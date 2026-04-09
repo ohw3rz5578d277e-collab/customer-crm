@@ -1,5 +1,12 @@
 {
   "name": "customer-crm-api",
   "main": "src/index.js",
-  "compatibility_date": "2026-04-09"
+  "compatibility_date": "2026-04-09",
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "customer-crm-db",
+      "database_id": "YOUR_D1_DATABASE_ID"
+    }
+  ]
 }
