@@ -49,9 +49,7 @@ export default {
             ORDER BY updated_at DESC
             LIMIT ?2
             `
-          )
-            .bind(like, limit)
-            .all();
+          ).bind(like, limit).all();
         } else {
           result = await env.DB.prepare(
             `
@@ -76,9 +74,7 @@ export default {
             ORDER BY updated_at DESC
             LIMIT ?1
             `
-          )
-            .bind(limit)
-            .all();
+          ).bind(limit).all();
         }
 
         return Response.json({
