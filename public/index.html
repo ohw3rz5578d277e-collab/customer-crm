@@ -3,47 +3,311 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Customer CRM</title>
+  <title>顧客管理CRM</title>
   <style>
     body {
-      font-family: sans-serif;
-      background: #f7f7f8;
       margin: 0;
-      padding: 40px 20px;
+      font-family: sans-serif;
+      background: #f6f7fb;
       color: #222;
     }
-    .card {
-      max-width: 720px;
+
+    .wrap {
+      max-width: 1200px;
       margin: 0 auto;
+      padding: 20px;
+    }
+
+    .header {
+      margin-bottom: 20px;
+    }
+
+    .title {
+      font-size: 28px;
+      font-weight: 700;
+      margin: 0 0 8px;
+    }
+
+    .sub {
+      color: #666;
+      font-size: 14px;
+    }
+
+    .card {
       background: #fff;
       border-radius: 16px;
-      padding: 24px;
-      box-shadow: 0 8px 24px rgba(0,0,0,0.08);
+      padding: 16px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.06);
+      margin-bottom: 16px;
     }
-    h1 {
-      margin-top: 0;
-      font-size: 28px;
+
+    .toolbar {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items: center;
     }
-    p {
-      line-height: 1.7;
+
+    input[type="text"] {
+      flex: 1;
+      min-width: 220px;
+      border: 1px solid #ddd;
+      border-radius: 12px;
+      padding: 12px 14px;
+      font-size: 14px;
     }
-    .badge {
-      display: inline-block;
-      padding: 6px 10px;
-      background: #eef4ff;
-      color: #2f5bd3;
-      border-radius: 999px;
+
+    button {
+      border: none;
+      border-radius: 12px;
+      padding: 12px 16px;
+      font-size: 14px;
+      cursor: pointer;
+      background: #2f5bd3;
+      color: #fff;
+    }
+
+    button.secondary {
+      background: #e9edf8;
+      color: #234;
+    }
+
+    .summary {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .stat {
+      background: #fff;
+      border-radius: 16px;
+      padding: 16px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.06);
+    }
+
+    .stat-label {
       font-size: 12px;
-      margin-bottom: 12px;
+      color: #666;
+      margin-bottom: 8px;
+    }
+
+    .stat-value {
+      font-size: 24px;
+      font-weight: 700;
+    }
+
+    .table-wrap {
+      overflow-x: auto;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      min-width: 980px;
+    }
+
+    th, td {
+      text-align: left;
+      padding: 12px 10px;
+      border-bottom: 1px solid #eee;
+      font-size: 14px;
+      vertical-align: top;
+    }
+
+    th {
+      background: #fafbff;
+      color: #555;
+      font-weight: 700;
+    }
+
+    .muted {
+      color: #888;
+      font-size: 12px;
+    }
+
+    .message {
+      margin-top: 12px;
+      font-size: 14px;
+      color: #555;
+    }
+
+    .empty {
+      padding: 30px 10px;
+      text-align: center;
+      color: #777;
+    }
+
+    @media (max-width: 768px) {
+      .summary {
+        grid-template-columns: 1fr;
+      }
+
+      .title {
+        font-size: 24px;
+      }
+
+      button,
+      input[type="text"] {
+        width: 100%;
+      }
     }
   </style>
 </head>
 <body>
-  <div class="card">
-    <div class="badge">準備中</div>
-    <h1>顧客管理CRM</h1>
-    <p>Cloudflare Pages への初回デプロイ確認ページです。</p>
-    <p>次に、顧客一覧画面・顧客詳細画面・予約履歴画面を追加していきます。</p>
+  <div class="wrap">
+    <div class="header">
+      <h1 class="title">顧客管理CRM</h1>
+      <div class="sub">顧客一覧・検索・予約履歴連携のための管理画面</div>
+    </div>
+
+    <div class="summary">
+      <div class="stat">
+        <div class="stat-label">表示件数</div>
+        <div class="stat-value" id="statCount">0</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">累計売上合計</div>
+        <div class="stat-value" id="statRevenue">¥0</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">平均リピート回数</div>
+        <div class="stat-value" id="statRepeat">0.0</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="toolbar">
+        <input id="keywordInput" type="text" placeholder="名前・ふりがな・LINE名・電話・メールで検索" />
+        <button id="searchBtn">検索</button>
+        <button id="reloadBtn" class="secondary">再読み込み</button>
+      </div>
+      <div class="message" id="message">読み込み前です。</div>
+    </div>
+
+    <div class="card">
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>顧客名</th>
+              <th>LINE表示名</th>
+              <th>電話</th>
+              <th>メール</th>
+              <th>最終撮影日</th>
+              <th>累計予約回数</th>
+              <th>1年内リピート</th>
+              <th>累計売上</th>
+              <th>平均単価</th>
+              <th>流入元</th>
+              <th>休眠日数</th>
+            </tr>
+          </thead>
+          <tbody id="customerTableBody">
+            <tr><td colspan="11" class="empty">まだ読み込んでいません</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
   </div>
+
+  <script>
+    const API_BASE = "https://customer-crm-api.ohw3rz5578d277e.workers.dev/";
+    const keywordInput = document.getElementById("keywordInput");
+    const searchBtn = document.getElementById("searchBtn");
+    const reloadBtn = document.getElementById("reloadBtn");
+    const messageEl = document.getElementById("message");
+    const tbody = document.getElementById("customerTableBody");
+    const statCount = document.getElementById("statCount");
+    const statRevenue = document.getElementById("statRevenue");
+    const statRepeat = document.getElementById("statRepeat");
+
+    function formatYen(value) {
+      const num = Number(value || 0);
+      return "¥" + num.toLocaleString("ja-JP");
+    }
+
+    function setMessage(text) {
+      messageEl.textContent = text;
+    }
+
+    function renderRows(items) {
+      if (!items || items.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="11" class="empty">顧客データはまだありません</td></tr>';
+        return;
+      }
+
+      tbody.innerHTML = items.map(function(item) {
+        return `
+          <tr>
+            <td>
+              <strong>${item.name || ""}</strong><br>
+              <span class="muted">${item.customer_id || ""}</span>
+            </td>
+            <td>${item.line_display_name || ""}</td>
+            <td>${item.phone || ""}</td>
+            <td>${item.email || ""}</td>
+            <td>${item.last_shoot_date || ""}</td>
+            <td>${item.repeat_count || 0}</td>
+            <td>${item.repeat_count_1y || 0}</td>
+            <td>${formatYen(item.total_revenue)}</td>
+            <td>${formatYen(item.avg_order_value)}</td>
+            <td>${item.acquisition_source || ""}</td>
+            <td>${item.dormant_days || 0}</td>
+          </tr>
+        `;
+      }).join("");
+    }
+
+    function renderSummary(items) {
+      const count = items.length;
+      const revenue = items.reduce(function(sum, item) {
+        return sum + Number(item.total_revenue || 0);
+      }, 0);
+      const repeatAvg = count === 0
+        ? 0
+        : items.reduce(function(sum, item) {
+            return sum + Number(item.repeat_count || 0);
+          }, 0) / count;
+
+      statCount.textContent = count.toLocaleString("ja-JP");
+      statRevenue.textContent = formatYen(revenue);
+      statRepeat.textContent = repeatAvg.toFixed(1);
+    }
+
+    async function loadCustomers() {
+      const keyword = keywordInput.value.trim();
+      const url = keyword
+        ? API_BASE + "/api/customers?keyword=" + encodeURIComponent(keyword)
+        : API_BASE + "/api/customers";
+
+      setMessage("読み込み中です...");
+      tbody.innerHTML = '<tr><td colspan="11" class="empty">読み込み中...</td></tr>';
+
+      try {
+        const res = await fetch(url);
+        const data = await res.json();
+
+        if (!data.ok) {
+          throw new Error(data.message || "取得に失敗しました");
+        }
+
+        renderRows(data.items || []);
+        renderSummary(data.items || []);
+        setMessage("読み込み完了: " + (data.count || 0) + "件");
+      } catch (error) {
+        tbody.innerHTML = '<tr><td colspan="11" class="empty">取得に失敗しました</td></tr>';
+        renderSummary([]);
+        setMessage("エラー: " + (error.message || "不明なエラー"));
+      }
+    }
+
+    searchBtn.addEventListener("click", loadCustomers);
+    reloadBtn.addEventListener("click", loadCustomers);
+    keywordInput.addEventListener("keydown", function(e) {
+      if (e.key === "Enter") loadCustomers();
+    });
+
+    loadCustomers();
+  </script>
 </body>
 </html>
