@@ -9,7 +9,15 @@ export default {
         time: new Date().toISOString()
       });
     }
+if (url.pathname === "/api/admin/ai-reservations/approve" && request.method === "POST") {
+  const body = await request.json();
+  return json(await approveAiReservationDraft(env, body));
+}
 
+if (url.pathname === "/api/admin/ai-reservations/reject" && request.method === "POST") {
+  const body = await request.json();
+  return json(await rejectAiReservationDraft(env, body));
+}
     if (url.pathname === "/api/customers" && request.method === "GET") {
       try {
         const keyword = (url.searchParams.get("keyword") || "").trim();
