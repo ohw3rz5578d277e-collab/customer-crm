@@ -54,7 +54,10 @@ function getSyncTokenFromRequest(request) {
 
 function normalizeCustomer(item) {
   const customerId = normalizeText(item.customer_id);
-  const name = normalizeText(item.name) || normalizeText(item.line_display_name) || "名称未設定";
+  const name =
+    normalizeText(item.name) ||
+    normalizeText(item.line_display_name) ||
+    "名称未設定";
 
   if (!customerId) {
     throw new Error("customer_id is required");
@@ -83,7 +86,10 @@ function normalizeCustomer(item) {
     child3_name: normalizeText(item.child3_name),
     child3_birthdate: normalizeDate(item.child3_birthdate),
     anniversary: normalizeDate(item.anniversary),
-    nps: item.nps === undefined || item.nps === null || item.nps === "" ? null : toInt(item.nps, 0),
+    nps:
+      item.nps === undefined || item.nps === null || item.nps === ""
+        ? null
+        : toInt(item.nps, 0),
     photo_public_ok: normalizeBool01(item.photo_public_ok),
     memo: normalizeText(item.memo),
     genre_revenue_breakdown: normalizeText(item.genre_revenue_breakdown),
@@ -238,6 +244,15 @@ export default {
       });
     }
 
+    if (url.pathname === "/api/debug-env") {
+      return json({
+        ok: true,
+        hasDB: !!env.DB,
+        hasSyncToken: !!env.SYNC_TOKEN,
+        keys: Object.keys(env).sort()
+      });
+    }
+
     if (url.pathname === "/api/customers" && request.method === "GET") {
       try {
         const keyword = (url.searchParams.get("keyword") || "").trim();
@@ -307,10 +322,13 @@ export default {
           items: result.results || []
         });
       } catch (error) {
-        return json({
-          ok: false,
-          message: error?.message || "Unknown error"
-        }, 500);
+        return json(
+          {
+            ok: false,
+            message: error && error.message ? error.message : "Unknown error"
+          },
+          500
+        );
       }
     }
 
@@ -329,12 +347,24 @@ export default {
         if (!reqToken || reqToken !== workerToken) {
           return json({
             ok: false,
-            message: "Unauthorized"
+            message: "Unauthorized",
+            debug: {
+              hasRequestToken: !!reqToken,
+              requestTokenLength: reqToken ? reqToken.length : 0,
+              hasWorkerToken: !!workerToken,
+              workerTokenLength: workerToken ? workerToken.length : 0,
+              tokensMatch: !!reqToken && !!workerToken && reqToken === workerToken
+            }
           }, 401);
         }
 
         const body = await request.json();
-        const rawItems = Array.isArray(body) ? body : Array.isArray(body.items) ? body.items : [body];
+        const rawItems = Array.isArray(body)
+          ? body
+          : Array.isArray(body.items)
+            ? body.items
+            : [body];
+
         const items = rawItems.filter(Boolean);
 
         if (items.length === 0) {
@@ -361,10 +391,13 @@ export default {
           items: results
         });
       } catch (error) {
-        return json({
-          ok: false,
-          message: error?.message || "Unknown error"
-        }, 500);
+        return json(
+          {
+            ok: false,
+            message: error && error.message ? error.message : "Unknown error"
+          },
+          500
+        );
       }
     }
 
