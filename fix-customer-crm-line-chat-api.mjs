@@ -1,4 +1,4 @@
-a// ======================================================
+// ======================================================
 // fix-customer-crm-line-chat-api.mjs
 // customer-crm / src/index.js のLINE履歴取得・LINE風チャット表示修正
 // build: fix-customer-crm-line-chat-api-20260517-01

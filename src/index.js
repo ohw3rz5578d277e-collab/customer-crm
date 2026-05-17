@@ -1,6 +1,6 @@
 // ======================================================
 // CUSTOMER CRM API / COMPLETE WORKER
-// build: customer-crm-api-complete-20260516-list-line-chat-01
+// build: customer-crm-api-complete-20260517-line-chat-api-fix-01
 // ======================================================
 // customer-crm-api / src / index.js を「全削除 → 全貼り替え」してください。
 //
@@ -14,7 +14,7 @@
 // 7) 既存D1テーブルがある場合も壊れにくいよう、CREATE IF NOT EXISTS と ADD COLUMN で吸収
 // ======================================================
 
-const BUILD = "customer-crm-api-complete-20260516-list-line-chat-01";
+const BUILD = "customer-crm-api-complete-20260517-line-chat-api-fix-01";
 const DEFAULT_ADMIN_TOKEN = "mizuno-admin-2026-secret-001";
 const DEFAULT_INTERNAL_TOKEN = "mizuno-reservation-bridge-2026-secret-001";
 const DEFAULT_LINE_WORKER_BASE = "https://line-webhook-worker.ohw3rz5578d277e.workers.dev";
@@ -119,6 +119,16 @@ async function readJson(request) {
     return await request.json();
   } catch (_) {
     return {};
+  }
+}
+
+function parseJson(value, fallback = {}) {
+  try {
+    if (value === undefined || value === null || value === "") return fallback;
+    if (typeof value === "object") return value;
+    return JSON.parse(String(value));
+  } catch (_) {
+    return fallback;
   }
 }
 
@@ -831,15 +841,38 @@ async function upsertLineMessagesFromPayload(env, customer, raw) {
 function normalizeLineHistoryMessages(items) {
   return (Array.isArray(items) ? items : []).map((m) => {
     const raw = parseJson(m.raw_json, {});
+
+    const rawDirection = text(m.direction || m.sender || m.sender_type || raw.direction || "inbound").toLowerCase();
+    const direction =
+      ["outbound", "reply", "admin", "staff", "owner", "shop", "operator", "sent"].includes(rawDirection)
+        ? "outbound"
+        : "inbound";
+
+    const messageType = text(m.message_type || m.type || raw.message_type || (raw.message && raw.message.type) || "text") || "text";
+    const messageText =
+      text(m.message_text || m.text || raw.message_text || raw.text || (raw.message && raw.message.text) || "") ||
+      (messageType && messageType !== "text" ? "[" + messageType + "]" : "");
+
+    const sentAt =
+      text(m.event_time_jst) ||
+      text(m.sent_at) ||
+      text(m.created_at) ||
+      text(m.timestamp) ||
+      text(m.event_timestamp) ||
+      text(raw.event_time_jst) ||
+      text(raw.sent_at) ||
+      text(raw.created_at) ||
+      text(raw.event_timestamp);
+
     return {
       id: m.id || m.message_id || m.webhook_event_id || m.event_id || "",
       message_key: text(m.message_key || m.webhook_event_id || m.event_id || m.message_id),
       line_user_id: text(m.line_user_id || m.user_id || raw.line_user_id || raw.user_id),
-      direction: text(m.direction || m.sender || "inbound"),
-      message_type: text(m.message_type || m.type || raw.message_type || "text"),
-      message_text: text(m.message_text || m.text || raw.message_text || raw.text || ""),
-      sender_name: text(m.sender_name || m.display_name || raw.display_name),
-      sent_at: text(m.sent_at || m.created_at || m.event_timestamp || raw.sent_at || raw.created_at || raw.event_timestamp),
+      direction,
+      message_type: messageType,
+      message_text: messageText,
+      sender_name: text(m.sender_name || m.display_name || raw.display_name || (direction === "outbound" ? "運営" : "お客様")),
+      sent_at: sentAt,
       raw_json: raw
     };
   }).sort((a, b) => String(a.sent_at || "").localeCompare(String(b.sent_at || "")));
@@ -873,90 +906,117 @@ async function fetchRemoteLineHistory(env, customer) {
       ok: false,
       connected: false,
       message: "この顧客には line_user_id がまだありません。LINE連携後に履歴を表示できます。",
-      messages: []
+      messages: [],
+      debug: [{ step: "missing_line_user_id" }]
     };
   }
 
-  const token =
+  const adminToken = getAdminToken(env);
+  const internalToken =
     text(env.LINE_INTERNAL_TOKEN) ||
     text(env.LINE_WORKER_INTERNAL_TOKEN) ||
     text(env.RESERVATION_INTERNAL_TOKEN) ||
-    DEFAULT_INTERNAL_TOKEN ||
-    getAdminToken(env);
+    DEFAULT_INTERNAL_TOKEN;
 
-  const paths = [
-    "/api/internal/customer-line-history",
-    "/admin/api/customer-line-history",
-    "/admin/api/line-user-history"
-  ];
-
-  if (env.LINE_SERVICE && typeof env.LINE_SERVICE.fetch === "function") {
-    for (const path of paths) {
-      try {
-        const url = new URL("https://internal" + path);
-        url.searchParams.set("line_user_id", lineUserId);
-        url.searchParams.set("user_id", lineUserId);
-        const res = await env.LINE_SERVICE.fetch(new Request(url.toString(), {
-          method: "GET",
-          headers: {
-            "x-internal-token": token,
-            "x-admin-token": getAdminToken(env),
-            "Authorization": "Bearer " + token
-          }
-        }));
-        const data = await res.json().catch(() => ({}));
-        if (res.ok && data && data.ok !== false) {
-          return {
-            ok: true,
-            connected: true,
-            source: "LINE_SERVICE" + path,
-            messages: normalizeLineHistoryMessages(data.messages || data.items || [])
-          };
-        }
-      } catch (_) {}
-    }
-  }
-
-  const baseCandidates = [
+  const baseCandidates = Array.from(new Set([
     text(env.LINE_HISTORY_API_BASE),
     text(env.LINE_WEBHOOK_WORKER_BASE),
     text(env.LINE_WORKER_BASE),
     DEFAULT_LINE_WORKER_BASE
-  ].filter(Boolean).map((v) => v.replace(/\/+$/, ""));
+  ].filter(Boolean).map((v) => v.replace(/\/+$/, ""))));
 
-  for (const base of Array.from(new Set(baseCandidates))) {
-    for (const path of paths) {
-      try {
-        const url = new URL(base + path);
-        url.searchParams.set("line_user_id", lineUserId);
-        url.searchParams.set("user_id", lineUserId);
-        url.searchParams.set("token", getAdminToken(env));
-        const res = await fetch(url.toString(), {
-          method: "GET",
-          headers: {
-            "x-internal-token": token,
-            "x-admin-token": getAdminToken(env),
-            "Authorization": "Bearer " + token
-          }
-        });
-        const data = await res.json().catch(() => ({}));
-        if (res.ok && data && data.ok !== false) {
-          return {
-            ok: true,
-            connected: true,
-            source: base + path,
-            messages: normalizeLineHistoryMessages(data.messages || data.items || [])
-          };
+  const path = "/api/internal/customer-line-history";
+  const debug = [];
+
+  // 1) Service Binding があれば最優先
+  if (env.LINE_SERVICE && typeof env.LINE_SERVICE.fetch === "function") {
+    try {
+      const url = new URL("https://line-service.internal" + path);
+      url.searchParams.set("line_user_id", lineUserId);
+      url.searchParams.set("user_id", lineUserId);
+
+      const res = await env.LINE_SERVICE.fetch(new Request(url.toString(), {
+        method: "GET",
+        headers: {
+          "x-internal-token": internalToken,
+          "x-admin-token": adminToken,
+          "authorization": "Bearer " + internalToken
         }
-      } catch (_) {}
+      }));
+
+      const rawText = await res.text();
+      let data = {};
+      try { data = rawText ? JSON.parse(rawText) : {}; } catch (_) { data = { raw: rawText }; }
+
+      debug.push({ source: "LINE_SERVICE", status: res.status, ok: res.ok, count: Array.isArray(data.items || data.messages) ? (data.items || data.messages).length : 0 });
+
+      if (res.ok && data && data.ok !== false) {
+        return {
+          ok: true,
+          connected: true,
+          source: "LINE_SERVICE" + path,
+          messages: normalizeLineHistoryMessages(data.messages || data.items || []),
+          debug
+        };
+      }
+    } catch (e) {
+      debug.push({ source: "LINE_SERVICE", status: 0, message: e && e.message ? e.message : String(e) });
+    }
+  }
+
+  // 2) public workers.dev URL
+  for (const base of baseCandidates) {
+    try {
+      const url = new URL(base + path);
+      url.searchParams.set("line_user_id", lineUserId);
+      url.searchParams.set("user_id", lineUserId);
+      // line-webhook-worker はこの token で直接テスト成功済みなので、まず固定管理トークンで通す
+      url.searchParams.set("token", DEFAULT_ADMIN_TOKEN);
+
+      const res = await fetch(url.toString(), {
+        method: "GET",
+        headers: {
+          "x-internal-token": internalToken,
+          "x-admin-token": DEFAULT_ADMIN_TOKEN,
+          "authorization": "Bearer " + internalToken,
+          "cache-control": "no-cache"
+        }
+      });
+
+      const rawText = await res.text();
+      let data = {};
+      try { data = rawText ? JSON.parse(rawText) : {}; } catch (_) { data = { raw: rawText }; }
+
+      const arr = data.messages || data.items || [];
+      debug.push({
+        source: base + path,
+        status: res.status,
+        ok: res.ok,
+        data_ok: data && data.ok,
+        count: Array.isArray(arr) ? arr.length : 0,
+        message: data && (data.message || data.error) ? (data.message || data.error) : ""
+      });
+
+      if (res.ok && data && data.ok !== false) {
+        return {
+          ok: true,
+          connected: true,
+          source: base + path,
+          messages: normalizeLineHistoryMessages(arr),
+          debug
+        };
+      }
+    } catch (e) {
+      debug.push({ source: base + path, status: 0, message: e && e.message ? e.message : String(e) });
     }
   }
 
   return {
     ok: false,
     connected: false,
-    message: "LINE履歴APIに接続できませんでした。line-webhook-worker 側に /api/internal/customer-line-history を追加すると、チャット形式で表示できます。",
-    messages: []
+    message: "LINE履歴APIに接続できませんでした。LINEワーカー単体は成功しているため、CRM側からのfetchまたは認証で停止しています。",
+    messages: [],
+    debug
   };
 }
 
@@ -1224,7 +1284,99 @@ td:nth-child(7) .btn{width:100%;min-height:44px;border-radius:14px}
 #summary .stat b{font-size:22px}
 #marketingCards.grid{grid-template-columns:1fr!important}
 td{grid-template-columns:76px 1fr;gap:6px}
-}</style></head><body><div class="app"><div class="header"><div><div class="title">顧客管理CRM</div><div class="sub">予約管理アプリと連携した顧客一覧・撮影履歴・購入履歴・マーケティング抽出</div></div><div><button class="btn" id="reloadBtn">更新</button><button class="btn danger" id="deleteTestBtn">テスト顧客削除</button></div></div><div class="box" id="status">読み込み中...</div><div class="grid" id="summary"></div><div class="kpi-scroll-hint">横にスワイプすると他の指標も見られます</div><div class="marketing"><div class="box"><b>顧客マーケティング指標</b><div class="sub">平均顧客単価・リピート率・購入履歴から次の施策対象を見つけます。</div><div class="grid" id="marketingCards" style="grid-template-columns:repeat(3,1fr)"></div></div><div class="box"><b>購入アイテムランキング</b><div class="sub">プラン・オプション・スタジオ利用料・交通費を購入履歴として保存します。</div><div id="itemRanking"></div></div></div><div class="card"><div class="toolbar"><input class="input" id="keyword" placeholder="名前・ふりがな・電話・メール・LINE名・ジャンルで検索"><select id="sort"><option value="updated_at">更新順</option><option value="last_shoot">最終撮影日順</option><option value="revenue">売上順</option><option value="aov">平均顧客単価順</option><option value="repeat">リピート回数順</option><option value="dormant">休眠日数順</option></select><button class="btn" id="filterBtn">フィルター</button><button class="btn primary" id="searchBtn">検索</button></div><div class="filter-summary" id="filterSummary"></div><div class="chips" id="segments"></div><div class="tablewrap"><table><thead><tr><th>名前</th><th>直近の撮影日</th><th>リピート回数</th><th>写真公開OK</th><th>操作</th></tr></thead><tbody id="tbody"></tbody></table></div></div></div><div class="modal-bg" id="modalBg"></div><div class="modal" id="modal"></div><div class="filter-modal" id="filterModal"></div><script>
+}
+/* LINE風チャット表示強化 */
+.chat-box.line-like,.chat-box{
+  background:#8fb4dc;
+  background:linear-gradient(180deg,#8fb4dc 0%,#b7d2ec 100%);
+  border:0;
+  border-radius:18px;
+  padding:14px 10px;
+  max-height:520px;
+  overflow:auto;
+}
+.chat-empty{
+  background:rgba(255,255,255,.86);
+  color:#334155;
+  border-radius:16px;
+  padding:14px;
+  line-height:1.6;
+}
+.chat-date-divider{
+  width:max-content;
+  max-width:80%;
+  margin:12px auto;
+  padding:4px 10px;
+  border-radius:999px;
+  background:rgba(30,41,59,.28);
+  color:#fff;
+  font-size:.72rem;
+  font-weight:900;
+}
+.chat-row{
+  display:flex;
+  margin:8px 0;
+}
+.chat-row.inbound{
+  justify-content:flex-start;
+}
+.chat-row.outbound{
+  justify-content:flex-end;
+}
+.chat-stack{
+  max-width:84%;
+  display:flex;
+  flex-direction:column;
+}
+.chat-row.outbound .chat-stack{
+  align-items:flex-end;
+}
+.chat-sender{
+  font-size:.68rem;
+  font-weight:900;
+  color:rgba(255,255,255,.9);
+  margin:0 8px 3px;
+}
+.chat-bubble{
+  max-width:100%;
+  border-radius:18px;
+  padding:10px 12px 7px;
+  line-height:1.58;
+  white-space:pre-wrap;
+  word-break:break-word;
+  box-shadow:0 2px 8px rgba(15,23,42,.12);
+  position:relative;
+}
+.chat-row.inbound .chat-bubble{
+  background:#fff;
+  color:#111827;
+  border-bottom-left-radius:5px;
+}
+.chat-row.outbound .chat-bubble{
+  background:#06c755;
+  color:#111827;
+  border-bottom-right-radius:5px;
+}
+.chat-meta{
+  font-size:.66rem;
+  opacity:.65;
+  margin-top:5px;
+  text-align:right;
+}
+@media(max-width:820px){
+  .chat-box.line-like,.chat-box{
+    max-height:460px;
+    padding:12px 8px;
+    border-radius:16px;
+  }
+  .chat-stack{
+    max-width:88%;
+  }
+  .chat-bubble{
+    font-size:.9rem;
+  }
+}
+</style></head><body><div class="app"><div class="header"><div><div class="title">顧客管理CRM</div><div class="sub">予約管理アプリと連携した顧客一覧・撮影履歴・購入履歴・マーケティング抽出</div></div><div><button class="btn" id="reloadBtn">更新</button><button class="btn danger" id="deleteTestBtn">テスト顧客削除</button></div></div><div class="box" id="status">読み込み中...</div><div class="grid" id="summary"></div><div class="kpi-scroll-hint">横にスワイプすると他の指標も見られます</div><div class="marketing"><div class="box"><b>顧客マーケティング指標</b><div class="sub">平均顧客単価・リピート率・購入履歴から次の施策対象を見つけます。</div><div class="grid" id="marketingCards" style="grid-template-columns:repeat(3,1fr)"></div></div><div class="box"><b>購入アイテムランキング</b><div class="sub">プラン・オプション・スタジオ利用料・交通費を購入履歴として保存します。</div><div id="itemRanking"></div></div></div><div class="card"><div class="toolbar"><input class="input" id="keyword" placeholder="名前・ふりがな・電話・メール・LINE名・ジャンルで検索"><select id="sort"><option value="updated_at">更新順</option><option value="last_shoot">最終撮影日順</option><option value="revenue">売上順</option><option value="aov">平均顧客単価順</option><option value="repeat">リピート回数順</option><option value="dormant">休眠日数順</option></select><button class="btn" id="filterBtn">フィルター</button><button class="btn primary" id="searchBtn">検索</button></div><div class="filter-summary" id="filterSummary"></div><div class="chips" id="segments"></div><div class="tablewrap"><table><thead><tr><th>名前</th><th>直近の撮影日</th><th>リピート回数</th><th>写真公開OK</th><th>操作</th></tr></thead><tbody id="tbody"></tbody></table></div></div></div><div class="modal-bg" id="modalBg"></div><div class="modal" id="modal"></div><div class="filter-modal" id="filterModal"></div><script>
 (function(){const TOKEN=new URLSearchParams(location.search).get('token')||'';const $=(id)=>document.getElementById(id);let state={items:[],segment:'',summary:{},genres:[],sources:[],itemRanking:[],filters:{genre:'',source:'',min_revenue:'',max_revenue:'',min_repeat:'',min_dormant:'',photo_public_ok:'',has_child:''}};function esc(v){return String(v==null?'':v).replace(/[&<>"']/g,function(m){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]})}function yen(v){return '¥'+Number(v||0).toLocaleString('ja-JP')}function pct(v){return Number(v||0).toLocaleString('ja-JP',{maximumFractionDigits:1})+'%'}function api(path,options){options=options||{};options.headers=options.headers||{};if(TOKEN)options.headers['x-admin-token']=TOKEN;if(options.body&&!options.headers['Content-Type'])options.headers['Content-Type']='application/json';const u=new URL(path,location.origin);if(TOKEN&&!u.searchParams.get('token'))u.searchParams.set('token',TOKEN);u.searchParams.set('_',String(Date.now()));return fetch(u.toString(),options).then(r=>r.text().then(t=>{let d={};try{d=t?JSON.parse(t):{}}catch(e){throw Error('JSONではない応答: '+t.slice(0,160))}if(!r.ok||d.ok===false)throw Error(d.message||d.error||('HTTP '+r.status));return d}))}function status(m,e){$('status').textContent=m;$('status').style.color=e?'var(--danger)':'var(--muted)'}function stat(l,v,s){return '<div class="stat"><div class="sub">'+esc(l)+'</div><b>'+esc(v)+'</b><small>'+esc(s||'')+'</small></div>'}function renderSummary(){const s=state.summary||{};$('summary').innerHTML=[stat('顧客数',Number(s.total||0).toLocaleString('ja-JP')+'人','CRM登録済み'),stat('平均顧客単価',yen(s.avg_ltv||0),'顧客LTVの平均'),stat('平均注文単価',yen(s.reservation_aov||s.avg_order_value||0),'撮影1回あたり'),stat('リピート率',pct(s.repeat_rate||0),'2回以上'),stat('休眠180日',Number(s.dormant_180||0).toLocaleString('ja-JP')+'人','再来店施策'),stat('休眠365日',Number(s.dormant_365||0).toLocaleString('ja-JP')+'人','強めの再接触'),stat('購入アイテム数',Number(s.item_count||0).toLocaleString('ja-JP')+'件','プラン/オプション'),stat('累計売上',yen(s.total_revenue||0),'CRM集計')].join('');$('marketingCards').innerHTML=[stat('リピーター',Number(s.repeaters||0).toLocaleString('ja-JP')+'人','再提案候補'),stat('高売上顧客',Number(s.high_value||0).toLocaleString('ja-JP')+'人','10万円以上'),stat('LINE連携率',pct(s.line_rate||0),'LINE接点あり'),stat('写真公開OK率',pct(s.photo_public_rate||0),'作例依頼候補'),stat('購入単価',yen(s.item_avg_amount||0),'アイテム平均'),stat('購入売上',yen(s.item_revenue||0),'アイテム合計')].join('');$('itemRanking').innerHTML=(state.itemRanking||[]).length?state.itemRanking.slice(0,8).map(x=>'<div class="rank-row"><div><b>'+esc(x.item_name)+'</b><div class="sub">'+esc(x.item_category)+'</div></div><div>'+Number(x.count||0)+'件</div><div class="money">'+yen(x.revenue||0)+'</div></div>').join(''):'<div class="sub">購入履歴はまだありません。今後の予約保存でプラン・オプションが蓄積されます。</div>'}function renderSegments(){const list=[['','すべて'],['repeaters','リピーター'],['first_time','初回のみ'],['dormant_90','休眠90日'],['dormant_180','休眠180日'],['dormant_365','休眠365日'],['high_value','高売上'],['omiyamairi','お宮参り'],['shichigosan','七五三'],['line','LINE連携'],['no_phone','電話なし'],['photo_public_ok','写真公開OK']];$('segments').innerHTML=list.map(x=>'<button class="chip '+(state.segment===x[0]?'active':'')+'" data-segment="'+esc(x[0])+'">'+esc(x[1])+'</button>').join('');document.querySelectorAll('[data-segment]').forEach(btn=>btn.onclick=()=>{state.segment=btn.dataset.segment||'';loadCustomers()})}function renderFilterSummary(){const labels=[];if(state.segment)labels.push('セグメント: '+state.segment);if(state.filters.genre)labels.push('ジャンル: '+state.filters.genre);if(state.filters.source)labels.push('流入元: '+state.filters.source);if(state.filters.min_revenue)labels.push('売上 '+Number(state.filters.min_revenue).toLocaleString('ja-JP')+'円以上');if(state.filters.max_revenue)labels.push('売上 '+Number(state.filters.max_revenue).toLocaleString('ja-JP')+'円以下');if(state.filters.min_repeat)labels.push('撮影 '+state.filters.min_repeat+'回以上');if(state.filters.min_dormant)labels.push('休眠 '+state.filters.min_dormant+'日以上');if(state.filters.photo_public_ok==='1')labels.push('写真公開OK');if(state.filters.has_child==='1')labels.push('お子さま情報あり');$('filterSummary').innerHTML=labels.length?labels.map(x=>'<span class="badge">'+esc(x)+'</span>').join('')+'<button class="chip" id="clearFiltersBtn">条件クリア</button>':'<span class="sub">フィルター条件なし</span>';const btn=$('clearFiltersBtn');if(btn)btn.onclick=()=>{state.segment='';state.filters={genre:'',source:'',min_revenue:'',max_revenue:'',min_repeat:'',min_dormant:'',photo_public_ok:'',has_child:''};loadCustomers()}}function renderCustomers(){
   renderFilterSummary();
   const items=state.items||[];
@@ -1252,16 +1404,33 @@ td{grid-template-columns:76px 1fr;gap:6px}
   const lh=lineHistory||{};
   const messages=lh.messages||[];
   if(!messages.length){
-    return '<div class="box"><b>LINE履歴</b><div class="sub">'+esc(lh.message||'LINE履歴はまだありません。')+'</div></div>';
+    return '<div class="detail-section-title"><h3>LINE履歴</h3><span class="badge">0件</span></div>' +
+      '<div class="chat-box"><div class="chat-empty">'+esc(lh.message||'LINE履歴はまだありません。')+'</div></div>';
   }
+
+  let lastDate='';
+  function datePart(v){
+    const s=String(v||'');
+    const m=s.match(/^(\d{4}-\d{2}-\d{2})/);
+    return m?m[1]:'';
+  }
+
   return '<div class="detail-section-title"><h3>LINE履歴</h3><span class="badge">'+messages.length+'件</span></div>'+
-    '<div class="chat-box">'+messages.map(m=>{
+    '<div class="chat-box line-like">'+messages.map(m=>{
       const dir=(m.direction==='outbound'||m.direction==='reply'||m.direction==='admin')?'outbound':'inbound';
       const body=m.message_text||((m.message_type&&m.message_type!=='text')?'['+m.message_type+']':'');
-      return '<div class="chat-row '+dir+'"><div class="chat-bubble">'+
-        esc(body||'メッセージ本文なし')+
-        '<div class="chat-meta">'+esc(m.sent_at||'')+'</div>'+
-      '</div></div>';
+      const d=datePart(m.sent_at);
+      const dateDivider=(d&&d!==lastDate)?('<div class="chat-date-divider">'+esc(d)+'</div>'):'';
+      if(d)lastDate=d;
+      return dateDivider + '<div class="chat-row '+dir+'">'+
+        '<div class="chat-stack">'+
+          '<div class="chat-sender">'+esc(dir==='outbound'?'運営側':(m.sender_name||'お客様'))+'</div>'+
+          '<div class="chat-bubble">'+
+            esc(body||'メッセージ本文なし')+
+            '<div class="chat-meta">'+esc(m.sent_at||'')+'</div>'+
+          '</div>'+
+        '</div>'+
+      '</div>';
     }).join('')+'</div>';
 }
 
