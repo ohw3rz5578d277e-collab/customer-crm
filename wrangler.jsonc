@@ -1,6 +1,6 @@
 {
   "name": "customer-crm-api",
-  "main": "src/secure-index.js",
+  "main": "src/production-index.js",
   "compatibility_date": "2026-04-09",
   "d1_databases": [
     {
