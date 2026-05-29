@@ -1,12 +1,18 @@
 {
   "name": "customer-crm-api",
-  "main": "src/index.js",
+  "main": "src/secure-index.js",
   "compatibility_date": "2026-04-09",
   "d1_databases": [
     {
       "binding": "DB",
       "database_name": "customer-crm-db",
       "database_id": "1ae3e0d9-72c0-47ad-8fc1-fed9d15ec70f"
+    }
+  ],
+  "services": [
+    {
+      "binding": "LINE_SERVICE",
+      "service": "line-webhook-worker"
     }
   ]
 }
