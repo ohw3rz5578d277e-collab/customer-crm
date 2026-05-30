@@ -1557,7 +1557,7 @@ export default {
       if (url.pathname === "/admin") {
         await ensureSchema(env.DB);
         if (!isAdmin(request, env)) {
-          return html(`<div style="font-family:sans-serif;padding:24px"><h1>Unauthorized</h1><p>管理画面を開くには token が必要です。</p><p><a href="/admin?token=${getAdminToken(env)}">/admin?token=${getAdminToken(env)}</a></p></div>`, 401);
+          return html(`<div style="font-family:sans-serif;padding:24px"><h1>Unauthorized</h1><p>Googleログインまたは管理者認証が必要です。</p></div>`, 401);
         }
         return html(adminPage());
       }

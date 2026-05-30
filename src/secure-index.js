@@ -160,7 +160,6 @@ async function callOriginal(request, env, ctx, current) {
   if (!token) return json({ ok: false, message: "ADMIN_TOKEN is not configured" }, 503);
   const url = new URL(request.url);
   url.searchParams.delete("token");
-  url.searchParams.set("token", token);
   const headers = new Headers(request.headers);
   headers.set("x-admin-token", token);
   headers.set("authorization", `Bearer ${token}`);
