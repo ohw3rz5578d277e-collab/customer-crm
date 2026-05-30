@@ -1,6 +1,6 @@
 // ======================================================
 // CUSTOMER CRM API / COMPLETE WORKER
-// build: customer-crm-api-complete-20260517-line-chat-api-fix-01
+// build: customer-crm-api-complete-20260530-secrets-required-03
 // ======================================================
 // customer-crm-api / src / index.js を「全削除 → 全貼り替え」してください。
 //
@@ -14,9 +14,7 @@
 // 7) 既存D1テーブルがある場合も壊れにくいよう、CREATE IF NOT EXISTS と ADD COLUMN で吸収
 // ======================================================
 
-const BUILD = "customer-crm-api-complete-20260517-line-chat-api-fix-01";
-const DEFAULT_ADMIN_TOKEN = "mizuno-admin-2026-secret-001";
-const DEFAULT_INTERNAL_TOKEN = "mizuno-reservation-bridge-2026-secret-001";
+const BUILD = "customer-crm-api-complete-20260530-secrets-required-03";
 const DEFAULT_LINE_WORKER_BASE = "https://line-webhook-worker.ohw3rz5578d277e.workers.dev";
 
 const corsHeaders = {
@@ -87,7 +85,7 @@ function nowIso() {
 }
 
 function getAdminToken(env) {
-  return text(env.ADMIN_TOKEN) || DEFAULT_ADMIN_TOKEN;
+  return text(env.ADMIN_TOKEN);
 }
 
 function tokenFromRequest(request) {
@@ -915,8 +913,7 @@ async function fetchRemoteLineHistory(env, customer) {
   const internalToken =
     text(env.LINE_INTERNAL_TOKEN) ||
     text(env.LINE_WORKER_INTERNAL_TOKEN) ||
-    text(env.RESERVATION_INTERNAL_TOKEN) ||
-    DEFAULT_INTERNAL_TOKEN;
+    text(env.RESERVATION_INTERNAL_TOKEN);
 
   const baseCandidates = Array.from(new Set([
     text(env.LINE_HISTORY_API_BASE),
@@ -971,13 +968,12 @@ async function fetchRemoteLineHistory(env, customer) {
       url.searchParams.set("line_user_id", lineUserId);
       url.searchParams.set("user_id", lineUserId);
       // line-webhook-worker はこの token で直接テスト成功済みなので、まず固定管理トークンで通す
-      url.searchParams.set("token", DEFAULT_ADMIN_TOKEN);
 
       const res = await fetch(url.toString(), {
         method: "GET",
         headers: {
           "x-internal-token": internalToken,
-          "x-admin-token": DEFAULT_ADMIN_TOKEN,
+          "x-admin-token": adminToken,
           "authorization": "Bearer " + internalToken,
           "cache-control": "no-cache"
         }
@@ -1493,7 +1489,7 @@ async function handleApi(request, env) {
   if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: corsHeaders });
 
   if (path === "/api/health" || path === "/health") {
-    return json({ ok: true, service: "customer-crm-api", build: BUILD, time: nowIso(), hasDb: !!env.DB, admin_url: url.origin + "/admin?token=" + getAdminToken(env) });
+    return json({ ok: true, service: "customer-crm-api", build: BUILD, time: nowIso(), hasDb: !!env.DB, secure: true });
   }
 
   if (path === "/api/debug-env") return json({ ok: true, hasDB: !!env.DB, hasSyncToken: !!env.SYNC_TOKEN, keys: Object.keys(env).sort() });
@@ -1551,7 +1547,7 @@ export default {
 
       if (url.pathname === "/" || url.pathname === "/health") {
         await ensureSchema(env.DB);
-        return json({ ok: true, service: "customer-crm-api", build: BUILD, time: nowIso(), hasDb: !!env.DB, admin_url: url.origin + "/admin?token=" + getAdminToken(env) });
+        return json({ ok: true, service: "customer-crm-api", build: BUILD, time: nowIso(), hasDb: !!env.DB, secure: true });
       }
 
       if (url.pathname === "/admin") {
