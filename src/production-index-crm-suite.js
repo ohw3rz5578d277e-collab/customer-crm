@@ -490,13 +490,13 @@ async function getSalesRepeatAnalytics(request, env) {
   `).first();
 
   const genreRows = await env.DB.prepare(`
-    SELECT COALESCE(primary_genre, '未分類') AS genre,
+    SELECT COALESCE(NULLIF(genre_history, ''), '未分類') AS genre,
            COUNT(*) AS customers,
            SUM(CAST(COALESCE(total_revenue, 0) AS INTEGER)) AS total_revenue,
            AVG(CAST(COALESCE(total_revenue, 0) AS INTEGER)) AS avg_revenue
     FROM customers
     WHERE deleted_at IS NULL OR deleted_at=''
-    GROUP BY COALESCE(primary_genre, '未分類')
+    GROUP BY COALESCE(NULLIF(genre_history, ''), '未分類')
     ORDER BY total_revenue DESC
     LIMIT 20
   `).all();
@@ -522,8 +522,7 @@ async function getReservationSummary(request, env, customerId) {
     SELECT *
     FROM customer_reservations
     WHERE customer_id=?
-      AND (deleted_at IS NULL OR deleted_at='')
-    ORDER BY COALESCE(shoot_date, reservation_date, created_at) DESC
+    ORDER BY rowid DESC
     LIMIT 50
   `).bind(customerId).all();
 
