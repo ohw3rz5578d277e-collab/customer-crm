@@ -1,6 +1,6 @@
 {
   "name": "customer-crm-api",
-  "main": "src/production-index-line-pending-csv.js",
+  "main": "src/production-index-crm-suite.js",
   "compatibility_date": "2026-04-09",
   "d1_databases": [
     {
