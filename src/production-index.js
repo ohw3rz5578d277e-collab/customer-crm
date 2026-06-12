@@ -1,11 +1,11 @@
 // ======================================================
 // CUSTOMER CRM API / PRODUCTION SAFETY WRAPPER
-// build: customer-crm-api-production-wrapper-20260612-01
+// build: customer-crm-api-production-wrapper-20260613-01
 // ======================================================
 
 import secureApp from "./secure-index.js";
 
-const BUILD = "customer-crm-api-production-wrapper-20260612-01";
+const BUILD = "customer-crm-api-production-wrapper-20260613-01";
 const ROOT_ADMIN_EMAIL = "ohw3rz5578d277e@gmail.com";
 const ADMIN_ROLES = ["admin", "root_admin"];
 
@@ -15,6 +15,11 @@ function text(v) {
 
 function normalizeEmail(v) {
   return text(v).toLowerCase();
+}
+
+function toNumber(v, fallback = 0) {
+  const n = Number(String(v ?? "").replace(/[,円¥\s]/g, ""));
+  return Number.isFinite(n) ? n : fallback;
 }
 
 function securityHeaders(headers = {}) {
@@ -152,10 +157,157 @@ async function restoreCustomers(request, env, current) {
   return json({ ok: true, mode: "restore", restored: ids.length, customer_ids: ids, restored_by: current.email });
 }
 
-function hideDevControls(html) {
-  if (!html || !html.includes("</head>")) return html;
-  const style = `<style id="crm-production-safe-controls">.header .danger{display:none!important;visibility:hidden!important;pointer-events:none!important}</style>`;
-  return html.replace("</head>", style + "</head>");
+function buildNextActions(customer = {}) {
+  const actions = [];
+  const dormantDays = toNumber(customer.dormant_days, 0);
+  const totalRevenue = toNumber(customer.total_revenue, 0);
+  const repeatCount = toNumber(customer.repeat_count, 0);
+  const genre = text(customer.genre_history);
+  const hasLine = !!text(customer.line_user_id);
+  const photoOk = String(customer.photo_public_ok) === "1" || customer.photo_public_ok === true;
+
+  function add(type, label, message, priority = "normal") {
+    actions.push({ type, label, message, priority });
+  }
+
+  if (dormantDays >= 365) {
+    add("dormant_follow", "休眠フォロー", `最終撮影から${dormantDays}日経過しています。近況確認と再撮影の案内候補です。`, "high");
+  } else if (dormantDays >= 180) {
+    add("revisit_offer", "再来店案内", `最終撮影から${dormantDays}日経過しています。季節撮影や記念日の案内候補です。`, "high");
+  }
+
+  if (totalRevenue >= 100000) {
+    add("vip_customer", "優良顧客", `累計売上が${Math.round(totalRevenue).toLocaleString("ja-JP")}円です。特別案内や先行予約の候補です。`, "high");
+  }
+
+  if (hasLine) {
+    add("line_follow", "LINEフォロー可能", "LINE連携済みです。個別メッセージで再来店案内や相談対応ができます。", "normal");
+  }
+
+  if (photoOk) {
+    add("photo_public", "作例・紹介依頼", "写真公開OKの顧客です。作例掲載や紹介依頼の候補です。", "normal");
+  }
+
+  if (repeatCount >= 2) {
+    add("repeat_customer", "リピーター向け案内", `${repeatCount}回撮影済みです。兄弟撮影・季節撮影・アルバム提案の候補です。`, "normal");
+  }
+
+  if (genre.includes("七五三")) {
+    add("shichigosan_next", "入学・兄弟撮影提案", "七五三の履歴があります。入学・卒園・兄弟撮影の提案候補です。", "normal");
+  }
+
+  if (genre.includes("お宮参り")) {
+    add("omiyamairi_next", "バースデー・七五三提案", "お宮参りの履歴があります。1歳バースデーや七五三への継続案内候補です。", "normal");
+  }
+
+  if (!hasLine) {
+    add("line_missing", "LINE連携確認", "LINE user IDが未登録です。次回問い合わせ時にLINE連携できると履歴管理がしやすくなります。", "low");
+  }
+
+  if (!actions.length) {
+    add("basic_follow", "通常フォロー", "大きな優先アクションはありません。次回記念日や季節撮影の案内候補です。", "low");
+  }
+
+  return actions;
+}
+
+function isCustomerDetailPath(path) {
+  return /^\/api\/customers\/[^/]+$/.test(path);
+}
+
+async function maybeAddNextActionsToJsonResponse(res, url) {
+  const contentType = res.headers.get("content-type") || "";
+  if (!contentType.includes("application/json") || !isCustomerDetailPath(url.pathname)) {
+    return new Response(res.body, { status: res.status, statusText: res.statusText, headers: securityHeaders(res.headers) });
+  }
+
+  const raw = await res.text();
+  try {
+    const data = raw ? JSON.parse(raw) : {};
+    if (data && data.customer) {
+      data.next_actions = buildNextActions(data.customer);
+    }
+    return json(data, res.status);
+  } catch (_) {
+    return new Response(raw, { status: res.status, statusText: res.statusText, headers: securityHeaders(res.headers) });
+  }
+}
+
+function injectNextActionUi(html) {
+  if (!html || !html.includes("</head>") || !html.includes("</body>")) return html;
+
+  const style = `<style id="crm-production-safe-controls">
+.header .danger{display:none!important;visibility:hidden!important;pointer-events:none!important}
+.crm-next-actions{margin:12px 0;padding:13px;border:1px solid #dbeafe;background:#eff6ff;border-radius:18px;box-shadow:0 6px 18px rgba(37,99,235,.08)}
+.crm-next-actions-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px}
+.crm-next-actions-head b{font-size:1rem}.crm-next-actions-head span{font-size:.75rem;color:#64748b;font-weight:800}
+.crm-next-action-list{display:grid;gap:8px}.crm-next-action{border:1px solid #e5e7eb;background:#fff;border-radius:14px;padding:10px}.crm-next-action-title{display:flex;gap:8px;align-items:center;font-weight:950}.crm-next-action-title em{font-style:normal;border-radius:999px;padding:3px 7px;font-size:.68rem;background:#f1f5f9;color:#334155}.crm-next-action-title em.high{background:#fee2e2;color:#991b1b}.crm-next-action-title em.normal{background:#dcfce7;color:#166534}.crm-next-action-title em.low{background:#f8fafc;color:#64748b}.crm-next-action-msg{margin-top:5px;color:#475569;font-size:.84rem;line-height:1.55}
+@media(max-width:760px){.crm-next-actions{border-radius:16px;padding:12px}.crm-next-action{padding:10px}.crm-next-action-msg{font-size:.82rem}}
+</style>`;
+
+  const script = `<script id="crm-next-actions-script">
+(function(){
+  if(window.__crmNextActionsInstalled)return;
+  window.__crmNextActionsInstalled=true;
+  var store={};
+  var originalFetch=window.fetch;
+  function esc(v){return String(v==null?'':v).replace(/[&<>\"]/g,function(m){return {'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;'}[m]})}
+  function money(v){var n=Number(String(v==null?'':v).replace(/[,円¥\\s]/g,''));return Number.isFinite(n)?Math.round(n).toLocaleString('ja-JP')+'円':'0円'}
+  function buildActions(c){
+    c=c||{};var a=[];var dormant=Number(c.dormant_days||0);var rev=Number(c.total_revenue||0);var repeat=Number(c.repeat_count||0);var genre=String(c.genre_history||'');var hasLine=!!String(c.line_user_id||'').trim();var photo=String(c.photo_public_ok)==='1'||c.photo_public_ok===true;
+    function add(type,label,msg,priority){a.push({type:type,label:label,message:msg,priority:priority||'normal'})}
+    if(dormant>=365)add('dormant_follow','休眠フォロー','最終撮影から'+dormant+'日経過しています。近況確認と再撮影の案内候補です。','high');
+    else if(dormant>=180)add('revisit_offer','再来店案内','最終撮影から'+dormant+'日経過しています。季節撮影や記念日の案内候補です。','high');
+    if(rev>=100000)add('vip_customer','優良顧客','累計売上が'+money(rev)+'です。特別案内や先行予約の候補です。','high');
+    if(hasLine)add('line_follow','LINEフォロー可能','LINE連携済みです。個別メッセージで再来店案内や相談対応ができます。','normal');
+    if(photo)add('photo_public','作例・紹介依頼','写真公開OKの顧客です。作例掲載や紹介依頼の候補です。','normal');
+    if(repeat>=2)add('repeat_customer','リピーター向け案内',repeat+'回撮影済みです。兄弟撮影・季節撮影・アルバム提案の候補です。','normal');
+    if(genre.indexOf('七五三')>=0)add('shichigosan_next','入学・兄弟撮影提案','七五三の履歴があります。入学・卒園・兄弟撮影の提案候補です。','normal');
+    if(genre.indexOf('お宮参り')>=0)add('omiyamairi_next','バースデー・七五三提案','お宮参りの履歴があります。1歳バースデーや七五三への継続案内候補です。','normal');
+    if(!hasLine)add('line_missing','LINE連携確認','LINE user IDが未登録です。次回問い合わせ時にLINE連携できると履歴管理がしやすくなります。','low');
+    if(!a.length)add('basic_follow','通常フォロー','大きな優先アクションはありません。次回記念日や季節撮影の案内候補です。','low');
+    return a;
+  }
+  function render(actions){
+    actions=actions||[];
+    return '<div class="crm-next-actions" id="crmNextActionsCard"><div class="crm-next-actions-head"><b>次にやること</b><span>'+actions.length+'件</span></div><div class="crm-next-action-list">'+actions.map(function(x){var p=x.priority||'normal';return '<div class="crm-next-action"><div class="crm-next-action-title"><span>'+esc(x.label)+'</span><em class="'+esc(p)+'">'+esc(p)+'</em></div><div class="crm-next-action-msg">'+esc(x.message)+'</div></div>'}).join('')+'</div></div>';
+  }
+  function tryInsert(customerId){
+    var modal=document.getElementById('modal');if(!modal||!customerId||!store[customerId])return;
+    var old=document.getElementById('crmNextActionsCard');if(old)old.remove();
+    var actions=store[customerId].next_actions||buildActions(store[customerId].customer||{});
+    var actionsBar=modal.querySelector('.actions');
+    if(actionsBar){actionsBar.insertAdjacentHTML('afterend',render(actions));return;}
+    modal.insertAdjacentHTML('afterbegin',render(actions));
+  }
+  window.fetch=function(input,init){
+    return originalFetch(input,init).then(function(res){
+      try{
+        var url=typeof input==='string'?input:(input&&input.url)||'';
+        var u=new URL(url,location.href);
+        if(/^\/api\/customers\/[^/]+$/.test(u.pathname)){
+          res.clone().json().then(function(data){
+            if(data&&data.customer&&data.customer.customer_id){
+              if(!data.next_actions)data.next_actions=buildActions(data.customer);
+              store[data.customer.customer_id]=data;
+              setTimeout(function(){tryInsert(data.customer.customer_id)},60);
+              setTimeout(function(){tryInsert(data.customer.customer_id)},250);
+            }
+          }).catch(function(){});
+        }
+      }catch(e){}
+      return res;
+    });
+  };
+  var mo=new MutationObserver(function(){
+    var modal=document.getElementById('modal');if(!modal)return;
+    Object.keys(store).forEach(function(id){if(modal.textContent&&modal.textContent.indexOf(id)>=0)tryInsert(id)});
+  });
+  mo.observe(document.documentElement,{childList:true,subtree:true});
+})();
+</script>`;
+
+  return html.replace("</head>", style + "</head>").replace("</body>", script + "</body>");
 }
 
 function hasLegacyQuery(url) {
@@ -188,10 +340,10 @@ export default {
     const contentType = res.headers.get("content-type") || "";
 
     if (!contentType.includes("text/html")) {
-      return new Response(res.body, { status: res.status, statusText: res.statusText, headers: securityHeaders(res.headers) });
+      return await maybeAddNextActionsToJsonResponse(res, url);
     }
 
-    const body = hideDevControls(await res.text());
+    const body = injectNextActionUi(await res.text());
     return new Response(body, { status: res.status, statusText: res.statusText, headers: securityHeaders(res.headers) });
   }
 };
