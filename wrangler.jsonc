@@ -1,6 +1,6 @@
 {
   "name": "customer-crm-api",
-  "main": "src/production-index-line-overview.js",
+  "main": "src/production-index-line-badges.js",
   "compatibility_date": "2026-04-09",
   "d1_databases": [
     {
