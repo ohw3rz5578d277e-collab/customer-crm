@@ -1,11 +1,11 @@
 // ======================================================
 // CUSTOMER CRM API / PRODUCTION SAFETY WRAPPER
-// build: customer-crm-api-production-wrapper-20260613-01
+// build: customer-crm-api-production-wrapper-20260613-02
 // ======================================================
 
 import secureApp from "./secure-index.js";
 
-const BUILD = "customer-crm-api-production-wrapper-20260613-01";
+const BUILD = "customer-crm-api-production-wrapper-20260613-02";
 const ROOT_ADMIN_EMAIL = "ohw3rz5578d277e@gmail.com";
 const ADMIN_ROLES = ["admin", "root_admin"];
 
@@ -20,6 +20,11 @@ function normalizeEmail(v) {
 function toNumber(v, fallback = 0) {
   const n = Number(String(v ?? "").replace(/[,円¥\s]/g, ""));
   return Number.isFinite(n) ? n : fallback;
+}
+
+function money(v) {
+  const n = Math.round(toNumber(v, 0));
+  return n.toLocaleString("ja-JP") + "円";
 }
 
 function securityHeaders(headers = {}) {
@@ -114,6 +119,11 @@ function customerSelectSql() {
   `;
 }
 
+async function getActiveCustomer(env, customerId) {
+  await ensureSoftDeleteSchema(env);
+  return await env.DB.prepare(`${customerSelectSql()} WHERE customer_id=? AND (deleted_at IS NULL OR deleted_at='') LIMIT 1`).bind(customerId).first();
+}
+
 async function listDeletedCustomers(env, url) {
   await ensureSoftDeleteSchema(env);
   const keyword = text(url.searchParams.get("keyword"));
@@ -177,7 +187,7 @@ function buildNextActions(customer = {}) {
   }
 
   if (totalRevenue >= 100000) {
-    add("vip_customer", "優良顧客", `累計売上が${Math.round(totalRevenue).toLocaleString("ja-JP")}円です。特別案内や先行予約の候補です。`, "high");
+    add("vip_customer", "優良顧客", `累計売上が${money(totalRevenue)}です。特別案内や先行予約の候補です。`, "high");
   }
 
   if (hasLine) {
@@ -211,8 +221,75 @@ function buildNextActions(customer = {}) {
   return actions;
 }
 
+function customerCallName(customer = {}) {
+  const name = text(customer.name || customer.line_display_name || customer.furigana);
+  if (!name || name === "名称未設定") return "お客様";
+  return name + "様";
+}
+
+function buildLineMessage(action, customer = {}) {
+  const name = customerCallName(customer);
+  const genre = text(customer.genre_history);
+  const lastShoot = text(customer.last_shoot_date);
+  const child = text(customer.child1_name);
+  const childLine = child ? `\n${child}ちゃんのご成長も、またぜひ残せたら嬉しいです。` : "";
+  const lastShootLine = lastShoot ? `\n前回の撮影日：${lastShoot}` : "";
+
+  switch (action.type) {
+    case "dormant_follow":
+      return `${name}\nご無沙汰しております。水野写真の水野です。${lastShootLine}\n\nその後、ご家族の皆さまはいかがお過ごしでしょうか？${childLine}\n季節の撮影や記念日のタイミングで、またご家族写真を残される場合はお気軽にご相談ください。`;
+    case "revisit_offer":
+      return `${name}\nこんにちは。水野写真の水野です。${lastShootLine}\n\n前回の撮影から少しお時間が経ちましたので、ご家族の今の雰囲気を残す撮影もおすすめです。${childLine}\n日程や場所の相談だけでも大丈夫ですので、気になることがあればいつでもLINEでご連絡ください。`;
+    case "vip_customer":
+      return `${name}\nいつも大切な撮影をお任せいただきありがとうございます。\n\nこれまで何度もご依頼いただいているお客様向けに、優先的に日程のご相談を承っています。\n七五三・バースデー・入学卒業・季節撮影など、次の記念日が近づいていましたらお気軽にご相談ください。`;
+    case "photo_public":
+      return `${name}\n先日は撮影をお任せいただきありがとうございました。\n\nもしよろしければ、撮影させていただいたお写真を作例として一部ご紹介させていただけますと嬉しいです。\n掲載する写真や範囲はこちらで配慮しますので、気になる点があれば遠慮なくお知らせください。`;
+    case "repeat_customer":
+      return `${name}\nいつも撮影をお任せいただきありがとうございます。\n\nご家族の成長記録として、季節撮影・兄弟撮影・アルバム作成などもおすすめです。\n今後の記念日や撮影タイミングで迷われていましたら、LINEで気軽にご相談ください。`;
+    case "shichigosan_next":
+      return `${name}\n七五三の撮影では大切な記念日をお任せいただきありがとうございました。\n\n次のタイミングでは、入学・卒園・兄弟撮影・家族写真などもおすすめです。\nご予定が近づいてきましたら、日程や場所の相談だけでもお気軽にご連絡ください。`;
+    case "omiyamairi_next":
+      return `${name}\nお宮参りの撮影では、大切な一日をお任せいただきありがとうございました。\n\n次の記念日として、ハーフバースデー・1歳バースデー・七五三などの撮影も人気です。\nお子さまの成長に合わせて、また残したいタイミングがあれば気軽にご相談ください。`;
+    case "line_follow":
+      return `${name}\nこんにちは。水野写真の水野です。\n\n撮影の日程、場所、服装、料金など、気になることがあればこのLINEでそのままご相談いただけます。\n相談だけでも大丈夫ですので、必要なタイミングでお気軽にご連絡ください。`;
+    case "line_missing":
+      return `${name}\n今後の撮影相談や日程調整をスムーズにするため、LINEでのご連絡がおすすめです。\n\n撮影前の確認やご相談もLINEでまとめてできますので、次回お問い合わせ時にLINE連携をご案内してください。`;
+    default:
+      return `${name}\nこんにちは。水野写真の水野です。\n\nまたご家族の記念日や季節のタイミングで撮影をご検討される際は、日程や場所の相談だけでもお気軽にご連絡ください。`;
+  }
+}
+
+function buildLineDrafts(customer = {}) {
+  const actions = buildNextActions(customer);
+  return actions.map((action) => ({
+    type: action.type,
+    label: action.label,
+    priority: action.priority,
+    message: buildLineMessage(action, customer)
+  }));
+}
+
 function isCustomerDetailPath(path) {
   return /^\/api\/customers\/[^/]+$/.test(path);
+}
+
+function isCustomerLineDraftPath(path) {
+  return /^\/api\/customers\/[^/]+\/line-drafts$/.test(path);
+}
+
+async function handleLineDrafts(request, env, current) {
+  if (!current) return json({ ok: false, message: "Google login through Cloudflare Access is required" }, 401);
+  const url = new URL(request.url);
+  const customerId = decodeURIComponent(url.pathname.replace("/api/customers/", "").replace("/line-drafts", ""));
+  const customer = await getActiveCustomer(env, customerId);
+  if (!customer) return json({ ok: false, message: "customer not found" }, 404);
+  return json({
+    ok: true,
+    customer_id: customer.customer_id,
+    customer_name: customer.name || customer.line_display_name || "名称未設定",
+    next_actions: buildNextActions(customer),
+    line_drafts: buildLineDrafts(customer)
+  });
 }
 
 async function maybeAddNextActionsToJsonResponse(res, url) {
@@ -226,6 +303,7 @@ async function maybeAddNextActionsToJsonResponse(res, url) {
     const data = raw ? JSON.parse(raw) : {};
     if (data && data.customer) {
       data.next_actions = buildNextActions(data.customer);
+      data.line_drafts = buildLineDrafts(data.customer);
     }
     return json(data, res.status);
   } catch (_) {
@@ -242,7 +320,8 @@ function injectNextActionUi(html) {
 .crm-next-actions-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px}
 .crm-next-actions-head b{font-size:1rem}.crm-next-actions-head span{font-size:.75rem;color:#64748b;font-weight:800}
 .crm-next-action-list{display:grid;gap:8px}.crm-next-action{border:1px solid #e5e7eb;background:#fff;border-radius:14px;padding:10px}.crm-next-action-title{display:flex;gap:8px;align-items:center;font-weight:950}.crm-next-action-title em{font-style:normal;border-radius:999px;padding:3px 7px;font-size:.68rem;background:#f1f5f9;color:#334155}.crm-next-action-title em.high{background:#fee2e2;color:#991b1b}.crm-next-action-title em.normal{background:#dcfce7;color:#166534}.crm-next-action-title em.low{background:#f8fafc;color:#64748b}.crm-next-action-msg{margin-top:5px;color:#475569;font-size:.84rem;line-height:1.55}
-@media(max-width:760px){.crm-next-actions{border-radius:16px;padding:12px}.crm-next-action{padding:10px}.crm-next-action-msg{font-size:.82rem}}
+.crm-line-draft{margin-top:9px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:9px}.crm-line-draft-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px}.crm-line-draft-head b{font-size:.78rem}.crm-copy-line{border:1px solid #028760;background:#028760;color:#fff;border-radius:999px;padding:6px 9px;font-size:.74rem;font-weight:900;cursor:pointer}.crm-line-draft-text{white-space:pre-wrap;line-height:1.65;font-size:.83rem;color:#0f172a}.crm-copy-toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);z-index:999999;background:#111827;color:#fff;border-radius:999px;padding:10px 14px;font-size:13px;font-weight:900;box-shadow:0 14px 36px rgba(15,23,42,.25)}
+@media(max-width:760px){.crm-next-actions{border-radius:16px;padding:12px}.crm-next-action{padding:10px}.crm-next-action-msg,.crm-line-draft-text{font-size:.82rem}.crm-line-draft-head{align-items:flex-start}.crm-copy-line{min-width:92px}}
 </style>`;
 
   const script = `<script id="crm-next-actions-script">
@@ -253,6 +332,7 @@ function injectNextActionUi(html) {
   var originalFetch=window.fetch;
   function esc(v){return String(v==null?'':v).replace(/[&<>\"]/g,function(m){return {'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;'}[m]})}
   function money(v){var n=Number(String(v==null?'':v).replace(/[,円¥\\s]/g,''));return Number.isFinite(n)?Math.round(n).toLocaleString('ja-JP')+'円':'0円'}
+  function callName(c){var n=String((c&&((c.name)||(c.line_display_name)||(c.furigana)))||'').trim();return (!n||n==='名称未設定')?'お客様':n+'様'}
   function buildActions(c){
     c=c||{};var a=[];var dormant=Number(c.dormant_days||0);var rev=Number(c.total_revenue||0);var repeat=Number(c.repeat_count||0);var genre=String(c.genre_history||'');var hasLine=!!String(c.line_user_id||'').trim();var photo=String(c.photo_public_ok)==='1'||c.photo_public_ok===true;
     function add(type,label,msg,priority){a.push({type:type,label:label,message:msg,priority:priority||'normal'})}
@@ -268,41 +348,46 @@ function injectNextActionUi(html) {
     if(!a.length)add('basic_follow','通常フォロー','大きな優先アクションはありません。次回記念日や季節撮影の案内候補です。','low');
     return a;
   }
-  function render(actions){
-    actions=actions||[];
-    return '<div class="crm-next-actions" id="crmNextActionsCard"><div class="crm-next-actions-head"><b>次にやること</b><span>'+actions.length+'件</span></div><div class="crm-next-action-list">'+actions.map(function(x){var p=x.priority||'normal';return '<div class="crm-next-action"><div class="crm-next-action-title"><span>'+esc(x.label)+'</span><em class="'+esc(p)+'">'+esc(p)+'</em></div><div class="crm-next-action-msg">'+esc(x.message)+'</div></div>'}).join('')+'</div></div>';
+  function draftFor(x,c){
+    c=c||{};var name=callName(c);var last=String(c.last_shoot_date||'').trim();var child=String(c.child1_name||'').trim();var lastLine=last?'\\n前回の撮影日：'+last:'';var childLine=child?'\\n'+child+'ちゃんのご成長も、またぜひ残せたら嬉しいです。':'';
+    switch(x.type){
+      case 'dormant_follow':return name+'\\nご無沙汰しております。水野写真の水野です。'+lastLine+'\\n\\nその後、ご家族の皆さまはいかがお過ごしでしょうか？'+childLine+'\\n季節の撮影や記念日のタイミングで、またご家族写真を残される場合はお気軽にご相談ください。';
+      case 'revisit_offer':return name+'\\nこんにちは。水野写真の水野です。'+lastLine+'\\n\\n前回の撮影から少しお時間が経ちましたので、ご家族の今の雰囲気を残す撮影もおすすめです。'+childLine+'\\n日程や場所の相談だけでも大丈夫ですので、気になることがあればいつでもLINEでご連絡ください。';
+      case 'vip_customer':return name+'\\nいつも大切な撮影をお任せいただきありがとうございます。\\n\\nこれまで何度もご依頼いただいているお客様向けに、優先的に日程のご相談を承っています。\\n七五三・バースデー・入学卒業・季節撮影など、次の記念日が近づいていましたらお気軽にご相談ください。';
+      case 'photo_public':return name+'\\n先日は撮影をお任せいただきありがとうございました。\\n\\nもしよろしければ、撮影させていただいたお写真を作例として一部ご紹介させていただけますと嬉しいです。\\n掲載する写真や範囲はこちらで配慮しますので、気になる点があれば遠慮なくお知らせください。';
+      case 'repeat_customer':return name+'\\nいつも撮影をお任せいただきありがとうございます。\\n\\nご家族の成長記録として、季節撮影・兄弟撮影・アルバム作成などもおすすめです。\\n今後の記念日や撮影タイミングで迷われていましたら、LINEで気軽にご相談ください。';
+      case 'shichigosan_next':return name+'\\n七五三の撮影では大切な記念日をお任せいただきありがとうございました。\\n\\n次のタイミングでは、入学・卒園・兄弟撮影・家族写真などもおすすめです。\\nご予定が近づいてきましたら、日程や場所の相談だけでもお気軽にご連絡ください。';
+      case 'omiyamairi_next':return name+'\\nお宮参りの撮影では、大切な一日をお任せいただきありがとうございました。\\n\\n次の記念日として、ハーフバースデー・1歳バースデー・七五三などの撮影も人気です。\\nお子さまの成長に合わせて、また残したいタイミングがあれば気軽にご相談ください。';
+      case 'line_follow':return name+'\\nこんにちは。水野写真の水野です。\\n\\n撮影の日程、場所、服装、料金など、気になることがあればこのLINEでそのままご相談いただけます。\\n相談だけでも大丈夫ですので、必要なタイミングでお気軽にご連絡ください。';
+      case 'line_missing':return name+'\\n今後の撮影相談や日程調整をスムーズにするため、LINEでのご連絡がおすすめです。\\n\\n撮影前の確認やご相談もLINEでまとめてできますので、次回お問い合わせ時にLINE連携をご案内してください。';
+      default:return name+'\\nこんにちは。水野写真の水野です。\\n\\nまたご家族の記念日や季節のタイミングで撮影をご検討される際は、日程や場所の相談だけでもお気軽にご連絡ください。';
+    }
+  }
+  function buildDrafts(c,actions){return (actions||buildActions(c)).map(function(x){return {type:x.type,label:x.label,priority:x.priority,message:draftFor(x,c)}})}
+  function toast(msg){var old=document.querySelector('.crm-copy-toast');if(old)old.remove();var t=document.createElement('div');t.className='crm-copy-toast';t.textContent=msg||'コピーしました';document.body.appendChild(t);setTimeout(function(){t.remove()},1600)}
+  function copyText(v){if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(v).then(function(){toast('LINE文面をコピーしました')}).catch(function(){fallbackCopy(v)})}else fallbackCopy(v)}
+  function fallbackCopy(v){var ta=document.createElement('textarea');ta.value=v;ta.style.position='fixed';ta.style.left='-9999px';document.body.appendChild(ta);ta.focus();ta.select();try{document.execCommand('copy');toast('LINE文面をコピーしました')}catch(e){alert(v)}ta.remove()}
+  function render(actions,customer,drafts){
+    actions=actions||[];drafts=drafts||buildDrafts(customer||{},actions);
+    return '<div class="crm-next-actions" id="crmNextActionsCard"><div class="crm-next-actions-head"><b>次にやること</b><span>'+actions.length+'件</span></div><div class="crm-next-action-list">'+actions.map(function(x,i){var p=x.priority||'normal';var d=drafts[i]||{message:draftFor(x,customer||{})};return '<div class="crm-next-action"><div class="crm-next-action-title"><span>'+esc(x.label)+'</span><em class="'+esc(p)+'">'+esc(p)+'</em></div><div class="crm-next-action-msg">'+esc(x.message)+'</div><div class="crm-line-draft"><div class="crm-line-draft-head"><b>LINE文面</b><button class="crm-copy-line" data-copy="'+i+'">コピー</button></div><div class="crm-line-draft-text">'+esc(d.message)+'</div></div></div>'}).join('')+'</div></div>';
   }
   function tryInsert(customerId){
     var modal=document.getElementById('modal');if(!modal||!customerId||!store[customerId])return;
     var old=document.getElementById('crmNextActionsCard');if(old)old.remove();
-    var actions=store[customerId].next_actions||buildActions(store[customerId].customer||{});
-    var actionsBar=modal.querySelector('.actions');
-    if(actionsBar){actionsBar.insertAdjacentHTML('afterend',render(actions));return;}
-    modal.insertAdjacentHTML('afterbegin',render(actions));
+    var data=store[customerId];var actions=data.next_actions||buildActions(data.customer||{});var drafts=data.line_drafts||buildDrafts(data.customer||{},actions);
+    var html=render(actions,data.customer||{},drafts);var actionsBar=modal.querySelector('.actions');
+    if(actionsBar){actionsBar.insertAdjacentHTML('afterend',html);return;}
+    modal.insertAdjacentHTML('afterbegin',html);
   }
+  document.addEventListener('click',function(e){var btn=e.target&&e.target.closest&&e.target.closest('[data-copy]');if(!btn)return;var card=btn.closest('.crm-next-action');var txt=card&&card.querySelector('.crm-line-draft-text');if(txt)copyText(txt.textContent||'')});
   window.fetch=function(input,init){
     return originalFetch(input,init).then(function(res){
-      try{
-        var url=typeof input==='string'?input:(input&&input.url)||'';
-        var u=new URL(url,location.href);
-        if(/^\/api\/customers\/[^/]+$/.test(u.pathname)){
-          res.clone().json().then(function(data){
-            if(data&&data.customer&&data.customer.customer_id){
-              if(!data.next_actions)data.next_actions=buildActions(data.customer);
-              store[data.customer.customer_id]=data;
-              setTimeout(function(){tryInsert(data.customer.customer_id)},60);
-              setTimeout(function(){tryInsert(data.customer.customer_id)},250);
-            }
-          }).catch(function(){});
-        }
-      }catch(e){}
+      try{var url=typeof input==='string'?input:(input&&input.url)||'';var u=new URL(url,location.href);if(/^\\/api\\/customers\\/[^/]+$/.test(u.pathname)){res.clone().json().then(function(data){if(data&&data.customer&&data.customer.customer_id){if(!data.next_actions)data.next_actions=buildActions(data.customer);if(!data.line_drafts)data.line_drafts=buildDrafts(data.customer,data.next_actions);store[data.customer.customer_id]=data;setTimeout(function(){tryInsert(data.customer.customer_id)},60);setTimeout(function(){tryInsert(data.customer.customer_id)},250)}}).catch(function(){})}}
+      catch(e){}
       return res;
     });
   };
-  var mo=new MutationObserver(function(){
-    var modal=document.getElementById('modal');if(!modal)return;
-    Object.keys(store).forEach(function(id){if(modal.textContent&&modal.textContent.indexOf(id)>=0)tryInsert(id)});
-  });
+  var mo=new MutationObserver(function(){var modal=document.getElementById('modal');if(!modal)return;Object.keys(store).forEach(function(id){if(modal.textContent&&modal.textContent.indexOf(id)>=0)tryInsert(id)})});
   mo.observe(document.documentElement,{childList:true,subtree:true});
 })();
 </script>`;
@@ -334,6 +419,12 @@ export default {
       if (url.pathname === "/api/customers/deleted" && request.method === "GET") return json(await listDeletedCustomers(env, url));
       if (url.pathname === "/api/customers/restore" && request.method === "POST") return await restoreCustomers(request, env, current);
       return json({ ok: false, message: "Method Not Allowed" }, 405);
+    }
+
+    if (isCustomerLineDraftPath(url.pathname)) {
+      const current = await getCurrentUser(request, env);
+      if (request.method !== "GET") return json({ ok: false, message: "Method Not Allowed" }, 405);
+      return await handleLineDrafts(request, env, current);
     }
 
     const res = await secureApp.fetch(request, env, ctx);
