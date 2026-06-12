@@ -1,6 +1,6 @@
 {
   "name": "customer-crm-api",
-  "main": "src/production-index-line-log.js",
+  "main": "src/production-index-line-overview.js",
   "compatibility_date": "2026-04-09",
   "d1_databases": [
     {
