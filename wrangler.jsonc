@@ -1,6 +1,6 @@
 {
   "name": "customer-crm-api",
-  "main": "src/production-index-reservation-bridge.js",
+  "main": "src/production-index-crm-reservation-send.js",
   "compatibility_date": "2026-04-09",
   "d1_databases": [
     {
@@ -13,6 +13,10 @@
     {
       "binding": "LINE_SERVICE",
       "service": "line-webhook-worker"
+    },
+    {
+      "binding": "RESERVATION_SERVICE",
+      "service": "reservation-app-api"
     }
   ]
 }
