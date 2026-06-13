@@ -1,6 +1,6 @@
 {
   "name": "customer-crm-api",
-  "main": "src/production-index-crm-customer-smart-panel.js",
+  "main": "src/production-index-crm-list-workbench.js",
   "compatibility_date": "2026-04-09",
   "d1_databases": [
     {
