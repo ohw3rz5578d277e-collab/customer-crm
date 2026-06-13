@@ -1,6 +1,6 @@
 {
   "name": "customer-crm-api",
-  "main": "src/production-index-crm-inquiry-actions.js",
+  "main": "src/production-index-crm-inquiry-row-actions.js",
   "compatibility_date": "2026-04-09",
   "d1_databases": [
     {
