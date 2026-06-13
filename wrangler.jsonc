@@ -1,6 +1,6 @@
 {
   "name": "customer-crm-api",
-  "main": "src/production-index-crm-growth-suite-actions.js",
+  "main": "src/production-index-crm-follow-template.js",
   "compatibility_date": "2026-04-09",
   "d1_databases": [
     {
