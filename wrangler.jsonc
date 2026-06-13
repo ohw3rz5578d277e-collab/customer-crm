@@ -1,6 +1,6 @@
 {
   "name": "customer-crm-api",
-  "main": "src/production-index-crm-usability-hub.js",
+  "main": "src/production-index-crm-mobile-usability.js",
   "compatibility_date": "2026-04-09",
   "d1_databases": [
     {
