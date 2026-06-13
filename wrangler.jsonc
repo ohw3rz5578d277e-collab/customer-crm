@@ -1,6 +1,6 @@
 {
   "name": "customer-crm-api",
-  "main": "src/production-index-crm-reservation-created-sync.js",
+  "main": "src/production-index-crm-reservation-status-ui.js",
   "compatibility_date": "2026-04-09",
   "d1_databases": [
     {
