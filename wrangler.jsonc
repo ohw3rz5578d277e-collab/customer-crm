@@ -1,6 +1,6 @@
 {
   "name": "customer-crm-api",
-  "main": "src/production-index-crm-stable-audit.js",
+  "main": "src/production-index-crm-number-format-fix.js",
   "compatibility_date": "2026-04-09",
   "d1_databases": [
     {
