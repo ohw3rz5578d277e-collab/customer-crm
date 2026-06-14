@@ -1,5 +1,5 @@
-// CUSTOMER CRM / RESERVATION TAB + LINE CHAT STYLE WRAPPER
-// Adds Reservation tab to bottom nav and renders customer LINE logs as chat bubbles.
+// CUSTOMER CRM / RESERVATION TAB + SIMPLE CUSTOMER LIST + LINE CHAT STYLE WRAPPER
+// Adds Reservation tab, simplifies customer list cards, and renders LINE logs as chat bubbles.
 import app from "./production-index-crm-instagram-nav-v4.js";
 
 const RESERVATION_ADMIN_URL = "https://reservation-app-api.ohw3rz5578d277e.workers.dev/admin";
@@ -7,7 +7,7 @@ const RESERVATION_ADMIN_URL = "https://reservation-app-api.ohw3rz5578d277e.worke
 function inject(html){
   if(!html || html.includes('crm-reservation-chat-line-script')) return html;
   const style = `<style id="crm-reservation-chat-line-style">
-.crm-line-chat-box{display:flex!important;flex-direction:column!important;gap:10px!important;padding:10px!important;border:1px solid #dbe5ef!important;border-radius:18px!important;background:#f1f5f9!important}.crm-line-bubble{max-width:82%!important;padding:10px 12px!important;border-radius:18px!important;font-size:13px!important;line-height:1.55!important;box-shadow:0 3px 10px rgba(15,23,42,.05)!important;word-break:break-word!important}.crm-line-bubble.out{align-self:flex-end!important;background:#06c755!important;color:#fff!important;border-bottom-right-radius:5px!important}.crm-line-bubble.in{align-self:flex-start!important;background:#fff!important;color:#07111f!important;border-bottom-left-radius:5px!important}.crm-line-time{display:block!important;font-size:10px!important;opacity:.72!important;margin-top:4px!important}.crm-line-empty{padding:14px!important;border:1px dashed #cbd5e1!important;border-radius:16px!important;color:#64748b!important;background:#fff!important}@media(max-width:767px){#crmInstaNav{height:76px!important;padding:7px 6px!important;gap:2px!important}#crmInstaNav .crm-insta-tab{height:60px!important;font-size:10px!important;border-radius:18px!important}#crmInstaNav .crm-insta-icon{font-size:20px!important}.crm-line-bubble{max-width:88%!important;font-size:13px!important}}
+.crm-line-chat-box{display:flex!important;flex-direction:column!important;gap:10px!important;padding:10px!important;border:1px solid #dbe5ef!important;border-radius:18px!important;background:#f1f5f9!important}.crm-line-bubble{max-width:82%!important;padding:10px 12px!important;border-radius:18px!important;font-size:13px!important;line-height:1.55!important;box-shadow:0 3px 10px rgba(15,23,42,.05)!important;word-break:break-word!important}.crm-line-bubble.out{align-self:flex-end!important;background:#06c755!important;color:#fff!important;border-bottom-right-radius:5px!important}.crm-line-bubble.in{align-self:flex-start!important;background:#fff!important;color:#07111f!important;border-bottom-left-radius:5px!important}.crm-line-time{display:block!important;font-size:10px!important;opacity:.72!important;margin-top:4px!important}.crm-line-empty{padding:14px!important;border:1px dashed #cbd5e1!important;border-radius:16px!important;color:#64748b!important;background:#fff!important}.crm-stable-customer-card{padding:16px 18px!important;border-radius:18px!important;display:flex!important;align-items:center!important;justify-content:space-between!important;gap:12px!important}.crm-stable-customer-name{font-size:18px!important;font-weight:950!important;margin:0!important;line-height:1.35!important;color:#07111f!important}.crm-stable-customer-sub,.crm-stable-customer-meta,.crm-stable-customer-pill,.crm-v2-card-detail-btn{display:none!important}.crm-stable-customer-card::after{content:'›';font-size:28px;font-weight:800;color:#94a3b8;line-height:1}.crm-stable-customer-head p{display:none!important}.crm-stable-audit-btn,.crm-stable-customer-btn,#crmStableAuditBtn,#crmStableCustomerBtn,#crmSettingsMenuBtn,#crmLogoutMenuBtn,#crmSettingsUnifiedBtn{display:none!important}@media(max-width:767px){#crmInstaNav{height:76px!important;padding:7px 6px!important;gap:2px!important}#crmInstaNav .crm-insta-tab{height:60px!important;font-size:10px!important;border-radius:18px!important}#crmInstaNav .crm-insta-icon{font-size:20px!important}.crm-line-bubble{max-width:88%!important;font-size:13px!important}.crm-stable-customer-card{min-height:58px!important}.crm-stable-customer-name{font-size:17px!important}}
 </style>`;
   const script = `<script id="crm-reservation-chat-line-script">
 (()=>{
@@ -46,8 +46,7 @@ function inject(html){
    qsa('.crm-stable-customer-card').forEach(card=>{
      const id=card.getAttribute('data-customer-id')||'';
      if(card.dataset.chatLinePatch==='1') return; card.dataset.chatLinePatch='1';
-     card.addEventListener('click',()=>enhanceDetailPanel(id),true);
-     const btn=qs('.crm-v2-card-detail-btn',card); if(btn) btn.addEventListener('click',()=>enhanceDetailPanel(id),true);
+     card.addEventListener('click',(e)=>{e.preventDefault(); if(typeof window.__crmOpenCustomerDetailV2==='function') window.__crmOpenCustomerDetailV2(id); enhanceDetailPanel(id);},true);
    });
  }
  function patchGlobalDetail(){
