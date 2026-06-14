@@ -1,6 +1,6 @@
 {
   "name": "customer-crm-api",
-  "main": "src/production-index-crm-home-dashboard.js",
+  "main": "src/production-index-crm-ui-polish.js",
   "compatibility_date": "2026-04-09",
   "d1_databases": [
     {
