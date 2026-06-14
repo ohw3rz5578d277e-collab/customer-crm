@@ -1,15 +1,14 @@
 // ======================================================
 // CUSTOMER CRM / CUSTOMER LIST DETAIL V2 WRAPPER
-// build: customer-crm-customer-list-detail-v2-20260614-02
+// build: customer-crm-customer-list-detail-v2-20260614-03
 // - Makes stable customer list cards open a reliable detail panel
 // - Adds dedicated customer detail API independent from old DOM click
-// - Moves user management / user add actions into Settings panel
-// - Exposes window.__crmOpenCustomerDetailV2 for outer UI wrappers
+// - LINE history is shown as a light timeline list, not chat bubbles
 // ======================================================
 
 import app from "./production-index-crm-stable-customer-list.js";
 
-const BUILD = "customer-crm-customer-list-detail-v2-20260614-02";
+const BUILD = "customer-crm-customer-list-detail-v2-20260614-03";
 
 function json(data, status = 200){
   return new Response(JSON.stringify(data, null, 2), {
@@ -100,7 +99,7 @@ function injectDetailV2(html){
   if(!html || html.includes("crm-customer-detail-v2-script")) return html;
 
   const style = `<style id="crm-customer-detail-v2-style">
-.crm-v2-detail-panel{position:fixed!important;right:18px!important;top:18px!important;bottom:18px!important;width:min(760px,calc(100vw - 36px))!important;background:#fff!important;border:1px solid #dbe5ef!important;border-radius:24px!important;box-shadow:0 28px 70px rgba(15,23,42,.24)!important;z-index:2147483100!important;display:none!important;overflow:hidden!important;color:#07111f!important}.crm-v2-detail-panel.open{display:flex!important;flex-direction:column!important}.crm-v2-detail-head{padding:18px 64px 16px 18px!important;border-bottom:1px solid #e2e8f0!important;background:linear-gradient(135deg,#f8fafc,#fff)!important}.crm-v2-detail-head h2{font-size:24px!important;line-height:1.25!important;margin:0 0 6px!important;font-weight:950!important}.crm-v2-detail-head p{font-size:13px!important;color:#64748b!important;line-height:1.7!important;margin:0!important}.crm-v2-detail-close{position:absolute!important;right:14px!important;top:14px!important;width:42px!important;height:42px!important;border-radius:999px!important;border:1px solid #dbe5ef!important;background:#fff!important;font-size:22px!important;font-weight:950!important;cursor:pointer!important}.crm-v2-detail-body{overflow:auto!important;padding:18px!important;display:grid!important;gap:14px!important}.crm-v2-detail-grid{display:grid!important;grid-template-columns:repeat(2,1fr)!important;gap:10px!important}.crm-v2-detail-card{border:1px solid #e2e8f0!important;border-radius:18px!important;background:#fff!important;padding:14px!important}.crm-v2-detail-card b{display:block!important;font-size:20px!important;color:#07111f!important}.crm-v2-detail-card span{font-size:13px!important;color:#64748b!important}.crm-v2-section h3{font-size:18px!important;margin:0 0 8px!important;font-weight:950!important}.crm-v2-row{border:1px solid #e2e8f0!important;border-radius:16px!important;padding:12px!important;background:#f8fafc!important;margin-bottom:8px!important;font-size:13px!important;line-height:1.6!important}.crm-v2-empty{border:1px dashed #cbd5e1!important;border-radius:16px!important;padding:14px!important;color:#64748b!important;background:#f8fafc!important}.crm-v2-card-detail-btn{margin-top:12px!important;min-height:42px!important;border:0!important;border-radius:999px!important;background:#07111f!important;color:#fff!important;font-weight:950!important;padding:0 14px!important;cursor:pointer!important}@media(max-width:767px){.crm-v2-detail-panel{inset:8px!important;width:auto!important;border-radius:20px!important}.crm-v2-detail-head{padding:16px 62px 14px 16px!important}.crm-v2-detail-head h2{font-size:22px!important}.crm-v2-detail-body{padding:12px 12px calc(24px + env(safe-area-inset-bottom))!important}.crm-v2-detail-grid{grid-template-columns:1fr 1fr!important}.crm-v2-card-detail-btn{width:100%!important}}
+.crm-v2-detail-panel{position:fixed!important;right:18px!important;top:18px!important;bottom:18px!important;width:min(760px,calc(100vw - 36px))!important;background:#fff!important;border:1px solid #dbe5ef!important;border-radius:24px!important;box-shadow:0 28px 70px rgba(15,23,42,.24)!important;z-index:2147483100!important;display:none!important;overflow:hidden!important;color:#07111f!important}.crm-v2-detail-panel.open{display:flex!important;flex-direction:column!important}.crm-v2-detail-head{padding:18px 64px 16px 18px!important;border-bottom:1px solid #e2e8f0!important;background:linear-gradient(135deg,#f8fafc,#fff)!important}.crm-v2-detail-head h2{font-size:24px!important;line-height:1.25!important;margin:0 0 6px!important;font-weight:950!important}.crm-v2-detail-head p{font-size:13px!important;color:#64748b!important;line-height:1.7!important;margin:0!important}.crm-v2-detail-close{position:absolute!important;right:14px!important;top:14px!important;width:42px!important;height:42px!important;border-radius:999px!important;border:1px solid #dbe5ef!important;background:#fff!important;font-size:22px!important;font-weight:950!important;cursor:pointer!important}.crm-v2-detail-body{overflow:auto!important;padding:18px!important;display:grid!important;gap:14px!important}.crm-v2-detail-grid{display:grid!important;grid-template-columns:repeat(2,1fr)!important;gap:10px!important}.crm-v2-detail-card{border:1px solid #e2e8f0!important;border-radius:18px!important;background:#fff!important;padding:14px!important}.crm-v2-detail-card b{display:block!important;font-size:20px!important;color:#07111f!important}.crm-v2-detail-card span{font-size:13px!important;color:#64748b!important}.crm-v2-section h3{font-size:18px!important;margin:0 0 8px!important;font-weight:950!important}.crm-v2-row{border:1px solid #e2e8f0!important;border-radius:16px!important;padding:12px!important;background:#f8fafc!important;margin-bottom:8px!important;font-size:13px!important;line-height:1.6!important}.crm-v2-empty{border:1px dashed #cbd5e1!important;border-radius:16px!important;padding:14px!important;color:#64748b!important;background:#f8fafc!important}.crm-line-lite-list{display:grid!important;gap:8px!important}.crm-line-lite-item{border:1px solid #e2e8f0!important;border-radius:14px!important;background:#fff!important;padding:10px 12px!important;display:grid!important;gap:4px!important}.crm-line-lite-top{display:flex!important;align-items:center!important;gap:8px!important;font-size:12px!important;color:#64748b!important}.crm-line-lite-badge{display:inline-flex!important;align-items:center!important;justify-content:center!important;min-width:44px!important;height:22px!important;border-radius:999px!important;font-size:11px!important;font-weight:950!important}.crm-line-lite-badge.out{background:#dcfce7!important;color:#166534!important}.crm-line-lite-badge.in{background:#e0f2fe!important;color:#075985!important}.crm-line-lite-text{font-size:14px!important;line-height:1.6!important;color:#07111f!important;white-space:normal!important;word-break:break-word!important}@media(max-width:767px){.crm-v2-detail-panel{inset:8px!important;width:auto!important;border-radius:20px!important}.crm-v2-detail-head{padding:16px 62px 14px 16px!important}.crm-v2-detail-head h2{font-size:22px!important}.crm-v2-detail-body{padding:12px 12px calc(24px + env(safe-area-inset-bottom))!important}.crm-v2-detail-grid{grid-template-columns:1fr 1fr!important}}
 </style>`;
 
   const script = `<script id="crm-customer-detail-v2-script">
@@ -121,6 +120,18 @@ function injectDetailV2(html){
     document.body.appendChild(panel);
   }
   function row(title, value){ return '<div class="crm-v2-detail-card"><b>'+esc(value || '未設定')+'</b><span>'+esc(title)+'</span></div>'; }
+  function lineText(r){ return r.message_text || r.message || r.text || r.body || r.memo || r.action_label || r.status || ''; }
+  function lineTime(r){ return r.sent_at || r.replied_at || r.copied_at || r.created_at || r.updated_at || ''; }
+  function isIncoming(r){ const s=String(r.direction||r.message_type||r.action_type||r.status||'').toLowerCase(); return /in|reply|replied|receive|user/.test(s); }
+  function lineRows(logs){
+    if(!logs || !logs.length) return '<div class="crm-v2-empty">LINE履歴はまだありません。</div>';
+    return '<div class="crm-line-lite-list">' + logs.map(r => {
+      const incoming = isIncoming(r);
+      const badge = incoming ? '返信' : '送信';
+      const cls = incoming ? 'in' : 'out';
+      return '<div class="crm-line-lite-item"><div class="crm-line-lite-top"><span class="crm-line-lite-badge '+cls+'">'+badge+'</span><span>'+esc(lineTime(r) || '日時未設定')+'</span></div><div class="crm-line-lite-text">'+esc(lineText(r) || '内容なし')+'</div></div>';
+    }).join('') + '</div>';
+  }
   function listRows(rows, emptyText){
     if(!rows || !rows.length) return '<div class="crm-v2-empty">'+esc(emptyText)+'</div>';
     return rows.map(r => '<div class="crm-v2-row">'+esc([r.shoot_date || r.due_date || r.created_at || '', r.genre || r.task_type || r.action_label || r.status || '', r.total_amount ? yen(r.total_amount) : '', r.message_text || r.memo || ''].filter(Boolean).join(' / '))+'</div>').join('');
@@ -138,7 +149,7 @@ function injectDetailV2(html){
       const c = j.customer;
       panel.querySelector('h2').textContent = c.name || '顧客詳細';
       panel.querySelector('.crm-v2-detail-head p').textContent = ['LINE: '+(c.line_display_name || '未設定'), c.genre_history ? 'ジャンル: '+c.genre_history : '', c.last_shoot_date ? '直近: '+c.last_shoot_date : ''].filter(Boolean).join(' / ');
-      body.innerHTML = '<div class="crm-v2-detail-grid">'+row('撮影回数', c.repeat_count || 0)+row('累計売上', yen(c.total_revenue))+row('ランク', c.customer_rank || '未設定')+row('電話', c.phone || '未設定')+'</div><div class="crm-v2-section"><h3>撮影・予約履歴</h3>'+listRows(j.reservations, '撮影・予約履歴はまだありません。')+'</div><div class="crm-v2-section"><h3>LINE履歴</h3>'+listRows(j.line_logs, 'LINE履歴はまだありません。')+'</div><div class="crm-v2-section"><h3>フォロー予定</h3>'+listRows(j.follow_tasks, 'フォロー予定はまだありません。')+'</div>';
+      body.innerHTML = '<div class="crm-v2-detail-grid">'+row('撮影回数', c.repeat_count || 0)+row('累計売上', yen(c.total_revenue))+row('ランク', c.customer_rank || '未設定')+row('電話', c.phone || '未設定')+'</div><div class="crm-v2-section"><h3>撮影・予約履歴</h3>'+listRows(j.reservations, '撮影・予約履歴はまだありません。')+'</div><div class="crm-v2-section"><h3>LINE履歴</h3>'+lineRows(j.line_logs)+'</div><div class="crm-v2-section"><h3>フォロー予定</h3>'+listRows(j.follow_tasks, 'フォロー予定はまだありません。')+'</div>';
     }catch(e){ body.innerHTML = '<div class="crm-v2-empty">詳細の読み込みに失敗しました。状態確認を実行してください。</div>'; }
   }
   window.__crmOpenCustomerDetailV2 = openDetail;
@@ -147,12 +158,6 @@ function injectDetailV2(html){
       if(card.dataset.v2Patched === '1') return;
       card.dataset.v2Patched = '1';
       const id = card.getAttribute('data-customer-id') || '';
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className = 'crm-v2-card-detail-btn';
-      btn.textContent = '詳細を見る';
-      btn.onclick = e => { e.preventDefault(); e.stopPropagation(); openDetail(id); };
-      card.appendChild(btn);
       card.addEventListener('click', e => { e.preventDefault(); e.stopImmediatePropagation(); openDetail(id); }, true);
     });
   }
