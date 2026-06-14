@@ -1,16 +1,16 @@
 // ======================================================
 // CUSTOMER CRM / STABLE AUDIT WRAPPER
-// build: customer-crm-stable-audit-20260614-02
+// build: customer-crm-stable-audit-20260614-03
 // - Final outer safety layer for admin UI
 // - Adds /api/crm-health-check
 // - Re-checks critical CRM tables before every request
 // - Returns safe empty data for fragile dashboard endpoints
-// - Adds small UI health button without changing existing features
+// - Keeps customer list return UX by wrapping customer-list-return
 // ======================================================
 
-import app from "./production-index-crm-detail-panel-fix.js";
+import app from "./production-index-crm-customer-list-return.js";
 
-const BUILD = "customer-crm-stable-audit-20260614-02";
+const BUILD = "customer-crm-stable-audit-20260614-03";
 
 function json(data, status = 200){
   return new Response(JSON.stringify(data, null, 2), {
@@ -255,16 +255,17 @@ export default {
       const ct = res.headers.get("content-type") || "";
       if(!res.ok && request.method === "GET"){
         const payload = safePayload(url.pathname);
-        if(payload) return json(payload);
+        if(payload) return json(payload, 200);
       }
       if(request.method === "GET" && ct.includes("text/html")){
-        return new Response(injectStableAuditUi(await res.text()), {status:res.status, headers:res.headers});
+        const html = await res.text();
+        return new Response(injectStableAuditUi(html), {status:res.status, headers:res.headers});
       }
       return res;
     }catch(e){
       const payload = request.method === "GET" ? safePayload(url.pathname) : null;
-      if(payload) return json({...payload, caught_error:String(e && e.message || e)});
-      return json({ok:false, build:BUILD, message:String(e && e.message || e)}, 500);
+      if(payload) return json({...payload, caught_error:String(e && e.message || e)}, 200);
+      return json({ok:false, build:BUILD, error:String(e && e.message || e)}, 500);
     }
   }
 };
