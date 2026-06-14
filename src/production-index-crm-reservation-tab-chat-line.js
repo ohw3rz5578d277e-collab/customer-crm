@@ -1,6 +1,6 @@
 // CUSTOMER CRM / RESERVATION TAB + LINE CHAT STYLE WRAPPER
 // Adds Reservation tab to bottom nav and renders customer LINE logs as chat bubbles.
-import app from "./production-index-crm-clean-mobile-ux-v3.js";
+import app from "./production-index-crm-instagram-nav-v4.js";
 
 const RESERVATION_ADMIN_URL = "https://reservation-app-api.ohw3rz5578d277e.workers.dev/admin";
 
@@ -14,7 +14,7 @@ function inject(html){
  if(window.__crmReservationChatLine) return; window.__crmReservationChatLine=1;
  const RES_URL=${JSON.stringify(RESERVATION_ADMIN_URL)};
  const qs=(s,r=document)=>r.querySelector(s); const qsa=(s,r=document)=>Array.from(r.querySelectorAll(s));
- const esc=v=>String(v==null?'':v).replace(/[&<>\"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;'}[c]||c));
+ const esc=v=>String(v==null?'':v).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]||c));
  function openReservation(){ window.open(RES_URL,'_blank','noopener'); }
  function setActive(name){ qsa('#crmInstaNav .crm-insta-tab').forEach(b=>b.classList.toggle('active',b.dataset.tab===name)); }
  function patchReservationTab(){
