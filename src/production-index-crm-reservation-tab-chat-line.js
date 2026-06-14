@@ -1,5 +1,5 @@
 // CUSTOMER CRM / RESERVATION TAB + SIMPLE CUSTOMER LIST + LINE CHAT STYLE WRAPPER
-// Adds Reservation tab, simplifies customer list cards, and renders LINE logs as chat bubbles.
+// Adds Reservation tab, simplifies customer list cards to names only, and renders LINE logs as chat bubbles.
 import app from "./production-index-crm-instagram-nav-v4.js";
 
 const RESERVATION_ADMIN_URL = "https://reservation-app-api.ohw3rz5578d277e.workers.dev/admin";
@@ -7,7 +7,11 @@ const RESERVATION_ADMIN_URL = "https://reservation-app-api.ohw3rz5578d277e.worke
 function inject(html){
   if(!html || html.includes('crm-reservation-chat-line-script')) return html;
   const style = `<style id="crm-reservation-chat-line-style">
-.crm-line-chat-box{display:flex!important;flex-direction:column!important;gap:10px!important;padding:10px!important;border:1px solid #dbe5ef!important;border-radius:18px!important;background:#f1f5f9!important}.crm-line-bubble{max-width:82%!important;padding:10px 12px!important;border-radius:18px!important;font-size:13px!important;line-height:1.55!important;box-shadow:0 3px 10px rgba(15,23,42,.05)!important;word-break:break-word!important}.crm-line-bubble.out{align-self:flex-end!important;background:#06c755!important;color:#fff!important;border-bottom-right-radius:5px!important}.crm-line-bubble.in{align-self:flex-start!important;background:#fff!important;color:#07111f!important;border-bottom-left-radius:5px!important}.crm-line-time{display:block!important;font-size:10px!important;opacity:.72!important;margin-top:4px!important}.crm-line-empty{padding:14px!important;border:1px dashed #cbd5e1!important;border-radius:16px!important;color:#64748b!important;background:#fff!important}.crm-stable-customer-card{padding:16px 18px!important;border-radius:18px!important;display:flex!important;align-items:center!important;justify-content:space-between!important;gap:12px!important}.crm-stable-customer-name{font-size:18px!important;font-weight:950!important;margin:0!important;line-height:1.35!important;color:#07111f!important}.crm-stable-customer-sub,.crm-stable-customer-meta,.crm-stable-customer-pill,.crm-v2-card-detail-btn{display:none!important}.crm-stable-customer-card::after{content:'›';font-size:28px;font-weight:800;color:#94a3b8;line-height:1}.crm-stable-customer-head p{display:none!important}.crm-stable-audit-btn,.crm-stable-customer-btn,#crmStableAuditBtn,#crmStableCustomerBtn,#crmSettingsMenuBtn,#crmLogoutMenuBtn,#crmSettingsUnifiedBtn{display:none!important}@media(max-width:767px){#crmInstaNav{height:76px!important;padding:7px 6px!important;gap:2px!important}#crmInstaNav .crm-insta-tab{height:60px!important;font-size:10px!important;border-radius:18px!important}#crmInstaNav .crm-insta-icon{font-size:20px!important}.crm-line-bubble{max-width:88%!important;font-size:13px!important}.crm-stable-customer-card{min-height:58px!important}.crm-stable-customer-name{font-size:17px!important}}
+/* LINE chat style */
+.crm-line-chat-box{display:flex!important;flex-direction:column!important;gap:10px!important;padding:10px!important;border:1px solid #dbe5ef!important;border-radius:18px!important;background:#f1f5f9!important}.crm-line-bubble{max-width:82%!important;padding:10px 12px!important;border-radius:18px!important;font-size:13px!important;line-height:1.55!important;box-shadow:0 3px 10px rgba(15,23,42,.05)!important;word-break:break-word!important}.crm-line-bubble.out{align-self:flex-end!important;background:#06c755!important;color:#fff!important;border-bottom-right-radius:5px!important}.crm-line-bubble.in{align-self:flex-start!important;background:#fff!important;color:#07111f!important;border-bottom-left-radius:5px!important}.crm-line-time{display:block!important;font-size:10px!important;opacity:.72!important;margin-top:4px!important}.crm-line-empty{padding:14px!important;border:1px dashed #cbd5e1!important;border-radius:16px!important;color:#64748b!important;background:#fff!important}
+/* Simple customer list: name only */
+.crm-stable-customer-head p,.crm-stable-customer-status,.crm-stable-customer-sub,.crm-stable-customer-meta,.crm-stable-customer-pill,.crm-v2-card-detail-btn{display:none!important}.crm-stable-customer-list{gap:8px!important}.crm-stable-customer-card{padding:15px 18px!important;border-radius:18px!important;display:flex!important;align-items:center!important;justify-content:space-between!important;gap:12px!important;background:#fff!important;min-height:58px!important}.crm-stable-customer-name{font-size:18px!important;font-weight:950!important;margin:0!important;line-height:1.35!important;color:#07111f!important}.crm-stable-customer-card::after{content:'›';font-size:28px;font-weight:800;color:#94a3b8;line-height:1}.crm-stable-customer-search{border-bottom:1px solid #e2e8f0!important}.crm-stable-customer-search input{font-size:16px!important}.crm-stable-audit-btn,.crm-stable-customer-btn,#crmStableAuditBtn,#crmStableCustomerBtn,#crmSettingsMenuBtn,#crmLogoutMenuBtn,#crmSettingsUnifiedBtn{display:none!important}.crm-legacy-hidden-by-simple{display:none!important}
+@media(max-width:767px){#crmInstaNav{height:76px!important;padding:7px 6px!important;gap:2px!important}#crmInstaNav .crm-insta-tab{height:60px!important;font-size:10px!important;border-radius:18px!important}#crmInstaNav .crm-insta-icon{font-size:20px!important}.crm-line-bubble{max-width:88%!important;font-size:13px!important}.crm-stable-customer-card{min-height:56px!important;padding:14px 16px!important}.crm-stable-customer-name{font-size:17px!important}.crm-stable-customer-panel{background:#fff!important}.crm-stable-customer-head{padding-bottom:12px!important}.crm-stable-customer-head h2{font-size:24px!important}}
 </style>`;
   const script = `<script id="crm-reservation-chat-line-script">
 (()=>{
@@ -46,7 +50,8 @@ function inject(html){
    qsa('.crm-stable-customer-card').forEach(card=>{
      const id=card.getAttribute('data-customer-id')||'';
      if(card.dataset.chatLinePatch==='1') return; card.dataset.chatLinePatch='1';
-     card.addEventListener('click',(e)=>{e.preventDefault(); if(typeof window.__crmOpenCustomerDetailV2==='function') window.__crmOpenCustomerDetailV2(id); enhanceDetailPanel(id);},true);
+     card.addEventListener('click',()=>enhanceDetailPanel(id),true);
+     const btn=qs('.crm-v2-card-detail-btn',card); if(btn) btn.addEventListener('click',()=>enhanceDetailPanel(id),true);
    });
  }
  function patchGlobalDetail(){
@@ -56,7 +61,15 @@ function inject(html){
      window.__crmOpenCustomerDetailV2ChatWrapped=1;
    }
  }
- function boot(){ patchReservationTab(); patchCustomerOpen(); patchGlobalDetail(); }
+ function hideExtraButtons(){
+   const old=['状態確認','顧客リストへ','ユーザー管理','ユーザー追加','一括確認','LINE運用'];
+   qsa('button,a,div').forEach(el=>{
+     if(el.closest('#crmInstaNav')||el.closest('#crmSettingsPanel')||el.closest('#crmStableCustomerPanel')||el.closest('#crmV2DetailPanel')) return;
+     const t=(el.textContent||'').trim(); const st=getComputedStyle(el);
+     if((st.position==='fixed'||st.position==='sticky'||st.position==='absolute') && old.some(x=>t===x||t.includes(x))) el.classList.add('crm-legacy-hidden-by-simple');
+   });
+ }
+ function boot(){ patchReservationTab(); patchCustomerOpen(); patchGlobalDetail(); hideExtraButtons(); }
  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',boot); else boot();
  new MutationObserver(()=>setTimeout(boot,120)).observe(document.documentElement,{childList:true,subtree:true});
 })();
