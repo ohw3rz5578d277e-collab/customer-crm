@@ -1,6 +1,6 @@
 {
   "name": "customer-crm-api",
-  "main": "src/production-index-crm-detail-panel-fix.js",
+  "main": "src/production-index-crm-customer-list-return.js",
   "compatibility_date": "2026-04-09",
   "d1_databases": [
     {
