@@ -1,4 +1,4 @@
 // CUSTOMER CRM / CLEAN MOBILE UX V3
-// Thin compatibility entrypoint. Reservation tab and chat-style LINE history live in reservation-tab-chat-line.
-import app from "./production-index-crm-reservation-tab-chat-line.js";
+// Emergency stable entrypoint: route back to customer-list-detail-v2 to stop Worker 1101.
+import app from "./production-index-crm-customer-list-detail-v2.js";
 export default app;
