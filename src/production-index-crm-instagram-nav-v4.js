@@ -1,15 +1,15 @@
 // ======================================================
 // CUSTOMER CRM / INSTAGRAM-LIKE MOBILE NAV V4 WRAPPER
-// build: customer-crm-instagram-nav-v4-20260614-01
+// build: customer-crm-instagram-nav-v4-20260614-02
 // - Replaces messy mobile bottom controls with 5 icon tabs
 // - Home / Search / LINE / Customers / Settings
 // - Settings contains logout and user management inherited from previous wrappers
 // - Hides duplicate floating buttons and old bottom bars on mobile
 // ======================================================
 
-import app from "./production-index-crm-clean-mobile-ux-v3.js";
+import app from "./production-index-crm-customer-list-detail-v2.js";
 
-const BUILD = "customer-crm-instagram-nav-v4-20260614-01";
+const BUILD = "customer-crm-instagram-nav-v4-20260614-02";
 
 function injectInstagramNav(html){
   if(!html || html.includes("crm-instagram-nav-v4-script")) return html;
