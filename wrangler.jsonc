@@ -1,6 +1,6 @@
 {
   "name": "customer-crm-api",
-  "main": "src/production-index-crm-clean-mobile-ux-v3.js",
+  "main": "src/production-index-crm-delivery-deadline-alerts-entry.js",
   "compatibility_date": "2026-04-09",
   "d1_databases": [
     {
