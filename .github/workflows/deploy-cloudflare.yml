@@ -1,0 +1,256 @@
+name: Deploy customer-crm to Cloudflare
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: customer-crm-production-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Migrate, deploy, and verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Validate production config and migration safety
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const fs = require('fs');
+
+          const config = JSON.parse(fs.readFileSync('wrangler.jsonc', 'utf8'));
+          if (config.name !== 'customer-crm-api') throw new Error('Unexpected Worker name');
+          if (config.main !== 'src/production-index-crm-browser-root-entry.js') throw new Error('Production main changed');
+          const db = (config.d1_databases || []).find(x => x.binding === 'DB');
+          if (!db) throw new Error('DB binding missing');
+          if (db.database_name !== 'customer-crm-db') throw new Error('Unexpected D1 database name');
+          if (db.database_id !== '1ae3e0d9-72c0-47ad-8fc1-fed9d15ec70f') throw new Error('Unexpected D1 database id');
+
+          const file = 'migrations/20260814_customer_line_message_events.sql';
+          let sql = fs.readFileSync(file, 'utf8');
+          sql = sql.replace(/--.*$/gm, ' ').replace(/\/\*[\s\S]*?\*\//g, ' ');
+
+          const forbidden = [
+            /\bDROP\b/i,
+            /\bDELETE\b/i,
+            /\bALTER\b/i,
+            /\bUPDATE\b/i,
+            /\bINSERT\b/i,
+            /\bREPLACE\b/i,
+            /\bTRUNCATE\b/i
+          ];
+          for (const pattern of forbidden) {
+            if (pattern.test(sql)) throw new Error(`Forbidden migration statement detected: ${pattern}`);
+          }
+
+          const statements = sql.split(';').map(x => x.trim()).filter(Boolean);
+          if (!statements.length) throw new Error('Migration is empty');
+          for (const statement of statements) {
+            if (!/^CREATE\s+(TABLE|INDEX)\s+IF\s+NOT\s+EXISTS\b/i.test(statement)) {
+              throw new Error(`Migration contains a non-approved statement: ${statement.slice(0, 80)}`);
+            }
+          }
+
+          const required = [
+            'CREATE TABLE IF NOT EXISTS customer_line_message_events',
+            'idx_customer_line_message_events_customer_time',
+            'idx_customer_line_message_events_line_user_time',
+            'idx_customer_line_message_events_context'
+          ];
+          for (const token of required) {
+            if (!sql.includes(token)) throw new Error(`Required migration definition missing: ${token}`);
+          }
+          console.log('Production config and migration safety checks passed.');
+          NODE
+
+      - name: Confirm Cloudflare authentication
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          wranglerVersion: "4"
+          command: whoami
+
+      - name: List pending remote D1 migrations
+        id: pending_migrations
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          wranglerVersion: "4"
+          command: d1 migrations list customer-crm-db --remote
+
+      - name: Guard pending migration set
+        shell: bash
+        env:
+          PENDING_MIGRATIONS: ${{ steps.pending_migrations.outputs.command-output }}
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const output = process.env.PENDING_MIGRATIONS || '';
+          const target = '20260814_customer_line_message_events.sql';
+          const files = [...new Set([...output.matchAll(/[A-Za-z0-9_.-]+\.sql/g)].map(m => m[0]))];
+          const unexpected = files.filter(x => x !== target);
+          if (unexpected.length) {
+            throw new Error(`Unexpected unapplied migrations detected: ${unexpected.join(', ')}`);
+          }
+          console.log(files.length ? `Pending migration approved: ${target}` : 'No pending migrations; safe idempotent rerun.');
+          NODE
+
+      - name: Apply remote D1 migrations
+        id: migrate
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          wranglerVersion: "4"
+          command: d1 migrations apply customer-crm-db --remote
+
+      - name: Deploy customer-crm-api
+        id: deploy_worker
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          wranglerVersion: "4"
+          command: deploy
+
+      - name: Verify D1 table exists (READ ONLY)
+        id: verify_table
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          wranglerVersion: "4"
+          command: d1 execute customer-crm-db --remote --command "SELECT name FROM sqlite_master WHERE type='table' AND name='customer_line_message_events';" --json
+
+      - name: Verify D1 columns (READ ONLY)
+        id: verify_columns
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          wranglerVersion: "4"
+          command: d1 execute customer-crm-db --remote --command "PRAGMA table_info(customer_line_message_events);" --json
+
+      - name: Verify D1 indexes (READ ONLY)
+        id: verify_indexes
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          wranglerVersion: "4"
+          command: d1 execute customer-crm-db --remote --command "PRAGMA index_list(customer_line_message_events);" --json
+
+      - name: Assert D1 verification results
+        shell: bash
+        env:
+          TABLE_OUTPUT: ${{ steps.verify_table.outputs.command-output }}
+          COLUMNS_OUTPUT: ${{ steps.verify_columns.outputs.command-output }}
+          INDEXES_OUTPUT: ${{ steps.verify_indexes.outputs.command-output }}
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const table = process.env.TABLE_OUTPUT || '';
+          const columns = process.env.COLUMNS_OUTPUT || '';
+          const indexes = process.env.INDEXES_OUTPUT || '';
+
+          if (!table.includes('customer_line_message_events')) throw new Error('customer_line_message_events table not found');
+
+          const requiredColumns = [
+            'id','event_id','customer_id','line_user_id','direction','message_type','message_text',
+            'source','send_status','send_error','line_message_id','idempotency_key','sender_type',
+            'occurred_at','created_at','updated_at','raw_json'
+          ];
+          const missingColumns = requiredColumns.filter(x => !columns.includes(`"${x}"`) && !columns.includes(x));
+          if (missingColumns.length) throw new Error(`Missing columns: ${missingColumns.join(', ')}`);
+
+          const requiredIndexes = [
+            'idx_customer_line_message_events_customer_time',
+            'idx_customer_line_message_events_line_user_time',
+            'idx_customer_line_message_events_context'
+          ];
+          const missingIndexes = requiredIndexes.filter(x => !indexes.includes(x));
+          if (missingIndexes.length) throw new Error(`Missing indexes: ${missingIndexes.join(', ')}`);
+          console.log('D1 table, columns, and required indexes verified.');
+          NODE
+
+      - name: Verify deployed Worker safety (READ ONLY HTTP)
+        shell: bash
+        env:
+          DEPLOYMENT_URL: ${{ steps.deploy_worker.outputs.deployment-url }}
+          DEPLOY_COMMAND_OUTPUT: ${{ steps.deploy_worker.outputs.command-output }}
+        run: |
+          set -euo pipefail
+
+          WORKER_URL="${DEPLOYMENT_URL:-}"
+          if [ -z "$WORKER_URL" ]; then
+            WORKER_URL="$(printf '%s' "${DEPLOY_COMMAND_OUTPUT:-}" | grep -Eo 'https://[^[:space:]]+\.workers\.dev' | head -n1 || true)"
+          fi
+          if [ -z "$WORKER_URL" ]; then
+            echo 'Could not determine deployed Worker URL.' >&2
+            exit 1
+          fi
+          WORKER_URL="${WORKER_URL%/}"
+
+          curl --fail --silent --show-error --retry 4 --retry-delay 2 "$WORKER_URL/health" -o /tmp/health.json
+          node <<'NODE'
+          const fs = require('fs');
+          const h = JSON.parse(fs.readFileSync('/tmp/health.json', 'utf8'));
+          const expected = {
+            line_context_events_enabled: true,
+            line_context_events_table_present: true,
+            line_context_events_columns_ok: true,
+            line_context_sent_only_formal: true,
+            line_live_send_enabled: false
+          };
+          for (const [key, value] of Object.entries(expected)) {
+            if (h[key] !== value) throw new Error(`Health mismatch: ${key}=${JSON.stringify(h[key])}, expected ${value}`);
+          }
+          console.log('Health checks passed.');
+          NODE
+
+          internal_status="$(curl --silent --show-error -o /tmp/internal.json -w '%{http_code}' "$WORKER_URL/api/internal/line-context-events?line_user_id=test")"
+          if [ "$internal_status" != "401" ]; then
+            echo "Internal API unauthenticated status was $internal_status; expected 401." >&2
+            exit 1
+          fi
+
+          customer_status="$(curl --silent --show-error -o /tmp/customer.json -w '%{http_code}' "$WORKER_URL/api/customers/test/line-context-events")"
+          case "$customer_status" in
+            401|403|302|303|307|308) ;;
+            *)
+              echo "Customer context unauthenticated status was $customer_status; expected 401/403 or Cloudflare Access redirect." >&2
+              exit 1
+              ;;
+          esac
+
+          admin_status="$(curl --silent --show-error -L -o /tmp/admin.html -w '%{http_code}' "$WORKER_URL/admin")"
+          if [ "$admin_status" -ge 500 ] || [ "$admin_status" = "404" ]; then
+            echo "Admin endpoint unhealthy: HTTP $admin_status" >&2
+            exit 1
+          fi
+          if grep -Eqi 'Worker threw exception|Error 1101|internal server error' /tmp/admin.html; then
+            echo 'Admin response contains a Worker error.' >&2
+            exit 1
+          fi
+
+          draft_status="$(curl --silent --show-error -o /tmp/line-ops.json -w '%{http_code}' "$WORKER_URL/api/line-ops/dashboard")"
+          case "$draft_status" in
+            200|401|403) ;;
+            *)
+              echo "Existing customer_line_draft_logs API path unhealthy: HTTP $draft_status" >&2
+              exit 1
+              ;;
+          esac
+
+          echo "Worker verification passed: health, auth guards, admin, and existing LINE draft API are non-destructive."
