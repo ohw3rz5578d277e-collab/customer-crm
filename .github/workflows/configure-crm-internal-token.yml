@@ -1,0 +1,136 @@
+name: Configure CRM Internal Token
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  configure:
+    name: Rotate shared CRM_INTERNAL_TOKEN and verify bridge
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+    steps:
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Configure both Workers and verify READ ONLY bridge
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +x
+          trap 'rm -f /tmp/customer-secrets.json /tmp/reservation-secrets.json /tmp/customer-deployment.json /tmp/reservation-deployment.json /tmp/customer-health.json /tmp/reservation-health.json; unset TOKEN' EXIT
+
+          TOKEN="$(openssl rand -hex 32)"
+          echo "::add-mask::$TOKEN"
+
+          echo 'Setting CRM_INTERNAL_TOKEN on customer-crm-api first...'
+          printf '%s' "$TOKEN" | npx --yes wrangler@4 secret put CRM_INTERNAL_TOKEN --name customer-crm-api
+
+          echo 'Setting the same CRM_INTERNAL_TOKEN on reservation-app-api...'
+          printf '%s' "$TOKEN" | npx --yes wrangler@4 secret put CRM_INTERNAL_TOKEN --name reservation-app-api
+
+          echo 'Verifying secret-name presence only...'
+          npx --yes wrangler@4 secret list --name customer-crm-api --format json > /tmp/customer-secrets.json
+          npx --yes wrangler@4 secret list --name reservation-app-api --format json > /tmp/reservation-secrets.json
+          node <<'NODE'
+          const fs = require('fs');
+          function rows(path) {
+            const data = JSON.parse(fs.readFileSync(path, 'utf8'));
+            if (Array.isArray(data)) return data;
+            if (Array.isArray(data.secrets)) return data.secrets;
+            if (Array.isArray(data.result)) return data.result;
+            return [];
+          }
+          for (const [worker, path] of [
+            ['customer-crm-api', '/tmp/customer-secrets.json'],
+            ['reservation-app-api', '/tmp/reservation-secrets.json']
+          ]) {
+            const present = rows(path).some(x => String((x && (x.name || x.key)) || '') === 'CRM_INTERNAL_TOKEN');
+            if (!present) throw new Error(`${worker}: CRM_INTERNAL_TOKEN secret name not found`);
+            console.log(`${worker}: CRM_INTERNAL_TOKEN present`);
+          }
+          NODE
+
+          echo 'Reading current deployment version IDs (safe metadata only)...'
+          npx --yes wrangler@4 deployments status --name customer-crm-api --json > /tmp/customer-deployment.json
+          npx --yes wrangler@4 deployments status --name reservation-app-api --json > /tmp/reservation-deployment.json
+          node <<'NODE'
+          const fs = require('fs');
+          function versionIds(path) {
+            let data;
+            try { data = JSON.parse(fs.readFileSync(path, 'utf8')); } catch { return []; }
+            const ids = [];
+            function walk(v, key = '') {
+              if (Array.isArray(v)) return v.forEach(x => walk(x, key));
+              if (v && typeof v === 'object') return Object.entries(v).forEach(([k, x]) => {
+                if (/version.*id|id.*version/i.test(k) && typeof x === 'string' && x) ids.push(x);
+                walk(x, k);
+              });
+            }
+            walk(data);
+            return [...new Set(ids)];
+          }
+          for (const [worker, path] of [
+            ['customer-crm-api', '/tmp/customer-deployment.json'],
+            ['reservation-app-api', '/tmp/reservation-deployment.json']
+          ]) {
+            const ids = versionIds(path);
+            console.log(`${worker}: active version ID${ids.length === 1 ? '' : 's'} = ${ids.length ? ids.join(', ') : 'UNKNOWN'}`);
+          }
+          NODE
+
+          echo 'Verifying customer-crm health without enabling LINE send...'
+          curl --fail --silent --show-error --retry 8 --retry-delay 2 \
+            'https://customer-crm-api.ohw3rz5578d277e.workers.dev/health' \
+            -o /tmp/customer-health.json
+          node <<'NODE'
+          const fs = require('fs');
+          const h = JSON.parse(fs.readFileSync('/tmp/customer-health.json', 'utf8'));
+          const expected = {
+            line_context_events_enabled: true,
+            line_context_events_table_present: true,
+            line_context_events_columns_ok: true,
+            line_context_sent_only_formal: true,
+            line_live_send_enabled: false
+          };
+          for (const [k, v] of Object.entries(expected)) {
+            if (h[k] !== v) throw new Error(`customer-crm health mismatch: ${k}`);
+          }
+          console.log('customer-crm health verified: context events ready, sent-only formal, LINE live send disabled');
+          NODE
+
+          echo 'Verifying reservation-app-api READ ONLY Service Binding bridge...'
+          curl --fail --silent --show-error --retry 8 --retry-delay 2 \
+            'https://reservation-app-api.ohw3rz5578d277e.workers.dev/health' \
+            -o /tmp/reservation-health.json
+          node <<'NODE'
+          const fs = require('fs');
+          const h = JSON.parse(fs.readFileSync('/tmp/reservation-health.json', 'utf8'));
+          const expected = {
+            crm_outbound_context_bridge: true,
+            crm_outbound_formal_only: true,
+            crm_outbound_service_binding: true,
+            conversation_combined_timeline: true,
+            crm_internal_token_configured: true,
+            crm_outbound_live_available: true
+          };
+          for (const [k, v] of Object.entries(expected)) {
+            if (h[k] !== v) throw new Error(`reservation health mismatch: ${k}`);
+          }
+          if (Number(h.crm_outbound_probe_status) !== 200) throw new Error('reservation health mismatch: crm_outbound_probe_status');
+          if (h.crm_outbound_probe_reason && String(h.crm_outbound_probe_reason).trim()) {
+            throw new Error('reservation health mismatch: crm_outbound_probe_reason is not empty');
+          }
+          console.log('reservation bridge health verified: token configured, Service Binding READ ONLY probe HTTP 200');
+          console.log('No D1 write, fake sent event, or LINE send is performed by this workflow.');
+          NODE
+
+          unset TOKEN
