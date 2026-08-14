@@ -20,7 +20,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v6
 
-      - name: Validate production config and migration safety
+      - name: Validate production config and managed migration safety
         shell: bash
         run: |
           set -euo pipefail
@@ -34,11 +34,16 @@ jobs:
           if (!db) throw new Error('DB binding missing');
           if (db.database_name !== 'customer-crm-db') throw new Error('Unexpected D1 database name');
           if (db.database_id !== '1ae3e0d9-72c0-47ad-8fc1-fed9d15ec70f') throw new Error('Unexpected D1 database id');
+          if (db.migrations_dir !== 'migrations_managed') throw new Error('Managed migrations directory is not configured');
+          if (db.migrations_table !== 'd1_migrations_managed') throw new Error('Managed migrations table is not configured');
 
-          const file = 'migrations/20260814_customer_line_message_events.sql';
-          let sql = fs.readFileSync(file, 'utf8');
-          sql = sql.replace(/--.*$/gm, ' ').replace(/\/\*[\s\S]*?\*\//g, ' ');
+          const legacyFile = 'migrations/20260814_customer_line_message_events.sql';
+          const managedFile = 'migrations_managed/20260814_customer_line_message_events.sql';
+          const legacySql = fs.readFileSync(legacyFile, 'utf8');
+          const managedSql = fs.readFileSync(managedFile, 'utf8');
+          if (legacySql !== managedSql) throw new Error('Managed migration is not an exact copy of the approved legacy source migration');
 
+          let sql = managedSql.replace(/--.*$/gm, ' ').replace(/\/\*[\s\S]*?\*\//g, ' ');
           const forbidden = [
             /\bDROP\b/i,
             /\bDELETE\b/i,
@@ -53,10 +58,10 @@ jobs:
           }
 
           const statements = sql.split(';').map(x => x.trim()).filter(Boolean);
-          if (!statements.length) throw new Error('Migration is empty');
+          if (!statements.length) throw new Error('Managed migration is empty');
           for (const statement of statements) {
             if (!/^CREATE\s+(TABLE|INDEX)\s+IF\s+NOT\s+EXISTS\b/i.test(statement)) {
-              throw new Error(`Migration contains a non-approved statement: ${statement.slice(0, 80)}`);
+              throw new Error(`Managed migration contains a non-approved statement: ${statement.slice(0, 80)}`);
             }
           }
 
@@ -69,7 +74,7 @@ jobs:
           for (const token of required) {
             if (!sql.includes(token)) throw new Error(`Required migration definition missing: ${token}`);
           }
-          console.log('Production config and migration safety checks passed.');
+          console.log('Production config, managed namespace, exact-copy check, and migration safety checks passed.');
           NODE
 
       - name: Confirm Cloudflare authentication
@@ -80,7 +85,7 @@ jobs:
           wranglerVersion: "4"
           command: whoami
 
-      - name: List pending remote D1 migrations
+      - name: List pending managed remote D1 migrations
         id: pending_migrations
         uses: cloudflare/wrangler-action@v4
         with:
@@ -89,7 +94,7 @@ jobs:
           wranglerVersion: "4"
           command: d1 migrations list customer-crm-db --remote
 
-      - name: Guard pending migration set
+      - name: Guard managed pending migration set
         shell: bash
         env:
           PENDING_MIGRATIONS: ${{ steps.pending_migrations.outputs.command-output }}
@@ -99,14 +104,18 @@ jobs:
           const output = process.env.PENDING_MIGRATIONS || '';
           const target = '20260814_customer_line_message_events.sql';
           const files = [...new Set([...output.matchAll(/[A-Za-z0-9_.-]+\.sql/g)].map(m => m[0]))];
+          const leakedLegacy = files.filter(x => /^202606(?:12|13|14)_/.test(x));
+          if (leakedLegacy.length) {
+            throw new Error(`Legacy migrations leaked into the managed namespace: ${leakedLegacy.join(', ')}`);
+          }
           const unexpected = files.filter(x => x !== target);
           if (unexpected.length) {
-            throw new Error(`Unexpected unapplied migrations detected: ${unexpected.join(', ')}`);
+            throw new Error(`Unexpected managed unapplied migrations detected: ${unexpected.join(', ')}`);
           }
-          console.log(files.length ? `Pending migration approved: ${target}` : 'No pending migrations; safe idempotent rerun.');
+          console.log(files.length ? `Managed pending migration approved: ${target}` : 'No managed pending migrations; safe idempotent rerun.');
           NODE
 
-      - name: Apply remote D1 migrations
+      - name: Apply managed remote D1 migrations
         id: migrate
         uses: cloudflare/wrangler-action@v4
         with:
@@ -123,6 +132,15 @@ jobs:
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           wranglerVersion: "4"
           command: deploy
+
+      - name: Verify managed migration tracking table exists (READ ONLY)
+        id: verify_migration_table
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          wranglerVersion: "4"
+          command: d1 execute customer-crm-db --remote --command "SELECT name FROM sqlite_master WHERE type='table' AND name='d1_migrations_managed';" --json
 
       - name: Verify D1 table exists (READ ONLY)
         id: verify_table
@@ -154,16 +172,19 @@ jobs:
       - name: Assert D1 verification results
         shell: bash
         env:
+          MIGRATION_TABLE_OUTPUT: ${{ steps.verify_migration_table.outputs.command-output }}
           TABLE_OUTPUT: ${{ steps.verify_table.outputs.command-output }}
           COLUMNS_OUTPUT: ${{ steps.verify_columns.outputs.command-output }}
           INDEXES_OUTPUT: ${{ steps.verify_indexes.outputs.command-output }}
         run: |
           set -euo pipefail
           node <<'NODE'
+          const migrationTable = process.env.MIGRATION_TABLE_OUTPUT || '';
           const table = process.env.TABLE_OUTPUT || '';
           const columns = process.env.COLUMNS_OUTPUT || '';
           const indexes = process.env.INDEXES_OUTPUT || '';
 
+          if (!migrationTable.includes('d1_migrations_managed')) throw new Error('Managed migration tracking table not found');
           if (!table.includes('customer_line_message_events')) throw new Error('customer_line_message_events table not found');
 
           const requiredColumns = [
@@ -181,7 +202,7 @@ jobs:
           ];
           const missingIndexes = requiredIndexes.filter(x => !indexes.includes(x));
           if (missingIndexes.length) throw new Error(`Missing indexes: ${missingIndexes.join(', ')}`);
-          console.log('D1 table, columns, and required indexes verified.');
+          console.log('Managed migration tracking table, D1 table, columns, and required indexes verified.');
           NODE
 
       - name: Verify deployed Worker safety (READ ONLY HTTP)
