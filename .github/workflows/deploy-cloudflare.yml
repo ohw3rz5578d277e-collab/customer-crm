@@ -213,6 +213,30 @@ jobs:
         run: |
           set -euo pipefail
 
+          cat > /tmp/verify-health.js <<'NODE'
+          const fs = require('fs');
+          const text = fs.readFileSync(process.argv[2], 'utf8');
+          let h;
+          try {
+            h = JSON.parse(text);
+          } catch (error) {
+            throw new Error(`Health endpoint declared JSON but could not be parsed: ${error.message}`);
+          }
+          const expected = {
+            line_context_events_enabled: true,
+            line_context_events_table_present: true,
+            line_context_events_columns_ok: true,
+            line_context_sent_only_formal: true,
+            line_live_send_enabled: false
+          };
+          for (const [key, value] of Object.entries(expected)) {
+            if (h[key] !== value) {
+              throw new Error(`Health mismatch: ${key}=${JSON.stringify(h[key])}, expected ${value}`);
+            }
+          }
+          console.log('Health JSON verification passed.');
+          NODE
+
           WORKER_URL="${DEPLOYMENT_URL:-}"
           if [ -z "$WORKER_URL" ]; then
             WORKER_URL="$(printf '%s' "${DEPLOY_COMMAND_OUTPUT:-}" | grep -Eo 'https://[^[:space:]]+\.workers\.dev' | head -n1 || true)"
@@ -240,12 +264,10 @@ jobs:
           health_status="$(request_no_redirect "$WORKER_URL/health" /tmp/health.headers /tmp/health.body)"
           health_content_type="$(read_header 'Content-Type' /tmp/health.headers)"
           health_location="$(read_header 'Location' /tmp/health.headers)"
-          health_body_kind="$(node <<'NODE'
-          const fs = require('fs');
-          const body = fs.readFileSync('/tmp/health.body', 'utf8').trimStart().toLowerCase();
-          console.log(body.startsWith('<html') || body.startsWith('<!doctype') ? 'html' : 'other');
-          NODE
-          )"
+          health_body_kind=other
+          if LC_ALL=C head -c 512 /tmp/health.body | grep -Eiq '^[[:space:]]*(<html|<!doctype)'; then
+            health_body_kind=html
+          fi
           health_location_lower="$(printf '%s' "$health_location" | tr '[:upper:]' '[:lower:]')"
           health_access_redirect=no
           if [[ "$health_status" =~ ^(302|303|307|308)$ ]] && \
@@ -258,27 +280,7 @@ jobs:
           case "$health_status" in
             200)
               if [[ "$health_content_type" == *"application/json"* || "$health_content_type" == *"+json"* ]]; then
-                node <<'NODE'
-                const fs = require('fs');
-                const text = fs.readFileSync('/tmp/health.body', 'utf8');
-                let h;
-                try {
-                  h = JSON.parse(text);
-                } catch (error) {
-                  throw new Error(`Health endpoint declared JSON but could not be parsed: ${error.message}`);
-                }
-                const expected = {
-                  line_context_events_enabled: true,
-                  line_context_events_table_present: true,
-                  line_context_events_columns_ok: true,
-                  line_context_sent_only_formal: true,
-                  line_live_send_enabled: false
-                };
-                for (const [key, value] of Object.entries(expected)) {
-                  if (h[key] !== value) throw new Error(`Health mismatch: ${key}=${JSON.stringify(h[key])}, expected ${value}`);
-                }
-                console.log('Health JSON verification passed.');
-                NODE
+                node /tmp/verify-health.js /tmp/health.body
               elif [ "$health_body_kind" = "html" ]; then
                 echo 'Health returned HTTP 200 HTML, not health JSON; refusing to parse HTML as JSON.' >&2
                 exit 1
