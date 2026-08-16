@@ -47,7 +47,7 @@ jobs:
           console.log('RESERVATION_PRODUCTION_HEALTH=PASS');
           NODE
 
-          curl --fail --silent --show-error "$CRM_BASE/health" -o /tmp/crm-health.json
+          curl --fail --silent --show-error "$CRM_BASE/api/crm-health-check" -o /tmp/crm-health.json
           node <<'NODE'
           const fs=require('fs');
           const j=JSON.parse(fs.readFileSync('/tmp/crm-health.json','utf8'));
