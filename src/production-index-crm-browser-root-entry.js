@@ -1,7 +1,8 @@
 import app from "./production-index-crm-delivery-deadline-alerts-entry.js";
 import { handleLineContextEvents, lineContextHealth } from "./crm-line-context-events.mjs";
+import { handleInternalCustomerDetail, internalCustomerDetailHealth } from "./crm-internal-customer-detail.mjs";
 
-const BUILD = "customer-crm-api-browser-root-20260809-02";
+const BUILD = "customer-crm-api-browser-root-20260816-03";
 
 function copyHeaders(response){
   const headers = new Headers(response.headers);
@@ -23,6 +24,7 @@ async function patchHealth(response, env){
   let data = {};
   try { data = raw ? JSON.parse(raw) : {}; } catch (_) {}
   const lineContext = await lineContextHealth(env);
+  const customerDetail = internalCustomerDetailHealth(env);
   const headers = copyHeaders(response);
   headers.set("content-type", "application/json; charset=utf-8");
   return new Response(JSON.stringify({
@@ -30,13 +32,17 @@ async function patchHealth(response, env){
     base_build: data.build || data.base_build || "",
     build: BUILD,
     browser_root_redirect: "/admin",
-    ...lineContext
+    ...lineContext,
+    ...customerDetail
   }, null, 2), { status: response.status, headers });
 }
 
 export default {
   async fetch(request, env, ctx){
     const url = new URL(request.url);
+
+    const customerDetailResponse = await handleInternalCustomerDetail(request, env);
+    if(customerDetailResponse) return customerDetailResponse;
 
     const lineContextResponse = await handleLineContextEvents(request, env);
     if(lineContextResponse) return lineContextResponse;
