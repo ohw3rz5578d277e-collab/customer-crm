@@ -1,0 +1,74 @@
+name: Diagnose Cloudflare Access Service Auth Temp
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/diagnose-cloudflare-access-temp.yml
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+      CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+      HOSTNAME: customer-crm-api.ohw3rz5578d277e.workers.dev
+    steps:
+      - name: Diagnose Access configuration read-only
+        shell: bash
+        run: |
+          set -euo pipefail
+          for v in CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID CF_ACCESS_CLIENT_ID CF_ACCESS_CLIENT_SECRET; do
+            if [ -z "${!v:-}" ]; then echo "$v=MISSING"; exit 1; fi
+            echo "::add-mask::${!v}"
+          done
+          node <<'NODE'
+          const token = process.env.CLOUDFLARE_API_TOKEN;
+          const account = process.env.CLOUDFLARE_ACCOUNT_ID;
+          const expectedClient = process.env.CF_ACCESS_CLIENT_ID;
+          const expectedSecret = process.env.CF_ACCESS_CLIENT_SECRET;
+          const hostname = process.env.HOSTNAME;
+          const headers = {Authorization:`Bearer ${token}`,'Content-Type':'application/json'};
+          async function cf(path){
+            const r=await fetch(`https://api.cloudflare.com/client/v4/accounts/${account}${path}`,{headers});
+            let j=null; try{j=await r.json()}catch{}
+            return {status:r.status,json:j};
+          }
+          const out = {serviceTokenApi:false, serviceTokenFound:false, appsApi:false, appFound:false, policiesApi:false, serviceAuthPolicyFound:false, directHeaderTest:false};
+          const st=await cf('/access/service_tokens');
+          out.serviceTokenApi = st.status===200 && st.json?.success===true;
+          let tokenObj=null;
+          if(out.serviceTokenApi){ tokenObj=(st.json.result||[]).find(x=>x.client_id===expectedClient)||null; out.serviceTokenFound=!!tokenObj; }
+          else console.log(`service_tokens_api_status=${st.status}`);
+          const apps=await cf('/access/apps');
+          out.appsApi = apps.status===200 && apps.json?.success===true;
+          let app=null;
+          if(out.appsApi){
+            app=(apps.json.result||[]).find(a=>a.domain===hostname || (Array.isArray(a.self_hosted_domains)&&a.self_hosted_domains.includes(hostname)))||null;
+            out.appFound=!!app;
+          } else console.log(`apps_api_status=${apps.status}`);
+          if(app){
+            const pol=await cf(`/access/apps/${app.id}/policies`);
+            out.policiesApi = pol.status===200 && pol.json?.success===true;
+            if(out.policiesApi && tokenObj){
+              out.serviceAuthPolicyFound=(pol.json.result||[]).some(p=>p.decision==='non_identity' && Array.isArray(p.include) && p.include.some(rule=>rule?.service_token?.token_id===tokenObj.id));
+              const summaries=(pol.json.result||[]).map(p=>({name:p.name,decision:p.decision,serviceTokenRule:Array.isArray(p.include)&&p.include.some(rule=>!!rule?.service_token)}));
+              console.log('policy_summaries='+JSON.stringify(summaries));
+            } else if(!out.policiesApi) console.log(`policies_api_status=${pol.status}`);
+          }
+          try{
+            const r=await fetch(`https://${hostname}/api/crm-health-check`,{headers:{'CF-Access-Client-Id':expectedClient,'CF-Access-Client-Secret':expectedSecret,'x-admin-token':'invalid-readonly-diagnostic'}});
+            out.directHeaderTest = !/cloudflareaccess\.com/i.test(r.url);
+            console.log(`direct_test_status=${r.status}`);
+            console.log(`direct_test_access_login=${/cloudflareaccess\.com/i.test(r.url)?'YES':'NO'}`);
+          }catch(e){ console.log('direct_test_network_error=YES'); }
+          console.log('DIAG='+JSON.stringify(out));
+          if(!out.serviceTokenApi || !out.appsApi || !out.appFound || !out.policiesApi) process.exit(2);
+          NODE
