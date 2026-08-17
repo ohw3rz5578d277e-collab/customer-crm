@@ -1,0 +1,86 @@
+name: Apply Customer ID Reconciliation Review
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: customer-id-reconciliation-review-migration
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Validate fixed migration
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const fs=require('fs');
+          const f='migrations/20260817_customer_id_reconciliation_reviews.sql';
+          const sql=fs.readFileSync(f,'utf8').replace(/--.*$/gm,' ');
+          for(const bad of [/\bDROP\b/i,/\bALTER\b/i,/\bDELETE\b/i,/\bUPDATE\b/i,/\bREPLACE\b/i,/\bTRUNCATE\b/i]) if(bad.test(sql)) throw new Error('forbidden migration statement '+bad);
+          const statements=sql.split(';').map(x=>x.trim()).filter(Boolean);
+          if(!statements.length) throw new Error('empty migration');
+          for(const s of statements) if(!/^CREATE\s+(TABLE|INDEX)\s+IF\s+NOT\s+EXISTS\b/i.test(s)) throw new Error('only CREATE TABLE/INDEX IF NOT EXISTS allowed');
+          for(const token of ['customer_id_reconciliation_reviews','customer_id_reconciliation_review_audit']) if(!sql.includes(token)) throw new Error('required table missing: '+token);
+          console.log('Fixed migration validation PASS');
+          NODE
+
+      - name: Apply review schema only
+        run: npx --yes wrangler@4.107.0 d1 execute customer-crm-db --remote --file=migrations/20260817_customer_id_reconciliation_reviews.sql
+
+      - name: Read current pair sources (READ ONLY)
+        run: |
+          set -euo pipefail
+          cat >/tmp/res-wrangler.jsonc <<'JSON'
+          {"name":"review-seed-read","compatibility_date":"2026-08-17","d1_databases":[{"binding":"RES_DB","database_name":"reservation-app-db","database_id":"507be6dd-7c94-4c84-ae28-81624834f84a"}]}
+          JSON
+          npx --yes wrangler@4.107.0 d1 execute RES_DB --config /tmp/res-wrangler.jsonc --remote --json --command "SELECT DISTINCT TRIM(customer_id) customer_id,customer_name FROM app_reservations WHERE TRIM(COALESCE(customer_id,''))<>'' AND COALESCE(deleted_at,'')='' AND lower(COALESCE(status,''))<>'deleted'" >/tmp/res.json
+          npx --yes wrangler@4.107.0 d1 execute customer-crm-db --remote --json --command "SELECT customer_id,name FROM customers WHERE TRIM(COALESCE(customer_id,''))<>'' AND COALESCE(deleted_at,'')=''" >/tmp/crm.json
+          npx --yes wrangler@4.107.0 d1 execute customer-crm-db --remote --json --command "SELECT reservation_customer_id,crm_candidate_customer_id FROM customer_id_reconciliation_reviews" >/tmp/existing.json
+
+      - name: Freeze exactly the approved 20 candidate pairs
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const fs=require('fs');
+          function rows(p){const j=JSON.parse(fs.readFileSync(p,'utf8'));const b=Array.isArray(j)?j[0]:j;if(!b?.success)throw new Error('query failed');if((b.meta?.rows_written||0)!==0||b.meta?.changed_db===true)throw new Error('unexpected write');return b.results||[]}
+          const norm=v=>String(v??'').trim().normalize('NFKC').toLowerCase().replace(/[\s　・･.．,，、()（）\[\]［］【】「」『』]/g,'');
+          const res=rows('/tmp/res.json'),crm=rows('/tmp/crm.json'),existing=rows('/tmp/existing.json');
+          if(existing.length){if(existing.length!==20)throw new Error('review table already seeded with unexpected count '+existing.length);console.log('Review candidate table already fixed at 20; seed skipped.');process.exit(0)}
+          const activeIds=new Set(crm.map(x=>String(x.customer_id??'').trim()));
+          const byName=new Map();for(const c of crm){const n=norm(c.name);if(!n)continue;if(!byName.has(n))byName.set(n,[]);byName.get(n).push(String(c.customer_id??'').trim())}
+          const pairs=new Map();
+          for(const r of res){const x=String(r.customer_id??'').trim();if(!x||activeIds.has(x))continue;const cs=[...new Set(byName.get(norm(r.customer_name))||[])].filter(Boolean);if(cs.length===1&&cs[0]!==x)pairs.set(x+'\u0000'+cs[0],[x,cs[0]])}
+          const out=[...pairs.values()];
+          if(out.length!==20)throw new Error('approved candidate population changed: expected 20, got '+out.length);
+          const q=s=>"'"+String(s).replace(/'/g,"''")+"'";
+          const sql=out.map(([x,y])=>`INSERT OR IGNORE INTO customer_id_reconciliation_reviews(reservation_customer_id,crm_candidate_customer_id,decision,candidate_source,created_at,updated_at) VALUES(${q(x)},${q(y)},'UNREVIEWED','manual_review_20260817',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP);`).join('\n');
+          fs.writeFileSync('/tmp/seed.sql',sql);
+          console.log('Approved 20 candidate pairs resolved; values intentionally not logged.');
+          NODE
+          if [ -s /tmp/seed.sql ]; then npx --yes wrangler@4.107.0 d1 execute customer-crm-db --remote --file=/tmp/seed.sql >/tmp/seed-output.txt; fi
+
+      - name: Verify review storage (READ ONLY)
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@4.107.0 d1 execute customer-crm-db --remote --json --command "SELECT COUNT(*) count, SUM(CASE WHEN decision='UNREVIEWED' THEN 1 ELSE 0 END) unreviewed FROM customer_id_reconciliation_reviews" >/tmp/count.json
+          npx --yes wrangler@4.107.0 d1 execute customer-crm-db --remote --json --command "PRAGMA table_info(customer_id_reconciliation_reviews)" >/tmp/columns.json
+          node <<'NODE'
+          const fs=require('fs');const get=p=>{const x=JSON.parse(fs.readFileSync(p,'utf8'));return (Array.isArray(x)?x[0]:x).results||[]};
+          const c=get('/tmp/count.json')[0]||{};if(Number(c.count)!==20)throw new Error('candidate count != 20');
+          const cols=JSON.stringify(get('/tmp/columns.json'));for(const n of ['reservation_customer_id','crm_candidate_customer_id','decision','reviewed_by','reviewed_at'])if(!cols.includes(n))throw new Error('missing column '+n);
+          console.log('Review schema + fixed candidate population verified: 20');
+          NODE

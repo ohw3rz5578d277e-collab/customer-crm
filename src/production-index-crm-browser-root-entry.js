@@ -1,8 +1,9 @@
 import app from "./production-index-crm-delivery-deadline-alerts-entry.js";
 import { handleLineContextEvents, lineContextHealth } from "./crm-line-context-events.mjs";
 import { handleInternalCustomerDetail, internalCustomerDetailHealth } from "./crm-internal-customer-detail.mjs";
+import { handleReconciliationReview, patchReconciliationHealth } from "./crm-reconciliation-review.mjs";
 
-const BUILD = "customer-crm-api-browser-root-20260816-03";
+const BUILD = "customer-crm-api-browser-root-20260817-04";
 
 function copyHeaders(response){
   const headers = new Headers(response.headers);
@@ -37,9 +38,24 @@ async function patchHealth(response, env){
   }, null, 2), { status: response.status, headers });
 }
 
+async function injectReviewLink(response, url){
+  const ct = response.headers.get("content-type") || "";
+  if(response.status !== 200 || !ct.includes("text/html")) return response;
+  let body = await response.text();
+  const token = url.searchParams.get("token") || "";
+  const href = "/admin/customer-id-reconciliation" + (token ? "?token=" + encodeURIComponent(token) : "");
+  const link = `<a href="${href}" style="position:fixed;left:12px;bottom:12px;z-index:9998;background:#17202a;color:#fff;text-decoration:none;border-radius:999px;padding:10px 14px;font:800 13px -apple-system,BlinkMacSystemFont,'Noto Sans JP',sans-serif;box-shadow:0 8px 24px rgba(0,0,0,.18)">顧客ID照合</a>`;
+  body = body.includes("</body>") ? body.replace("</body>", link + "</body>") : body + link;
+  const headers = copyHeaders(response); headers.set("content-type","text/html; charset=utf-8");
+  return new Response(body,{status:response.status,headers});
+}
+
 export default {
   async fetch(request, env, ctx){
     const url = new URL(request.url);
+
+    const reviewResponse = await handleReconciliationReview(request, env);
+    if(reviewResponse) return reviewResponse;
 
     const customerDetailResponse = await handleInternalCustomerDetail(request, env);
     if(customerDetailResponse) return customerDetailResponse;
@@ -52,10 +68,12 @@ export default {
       return Response.redirect(target.toString(), 302);
     }
 
-    const response = await app.fetch(request, env, ctx);
+    let response = await app.fetch(request, env, ctx);
     if(request.method === "GET" && (url.pathname === "/health" || url.pathname === "/api/crm-health-check")){
-      return patchHealth(response, env);
+      response = await patchHealth(response, env);
+      return patchReconciliationHealth(response);
     }
+    if(request.method === "GET" && url.pathname === "/admin") return injectReviewLink(response,url);
     return response;
   }
 };
