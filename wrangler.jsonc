@@ -1,6 +1,6 @@
 {
   "name": "customer-crm-api",
-  "main": "src/production-index-crm-browser-root-entry.js",
+  "main": "src/production-index-crm-reconciliation-review-entry.js",
   "compatibility_date": "2026-04-09",
   "d1_databases": [
     {
