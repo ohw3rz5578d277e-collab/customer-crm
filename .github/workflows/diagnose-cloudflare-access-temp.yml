@@ -41,27 +41,38 @@ jobs:
             let j=null; try{j=await r.json()}catch{}
             return {status:r.status,json:j};
           }
-          const out = {serviceTokenApi:false, serviceTokenFound:false, appsApi:false, appFound:false, policiesApi:false, serviceAuthPolicyFound:false, directHeaderTest:false};
+          const out = {serviceTokenApi:false, serviceTokenFound:false, tokenNameMatch:false, tokenClientMatchesName:false, appsApi:false, appFound:false, appNameMatch:false, policiesApi:false, serviceAuthPolicyFound:false, directHeaderTest:false};
           const st=await cf('/access/service_tokens');
           out.serviceTokenApi = st.status===200 && st.json?.success===true;
           let tokenObj=null;
-          if(out.serviceTokenApi){ tokenObj=(st.json.result||[]).find(x=>x.client_id===expectedClient)||null; out.serviceTokenFound=!!tokenObj; }
-          else console.log(`service_tokens_api_status=${st.status}`);
+          if(out.serviceTokenApi){
+            const tokens=st.json.result||[];
+            console.log('service_token_names='+JSON.stringify(tokens.map(x=>x.name)));
+            tokenObj=tokens.find(x=>x.client_id===expectedClient)||null;
+            out.serviceTokenFound=!!tokenObj;
+            const byName=tokens.find(x=>x.name==='customer-crm-production-browser-smoke')||null;
+            out.tokenNameMatch=!!byName;
+            out.tokenClientMatchesName=!!byName && byName.client_id===expectedClient;
+          } else console.log(`service_tokens_api_status=${st.status}`);
           const apps=await cf('/access/apps');
           out.appsApi = apps.status===200 && apps.json?.success===true;
           let app=null;
           if(out.appsApi){
-            app=(apps.json.result||[]).find(a=>a.domain===hostname || (Array.isArray(a.self_hosted_domains)&&a.self_hosted_domains.includes(hostname)))||null;
+            const all=apps.json.result||[];
+            console.log('access_apps='+JSON.stringify(all.map(a=>({name:a.name,domain:a.domain,self_hosted_domains:a.self_hosted_domains||[]}))));
+            app=all.find(a=>a.domain===hostname || (Array.isArray(a.self_hosted_domains)&&a.self_hosted_domains.includes(hostname)))||null;
             out.appFound=!!app;
+            out.appNameMatch=all.some(a=>a.name==='customer-crm-api');
+            if(!app) app=all.find(a=>a.name==='customer-crm-api')||null;
           } else console.log(`apps_api_status=${apps.status}`);
           if(app){
             const pol=await cf(`/access/apps/${app.id}/policies`);
             out.policiesApi = pol.status===200 && pol.json?.success===true;
-            if(out.policiesApi && tokenObj){
-              out.serviceAuthPolicyFound=(pol.json.result||[]).some(p=>p.decision==='non_identity' && Array.isArray(p.include) && p.include.some(rule=>rule?.service_token?.token_id===tokenObj.id));
-              const summaries=(pol.json.result||[]).map(p=>({name:p.name,decision:p.decision,serviceTokenRule:Array.isArray(p.include)&&p.include.some(rule=>!!rule?.service_token)}));
+            if(out.policiesApi){
+              const summaries=(pol.json.result||[]).map(p=>({name:p.name,decision:p.decision,serviceTokenRule:Array.isArray(p.include)&&p.include.some(rule=>!!rule?.service_token),matchesExpected:!!tokenObj && Array.isArray(p.include)&&p.include.some(rule=>rule?.service_token?.token_id===tokenObj.id)}));
               console.log('policy_summaries='+JSON.stringify(summaries));
-            } else if(!out.policiesApi) console.log(`policies_api_status=${pol.status}`);
+              if(tokenObj) out.serviceAuthPolicyFound=(pol.json.result||[]).some(p=>p.decision==='non_identity' && Array.isArray(p.include) && p.include.some(rule=>rule?.service_token?.token_id===tokenObj.id));
+            } else console.log(`policies_api_status=${pol.status}`);
           }
           try{
             const r=await fetch(`https://${hostname}/api/crm-health-check`,{headers:{'CF-Access-Client-Id':expectedClient,'CF-Access-Client-Secret':expectedSecret,'x-admin-token':'invalid-readonly-diagnostic'}});
@@ -70,5 +81,4 @@ jobs:
             console.log(`direct_test_access_login=${/cloudflareaccess\.com/i.test(r.url)?'YES':'NO'}`);
           }catch(e){ console.log('direct_test_network_error=YES'); }
           console.log('DIAG='+JSON.stringify(out));
-          if(!out.serviceTokenApi || !out.appsApi || !out.appFound || !out.policiesApi) process.exit(2);
           NODE
