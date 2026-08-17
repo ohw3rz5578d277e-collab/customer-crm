@@ -82,7 +82,7 @@ jobs:
           {
             "name": "customer-crm-health-probe-local",
             "main": "index.mjs",
-            "compatibility_date": "2026-08-17",
+            "compatibility_date": "2026-07-08",
             "services": [
               {"binding":"CRM","service":"customer-crm-api","remote":true}
             ]
