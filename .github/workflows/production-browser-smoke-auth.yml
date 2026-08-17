@@ -34,7 +34,7 @@ jobs:
           echo "::add-mask::$ADMIN_TOKEN"
           echo "::add-mask::$CF_ACCESS_CLIENT_ID"
           echo "::add-mask::$CF_ACCESS_CLIENT_SECRET"
-          echo "ADMIN_TOKEN and Cloudflare Access service token secrets are present."
+          echo "Required browser smoke credentials are present."
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -84,20 +84,16 @@ jobs:
             /\/internal\/line\/push/
           ];
 
-          const knownCspDataImage = text =>
+          const knownAccessLoginCsp = text =>
             /Refused to load the image 'data:image\/svg\+xml/i.test(text) &&
             /Content Security Policy/i.test(text);
 
-          function fail(message) {
-            failures.push(message);
-          }
-
+          function fail(message) { failures.push(message); }
           function watch(page, label) {
             expectedUiByPage.set(page, false);
             page.on('pageerror', err => pageErrors.push(`${label}: ${err.message || String(err)}`));
             page.on('console', msg => {
-              if (msg.type() !== 'error') return;
-              consoleErrors.push({ label, text: msg.text(), page });
+              if (msg.type() === 'error') consoleErrors.push({ label, text: msg.text(), page });
             });
             page.on('request', req => {
               const path = new URL(req.url()).pathname;
@@ -105,20 +101,6 @@ jobs:
                 writes.push(`${req.method()} ${path}`);
               }
             });
-          }
-
-          async function safeMeta(page, response, label) {
-            const status = response ? response.status() : 0;
-            const finalUrl = page.url();
-            const contentType = response ? (response.headers()['content-type'] || '') : '';
-            const title = await page.title().catch(() => '');
-            const marker = await page.locator('text=顧客ID照合').first().isVisible({ timeout: 8000 }).catch(() => false);
-            console.log(`${label} response status=${status}`);
-            console.log(`${label} final_url=${finalUrl}`);
-            console.log(`${label} content_type=${contentType || '(none)'}`);
-            console.log(`${label} document_title=${title || '(empty)'}`);
-            console.log(`${label} expected_ui_marker=${marker ? 'YES' : 'NO'}`);
-            return { status, finalUrl, contentType, title, marker };
           }
 
           async function checkHealth(request) {
@@ -129,77 +111,93 @@ jobs:
             console.log(`health response status=${status}`);
             console.log(`health final_url=${finalUrl}`);
             console.log(`health content_type=${contentType || '(none)'}`);
-            if (/cloudflareaccess\.com/i.test(finalUrl)) {
-              fail('ACCESS_AUTH_FAILED: health redirected to Cloudflare Access login');
-              return;
-            }
-            if (status === 401 || status === 403) {
-              fail(`AUTH_FAILED: health returned ${status}`);
-              return;
-            }
-            if (status !== 200) {
-              fail(`HEALTH_FAILED: expected 200, got ${status}`);
-              return;
-            }
+            if (/cloudflareaccess\.com/i.test(finalUrl)) return fail('ACCESS_AUTH_FAILED: health redirected to Cloudflare Access login');
+            if (status !== 200) return fail(`HEALTH_FAILED: expected 200, got ${status}`);
+            if (!/application\/json/i.test(contentType)) return fail(`HEALTH_FAILED: expected application/json, got ${contentType || '(none)'}`);
             const body = await res.json().catch(() => null);
             if (!body || body.ok !== true) fail('HEALTH_FAILED: response JSON missing ok=true');
-            else console.log('health json ok=true');
           }
 
-          async function checkPage(page, label) {
-            const response = await page.goto(BASE_URL + REVIEW_PATH, {
-              waitUntil: 'domcontentloaded',
-              timeout: 45000
-            }).catch(() => null);
-            await page.waitForLoadState('networkidle', { timeout: 45000 }).catch(() => {});
-
-            const meta = await safeMeta(page, response, label);
-            if (/cloudflareaccess\.com/i.test(meta.finalUrl) || /Sign in.*Cloudflare Access/i.test(meta.title)) {
+          async function pageIdentity(page, response, label) {
+            const status = response ? response.status() : 0;
+            const finalUrl = page.url();
+            const contentType = response ? (response.headers()['content-type'] || '') : '';
+            const title = await page.title().catch(() => '');
+            const marker = await page.locator('text=顧客ID照合').first().isVisible({ timeout: 8000 }).catch(() => false);
+            console.log(`${label} response status=${status}`);
+            console.log(`${label} final_url=${finalUrl}`);
+            console.log(`${label} content_type=${contentType || '(none)'}`);
+            console.log(`${label} document_title=${title || '(empty)'}`);
+            console.log(`${label} review_marker=${marker ? 'YES' : 'NO'}`);
+            if (/cloudflareaccess\.com/i.test(finalUrl) || /Sign in.*Cloudflare Access/i.test(title)) {
               fail(`${label}: ACCESS_AUTH_FAILED Cloudflare Access login page returned`);
-              return;
+              return false;
             }
-            if (meta.status === 401 || meta.status === 403) {
-              fail(`${label}: AUTH_FAILED status=${meta.status}`);
-              return;
-            }
-            if (meta.status !== 200) {
-              fail(`${label}: WRONG_PAGE_OR_RUNTIME status=${meta.status}`);
-              return;
-            }
-            if (!meta.marker) {
-              fail(`${label}: WRONG_PAGE_OR_RUNTIME expected Review UI marker missing`);
-              return;
-            }
-
+            if (status !== 200) { fail(`${label}: expected HTTP 200, got ${status}`); return false; }
+            if (!/text\/html/i.test(contentType)) { fail(`${label}: expected text/html, got ${contentType || '(none)'}`); return false; }
+            if (!marker) { fail(`${label}: Review Workspace marker missing`); return false; }
             expectedUiByPage.set(page, true);
+            return true;
+          }
 
-            const statVisible = await page.locator('.stat').first().isVisible({ timeout: 15000 }).catch(() => false);
-            const listVisible = await page.locator('#list .row, #list .card').first().isVisible({ timeout: 15000 }).catch(() => false);
+          async function verifyCandidateState(page, label) {
             const bodyText = await page.locator('body').innerText({ timeout: 15000 }).catch(() => '');
+            if (!/全20\s*candidate pair|全20\s*candidate|全20/.test(bodyText)) fail(`${label}: candidate total 20 not confirmed`);
+            const stats = await page.locator('.stat').allInnerTexts().catch(() => []);
+            const joined = stats.join(' | ');
+            if (!/20[\s\S]*未確認|未確認[\s\S]*20/.test(joined)) fail(`${label}: UNREVIEWED=20 not confirmed`);
+            for (const pair of [['同一人物','0'],['別人','0'],['保留','0']]) {
+              const [name, count] = pair;
+              const stat = stats.find(x => x.includes(name)) || '';
+              if (!new RegExp(`(^|\\D)${count}(\\D|$)`).test(stat)) fail(`${label}: ${name}=0 not confirmed`);
+            }
+          }
 
-            if (!statVisible) fail(`${label}: review stats not visible`);
-            if (!listVisible) fail(`${label}: review list/empty state not visible`);
-            if (!/candidate pair|candidate|全/.test(bodyText)) fail(`${label}: candidate summary not found`);
-            if (!/未確認|同一人物|別人|保留/.test(bodyText)) fail(`${label}: filter labels not found`);
+          async function exerciseFilters(page, label) {
+            const buttons = page.locator('#filters [data-f], #filters .filter');
+            if ((await buttons.count()) < 4) return fail(`${label}: filter controls missing`);
+            for (const name of ['SAME_PERSON','DIFFERENT_PERSON','DEFERRED','UNREVIEWED']) {
+              const b = page.locator(`#filters [data-f="${name}"]`).first();
+              if (!(await b.isVisible().catch(() => false))) { fail(`${label}: filter ${name} not visible`); continue; }
+              await b.click();
+              await page.waitForTimeout(200);
+            }
+          }
+
+          async function checkPage(page, label, desktop = false) {
+            const response = await page.goto(BASE_URL + REVIEW_PATH, { waitUntil: 'domcontentloaded', timeout: 45000 }).catch(() => null);
+            await page.waitForLoadState('networkidle', { timeout: 45000 }).catch(() => {});
+            if (!(await pageIdentity(page, response, label))) return;
+
+            if (!(await page.locator('.stat').first().isVisible({ timeout: 15000 }).catch(() => false))) fail(`${label}: review stats not visible`);
+            if (!(await page.locator('#list .row').first().isVisible({ timeout: 15000 }).catch(() => false))) fail(`${label}: first candidate row not visible`);
+            await verifyCandidateState(page, label);
+            await exerciseFilters(page, label);
 
             const firstRow = page.locator('#list .row').first();
-            const hasRow = await firstRow.count().then(n => n > 0).catch(() => false);
-            if (hasRow) {
+            if (await firstRow.isVisible().catch(() => false)) {
               await firstRow.click();
-              const modalVisible = await page.locator('#modal.show, .modal.show').first().isVisible({ timeout: 15000 }).catch(() => false);
-              if (!modalVisible) fail(`${label}: detail modal not visible`);
+              if (!(await page.locator('#modal.show, .modal.show').first().isVisible({ timeout: 15000 }).catch(() => false))) fail(`${label}: detail modal not visible`);
               const detailText = await page.locator('#modal, .modal').first().innerText({ timeout: 15000 }).catch(() => '');
               if (!/予約管理側/.test(detailText)) fail(`${label}: Reservation side not found`);
-              if (!/CRM候補|CRM side|CRM/.test(detailText)) fail(`${label}: CRM side not found`);
-              if (!/Evidence|evidence|照合/.test(detailText)) fail(`${label}: evidence not found`);
+              if (!/CRM候補/.test(detailText)) fail(`${label}: CRM side not found`);
+              if (!/Evidence/.test(detailText)) fail(`${label}: Evidence not found`);
+              if (desktop) {
+                const grid = page.locator('#modal .grid, .modal .grid').first();
+                const cols = await grid.evaluate(el => getComputedStyle(el).gridTemplateColumns).catch(() => '');
+                if (!cols || cols === 'none' || cols.split(' ').length < 2) fail(`${label}: 2-column comparison not established`);
+                const overflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth + 2);
+                if (overflow) fail(`${label}: horizontal overflow detected`);
+              }
               await page.mouse.wheel(0, 1400);
-              await page.waitForTimeout(300);
+              await page.waitForTimeout(250);
               const close = page.locator('#close, button:has-text("閉じる")').first();
-              if (await close.count().then(n => n > 0).catch(() => false)) await close.click();
+              if (!(await close.isVisible().catch(() => false))) fail(`${label}: close button not visible`);
+              else await close.click();
             }
 
             await page.mouse.wheel(0, 1800);
-            await page.waitForTimeout(300);
+            await page.waitForTimeout(250);
             if (!(await page.locator('body').isVisible().catch(() => false))) fail(`${label}: body not visible after scroll`);
           }
 
@@ -212,54 +210,46 @@ jobs:
 
             const unauthContext = await browser.newContext();
             const unauthPage = await unauthContext.newPage();
-            const unauthResponse = await unauthPage.goto(BASE_URL + REVIEW_PATH, {
-              waitUntil: 'domcontentloaded', timeout: 45000
-            }).catch(() => null);
+            const unauthResponse = await unauthPage.goto(BASE_URL + REVIEW_PATH, { waitUntil: 'domcontentloaded', timeout: 45000 }).catch(() => null);
             const unauthStatus = unauthResponse ? unauthResponse.status() : 0;
             const unauthUrl = unauthPage.url();
             const unauthTitle = await unauthPage.title().catch(() => '');
+            const unauthMarker = await unauthPage.locator('text=顧客ID照合').first().isVisible({ timeout: 3000 }).catch(() => false);
             console.log(`unauthenticated response status=${unauthStatus}`);
             console.log(`unauthenticated final_url=${unauthUrl}`);
+            console.log(`unauthenticated review_marker=${unauthMarker ? 'YES' : 'NO'}`);
+            if (unauthMarker) fail('unauthenticated Review Workspace was visible');
             if (!(unauthStatus === 401 || unauthStatus === 403 || /cloudflareaccess\.com/i.test(unauthUrl) || /Cloudflare Access/i.test(unauthTitle))) {
               fail(`unauthenticated access was not blocked; status=${unauthStatus}`);
             }
             await unauthContext.close();
 
             const mobileContext = await browser.newContext({
-              viewport: { width: 412, height: 915 },
-              isMobile: true,
-              hasTouch: true,
+              viewport: { width: 412, height: 915 }, isMobile: true, hasTouch: true,
               extraHTTPHeaders: authHeaders
             });
             const mobile = await mobileContext.newPage();
             watch(mobile, 'mobile 412x915');
-            await checkPage(mobile, 'mobile 412x915');
+            await checkPage(mobile, 'mobile 412x915', false);
             await mobileContext.close();
 
             const desktopContext = await browser.newContext({
-              viewport: { width: 1440, height: 1000 },
-              extraHTTPHeaders: authHeaders
+              viewport: { width: 1440, height: 1000 }, extraHTTPHeaders: authHeaders
             });
             const desktop = await desktopContext.newPage();
             watch(desktop, 'desktop 1440x1000');
-            await checkPage(desktop, 'desktop 1440x1000');
+            await checkPage(desktop, 'desktop 1440x1000', true);
             await desktopContext.close();
 
             await browser.close();
 
             if (writes.length) fail(`write requests detected: ${writes.join(', ')}`);
             if (pageErrors.length) fail(`pageerror detected: ${pageErrors.join(' | ')}`);
-
             const actionableConsoleErrors = consoleErrors.filter(entry => {
-              if (!knownCspDataImage(entry.text)) return true;
-              return expectedUiByPage.get(entry.page) !== true;
+              if (!knownAccessLoginCsp(entry.text)) return true;
+              return expectedUiByPage.get(entry.page) === true;
             });
-            if (actionableConsoleErrors.length) {
-              fail(`console error detected: ${actionableConsoleErrors.map(e => `${e.label}: ${e.text}`).join(' | ')}`);
-            }
-
-            const ignoredKnownCsp = consoleErrors.length - actionableConsoleErrors.length;
-            console.log(`known CSP data-image errors ignored after valid Review UI=${ignoredKnownCsp}`);
+            if (actionableConsoleErrors.length) fail(`console error detected: ${actionableConsoleErrors.map(e => `${e.label}: ${e.text}`).join(' | ')}`);
 
             if (failures.length) {
               console.error('Production browser smoke FAILED');
