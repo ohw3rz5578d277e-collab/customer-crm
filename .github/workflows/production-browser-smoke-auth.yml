@@ -33,8 +33,10 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Install Playwright Chromium
-        run: npx --yes playwright@1.54.2 install --with-deps chromium
+      - name: Install Playwright
+        run: |
+          npm install --no-save playwright@1.54.2
+          npx playwright install --with-deps chromium
 
       - name: Run read-only browser smoke
         shell: bash
@@ -50,6 +52,10 @@ jobs:
             throw new Error('BASE_URL or ADMIN_TOKEN missing');
           }
 
+          const failures = [];
+          const errors = [];
+          const consoleErrors = [];
+          const writes = [];
           const writePatterns = [
             /\/api\/customer-id-reconciliation\/reviews\/[^/]+$/,
             /\/api\/customers\/[^/]+\/line-send/,
@@ -60,28 +66,30 @@ jobs:
             /\/internal\/line\/push/
           ];
 
-          const failures = [];
-          const errors = [];
-          const consoleErrors = [];
-          const writes = [];
-
           function assert(cond, message) {
             if (!cond) failures.push(message);
           }
 
+          function watch(page) {
+            page.on('pageerror', err => errors.push(err.message || String(err)));
+            page.on('console', msg => {
+              if (msg.type() === 'error') consoleErrors.push(msg.text());
+            });
+            page.on('request', req => {
+              const path = new URL(req.url()).pathname;
+              if (req.method() !== 'GET' && writePatterns.some(r => r.test(path))) {
+                writes.push(`${req.method()} ${path}`);
+              }
+            });
+          }
+
           async function checkPage(page, label) {
-            const reviewUrl = BASE_URL + REVIEW_PATH;
-            await page.goto(reviewUrl, { waitUntil: 'domcontentloaded', timeout: 45000 });
+            await page.goto(BASE_URL + REVIEW_PATH, { waitUntil: 'domcontentloaded', timeout: 45000 });
             await page.waitForLoadState('networkidle', { timeout: 45000 }).catch(() => {});
 
-            const title = await page.locator('text=顧客ID照合').first().isVisible({ timeout: 15000 }).catch(() => false);
-            assert(title, `${label}: review title not visible`);
-
-            const statVisible = await page.locator('.stat').first().isVisible({ timeout: 15000 }).catch(() => false);
-            assert(statVisible, `${label}: review stats not visible`);
-
-            const listOrEmpty = await page.locator('#list .row, #list .card').first().isVisible({ timeout: 15000 }).catch(() => false);
-            assert(listOrEmpty, `${label}: review list/empty state not visible`);
+            assert(await page.locator('text=顧客ID照合').first().isVisible({ timeout: 15000 }).catch(() => false), `${label}: review title not visible`);
+            assert(await page.locator('.stat').first().isVisible({ timeout: 15000 }).catch(() => false), `${label}: review stats not visible`);
+            assert(await page.locator('#list .row, #list .card').first().isVisible({ timeout: 15000 }).catch(() => false), `${label}: review list/empty state not visible`);
 
             const bodyText = await page.locator('body').innerText({ timeout: 15000 }).catch(() => '');
             assert(/candidate pair|candidate|全/.test(bodyText), `${label}: candidate summary not found`);
@@ -91,14 +99,11 @@ jobs:
             const hasRow = await firstRow.count().then(n => n > 0).catch(() => false);
             if (hasRow) {
               await firstRow.click();
-              const modalVisible = await page.locator('#modal.show, .modal.show').first().isVisible({ timeout: 15000 }).catch(() => false);
-              assert(modalVisible, `${label}: detail modal not visible`);
-
+              assert(await page.locator('#modal.show, .modal.show').first().isVisible({ timeout: 15000 }).catch(() => false), `${label}: detail modal not visible`);
               const detailText = await page.locator('#modal, .modal').first().innerText({ timeout: 15000 }).catch(() => '');
               assert(/予約管理側/.test(detailText), `${label}: Reservation side not found`);
               assert(/CRM候補|CRM side|CRM/.test(detailText), `${label}: CRM side not found`);
               assert(/Evidence|evidence|照合/.test(detailText), `${label}: evidence not found`);
-
               await page.mouse.wheel(0, 1400);
               await page.waitForTimeout(300);
               const close = page.locator('#close, button:has-text("閉じる")').first();
@@ -112,49 +117,40 @@ jobs:
 
           (async () => {
             const browser = await chromium.launch({ headless: true });
-            const context = await browser.newContext({
-              extraHTTPHeaders: { 'x-admin-token': ADMIN_TOKEN },
-              ignoreHTTPSErrors: false
-            });
 
-            context.on('page', page => {
-              page.on('pageerror', err => errors.push(err.message || String(err)));
-              page.on('console', msg => {
-                if (msg.type() === 'error') consoleErrors.push(msg.text());
-              });
-              page.on('request', req => {
-                if (req.method() !== 'GET' && writePatterns.some(r => r.test(new URL(req.url()).pathname))) {
-                  writes.push(`${req.method()} ${new URL(req.url()).pathname}`);
-                }
-              });
-            });
-
-            const health = await context.request.get(BASE_URL + '/api/crm-health-check', {
-              headers: { 'x-admin-token': ADMIN_TOKEN }
-            });
+            const healthContext = await browser.newContext({ extraHTTPHeaders: { 'x-admin-token': ADMIN_TOKEN } });
+            const health = await healthContext.request.get(BASE_URL + '/api/crm-health-check', { headers: { 'x-admin-token': ADMIN_TOKEN } });
             assert(health.status() < 500, `health returned ${health.status()}`);
+            await healthContext.close();
 
-            const unauth = await chromium.launch({ headless: true });
-            const unauthContext = await unauth.newContext();
+            const unauthContext = await browser.newContext();
             const unauthPage = await unauthContext.newPage();
-            const unauthResponse = await unauthPage.goto(BASE_URL + REVIEW_PATH, { waitUntil: 'domcontentloaded', timeout: 45000 }).catch(e => null);
+            const unauthResponse = await unauthPage.goto(BASE_URL + REVIEW_PATH, { waitUntil: 'domcontentloaded', timeout: 45000 }).catch(() => null);
             const unauthStatus = unauthResponse ? unauthResponse.status() : 0;
             const unauthBody = await unauthPage.locator('body').innerText({ timeout: 5000 }).catch(() => '');
             assert(unauthStatus === 401 || unauthStatus === 403 || /login|access|unauthorized|forbidden|認証/i.test(unauthBody), `unauthenticated access was not blocked; status=${unauthStatus}`);
             await unauthContext.close();
-            await unauth.close();
 
-            const mobile = await context.newPage();
-            await mobile.setViewportSize({ width: 412, height: 915 });
+            const mobileContext = await browser.newContext({
+              viewport: { width: 412, height: 915 },
+              isMobile: true,
+              hasTouch: true,
+              extraHTTPHeaders: { 'x-admin-token': ADMIN_TOKEN }
+            });
+            const mobile = await mobileContext.newPage();
+            watch(mobile);
             await checkPage(mobile, 'mobile 412x915');
-            await mobile.close();
+            await mobileContext.close();
 
-            const desktop = await context.newPage();
-            await desktop.setViewportSize({ width: 1440, height: 1000 });
+            const desktopContext = await browser.newContext({
+              viewport: { width: 1440, height: 1000 },
+              extraHTTPHeaders: { 'x-admin-token': ADMIN_TOKEN }
+            });
+            const desktop = await desktopContext.newPage();
+            watch(desktop);
             await checkPage(desktop, 'desktop 1440x1000');
-            await desktop.close();
+            await desktopContext.close();
 
-            await context.close();
             await browser.close();
 
             if (writes.length) failures.push(`write requests detected: ${writes.join(', ')}`);
