@@ -21,7 +21,7 @@ jobs:
       CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
       HOSTNAME: customer-crm-api.ohw3rz5578d277e.workers.dev
     steps:
-      - name: Diagnose Access configuration read-only
+      - name: Locate Access account read-only
         shell: bash
         run: |
           set -euo pipefail
@@ -30,55 +30,36 @@ jobs:
             echo "::add-mask::${!v}"
           done
           node <<'NODE'
-          const token = process.env.CLOUDFLARE_API_TOKEN;
-          const account = process.env.CLOUDFLARE_ACCOUNT_ID;
-          const expectedClient = process.env.CF_ACCESS_CLIENT_ID;
-          const expectedSecret = process.env.CF_ACCESS_CLIENT_SECRET;
-          const hostname = process.env.HOSTNAME;
-          const headers = {Authorization:`Bearer ${token}`,'Content-Type':'application/json'};
-          async function cf(path){
-            const r=await fetch(`https://api.cloudflare.com/client/v4/accounts/${account}${path}`,{headers});
-            let j=null; try{j=await r.json()}catch{}
-            return {status:r.status,json:j};
+          const apiToken=process.env.CLOUDFLARE_API_TOKEN;
+          const configuredAccount=process.env.CLOUDFLARE_ACCOUNT_ID;
+          const expectedClient=process.env.CF_ACCESS_CLIENT_ID;
+          const expectedSecret=process.env.CF_ACCESS_CLIENT_SECRET;
+          const hostname=process.env.HOSTNAME;
+          const headers={Authorization:`Bearer ${apiToken}`,'Content-Type':'application/json'};
+          async function get(url){const r=await fetch(url,{headers});let j=null;try{j=await r.json()}catch{};return {status:r.status,json:j};}
+          const accounts=await get('https://api.cloudflare.com/client/v4/accounts?per_page=50');
+          if(!(accounts.status===200&&accounts.json?.success)){console.log('accounts_api_failed='+accounts.status);process.exit(2);}
+          const rows=[];
+          for(const a of accounts.json.result||[]){
+            const apps=await get(`https://api.cloudflare.com/client/v4/accounts/${a.id}/access/apps?per_page=100`);
+            const sts=await get(`https://api.cloudflare.com/client/v4/accounts/${a.id}/access/service_tokens?per_page=100`);
+            const appList=apps.status===200&&apps.json?.success?(apps.json.result||[]):[];
+            const tokenList=sts.status===200&&sts.json?.success?(sts.json.result||[]):[];
+            const app=appList.find(x=>x.domain===hostname || (Array.isArray(x.self_hosted_domains)&&x.self_hosted_domains.includes(hostname)) || x.name==='customer-crm-api')||null;
+            const byClient=tokenList.find(x=>x.client_id===expectedClient)||null;
+            const byName=tokenList.find(x=>x.name==='customer-crm-production-browser-smoke')||null;
+            rows.push({accountName:a.name,configured:a.id===configuredAccount,appsApi:apps.status,serviceTokensApi:sts.status,appFound:!!app,tokenClientFound:!!byClient,tokenNameFound:!!byName,tokenClientMatchesNamed:!!byName&&byName.client_id===expectedClient});
+            if(app){
+              const pol=await get(`https://api.cloudflare.com/client/v4/accounts/${a.id}/access/apps/${app.id}/policies?per_page=100`);
+              const plist=pol.status===200&&pol.json?.success?(pol.json.result||[]):[];
+              const targetToken=byClient||byName;
+              const summaries=plist.map(p=>({name:p.name,decision:p.decision,serviceTokenRule:Array.isArray(p.include)&&p.include.some(r=>!!r?.service_token),matchesNamedToken:!!targetToken&&Array.isArray(p.include)&&p.include.some(r=>r?.service_token?.token_id===targetToken.id)}));
+              console.log('FOUND_APP account='+a.name+' policy_summaries='+JSON.stringify(summaries));
+            }
           }
-          const out = {serviceTokenApi:false, serviceTokenFound:false, tokenNameMatch:false, tokenClientMatchesName:false, appsApi:false, appFound:false, appNameMatch:false, policiesApi:false, serviceAuthPolicyFound:false, directHeaderTest:false};
-          const st=await cf('/access/service_tokens');
-          out.serviceTokenApi = st.status===200 && st.json?.success===true;
-          let tokenObj=null;
-          if(out.serviceTokenApi){
-            const tokens=st.json.result||[];
-            console.log('service_token_names='+JSON.stringify(tokens.map(x=>x.name)));
-            tokenObj=tokens.find(x=>x.client_id===expectedClient)||null;
-            out.serviceTokenFound=!!tokenObj;
-            const byName=tokens.find(x=>x.name==='customer-crm-production-browser-smoke')||null;
-            out.tokenNameMatch=!!byName;
-            out.tokenClientMatchesName=!!byName && byName.client_id===expectedClient;
-          } else console.log(`service_tokens_api_status=${st.status}`);
-          const apps=await cf('/access/apps');
-          out.appsApi = apps.status===200 && apps.json?.success===true;
-          let app=null;
-          if(out.appsApi){
-            const all=apps.json.result||[];
-            console.log('access_apps='+JSON.stringify(all.map(a=>({name:a.name,domain:a.domain,self_hosted_domains:a.self_hosted_domains||[]}))));
-            app=all.find(a=>a.domain===hostname || (Array.isArray(a.self_hosted_domains)&&a.self_hosted_domains.includes(hostname)))||null;
-            out.appFound=!!app;
-            out.appNameMatch=all.some(a=>a.name==='customer-crm-api');
-            if(!app) app=all.find(a=>a.name==='customer-crm-api')||null;
-          } else console.log(`apps_api_status=${apps.status}`);
-          if(app){
-            const pol=await cf(`/access/apps/${app.id}/policies`);
-            out.policiesApi = pol.status===200 && pol.json?.success===true;
-            if(out.policiesApi){
-              const summaries=(pol.json.result||[]).map(p=>({name:p.name,decision:p.decision,serviceTokenRule:Array.isArray(p.include)&&p.include.some(rule=>!!rule?.service_token),matchesExpected:!!tokenObj && Array.isArray(p.include)&&p.include.some(rule=>rule?.service_token?.token_id===tokenObj.id)}));
-              console.log('policy_summaries='+JSON.stringify(summaries));
-              if(tokenObj) out.serviceAuthPolicyFound=(pol.json.result||[]).some(p=>p.decision==='non_identity' && Array.isArray(p.include) && p.include.some(rule=>rule?.service_token?.token_id===tokenObj.id));
-            } else console.log(`policies_api_status=${pol.status}`);
-          }
+          console.log('ACCOUNT_SCAN='+JSON.stringify(rows));
           try{
             const r=await fetch(`https://${hostname}/api/crm-health-check`,{headers:{'CF-Access-Client-Id':expectedClient,'CF-Access-Client-Secret':expectedSecret,'x-admin-token':'invalid-readonly-diagnostic'}});
-            out.directHeaderTest = !/cloudflareaccess\.com/i.test(r.url);
-            console.log(`direct_test_status=${r.status}`);
-            console.log(`direct_test_access_login=${/cloudflareaccess\.com/i.test(r.url)?'YES':'NO'}`);
-          }catch(e){ console.log('direct_test_network_error=YES'); }
-          console.log('DIAG='+JSON.stringify(out));
+            console.log('DIRECT_ACCESS_LOGIN='+(/cloudflareaccess\.com/i.test(r.url)?'YES':'NO'));
+          }catch{console.log('DIRECT_ACCESS_LOGIN=NETWORK_ERROR');}
           NODE
