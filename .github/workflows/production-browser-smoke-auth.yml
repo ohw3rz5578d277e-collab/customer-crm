@@ -18,6 +18,8 @@ jobs:
     timeout-minutes: 15
     env:
       ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}
+      CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+      CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
       BASE_URL: https://customer-crm-api.ohw3rz5578d277e.workers.dev
     steps:
       - name: Checkout
@@ -27,11 +29,17 @@ jobs:
         shell: bash
         run: |
           if [ -z "$ADMIN_TOKEN" ]; then
-            echo "ADMIN_TOKEN GitHub Actions secret is missing. Register it in repository Actions secrets."
+            echo "ADMIN_TOKEN GitHub Actions secret is missing."
+            exit 1
+          fi
+          if [ -z "$CF_ACCESS_CLIENT_ID" ] || [ -z "$CF_ACCESS_CLIENT_SECRET" ]; then
+            echo "CLOUDFLARE_ACCESS_SERVICE_TOKEN_MISSING: register CF_ACCESS_CLIENT_ID and CF_ACCESS_CLIENT_SECRET repository Actions secrets."
             exit 1
           fi
           echo "::add-mask::$ADMIN_TOKEN"
-          echo "ADMIN_TOKEN GitHub Actions secret is present."
+          echo "::add-mask::$CF_ACCESS_CLIENT_ID"
+          echo "::add-mask::$CF_ACCESS_CLIENT_SECRET"
+          echo "ADMIN_TOKEN and Cloudflare Access service token secrets are present."
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -51,16 +59,25 @@ jobs:
 
           const BASE_URL = process.env.BASE_URL;
           const ADMIN_TOKEN = process.env.ADMIN_TOKEN;
+          const CF_ACCESS_CLIENT_ID = process.env.CF_ACCESS_CLIENT_ID;
+          const CF_ACCESS_CLIENT_SECRET = process.env.CF_ACCESS_CLIENT_SECRET;
           const REVIEW_PATH = '/admin/customer-id-reconciliation';
           const HEALTH_PATH = '/api/crm-health-check';
 
-          if (!BASE_URL || !ADMIN_TOKEN) throw new Error('BASE_URL or ADMIN_TOKEN missing');
+          if (!BASE_URL || !ADMIN_TOKEN || !CF_ACCESS_CLIENT_ID || !CF_ACCESS_CLIENT_SECRET) {
+            throw new Error('required browser smoke credentials missing');
+          }
 
           const failures = [];
           const pageErrors = [];
           const consoleErrors = [];
           const writes = [];
           const expectedUiByPage = new WeakMap();
+          const authHeaders = {
+            'x-admin-token': ADMIN_TOKEN,
+            'CF-Access-Client-Id': CF_ACCESS_CLIENT_ID,
+            'CF-Access-Client-Secret': CF_ACCESS_CLIENT_SECRET
+          };
 
           const writePatterns = [
             /\/api\/customer-id-reconciliation\/reviews\/[^/]+$/,
@@ -85,8 +102,7 @@ jobs:
             page.on('pageerror', err => pageErrors.push(`${label}: ${err.message || String(err)}`));
             page.on('console', msg => {
               if (msg.type() !== 'error') return;
-              const text = msg.text();
-              consoleErrors.push({ label, text, page });
+              consoleErrors.push({ label, text: msg.text(), page });
             });
             page.on('request', req => {
               const path = new URL(req.url()).pathname;
@@ -111,11 +127,17 @@ jobs:
           }
 
           async function checkHealth(request) {
-            const res = await request.get(BASE_URL + HEALTH_PATH, {
-              headers: { 'x-admin-token': ADMIN_TOKEN }
-            });
+            const res = await request.get(BASE_URL + HEALTH_PATH, { headers: authHeaders });
             const status = res.status();
+            const finalUrl = res.url();
+            const contentType = res.headers()['content-type'] || '';
             console.log(`health response status=${status}`);
+            console.log(`health final_url=${finalUrl}`);
+            console.log(`health content_type=${contentType || '(none)'}`);
+            if (/cloudflareaccess\.com/i.test(finalUrl)) {
+              fail('ACCESS_AUTH_FAILED: health redirected to Cloudflare Access login');
+              return;
+            }
             if (status === 401 || status === 403) {
               fail(`AUTH_FAILED: health returned ${status}`);
               return;
@@ -137,6 +159,10 @@ jobs:
             await page.waitForLoadState('networkidle', { timeout: 45000 }).catch(() => {});
 
             const meta = await safeMeta(page, response, label);
+            if (/cloudflareaccess\.com/i.test(meta.finalUrl) || /Sign in.*Cloudflare Access/i.test(meta.title)) {
+              fail(`${label}: ACCESS_AUTH_FAILED Cloudflare Access login page returned`);
+              return;
+            }
             if (meta.status === 401 || meta.status === 403) {
               fail(`${label}: AUTH_FAILED status=${meta.status}`);
               return;
@@ -185,9 +211,7 @@ jobs:
           (async () => {
             const browser = await chromium.launch({ headless: true });
 
-            const healthContext = await browser.newContext({
-              extraHTTPHeaders: { 'x-admin-token': ADMIN_TOKEN }
-            });
+            const healthContext = await browser.newContext({ extraHTTPHeaders: authHeaders });
             await checkHealth(healthContext.request);
             await healthContext.close();
 
@@ -197,9 +221,11 @@ jobs:
               waitUntil: 'domcontentloaded', timeout: 45000
             }).catch(() => null);
             const unauthStatus = unauthResponse ? unauthResponse.status() : 0;
-            const unauthBody = await unauthPage.locator('body').innerText({ timeout: 5000 }).catch(() => '');
+            const unauthUrl = unauthPage.url();
+            const unauthTitle = await unauthPage.title().catch(() => '');
             console.log(`unauthenticated response status=${unauthStatus}`);
-            if (!(unauthStatus === 401 || unauthStatus === 403 || /login|access|unauthorized|forbidden|認証/i.test(unauthBody))) {
+            console.log(`unauthenticated final_url=${unauthUrl}`);
+            if (!(unauthStatus === 401 || unauthStatus === 403 || /cloudflareaccess\.com/i.test(unauthUrl) || /Cloudflare Access/i.test(unauthTitle))) {
               fail(`unauthenticated access was not blocked; status=${unauthStatus}`);
             }
             await unauthContext.close();
@@ -208,7 +234,7 @@ jobs:
               viewport: { width: 412, height: 915 },
               isMobile: true,
               hasTouch: true,
-              extraHTTPHeaders: { 'x-admin-token': ADMIN_TOKEN }
+              extraHTTPHeaders: authHeaders
             });
             const mobile = await mobileContext.newPage();
             watch(mobile, 'mobile 412x915');
@@ -217,7 +243,7 @@ jobs:
 
             const desktopContext = await browser.newContext({
               viewport: { width: 1440, height: 1000 },
-              extraHTTPHeaders: { 'x-admin-token': ADMIN_TOKEN }
+              extraHTTPHeaders: authHeaders
             });
             const desktop = await desktopContext.newPage();
             watch(desktop, 'desktop 1440x1000');
