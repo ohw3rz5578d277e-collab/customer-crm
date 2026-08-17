@@ -1,0 +1,50 @@
+name: Read-only customer 26199690 probe
+
+on:
+  push:
+    branches:
+      - agent/read-only-customer-26199690-probe
+    paths:
+      - '.github/workflows/read-only-customer-26199690-probe.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Exact customer_id lookup (READ ONLY)
+        id: exact
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          wranglerVersion: '4'
+          command: >-
+            d1 execute customer-crm-db --remote --command "SELECT customer_id, name, quote(CAST(customer_id AS TEXT)) AS id_text FROM customers WHERE CAST(customer_id AS TEXT)='26199690' AND COALESCE(deleted_at,'')='' LIMIT 5;" --json
+      - name: Trim/prefix diagnostic lookup (READ ONLY)
+        id: diagnostic
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          wranglerVersion: '4'
+          command: >-
+            d1 execute customer-crm-db --remote --command "SELECT customer_id, name, quote(CAST(customer_id AS TEXT)) AS id_text, length(CAST(customer_id AS TEXT)) AS id_length FROM customers WHERE (TRIM(CAST(customer_id AS TEXT))='26199690' OR CAST(customer_id AS TEXT) LIKE '%26199690%') AND COALESCE(deleted_at,'')='' LIMIT 20;" --json
+      - name: Print read-only results
+        shell: bash
+        env:
+          EXACT: ${{ steps.exact.outputs.command-output }}
+          DIAGNOSTIC: ${{ steps.diagnostic.outputs.command-output }}
+        run: |
+          set -euo pipefail
+          echo 'CRM_EXACT_RESULT_BEGIN'
+          printf '%s\n' "$EXACT"
+          echo 'CRM_EXACT_RESULT_END'
+          echo 'CRM_DIAGNOSTIC_RESULT_BEGIN'
+          printf '%s\n' "$DIAGNOSTIC"
+          echo 'CRM_DIAGNOSTIC_RESULT_END'
+          echo 'READ_ONLY=PASS'
