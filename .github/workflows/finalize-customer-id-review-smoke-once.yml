@@ -1,0 +1,190 @@
+name: Finalize Customer ID Review Production Smoke Once
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/finalize-customer-id-review-smoke-once.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: customer-id-review-final-production-smoke
+  cancel-in-progress: false
+
+jobs:
+  finalize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}
+      CRM_BASE: https://customer-crm-api.ohw3rz5578d277e.workers.dev
+      RESERVATION_BASE: https://reservation-app-api.ohw3rz5578d277e.workers.dev
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Cleanup regression tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${ADMIN_TOKEN:-}" || { echo 'ADMIN_TOKEN secret missing' >&2; exit 1; }
+          node --check src/crm-reconciliation-review.mjs
+          node --check src/production-index-crm-browser-root-entry.js
+          node tests/customer-id-reconciliation-review.mjs
+          node tests/customer-id-reconciliation-review-runtime.mjs
+          node tests/crm-internal-customer-detail.mjs
+          echo 'CRM cleanup regression PASS'
+
+      - name: Verify Production review state before browser smoke (READ ONLY)
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@4.107.0 d1 execute customer-crm-db --remote --json --command "SELECT COUNT(*) total, SUM(CASE WHEN decision='UNREVIEWED' THEN 1 ELSE 0 END) unreviewed, SUM(CASE WHEN decision='SAME_PERSON' THEN 1 ELSE 0 END) same_person, SUM(CASE WHEN decision='DIFFERENT_PERSON' THEN 1 ELSE 0 END) different_person, SUM(CASE WHEN decision='DEFERRED' THEN 1 ELSE 0 END) deferred FROM customer_id_reconciliation_reviews" >/tmp/review-before.json
+          npx --yes wrangler@4.107.0 d1 execute customer-crm-db --remote --json --command "SELECT COUNT(*) audit_count FROM customer_id_reconciliation_review_audit" >/tmp/audit-before.json
+          npx --yes wrangler@4.107.0 d1 execute customer-crm-db --remote --json --command "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('customer_id_reconciliation_reviews','customer_id_reconciliation_review_audit') ORDER BY name" >/tmp/tables.json
+          node <<'NODE'
+          const fs=require('fs');
+          const row=p=>{const j=JSON.parse(fs.readFileSync(p,'utf8')),b=Array.isArray(j)?j[0]:j;if(!b?.success)throw Error('D1 query failed');return b.results||[]};
+          const s=row('/tmp/review-before.json')[0]||{},a=row('/tmp/audit-before.json')[0]||{},t=row('/tmp/tables.json');
+          if(Number(s.total)!==20||Number(s.unreviewed)!==20||Number(s.same_person)!==0||Number(s.different_person)!==0||Number(s.deferred)!==0) throw Error('Production decision distribution mismatch');
+          if(Number(a.audit_count)!==0) throw Error('Audit table contains decision events before smoke');
+          if(t.length!==2) throw Error('Review tables not ready');
+          console.log('PRODUCTION_REVIEW_STATE_BEFORE=PASS total=20 unreviewed=20 decided=0 audit=0 tables=2');
+          NODE
+
+      - name: Deploy final CRM functional bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@4.107.0 deploy | tee /tmp/deploy.txt
+
+      - name: Verify formal CRM and Reservation health (READ ONLY)
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --retry 5 --retry-delay 2 "$CRM_BASE/api/crm-health-check" -o /tmp/crm-health.json
+          curl --fail --silent --show-error --retry 5 --retry-delay 2 "$RESERVATION_BASE/health" -o /tmp/res-health.json
+          node <<'NODE'
+          const fs=require('fs');
+          const c=JSON.parse(fs.readFileSync('/tmp/crm-health.json','utf8'));
+          if(c.ok===false) throw Error('CRM formal health returned ok=false');
+          if(c.customer_id_reconciliation_review!==true) throw Error('review feature health flag missing');
+          if(c.customer_merge!==false) throw Error('customer merge safety flag mismatch');
+          if(c.line_context_events_enabled!==true) throw Error('existing LINE context health regression');
+          const r=JSON.parse(fs.readFileSync('/tmp/res-health.json','utf8'));
+          if(r.ok===false) throw Error('Reservation health returned ok=false');
+          if(r.crm_reconciliation_review_source!==true) throw Error('Reservation reconciliation READ source health missing');
+          if(r.crm_reconciliation_review_write!==false) throw Error('Reservation reconciliation write safety mismatch');
+          console.log('FORMAL_HEALTH=PASS CRM=/api/crm-health-check Reservation=/health');
+          NODE
+
+      - name: Install Playwright Chromium
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/pw && cd /tmp/pw
+          npm init -y >/dev/null 2>&1
+          npm install --no-save playwright@1.54.2 >/dev/null 2>&1
+          npx playwright install --with-deps chromium >/dev/null
+
+      - name: Production browser smoke mobile 412x915 and desktop 1440
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat >/tmp/pw/smoke.cjs <<'NODE'
+          const { chromium } = require('playwright');
+          const base=process.env.CRM_BASE, token=process.env.ADMIN_TOKEN;
+          if(!base||!token) throw new Error('required smoke env missing');
+          const assert=(v,m)=>{if(!v)throw new Error(m)};
+          async function run(kind,opts){
+            const browser=await chromium.launch({headless:true});
+            const context=await browser.newContext(opts);
+            const page=await context.newPage();
+            const pageErrors=[],consoleErrors=[],unsafeWrites=[];
+            page.on('pageerror',e=>pageErrors.push(String(e)));
+            page.on('console',m=>{if(m.type()==='error')consoleErrors.push(m.text())});
+            page.on('request',r=>{
+              const method=r.method().toUpperCase();
+              if(r.url().includes('/api/customer-id-reconciliation') && !['GET','HEAD','OPTIONS'].includes(method)) unsafeWrites.push(method+' '+new URL(r.url()).pathname);
+            });
+            let res=await page.goto(base+'/admin?token='+encodeURIComponent(token),{waitUntil:'domcontentloaded'});
+            assert(res&&res.ok(),kind+' /admin failed');
+            const nav=page.getByRole('link',{name:'顧客ID照合'});
+            await nav.waitFor({state:'visible'});
+            await nav.click();
+            await page.waitForURL(/\/admin\/customer-id-reconciliation/);
+            await page.getByText('固定済み20 candidate').waitFor({state:'visible'});
+            await page.waitForFunction(()=>document.querySelectorAll('.row').length===20);
+            assert((await page.locator('.row').count())===20,kind+' list count !=20');
+            assert((await page.locator('#status').innerText()).includes('全20 candidate pair'),kind+' metadata total missing');
+            const statText=await page.locator('#stats').innerText();
+            assert(statText.includes('20')&&statText.includes('未確認'),kind+' progress missing');
+            await page.locator('.row').first().click();
+            await page.getByRole('heading',{name:/照合 .* \/ 20/}).waitFor({state:'visible'});
+            await page.getByRole('heading',{name:'予約管理側'}).waitFor({state:'visible'});
+            await page.getByRole('heading',{name:'CRM候補'}).waitFor({state:'visible'});
+            await page.getByRole('heading',{name:'Evidence'}).waitFor({state:'visible'});
+            for(const label of ['同一人物として確認','別人','判断保留']){
+              const b=page.getByRole('button',{name:label});
+              await b.waitFor({state:'visible'}); assert(await b.isEnabled(),kind+' decision button disabled '+label);
+            }
+            assert(await page.locator('#bg').isVisible(),kind+' shade not visible');
+            assert(await page.locator('#modal').isVisible(),kind+' modal not visible');
+            await page.locator('#modal').evaluate(el=>el.scrollTop=el.scrollHeight);
+            await page.getByRole('button',{name:'閉じる'}).click();
+            assert(!(await page.locator('#bg').isVisible()),kind+' shade did not close');
+            assert(!(await page.locator('#modal').isVisible()),kind+' modal did not close');
+            await page.getByRole('button',{name:'同一人物'}).click();
+            await page.waitForFunction(()=>document.querySelectorAll('.row').length===0);
+            assert((await page.locator('#status').innerText()).includes('現在 0件表示'),kind+' SAME_PERSON filter mismatch');
+            await page.getByRole('button',{name:'未確認'}).click();
+            await page.waitForFunction(()=>document.querySelectorAll('.row').length===20);
+            await page.evaluate(()=>window.scrollTo(0,document.body.scrollHeight));
+            const dims=await page.evaluate(()=>({sw:document.documentElement.scrollWidth,iw:innerWidth,sh:document.documentElement.scrollHeight,ih:innerHeight}));
+            assert(dims.sw<=dims.iw+2,kind+' horizontal overflow '+JSON.stringify(dims));
+            assert(dims.sh>dims.ih,kind+' page did not vertically scroll');
+            await page.locator('.row').first().click();
+            if(kind==='desktop'){
+              const cards=page.locator('#modal .grid > .card');
+              assert((await cards.count())>=2,'desktop comparison cards missing');
+              const a=await cards.nth(0).boundingBox(),b=await cards.nth(1).boundingBox();
+              assert(a&&b&&b.x>a.x+a.width-4,'desktop comparison not 2-column');
+            }
+            await page.getByRole('button',{name:'閉じる'}).click();
+            const back=page.getByRole('link',{name:'顧客管理へ'});
+            await back.click();
+            await page.waitForURL(/\/admin/);
+            await page.getByRole('link',{name:'顧客ID照合'}).waitFor({state:'visible'});
+            assert(unsafeWrites.length===0,kind+' unsafe decision write observed '+unsafeWrites.join(','));
+            assert(pageErrors.length===0,kind+' pageerror '+pageErrors.join(' | '));
+            assert(consoleErrors.length===0,kind+' console.error '+consoleErrors.join(' | '));
+            console.log(`${kind.toUpperCase()}_PLAYWRIGHT=PASS list=20 detail=PASS evidence=PASS filter=PASS scroll=PASS overlay=PASS navigation=PASS decision_post=0 pageerror=0 console_error=0 overflow=0`);
+            await browser.close();
+          }
+          (async()=>{
+            await run('mobile',{viewport:{width:412,height:915},isMobile:true,hasTouch:true,deviceScaleFactor:1});
+            await run('desktop',{viewport:{width:1440,height:1000},isMobile:false,hasTouch:false,deviceScaleFactor:1});
+          })().catch(e=>{console.error(e);process.exit(1)});
+          NODE
+          cd /tmp/pw && node smoke.cjs
+
+      - name: Verify Production review state after browser smoke (READ ONLY)
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@4.107.0 d1 execute customer-crm-db --remote --json --command "SELECT COUNT(*) total, SUM(CASE WHEN decision='UNREVIEWED' THEN 1 ELSE 0 END) unreviewed, SUM(CASE WHEN decision='SAME_PERSON' THEN 1 ELSE 0 END) same_person, SUM(CASE WHEN decision='DIFFERENT_PERSON' THEN 1 ELSE 0 END) different_person, SUM(CASE WHEN decision='DEFERRED' THEN 1 ELSE 0 END) deferred FROM customer_id_reconciliation_reviews" >/tmp/review-after.json
+          npx --yes wrangler@4.107.0 d1 execute customer-crm-db --remote --json --command "SELECT COUNT(*) audit_count FROM customer_id_reconciliation_review_audit" >/tmp/audit-after.json
+          node <<'NODE'
+          const fs=require('fs');const rows=p=>{const j=JSON.parse(fs.readFileSync(p,'utf8')),b=Array.isArray(j)?j[0]:j;return b.results||[]};
+          const s=rows('/tmp/review-after.json')[0]||{},a=rows('/tmp/audit-after.json')[0]||{};
+          if(Number(s.total)!==20||Number(s.unreviewed)!==20||Number(s.same_person)!==0||Number(s.different_person)!==0||Number(s.deferred)!==0) throw Error('Production decisions changed during smoke');
+          if(Number(a.audit_count)!==0) throw Error('Audit event created during smoke');
+          console.log('PRODUCTION_WRITE_GUARD=PASS review_decision_post=0 review_state=20_UNREVIEWED audit=0 Reservation_write=0 CRM_customer_write=0 LINE_write=0');
+          NODE
