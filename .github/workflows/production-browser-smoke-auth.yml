@@ -2,6 +2,11 @@ name: Production Authenticated Browser Smoke
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/production-browser-smoke-auth.yml'
 
 permissions:
   contents: read
