@@ -1,0 +1,25 @@
+name: Trigger Production Browser Smoke Once
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/trigger-production-browser-smoke-temp.yml
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch production browser smoke
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api \
+            --method POST \
+            repos/${{ github.repository }}/actions/workflows/production-browser-smoke-auth.yml/dispatches \
+            -f ref=main
