@@ -1,0 +1,179 @@
+name: Production Authenticated Browser Smoke
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: Customer CRM production browser smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}
+      BASE_URL: https://customer-crm-api.ohw3rz5578d277e.workers.dev
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify secret presence
+        shell: bash
+        run: |
+          if [ -z "$ADMIN_TOKEN" ]; then
+            echo "ADMIN_TOKEN GitHub Actions secret is missing. Register it in repository Actions secrets."
+            exit 1
+          fi
+          echo "::add-mask::$ADMIN_TOKEN"
+          echo "ADMIN_TOKEN GitHub Actions secret is present."
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Playwright Chromium
+        run: npx --yes playwright@1.54.2 install --with-deps chromium
+
+      - name: Run read-only browser smoke
+        shell: bash
+        run: |
+          node <<'NODE'
+          const { chromium } = require('playwright');
+
+          const BASE_URL = process.env.BASE_URL;
+          const ADMIN_TOKEN = process.env.ADMIN_TOKEN;
+          const REVIEW_PATH = '/admin/customer-id-reconciliation';
+
+          if (!BASE_URL || !ADMIN_TOKEN) {
+            throw new Error('BASE_URL or ADMIN_TOKEN missing');
+          }
+
+          const writePatterns = [
+            /\/api\/customer-id-reconciliation\/reviews\/[^/]+$/,
+            /\/api\/customers\/[^/]+\/line-send/,
+            /\/api\/customers\/[^/]+\/line-message-logs/,
+            /\/api\/line-message-logs\/[^/]+\/mark-sent/,
+            /\/api\/sync\/customers\/upsert/,
+            /\/api\/reservation-drafts/,
+            /\/internal\/line\/push/
+          ];
+
+          const failures = [];
+          const errors = [];
+          const consoleErrors = [];
+          const writes = [];
+
+          function assert(cond, message) {
+            if (!cond) failures.push(message);
+          }
+
+          async function checkPage(page, label) {
+            const reviewUrl = BASE_URL + REVIEW_PATH;
+            await page.goto(reviewUrl, { waitUntil: 'domcontentloaded', timeout: 45000 });
+            await page.waitForLoadState('networkidle', { timeout: 45000 }).catch(() => {});
+
+            const title = await page.locator('text=顧客ID照合').first().isVisible({ timeout: 15000 }).catch(() => false);
+            assert(title, `${label}: review title not visible`);
+
+            const statVisible = await page.locator('.stat').first().isVisible({ timeout: 15000 }).catch(() => false);
+            assert(statVisible, `${label}: review stats not visible`);
+
+            const listOrEmpty = await page.locator('#list .row, #list .card').first().isVisible({ timeout: 15000 }).catch(() => false);
+            assert(listOrEmpty, `${label}: review list/empty state not visible`);
+
+            const bodyText = await page.locator('body').innerText({ timeout: 15000 }).catch(() => '');
+            assert(/candidate pair|candidate|全/.test(bodyText), `${label}: candidate summary not found`);
+            assert(/未確認|同一人物|別人|保留/.test(bodyText), `${label}: filter labels not found`);
+
+            const firstRow = page.locator('#list .row').first();
+            const hasRow = await firstRow.count().then(n => n > 0).catch(() => false);
+            if (hasRow) {
+              await firstRow.click();
+              const modalVisible = await page.locator('#modal.show, .modal.show').first().isVisible({ timeout: 15000 }).catch(() => false);
+              assert(modalVisible, `${label}: detail modal not visible`);
+
+              const detailText = await page.locator('#modal, .modal').first().innerText({ timeout: 15000 }).catch(() => '');
+              assert(/予約管理側/.test(detailText), `${label}: Reservation side not found`);
+              assert(/CRM候補|CRM side|CRM/.test(detailText), `${label}: CRM side not found`);
+              assert(/Evidence|evidence|照合/.test(detailText), `${label}: evidence not found`);
+
+              await page.mouse.wheel(0, 1400);
+              await page.waitForTimeout(300);
+              const close = page.locator('#close, button:has-text("閉じる")').first();
+              if (await close.count().then(n => n > 0).catch(() => false)) await close.click();
+            }
+
+            await page.mouse.wheel(0, 1800);
+            await page.waitForTimeout(300);
+            assert(await page.locator('body').isVisible(), `${label}: body not visible after scroll`);
+          }
+
+          (async () => {
+            const browser = await chromium.launch({ headless: true });
+            const context = await browser.newContext({
+              extraHTTPHeaders: { 'x-admin-token': ADMIN_TOKEN },
+              ignoreHTTPSErrors: false
+            });
+
+            context.on('page', page => {
+              page.on('pageerror', err => errors.push(err.message || String(err)));
+              page.on('console', msg => {
+                if (msg.type() === 'error') consoleErrors.push(msg.text());
+              });
+              page.on('request', req => {
+                if (req.method() !== 'GET' && writePatterns.some(r => r.test(new URL(req.url()).pathname))) {
+                  writes.push(`${req.method()} ${new URL(req.url()).pathname}`);
+                }
+              });
+            });
+
+            const health = await context.request.get(BASE_URL + '/api/crm-health-check', {
+              headers: { 'x-admin-token': ADMIN_TOKEN }
+            });
+            assert(health.status() < 500, `health returned ${health.status()}`);
+
+            const unauth = await chromium.launch({ headless: true });
+            const unauthContext = await unauth.newContext();
+            const unauthPage = await unauthContext.newPage();
+            const unauthResponse = await unauthPage.goto(BASE_URL + REVIEW_PATH, { waitUntil: 'domcontentloaded', timeout: 45000 }).catch(e => null);
+            const unauthStatus = unauthResponse ? unauthResponse.status() : 0;
+            const unauthBody = await unauthPage.locator('body').innerText({ timeout: 5000 }).catch(() => '');
+            assert(unauthStatus === 401 || unauthStatus === 403 || /login|access|unauthorized|forbidden|認証/i.test(unauthBody), `unauthenticated access was not blocked; status=${unauthStatus}`);
+            await unauthContext.close();
+            await unauth.close();
+
+            const mobile = await context.newPage();
+            await mobile.setViewportSize({ width: 412, height: 915 });
+            await checkPage(mobile, 'mobile 412x915');
+            await mobile.close();
+
+            const desktop = await context.newPage();
+            await desktop.setViewportSize({ width: 1440, height: 1000 });
+            await checkPage(desktop, 'desktop 1440x1000');
+            await desktop.close();
+
+            await context.close();
+            await browser.close();
+
+            if (writes.length) failures.push(`write requests detected: ${writes.join(', ')}`);
+            if (errors.length) failures.push(`pageerror detected: ${errors.join(' | ')}`);
+            if (consoleErrors.length) failures.push(`console error detected: ${consoleErrors.join(' | ')}`);
+
+            if (failures.length) {
+              console.error('Production browser smoke FAILED');
+              for (const f of failures) console.error('- ' + f);
+              process.exit(1);
+            }
+
+            console.log('Production browser smoke PASSED');
+            console.log('decision POST: 0');
+            console.log('CRM write: 0');
+            console.log('Reservation write: 0');
+            console.log('LINE write: 0');
+          })().catch(err => {
+            console.error(err && err.message ? err.message : String(err));
+            process.exit(1);
+          });
+          NODE
