@@ -45,19 +45,22 @@ jobs:
         run: |
           set -euo pipefail
           npx --yes wrangler@4 d1 execute reservation-app-db --remote --command "SELECT COUNT(*) AS total_reservations, SUM(CASE WHEN TRIM(COALESCE(CAST(customer_id AS TEXT),''))<>'' THEN 1 ELSE 0 END) AS with_customer_id FROM app_reservations;" --json > /tmp/res-counts.json
-          npx --yes wrangler@4 d1 execute reservation-app-db --remote --command "SELECT DISTINCT TRIM(CAST(customer_id AS TEXT)) AS customer_id FROM app_reservations WHERE TRIM(COALESCE(CAST(customer_id AS TEXT),''))<>'';" --json > /tmp/res-ids.json
+          npx --yes wrangler@4 d1 execute reservation-app-db --remote --command "SELECT TRIM(CAST(customer_id AS TEXT)) AS customer_id, COUNT(*) AS reservation_count FROM app_reservations WHERE TRIM(COALESCE(CAST(customer_id AS TEXT),''))<>'' GROUP BY TRIM(CAST(customer_id AS TEXT));" --json > /tmp/res-id-counts.json
           npx --yes wrangler@4 d1 execute customer-crm-db --remote --command "SELECT DISTINCT TRIM(CAST(customer_id AS TEXT)) AS customer_id FROM customers WHERE TRIM(COALESCE(CAST(customer_id AS TEXT),''))<>'' AND COALESCE(deleted_at,'')='';" --json > /tmp/crm-ids.json
           node <<'NODE'
           const fs=require('fs');
           const parse=p=>JSON.parse(fs.readFileSync(p,'utf8'))[0]?.results||[];
           const counts=parse('/tmp/res-counts.json')[0]||{};
-          const resIds=new Set(parse('/tmp/res-ids.json').map(x=>String(x.customer_id||'').trim()).filter(Boolean));
+          const resRows=parse('/tmp/res-id-counts.json').map(x=>({id:String(x.customer_id||'').trim(),count:Number(x.reservation_count||0)})).filter(x=>x.id);
+          const resIds=new Set(resRows.map(x=>x.id));
           const crmIds=new Set(parse('/tmp/crm-ids.json').map(x=>String(x.customer_id||'').trim()).filter(Boolean));
-          let matchingDistinct=0;
-          for(const id of resIds) if(crmIds.has(id)) matchingDistinct++;
+          let matchingDistinct=0,matchingReservationRows=0,missingReservationRows=0;
+          for(const row of resRows){if(crmIds.has(row.id)){matchingDistinct++;matchingReservationRows+=row.count}else missingReservationRows+=row.count}
           console.log(JSON.stringify({
             total_reservations:Number(counts.total_reservations||0),
             reservations_with_customer_id:Number(counts.with_customer_id||0),
+            reservation_rows_with_crm_match:matchingReservationRows,
+            reservation_rows_without_crm_match:missingReservationRows,
             distinct_reservation_customer_ids:resIds.size,
             crm_active_customer_ids:crmIds.size,
             matching_distinct_customer_ids:matchingDistinct,
