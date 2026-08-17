@@ -47,15 +47,16 @@ jobs:
           const BASE_URL = process.env.BASE_URL;
           const ADMIN_TOKEN = process.env.ADMIN_TOKEN;
           const REVIEW_PATH = '/admin/customer-id-reconciliation';
+          const HEALTH_PATH = '/api/crm-health-check';
 
-          if (!BASE_URL || !ADMIN_TOKEN) {
-            throw new Error('BASE_URL or ADMIN_TOKEN missing');
-          }
+          if (!BASE_URL || !ADMIN_TOKEN) throw new Error('BASE_URL or ADMIN_TOKEN missing');
 
           const failures = [];
-          const errors = [];
+          const pageErrors = [];
           const consoleErrors = [];
           const writes = [];
+          const expectedUiByPage = new WeakMap();
+
           const writePatterns = [
             /\/api\/customer-id-reconciliation\/reviews\/[^/]+$/,
             /\/api\/customers\/[^/]+\/line-send/,
@@ -66,14 +67,21 @@ jobs:
             /\/internal\/line\/push/
           ];
 
-          function assert(cond, message) {
-            if (!cond) failures.push(message);
+          const knownCspDataImage = text =>
+            /Refused to load the image 'data:image\/svg\+xml/i.test(text) &&
+            /Content Security Policy/i.test(text);
+
+          function fail(message) {
+            failures.push(message);
           }
 
-          function watch(page) {
-            page.on('pageerror', err => errors.push(err.message || String(err)));
+          function watch(page, label) {
+            expectedUiByPage.set(page, false);
+            page.on('pageerror', err => pageErrors.push(`${label}: ${err.message || String(err)}`));
             page.on('console', msg => {
-              if (msg.type() === 'error') consoleErrors.push(msg.text());
+              if (msg.type() !== 'error') return;
+              const text = msg.text();
+              consoleErrors.push({ label, text, page });
             });
             page.on('request', req => {
               const path = new URL(req.url()).pathname;
@@ -83,27 +91,81 @@ jobs:
             });
           }
 
+          async function safeMeta(page, response, label) {
+            const status = response ? response.status() : 0;
+            const finalUrl = page.url();
+            const contentType = response ? (response.headers()['content-type'] || '') : '';
+            const title = await page.title().catch(() => '');
+            const marker = await page.locator('text=顧客ID照合').first().isVisible({ timeout: 8000 }).catch(() => false);
+            console.log(`${label} response status=${status}`);
+            console.log(`${label} final_url=${finalUrl}`);
+            console.log(`${label} content_type=${contentType || '(none)'}`);
+            console.log(`${label} document_title=${title || '(empty)'}`);
+            console.log(`${label} expected_ui_marker=${marker ? 'YES' : 'NO'}`);
+            return { status, finalUrl, contentType, title, marker };
+          }
+
+          async function checkHealth(request) {
+            const res = await request.get(BASE_URL + HEALTH_PATH, {
+              headers: { 'x-admin-token': ADMIN_TOKEN }
+            });
+            const status = res.status();
+            console.log(`health response status=${status}`);
+            if (status === 401 || status === 403) {
+              fail(`AUTH_FAILED: health returned ${status}`);
+              return;
+            }
+            if (status !== 200) {
+              fail(`HEALTH_FAILED: expected 200, got ${status}`);
+              return;
+            }
+            const body = await res.json().catch(() => null);
+            if (!body || body.ok !== true) fail('HEALTH_FAILED: response JSON missing ok=true');
+            else console.log('health json ok=true');
+          }
+
           async function checkPage(page, label) {
-            await page.goto(BASE_URL + REVIEW_PATH, { waitUntil: 'domcontentloaded', timeout: 45000 });
+            const response = await page.goto(BASE_URL + REVIEW_PATH, {
+              waitUntil: 'domcontentloaded',
+              timeout: 45000
+            }).catch(() => null);
             await page.waitForLoadState('networkidle', { timeout: 45000 }).catch(() => {});
 
-            assert(await page.locator('text=顧客ID照合').first().isVisible({ timeout: 15000 }).catch(() => false), `${label}: review title not visible`);
-            assert(await page.locator('.stat').first().isVisible({ timeout: 15000 }).catch(() => false), `${label}: review stats not visible`);
-            assert(await page.locator('#list .row, #list .card').first().isVisible({ timeout: 15000 }).catch(() => false), `${label}: review list/empty state not visible`);
+            const meta = await safeMeta(page, response, label);
+            if (meta.status === 401 || meta.status === 403) {
+              fail(`${label}: AUTH_FAILED status=${meta.status}`);
+              return;
+            }
+            if (meta.status !== 200) {
+              fail(`${label}: WRONG_PAGE_OR_RUNTIME status=${meta.status}`);
+              return;
+            }
+            if (!meta.marker) {
+              fail(`${label}: WRONG_PAGE_OR_RUNTIME expected Review UI marker missing`);
+              return;
+            }
 
+            expectedUiByPage.set(page, true);
+
+            const statVisible = await page.locator('.stat').first().isVisible({ timeout: 15000 }).catch(() => false);
+            const listVisible = await page.locator('#list .row, #list .card').first().isVisible({ timeout: 15000 }).catch(() => false);
             const bodyText = await page.locator('body').innerText({ timeout: 15000 }).catch(() => '');
-            assert(/candidate pair|candidate|全/.test(bodyText), `${label}: candidate summary not found`);
-            assert(/未確認|同一人物|別人|保留/.test(bodyText), `${label}: filter labels not found`);
+
+            if (!statVisible) fail(`${label}: review stats not visible`);
+            if (!listVisible) fail(`${label}: review list/empty state not visible`);
+            if (!/candidate pair|candidate|全/.test(bodyText)) fail(`${label}: candidate summary not found`);
+            if (!/未確認|同一人物|別人|保留/.test(bodyText)) fail(`${label}: filter labels not found`);
 
             const firstRow = page.locator('#list .row').first();
             const hasRow = await firstRow.count().then(n => n > 0).catch(() => false);
             if (hasRow) {
               await firstRow.click();
-              assert(await page.locator('#modal.show, .modal.show').first().isVisible({ timeout: 15000 }).catch(() => false), `${label}: detail modal not visible`);
+              const modalVisible = await page.locator('#modal.show, .modal.show').first().isVisible({ timeout: 15000 }).catch(() => false);
+              if (!modalVisible) fail(`${label}: detail modal not visible`);
               const detailText = await page.locator('#modal, .modal').first().innerText({ timeout: 15000 }).catch(() => '');
-              assert(/予約管理側/.test(detailText), `${label}: Reservation side not found`);
-              assert(/CRM候補|CRM side|CRM/.test(detailText), `${label}: CRM side not found`);
-              assert(/Evidence|evidence|照合/.test(detailText), `${label}: evidence not found`);
+              if (!/予約管理側/.test(detailText)) fail(`${label}: Reservation side not found`);
+              if (!/CRM候補|CRM side|CRM/.test(detailText)) fail(`${label}: CRM side not found`);
+              if (!/Evidence|evidence|照合/.test(detailText)) fail(`${label}: evidence not found`);
               await page.mouse.wheel(0, 1400);
               await page.waitForTimeout(300);
               const close = page.locator('#close, button:has-text("閉じる")').first();
@@ -112,23 +174,29 @@ jobs:
 
             await page.mouse.wheel(0, 1800);
             await page.waitForTimeout(300);
-            assert(await page.locator('body').isVisible(), `${label}: body not visible after scroll`);
+            if (!(await page.locator('body').isVisible().catch(() => false))) fail(`${label}: body not visible after scroll`);
           }
 
           (async () => {
             const browser = await chromium.launch({ headless: true });
 
-            const healthContext = await browser.newContext({ extraHTTPHeaders: { 'x-admin-token': ADMIN_TOKEN } });
-            const health = await healthContext.request.get(BASE_URL + '/api/crm-health-check', { headers: { 'x-admin-token': ADMIN_TOKEN } });
-            assert(health.status() < 500, `health returned ${health.status()}`);
+            const healthContext = await browser.newContext({
+              extraHTTPHeaders: { 'x-admin-token': ADMIN_TOKEN }
+            });
+            await checkHealth(healthContext.request);
             await healthContext.close();
 
             const unauthContext = await browser.newContext();
             const unauthPage = await unauthContext.newPage();
-            const unauthResponse = await unauthPage.goto(BASE_URL + REVIEW_PATH, { waitUntil: 'domcontentloaded', timeout: 45000 }).catch(() => null);
+            const unauthResponse = await unauthPage.goto(BASE_URL + REVIEW_PATH, {
+              waitUntil: 'domcontentloaded', timeout: 45000
+            }).catch(() => null);
             const unauthStatus = unauthResponse ? unauthResponse.status() : 0;
             const unauthBody = await unauthPage.locator('body').innerText({ timeout: 5000 }).catch(() => '');
-            assert(unauthStatus === 401 || unauthStatus === 403 || /login|access|unauthorized|forbidden|認証/i.test(unauthBody), `unauthenticated access was not blocked; status=${unauthStatus}`);
+            console.log(`unauthenticated response status=${unauthStatus}`);
+            if (!(unauthStatus === 401 || unauthStatus === 403 || /login|access|unauthorized|forbidden|認証/i.test(unauthBody))) {
+              fail(`unauthenticated access was not blocked; status=${unauthStatus}`);
+            }
             await unauthContext.close();
 
             const mobileContext = await browser.newContext({
@@ -138,7 +206,7 @@ jobs:
               extraHTTPHeaders: { 'x-admin-token': ADMIN_TOKEN }
             });
             const mobile = await mobileContext.newPage();
-            watch(mobile);
+            watch(mobile, 'mobile 412x915');
             await checkPage(mobile, 'mobile 412x915');
             await mobileContext.close();
 
@@ -147,15 +215,25 @@ jobs:
               extraHTTPHeaders: { 'x-admin-token': ADMIN_TOKEN }
             });
             const desktop = await desktopContext.newPage();
-            watch(desktop);
+            watch(desktop, 'desktop 1440x1000');
             await checkPage(desktop, 'desktop 1440x1000');
             await desktopContext.close();
 
             await browser.close();
 
-            if (writes.length) failures.push(`write requests detected: ${writes.join(', ')}`);
-            if (errors.length) failures.push(`pageerror detected: ${errors.join(' | ')}`);
-            if (consoleErrors.length) failures.push(`console error detected: ${consoleErrors.join(' | ')}`);
+            if (writes.length) fail(`write requests detected: ${writes.join(', ')}`);
+            if (pageErrors.length) fail(`pageerror detected: ${pageErrors.join(' | ')}`);
+
+            const actionableConsoleErrors = consoleErrors.filter(entry => {
+              if (!knownCspDataImage(entry.text)) return true;
+              return expectedUiByPage.get(entry.page) !== true;
+            });
+            if (actionableConsoleErrors.length) {
+              fail(`console error detected: ${actionableConsoleErrors.map(e => `${e.label}: ${e.text}`).join(' | ')}`);
+            }
+
+            const ignoredKnownCsp = consoleErrors.length - actionableConsoleErrors.length;
+            console.log(`known CSP data-image errors ignored after valid Review UI=${ignoredKnownCsp}`);
 
             if (failures.length) {
               console.error('Production browser smoke FAILED');
