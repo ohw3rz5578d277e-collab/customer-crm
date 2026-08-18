@@ -1,0 +1,38 @@
+name: Customer Management Verify
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install Playwright Chromium
+        run: |
+          npm install --no-save playwright@1.54.2
+          npx playwright install chromium
+      - name: Customer management read-only regression
+        run: |
+          set -euo pipefail
+          node tests/customer-management-ux.mjs
+          node tests/crm-internal-customer-detail.mjs
+          node tests/customer-identity-resolver.mjs
+          node tests/customer-identity-regression.mjs
+          node tests/deploy-managed-migration-guard.mjs
+          node tests/customer-management-browser.mjs
+          node --input-type=module - <<'NODE'
+          import fs from 'node:fs';
+          const wrangler=JSON.parse(fs.readFileSync('wrangler.jsonc','utf8'));
+          if(wrangler.main!=='src/production-index-crm-browser-root-entry.js') throw new Error(`wrangler main changed: ${wrangler.main}`);
+          await import('./src/production-index-crm-browser-root-entry.js');
+          console.log('CRM_PRODUCTION_ENTRY=PASS');
+          console.log('CRM_WRANGLER_MAIN=PASS');
+          NODE
