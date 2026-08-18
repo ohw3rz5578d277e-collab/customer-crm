@@ -1,6 +1,6 @@
 // ======================================================
 // CUSTOMER CRM / CUSTOMER LIST DETAIL V2 WRAPPER
-// build: customer-crm-customer-list-detail-v2-20260819-01
+// build: customer-crm-customer-list-detail-v2-20260819-02
 // - Stable customer detail panel
 // - customer_id-only linkage for reservation/LINE/task history
 // - Operation-first summary; no LINE send or customer writes
@@ -8,7 +8,7 @@
 
 import app from "./production-index-crm-stable-customer-list.js";
 
-const BUILD = "customer-crm-customer-list-detail-v2-20260819-01";
+const BUILD = "customer-crm-customer-list-detail-v2-20260819-02";
 
 function json(data, status = 200){
   return new Response(JSON.stringify(data, null, 2), {
@@ -67,6 +67,10 @@ function exactCustomerRows(rows, customerId){
   return (rows || []).filter(row => String(row && row.customer_id != null ? row.customer_id : "").trim() === customerId);
 }
 
+function reservationSortValue(row){
+  return String(firstValue(row, ["shoot_date", "created_at"], "")).trim();
+}
+
 export async function customerDetail(env, url){
   const requestedId = (url.searchParams.get("customer_id") || url.searchParams.get("id") || "").trim();
   if(!requestedId) return json({ok:false, build:BUILD, error:"customer_id is required", code:"customer_id_missing"}, 400);
@@ -92,6 +96,7 @@ export async function customerDetail(env, url){
     const r = await safeAll(env, `SELECT * FROM crm_reservation_drafts WHERE CAST(customer_id AS TEXT)=? ORDER BY COALESCE(shoot_date, created_at, '') DESC LIMIT 20`, [customerId]);
     reservations.push(...exactCustomerRows(r.results, customerId).map(x => ({...x, source:"draft"})));
   }
+  reservations.sort((a,b) => reservationSortValue(b).localeCompare(reservationSortValue(a), "ja-JP", {numeric:true}));
   if(await tableExists(env, "customer_line_draft_logs")){
     const r = await safeAll(env, `SELECT * FROM customer_line_draft_logs WHERE CAST(customer_id AS TEXT)=? ORDER BY COALESCE(created_at, copied_at, '') DESC LIMIT 20`, [customerId]);
     lineLogs.push(...exactCustomerRows(r.results, customerId));
