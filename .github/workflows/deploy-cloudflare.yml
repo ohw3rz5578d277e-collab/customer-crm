@@ -74,8 +74,47 @@ jobs:
           for (const token of required) {
             if (!sql.includes(token)) throw new Error(`Required migration definition missing: ${token}`);
           }
-          console.log('Production config, managed namespace, exact-copy check, and migration safety checks passed.');
+
+          const registrySql = fs.readFileSync('migrations_managed/20260818_customer_identity_registry.sql', 'utf8')
+            .replace(/--.*$/gm, ' ').replace(/\/\*[\s\S]*?\*\//g, ' ');
+          for (const pattern of forbidden) {
+            if (pattern.test(registrySql)) throw new Error(`Forbidden registry migration statement detected: ${pattern}`);
+          }
+          for (const statement of registrySql.split(';').map(x => x.trim()).filter(Boolean)) {
+            if (!/^CREATE\s+(TABLE|UNIQUE\s+INDEX|INDEX)\s+IF\s+NOT\s+EXISTS\b/i.test(statement)) {
+              throw new Error(`Registry migration contains a non-approved statement: ${statement.slice(0, 80)}`);
+            }
+          }
+          for (const token of [
+            'CREATE TABLE IF NOT EXISTS customer_identity_registry',
+            'idx_customer_identity_registry_customer_id',
+            'idx_customer_identity_registry_line_user_id',
+            'idx_customer_identity_registry_idempotency_key',
+            'idx_customer_identity_registry_status_updated'
+          ]) if (!registrySql.includes(token)) throw new Error(`Required registry definition missing: ${token}`);
+
+          const sequenceSql = fs.readFileSync('migrations_managed/20260818_customer_identity_sequence.sql', 'utf8')
+            .replace(/--.*$/gm, ' ').replace(/\/\*[\s\S]*?\*\//g, ' ');
+          const sequenceForbidden = [/\bDROP\b/i,/\bDELETE\b/i,/\bALTER\b/i,/\bUPDATE\b/i,/\bREPLACE\b/i,/\bTRUNCATE\b/i];
+          for (const pattern of sequenceForbidden) {
+            if (pattern.test(sequenceSql)) throw new Error(`Forbidden sequence migration statement detected: ${pattern}`);
+          }
+          const sequenceStatements = sequenceSql.split(';').map(x => x.trim()).filter(Boolean);
+          if (sequenceStatements.length !== 2) throw new Error('Sequence migration must contain exactly two approved statements');
+          if (!/^CREATE\s+TABLE\s+IF\s+NOT\s+EXISTS\s+customer_identity_sequence\b/i.test(sequenceStatements[0])) throw new Error('Sequence CREATE TABLE is not approved');
+          if (!/^INSERT\s+OR\s+IGNORE\s+INTO\s+customer_identity_sequence\b/i.test(sequenceStatements[1])) throw new Error('Sequence initializer is not approved');
+          for (const token of [
+            "'canonical_customer_id'",
+            'MAX(CAST(SUBSTR(customer_id, 3, 6) AS INTEGER))',
+            'FROM customers',
+            "customer_id GLOB '[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]'"
+          ]) if (!sequenceSql.includes(token)) throw new Error(`Required sequence initializer definition missing: ${token}`);
+
+          console.log('Production config, managed namespace, line-context, registry, and sequence migration safety checks passed.');
           NODE
+          node tests/deploy-managed-migration-guard.mjs
+          node tests/customer-identity-resolver.mjs
+          node tests/customer-identity-regression.mjs
 
       - name: Confirm Cloudflare authentication
         uses: cloudflare/wrangler-action@v4
@@ -102,17 +141,25 @@ jobs:
           set -euo pipefail
           node <<'NODE'
           const output = process.env.PENDING_MIGRATIONS || '';
-          const target = '20260814_customer_line_message_events.sql';
+          const approved = [
+            '20260814_customer_line_message_events.sql',
+            '20260818_customer_identity_registry.sql',
+            '20260818_customer_identity_sequence.sql'
+          ];
           const files = [...new Set([...output.matchAll(/[A-Za-z0-9_.-]+\.sql/g)].map(m => m[0]))];
           const leakedLegacy = files.filter(x => /^202606(?:12|13|14)_/.test(x));
           if (leakedLegacy.length) {
             throw new Error(`Legacy migrations leaked into the managed namespace: ${leakedLegacy.join(', ')}`);
           }
-          const unexpected = files.filter(x => x !== target);
+          const unexpected = files.filter(x => !approved.includes(x));
           if (unexpected.length) {
             throw new Error(`Unexpected managed unapplied migrations detected: ${unexpected.join(', ')}`);
           }
-          console.log(files.length ? `Managed pending migration approved: ${target}` : 'No managed pending migrations; safe idempotent rerun.');
+          const positions = files.map(x => approved.indexOf(x));
+          for (let i = 1; i < positions.length; i++) {
+            if (positions[i] <= positions[i - 1]) throw new Error(`Managed migration order is unsafe: ${files.join(' -> ')}`);
+          }
+          console.log(files.length ? `Approved managed pending migrations: ${files.join(', ')}` : 'No managed pending migrations; safe idempotent rerun.');
           NODE
 
       - name: Apply managed remote D1 migrations
@@ -140,7 +187,7 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           wranglerVersion: "4"
-          command: d1 execute customer-crm-db --remote --command "SELECT name FROM sqlite_master WHERE type='table' AND name='d1_migrations_managed';" --json
+          command: d1 execute customer-crm-db --remote --command "SELECT name FROM sqlite_master WHERE type='table' AND name='d1_migrations_managed'; SELECT name FROM d1_migrations_managed WHERE name IN ('20260818_customer_identity_registry.sql','20260818_customer_identity_sequence.sql') ORDER BY id;" --json
 
       - name: Verify D1 table exists (READ ONLY)
         id: verify_table
@@ -149,7 +196,7 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           wranglerVersion: "4"
-          command: d1 execute customer-crm-db --remote --command "SELECT name FROM sqlite_master WHERE type='table' AND name='customer_line_message_events';" --json
+          command: d1 execute customer-crm-db --remote --command "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('customer_line_message_events','customer_identity_registry','customer_identity_sequence') ORDER BY name;" --json
 
       - name: Verify D1 columns (READ ONLY)
         id: verify_columns
@@ -158,7 +205,7 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           wranglerVersion: "4"
-          command: d1 execute customer-crm-db --remote --command "PRAGMA table_info(customer_line_message_events);" --json
+          command: d1 execute customer-crm-db --remote --command "PRAGMA table_info(customer_line_message_events); PRAGMA table_info(customer_identity_registry); PRAGMA table_info(customer_identity_sequence);" --json
 
       - name: Verify D1 indexes (READ ONLY)
         id: verify_indexes
@@ -167,7 +214,16 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           wranglerVersion: "4"
-          command: d1 execute customer-crm-db --remote --command "PRAGMA index_list(customer_line_message_events);" --json
+          command: d1 execute customer-crm-db --remote --command "PRAGMA index_list(customer_line_message_events); PRAGMA index_list(customer_identity_registry);" --json
+
+      - name: Verify identity sequence state (READ ONLY)
+        id: verify_sequence
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          wranglerVersion: "4"
+          command: d1 execute customer-crm-db --remote --command "SELECT sequence_key,last_value FROM customer_identity_sequence WHERE sequence_key='canonical_customer_id'; SELECT COALESCE(MAX(CAST(SUBSTR(customer_id,3,6) AS INTEGER)),0) AS existing_numeric_suffix_max FROM customers WHERE customer_id GLOB '[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]';" --json
 
       - name: Assert D1 verification results
         shell: bash
@@ -176,6 +232,7 @@ jobs:
           TABLE_OUTPUT: ${{ steps.verify_table.outputs.command-output }}
           COLUMNS_OUTPUT: ${{ steps.verify_columns.outputs.command-output }}
           INDEXES_OUTPUT: ${{ steps.verify_indexes.outputs.command-output }}
+          SEQUENCE_OUTPUT: ${{ steps.verify_sequence.outputs.command-output }}
         run: |
           set -euo pipefail
           node <<'NODE'
@@ -183,14 +240,20 @@ jobs:
           const table = process.env.TABLE_OUTPUT || '';
           const columns = process.env.COLUMNS_OUTPUT || '';
           const indexes = process.env.INDEXES_OUTPUT || '';
+          const sequence = process.env.SEQUENCE_OUTPUT || '';
 
           if (!migrationTable.includes('d1_migrations_managed')) throw new Error('Managed migration tracking table not found');
-          if (!table.includes('customer_line_message_events')) throw new Error('customer_line_message_events table not found');
+          for (const migration of ['20260818_customer_identity_registry.sql','20260818_customer_identity_sequence.sql']) {
+            if (!migrationTable.includes(migration)) throw new Error(`Managed migration not tracked: ${migration}`);
+          }
+          for (const name of ['customer_line_message_events','customer_identity_registry','customer_identity_sequence']) {
+            if (!table.includes(name)) throw new Error(`Required D1 table not found: ${name}`);
+          }
 
           const requiredColumns = [
-            'id','event_id','customer_id','line_user_id','direction','message_type','message_text',
-            'source','send_status','send_error','line_message_id','idempotency_key','sender_type',
-            'occurred_at','created_at','updated_at','raw_json'
+            'event_id','message_type','message_text','send_status','send_error','line_message_id','sender_type','occurred_at',
+            'customer_id','line_user_id','idempotency_key','source','status','raw_json',
+            'sequence_key','last_value','updated_at'
           ];
           const missingColumns = requiredColumns.filter(x => !columns.includes(`"${x}"`) && !columns.includes(x));
           if (missingColumns.length) throw new Error(`Missing columns: ${missingColumns.join(', ')}`);
@@ -198,11 +261,16 @@ jobs:
           const requiredIndexes = [
             'idx_customer_line_message_events_customer_time',
             'idx_customer_line_message_events_line_user_time',
-            'idx_customer_line_message_events_context'
+            'idx_customer_line_message_events_context',
+            'idx_customer_identity_registry_customer_id',
+            'idx_customer_identity_registry_line_user_id',
+            'idx_customer_identity_registry_idempotency_key',
+            'idx_customer_identity_registry_status_updated'
           ];
           const missingIndexes = requiredIndexes.filter(x => !indexes.includes(x));
           if (missingIndexes.length) throw new Error(`Missing indexes: ${missingIndexes.join(', ')}`);
-          console.log('Managed migration tracking table, D1 table, columns, and required indexes verified.');
+          if (!sequence.includes('canonical_customer_id') || !sequence.includes('last_value') || !sequence.includes('existing_numeric_suffix_max')) throw new Error('Identity sequence state missing');
+          console.log('Managed tracking, D1 tables, columns, indexes, and sequence state verified.');
           NODE
 
       - name: Verify deployed Worker safety (READ ONLY HTTP)
@@ -227,13 +295,21 @@ jobs:
             line_context_events_table_present: true,
             line_context_events_columns_ok: true,
             line_context_sent_only_formal: true,
-            line_live_send_enabled: false
+            line_live_send_enabled: false,
+            customer_identity_resolver_enabled: true,
+            customer_identity_owner: 'customer-crm',
+            customer_identity_format: 'YY+6digit-global-sequence',
+            customer_identity_registry_table: 'customer_identity_registry',
+            customer_identity_sequence_table: 'customer_identity_sequence',
+            customer_identity_name_matching: false,
+            customer_identity_reservation_generator: false
           };
           for (const [key, value] of Object.entries(expected)) {
             if (h[key] !== value) {
-              throw new Error(`Health mismatch: ${key}=${JSON.stringify(h[key])}, expected ${value}`);
+              throw new Error(`Health mismatch: ${key}=${JSON.stringify(h[key])}, expected ${JSON.stringify(value)}`);
             }
           }
+          if (String(h.customer_identity_format || '').includes('C+global')) throw new Error('Legacy C+global-sequence health format remains');
           console.log('Health JSON verification passed.');
           NODE
 
@@ -303,6 +379,24 @@ jobs:
               ;;
             *)
               echo "Unexpected health response: HTTP $health_status." >&2
+              exit 1
+              ;;
+          esac
+
+          resolver_status="$(curl --silent --show-error --retry 4 --retry-delay 2 --max-redirs 0 -o /tmp/resolver.body -w '%{http_code}' \
+            -X POST -H 'content-type: application/json' \
+            --data '{"line_user_id":"U00000000000000000000000000000000","idempotency_key":"unauthenticated-readiness-only","source":"deploy-smoke"}' \
+            "$WORKER_URL/api/internal/customer-identity/resolve-or-create")"
+          case "$resolver_status" in
+            401|403|302|303|307|308)
+              echo "Customer identity resolver unauthenticated request was blocked: HTTP $resolver_status."
+              ;;
+            200)
+              echo 'Customer identity resolver returned HTTP 200 without authentication; refusing unsafe access.' >&2
+              exit 1
+              ;;
+            *)
+              echo "Customer identity resolver unauthenticated status was $resolver_status; expected 401/403 or Cloudflare Access redirect." >&2
               exit 1
               ;;
           esac
@@ -389,4 +483,4 @@ jobs:
               ;;
           esac
 
-          echo 'Worker HTTP verification passed: Access-aware health handling, auth guards, admin, and existing LINE draft API are non-destructive.'
+          echo 'Worker HTTP verification passed: Access-aware health handling, identity/line-context auth guards, admin, and existing LINE draft API are non-destructive.'
