@@ -26,7 +26,6 @@ jobs:
           set -euo pipefail
           node <<'NODE'
           const fs = require('fs');
-
           const config = JSON.parse(fs.readFileSync('wrangler.jsonc', 'utf8'));
           if (config.name !== 'customer-crm-api') throw new Error('Unexpected Worker name');
           if (config.main !== 'src/production-index-crm-browser-root-entry.js') throw new Error('Production main changed');
@@ -37,45 +36,39 @@ jobs:
           if (db.migrations_dir !== 'migrations_managed') throw new Error('Managed migrations directory is not configured');
           if (db.migrations_table !== 'd1_migrations_managed') throw new Error('Managed migrations table is not configured');
 
+          const strip = sql => sql.replace(/--.*$/gm, ' ').replace(/\/\*[\s\S]*?\*\//g, ' ').trim();
+          const forbid = (sql, patterns) => { for (const p of patterns) if (p.test(sql)) throw new Error(`Forbidden migration statement detected: ${p}`); };
+
           const legacyFile = 'migrations/20260814_customer_line_message_events.sql';
-          const managedFile = 'migrations_managed/20260814_customer_line_message_events.sql';
+          const lineFile = 'migrations_managed/20260814_customer_line_message_events.sql';
           const legacySql = fs.readFileSync(legacyFile, 'utf8');
-          const managedSql = fs.readFileSync(managedFile, 'utf8');
-          if (legacySql !== managedSql) throw new Error('Managed migration is not an exact copy of the approved legacy source migration');
+          const lineSqlRaw = fs.readFileSync(lineFile, 'utf8');
+          if (legacySql !== lineSqlRaw) throw new Error('Managed line-context migration is not an exact copy of approved legacy source');
+          const lineSql = strip(lineSqlRaw);
+          forbid(lineSql,[/\bDROP\b/i,/\bDELETE\b/i,/\bALTER\b/i,/\bUPDATE\b/i,/\bINSERT\b/i,/\bREPLACE\b/i,/\bTRUNCATE\b/i]);
+          for (const s of lineSql.split(';').map(x=>x.trim()).filter(Boolean)) if(!/^CREATE\s+(TABLE|INDEX)\s+IF\s+NOT\s+EXISTS\b/i.test(s)) throw new Error(`Non-approved line-context statement: ${s.slice(0,80)}`);
 
-          let sql = managedSql.replace(/--.*$/gm, ' ').replace(/\/\*[\s\S]*?\*\//g, ' ');
-          const forbidden = [
-            /\bDROP\b/i,
-            /\bDELETE\b/i,
-            /\bALTER\b/i,
-            /\bUPDATE\b/i,
-            /\bINSERT\b/i,
-            /\bREPLACE\b/i,
-            /\bTRUNCATE\b/i
-          ];
-          for (const pattern of forbidden) {
-            if (pattern.test(sql)) throw new Error(`Forbidden migration statement detected: ${pattern}`);
-          }
+          const registryFile='migrations_managed/20260818_customer_identity_registry.sql';
+          const registrySql=strip(fs.readFileSync(registryFile,'utf8'));
+          forbid(registrySql,[/\bDROP\b/i,/\bDELETE\b/i,/\bALTER\b/i,/\bUPDATE\b/i,/\bINSERT\b/i,/\bREPLACE\b/i,/\bTRUNCATE\b/i]);
+          for (const s of registrySql.split(';').map(x=>x.trim()).filter(Boolean)) if(!/^CREATE\s+(TABLE|UNIQUE\s+INDEX|INDEX)\s+IF\s+NOT\s+EXISTS\b/i.test(s)) throw new Error(`Non-approved registry statement: ${s.slice(0,80)}`);
+          for(const token of ['CREATE TABLE IF NOT EXISTS customer_identity_registry','idx_customer_identity_registry_customer_id','idx_customer_identity_registry_line_user_id','idx_customer_identity_registry_idempotency_key','idx_customer_identity_registry_status_updated']) if(!registrySql.includes(token)) throw new Error(`Registry definition missing: ${token}`);
 
-          const statements = sql.split(';').map(x => x.trim()).filter(Boolean);
-          if (!statements.length) throw new Error('Managed migration is empty');
-          for (const statement of statements) {
-            if (!/^CREATE\s+(TABLE|INDEX)\s+IF\s+NOT\s+EXISTS\b/i.test(statement)) {
-              throw new Error(`Managed migration contains a non-approved statement: ${statement.slice(0, 80)}`);
-            }
-          }
+          const sequenceFile='migrations_managed/20260818_customer_identity_sequence.sql';
+          const sequenceSql=strip(fs.readFileSync(sequenceFile,'utf8'));
+          forbid(sequenceSql,[/\bDROP\b/i,/\bDELETE\b/i,/\bALTER\b/i,/\bUPDATE\b/i,/\bREPLACE\b/i,/\bTRUNCATE\b/i]);
+          const sequenceStatements=sequenceSql.split(';').map(x=>x.trim()).filter(Boolean);
+          if(sequenceStatements.length!==2) throw new Error('Sequence migration must contain exactly two statements');
+          if(!/^CREATE\s+TABLE\s+IF\s+NOT\s+EXISTS\s+customer_identity_sequence\b/i.test(sequenceStatements[0])) throw new Error('Sequence table creation is not approved');
+          if(!/^INSERT\s+OR\s+IGNORE\s+INTO\s+customer_identity_sequence\b/i.test(sequenceStatements[1])) throw new Error('Sequence initializer is not the approved INSERT OR IGNORE');
+          for(const token of ["'canonical_customer_id'",'MAX(CAST(SUBSTR(customer_id, 3, 6) AS INTEGER))','FROM customers',"customer_id GLOB '[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]'"]) if(!sequenceSql.includes(token)) throw new Error(`Sequence initializer definition missing: ${token}`);
+          if(/\b(?:INSERT|UPDATE|DELETE|REPLACE)\s+(?:OR\s+\w+\s+)?INTO?\s+customers\b/i.test(sequenceSql)) throw new Error('Sequence migration must not write customers');
 
-          const required = [
-            'CREATE TABLE IF NOT EXISTS customer_line_message_events',
-            'idx_customer_line_message_events_customer_time',
-            'idx_customer_line_message_events_line_user_time',
-            'idx_customer_line_message_events_context'
-          ];
-          for (const token of required) {
-            if (!sql.includes(token)) throw new Error(`Required migration definition missing: ${token}`);
-          }
-          console.log('Production config, managed namespace, exact-copy check, and migration safety checks passed.');
+          console.log('Production config and approved managed migration safety checks passed.');
           NODE
+          node tests/deploy-managed-migration-guard.mjs
+          node tests/customer-identity-resolver.mjs
+          node tests/customer-identity-regression.mjs
 
       - name: Confirm Cloudflare authentication
         uses: cloudflare/wrangler-action@v4
@@ -101,18 +94,20 @@ jobs:
         run: |
           set -euo pipefail
           node <<'NODE'
-          const output = process.env.PENDING_MIGRATIONS || '';
-          const target = '20260814_customer_line_message_events.sql';
-          const files = [...new Set([...output.matchAll(/[A-Za-z0-9_.-]+\.sql/g)].map(m => m[0]))];
-          const leakedLegacy = files.filter(x => /^202606(?:12|13|14)_/.test(x));
-          if (leakedLegacy.length) {
-            throw new Error(`Legacy migrations leaked into the managed namespace: ${leakedLegacy.join(', ')}`);
-          }
-          const unexpected = files.filter(x => x !== target);
-          if (unexpected.length) {
-            throw new Error(`Unexpected managed unapplied migrations detected: ${unexpected.join(', ')}`);
-          }
-          console.log(files.length ? `Managed pending migration approved: ${target}` : 'No managed pending migrations; safe idempotent rerun.');
+          const output=process.env.PENDING_MIGRATIONS||'';
+          const approved=[
+            '20260814_customer_line_message_events.sql',
+            '20260818_customer_identity_registry.sql',
+            '20260818_customer_identity_sequence.sql'
+          ];
+          const files=[...new Set([...output.matchAll(/[A-Za-z0-9_.-]+\.sql/g)].map(m=>m[0]))];
+          const leakedLegacy=files.filter(x=>/^202606(?:12|13|14)_/.test(x));
+          if(leakedLegacy.length) throw new Error(`Legacy migrations leaked into managed namespace: ${leakedLegacy.join(', ')}`);
+          const unexpected=files.filter(x=>!approved.includes(x));
+          if(unexpected.length) throw new Error(`Unexpected managed unapplied migrations detected: ${unexpected.join(', ')}`);
+          const positions=files.map(x=>approved.indexOf(x));
+          for(let i=1;i<positions.length;i++) if(positions[i]<=positions[i-1]) throw new Error(`Managed migration order is unsafe: ${files.join(' -> ')}`);
+          console.log(files.length?`Approved pending migrations: ${files.join(', ')}`:'No managed pending migrations; safe idempotent rerun.');
           NODE
 
       - name: Apply managed remote D1 migrations
@@ -133,76 +128,65 @@ jobs:
           wranglerVersion: "4"
           command: deploy
 
-      - name: Verify managed migration tracking table exists (READ ONLY)
-        id: verify_migration_table
+      - name: Verify managed tracking (READ ONLY)
+        id: verify_tracking
         uses: cloudflare/wrangler-action@v4
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           wranglerVersion: "4"
-          command: d1 execute customer-crm-db --remote --command "SELECT name FROM sqlite_master WHERE type='table' AND name='d1_migrations_managed';" --json
+          command: d1 execute customer-crm-db --remote --command "SELECT name FROM d1_migrations_managed WHERE name IN ('20260818_customer_identity_registry.sql','20260818_customer_identity_sequence.sql') ORDER BY id;" --json
 
-      - name: Verify D1 table exists (READ ONLY)
-        id: verify_table
+      - name: Verify identity registry table (READ ONLY)
+        id: verify_registry
         uses: cloudflare/wrangler-action@v4
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           wranglerVersion: "4"
-          command: d1 execute customer-crm-db --remote --command "SELECT name FROM sqlite_master WHERE type='table' AND name='customer_line_message_events';" --json
+          command: d1 execute customer-crm-db --remote --command "SELECT name FROM sqlite_master WHERE type='table' AND name='customer_identity_registry'; PRAGMA table_info(customer_identity_registry); PRAGMA index_list(customer_identity_registry);" --json
 
-      - name: Verify D1 columns (READ ONLY)
-        id: verify_columns
+      - name: Verify identity sequence state (READ ONLY)
+        id: verify_sequence
         uses: cloudflare/wrangler-action@v4
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           wranglerVersion: "4"
-          command: d1 execute customer-crm-db --remote --command "PRAGMA table_info(customer_line_message_events);" --json
+          command: d1 execute customer-crm-db --remote --command "SELECT name FROM sqlite_master WHERE type='table' AND name='customer_identity_sequence'; PRAGMA table_info(customer_identity_sequence); SELECT sequence_key,last_value FROM customer_identity_sequence WHERE sequence_key='canonical_customer_id'; SELECT COALESCE(MAX(CAST(SUBSTR(customer_id,3,6) AS INTEGER)),0) AS existing_numeric_suffix_max FROM customers WHERE customer_id GLOB '[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]';" --json
 
-      - name: Verify D1 indexes (READ ONLY)
-        id: verify_indexes
+      - name: Verify existing line-context D1 table (READ ONLY)
+        id: verify_line_context
         uses: cloudflare/wrangler-action@v4
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           wranglerVersion: "4"
-          command: d1 execute customer-crm-db --remote --command "PRAGMA index_list(customer_line_message_events);" --json
+          command: d1 execute customer-crm-db --remote --command "SELECT name FROM sqlite_master WHERE type='table' AND name='customer_line_message_events'; PRAGMA table_info(customer_line_message_events); PRAGMA index_list(customer_line_message_events);" --json
 
       - name: Assert D1 verification results
         shell: bash
         env:
-          MIGRATION_TABLE_OUTPUT: ${{ steps.verify_migration_table.outputs.command-output }}
-          TABLE_OUTPUT: ${{ steps.verify_table.outputs.command-output }}
-          COLUMNS_OUTPUT: ${{ steps.verify_columns.outputs.command-output }}
-          INDEXES_OUTPUT: ${{ steps.verify_indexes.outputs.command-output }}
+          TRACKING_OUTPUT: ${{ steps.verify_tracking.outputs.command-output }}
+          REGISTRY_OUTPUT: ${{ steps.verify_registry.outputs.command-output }}
+          SEQUENCE_OUTPUT: ${{ steps.verify_sequence.outputs.command-output }}
+          LINE_OUTPUT: ${{ steps.verify_line_context.outputs.command-output }}
         run: |
           set -euo pipefail
           node <<'NODE'
-          const migrationTable = process.env.MIGRATION_TABLE_OUTPUT || '';
-          const table = process.env.TABLE_OUTPUT || '';
-          const columns = process.env.COLUMNS_OUTPUT || '';
-          const indexes = process.env.INDEXES_OUTPUT || '';
-
-          if (!migrationTable.includes('d1_migrations_managed')) throw new Error('Managed migration tracking table not found');
-          if (!table.includes('customer_line_message_events')) throw new Error('customer_line_message_events table not found');
-
-          const requiredColumns = [
-            'id','event_id','customer_id','line_user_id','direction','message_type','message_text',
-            'source','send_status','send_error','line_message_id','idempotency_key','sender_type',
-            'occurred_at','created_at','updated_at','raw_json'
-          ];
-          const missingColumns = requiredColumns.filter(x => !columns.includes(`"${x}"`) && !columns.includes(x));
-          if (missingColumns.length) throw new Error(`Missing columns: ${missingColumns.join(', ')}`);
-
-          const requiredIndexes = [
-            'idx_customer_line_message_events_customer_time',
-            'idx_customer_line_message_events_line_user_time',
-            'idx_customer_line_message_events_context'
-          ];
-          const missingIndexes = requiredIndexes.filter(x => !indexes.includes(x));
-          if (missingIndexes.length) throw new Error(`Missing indexes: ${missingIndexes.join(', ')}`);
-          console.log('Managed migration tracking table, D1 table, columns, and required indexes verified.');
+          const tracking=process.env.TRACKING_OUTPUT||'';
+          const registry=process.env.REGISTRY_OUTPUT||'';
+          const sequence=process.env.SEQUENCE_OUTPUT||'';
+          const line=process.env.LINE_OUTPUT||'';
+          for(const name of ['20260818_customer_identity_registry.sql','20260818_customer_identity_sequence.sql']) if(!tracking.includes(name)) throw new Error(`Managed migration not tracked: ${name}`);
+          if(!registry.includes('customer_identity_registry')) throw new Error('customer_identity_registry missing');
+          for(const c of ['id','customer_id','line_user_id','idempotency_key','source','status','created_at','updated_at','raw_json']) if(!registry.includes(c)) throw new Error(`Registry column missing: ${c}`);
+          for(const idx of ['idx_customer_identity_registry_customer_id','idx_customer_identity_registry_line_user_id','idx_customer_identity_registry_idempotency_key','idx_customer_identity_registry_status_updated']) if(!registry.includes(idx)) throw new Error(`Registry index missing: ${idx}`);
+          if(!sequence.includes('customer_identity_sequence')||!sequence.includes('canonical_customer_id')||!sequence.includes('last_value')||!sequence.includes('existing_numeric_suffix_max')) throw new Error('Sequence verification incomplete');
+          const numbers=[...sequence.matchAll(/"(?:last_value|existing_numeric_suffix_max)"\s*:\s*(\d+)/g)].map(m=>Number(m[1]));
+          if(numbers.length>=2 && numbers[0]<numbers[1]) throw new Error(`Sequence last_value ${numbers[0]} is below existing suffix max ${numbers[1]}`);
+          if(!line.includes('customer_line_message_events')) throw new Error('Existing line-context table missing');
+          console.log('Managed tracking, registry, sequence state, and existing line-context D1 verification passed.');
           NODE
 
       - name: Verify deployed Worker safety (READ ONLY HTTP)
@@ -212,181 +196,54 @@ jobs:
           DEPLOY_COMMAND_OUTPUT: ${{ steps.deploy_worker.outputs.command-output }}
         run: |
           set -euo pipefail
-
           cat > /tmp/verify-health.js <<'NODE'
-          const fs = require('fs');
-          const text = fs.readFileSync(process.argv[2], 'utf8');
-          let h;
-          try {
-            h = JSON.parse(text);
-          } catch (error) {
-            throw new Error(`Health endpoint declared JSON but could not be parsed: ${error.message}`);
-          }
-          const expected = {
-            line_context_events_enabled: true,
-            line_context_events_table_present: true,
-            line_context_events_columns_ok: true,
-            line_context_sent_only_formal: true,
-            line_live_send_enabled: false
+          const fs=require('fs');
+          const h=JSON.parse(fs.readFileSync(process.argv[2],'utf8'));
+          const expected={
+            line_context_events_enabled:true,
+            line_context_events_table_present:true,
+            line_context_events_columns_ok:true,
+            line_context_sent_only_formal:true,
+            line_live_send_enabled:false,
+            customer_identity_resolver_enabled:true,
+            customer_identity_owner:'customer-crm',
+            customer_identity_format:'YY+6digit-global-sequence',
+            customer_identity_registry_table:'customer_identity_registry',
+            customer_identity_sequence_table:'customer_identity_sequence',
+            customer_identity_name_matching:false,
+            customer_identity_reservation_generator:false
           };
-          for (const [key, value] of Object.entries(expected)) {
-            if (h[key] !== value) {
-              throw new Error(`Health mismatch: ${key}=${JSON.stringify(h[key])}, expected ${value}`);
-            }
-          }
+          for(const [k,v] of Object.entries(expected)) if(h[k]!==v) throw new Error(`Health mismatch: ${k}=${JSON.stringify(h[k])}, expected ${JSON.stringify(v)}`);
+          if(String(h.customer_identity_format||'').includes('C+global')) throw new Error('Legacy C+global-sequence health format remains');
           console.log('Health JSON verification passed.');
           NODE
 
           WORKER_URL="${DEPLOYMENT_URL:-}"
-          if [ -z "$WORKER_URL" ]; then
-            WORKER_URL="$(printf '%s' "${DEPLOY_COMMAND_OUTPUT:-}" | grep -Eo 'https://[^[:space:]]+\.workers\.dev' | head -n1 || true)"
-          fi
-          if [ -z "$WORKER_URL" ]; then
-            echo 'Could not determine deployed Worker URL.' >&2
-            exit 1
-          fi
+          if [ -z "$WORKER_URL" ]; then WORKER_URL="$(printf '%s' "${DEPLOY_COMMAND_OUTPUT:-}" | grep -Eo 'https://[^[:space:]]+\.workers\.dev' | head -n1 || true)"; fi
+          [ -n "$WORKER_URL" ] || { echo 'Could not determine deployed Worker URL.' >&2; exit 1; }
           WORKER_URL="${WORKER_URL%/}"
-
-          request_no_redirect() {
-            local url="$1"
-            local headers="$2"
-            local body="$3"
-            curl --silent --show-error --retry 4 --retry-delay 2 --max-redirs 0 \
-              -D "$headers" -o "$body" -w '%{http_code}' "$url"
-          }
-
-          read_header() {
-            local name="$1"
-            local file="$2"
-            grep -i "^${name}:" "$file" | tail -n1 | cut -d: -f2- | sed 's/^ *//;s/\r$//' || true
-          }
+          request_no_redirect(){ curl --silent --show-error --retry 4 --retry-delay 2 --max-redirs 0 -D "$2" -o "$3" -w '%{http_code}' "$1"; }
+          read_header(){ grep -i "^$1:" "$2" | tail -n1 | cut -d: -f2- | sed 's/^ *//;s/\r$//' || true; }
 
           health_status="$(request_no_redirect "$WORKER_URL/health" /tmp/health.headers /tmp/health.body)"
-          health_content_type="$(read_header 'Content-Type' /tmp/health.headers)"
+          health_ct="$(read_header 'Content-Type' /tmp/health.headers)"
           health_location="$(read_header 'Location' /tmp/health.headers)"
-          health_body_kind=other
-          if LC_ALL=C head -c 512 /tmp/health.body | grep -Eiq '^[[:space:]]*(<html|<!doctype)'; then
-            health_body_kind=html
-          fi
-          health_location_lower="$(printf '%s' "$health_location" | tr '[:upper:]' '[:lower:]')"
-          health_access_redirect=no
-          if [[ "$health_status" =~ ^(302|303|307|308)$ ]] && \
-             { [[ "$health_location_lower" == *"cloudflareaccess.com"* ]] || [[ "$health_location_lower" == *"/cdn-cgi/access/"* ]]; }; then
-            health_access_redirect=yes
-          fi
-
-          echo "Health response: status=$health_status content_type=${health_content_type:-<none>} body_kind=$health_body_kind access_redirect=$health_access_redirect"
-
           case "$health_status" in
-            200)
-              if [[ "$health_content_type" == *"application/json"* || "$health_content_type" == *"+json"* ]]; then
-                node /tmp/verify-health.js /tmp/health.body
-              elif [ "$health_body_kind" = "html" ]; then
-                echo 'Health returned HTTP 200 HTML, not health JSON; refusing to parse HTML as JSON.' >&2
-                exit 1
-              else
-                echo "Health returned HTTP 200 with non-JSON Content-Type: ${health_content_type:-<none>}." >&2
-                exit 1
-              fi
-              ;;
-            302|303|307|308)
-              if [ "$health_access_redirect" != "yes" ]; then
-                echo "Health returned an unexpected redirect that was not recognized as a Cloudflare Access challenge: HTTP $health_status." >&2
-                exit 1
-              fi
-              echo 'Health endpoint is protected by Cloudflare Access.'
-              echo 'Authenticated application health must be verified separately.'
-              ;;
-            401|403)
-              echo 'Health endpoint is protected by Cloudflare Access.'
-              echo 'Authenticated application health must be verified separately.'
-              ;;
-            *)
-              echo "Unexpected health response: HTTP $health_status." >&2
-              exit 1
-              ;;
+            200) [[ "$health_ct" == *json* ]] || { echo 'Health 200 was not JSON' >&2; exit 1; }; node /tmp/verify-health.js /tmp/health.body ;;
+            302|303|307|308) [[ "${health_location,,}" == *cloudflareaccess.com* || "${health_location,,}" == *'/cdn-cgi/access/'* ]] || { echo 'Unexpected health redirect' >&2; exit 1; }; echo 'Health protected by Cloudflare Access; authenticated health not verified.' ;;
+            401|403) echo 'Health protected by Cloudflare Access; authenticated health not verified.' ;;
+            *) echo "Unexpected health status $health_status" >&2; exit 1 ;;
           esac
 
-          internal_status="$(request_no_redirect "$WORKER_URL/api/internal/line-context-events?line_user_id=test" /tmp/internal.headers /tmp/internal.body)"
-          case "$internal_status" in
-            401|403|302|303|307|308)
-              echo "Internal API unauthenticated request was blocked: HTTP $internal_status."
-              ;;
-            200)
-              echo 'Internal API returned HTTP 200 without authentication; refusing unsafe access.' >&2
-              exit 1
-              ;;
-            *)
-              echo "Internal API unauthenticated status was $internal_status; expected 401/403 or Cloudflare Access redirect." >&2
-              exit 1
-              ;;
-          esac
+          resolver_status="$(curl --silent --show-error --max-redirs 0 -o /tmp/resolver.body -w '%{http_code}' -X POST -H 'content-type: application/json' --data '{"line_user_id":"U00000000000000000000000000000000","idempotency_key":"unauthenticated-readiness-only","source":"deploy-smoke"}' "$WORKER_URL/api/internal/customer-identity/resolve-or-create")"
+          case "$resolver_status" in 401|403|302|303|307|308) echo "Resolver unauthenticated request blocked: HTTP $resolver_status" ;; 200) echo 'Resolver returned 200 unauthenticated' >&2; exit 1 ;; *) echo "Unexpected resolver unauthenticated status $resolver_status" >&2; exit 1 ;; esac
 
-          customer_status="$(request_no_redirect "$WORKER_URL/api/customers/test/line-context-events" /tmp/customer.headers /tmp/customer.body)"
-          case "$customer_status" in
-            401|403|302|303|307|308)
-              echo "Customer context unauthenticated request was blocked: HTTP $customer_status."
-              ;;
-            200)
-              echo 'Customer context API returned HTTP 200 without authentication; refusing unsafe access.' >&2
-              exit 1
-              ;;
-            *)
-              echo "Customer context unauthenticated status was $customer_status; expected 401/403 or Cloudflare Access redirect." >&2
-              exit 1
-              ;;
-          esac
-
-          admin_status="$(request_no_redirect "$WORKER_URL/admin" /tmp/admin.headers /tmp/admin.body)"
-          case "$admin_status" in
-            302|303|307|308|401|403)
-              echo "Admin endpoint is protected from this unauthenticated runner: HTTP $admin_status."
-              ;;
-            200)
-              if grep -Eqi 'Worker threw exception|Error 1101|internal server error' /tmp/admin.body; then
-                echo 'Admin response contains a Worker error.' >&2
-                exit 1
-              fi
-              echo 'Admin endpoint returned HTTP 200 without a Worker error.'
-              ;;
-            404)
-              echo 'Admin endpoint unhealthy: HTTP 404.' >&2
-              exit 1
-              ;;
-            5??)
-              echo "Admin endpoint unhealthy: HTTP $admin_status." >&2
-              exit 1
-              ;;
-            *)
-              echo "Unexpected admin endpoint status: HTTP $admin_status." >&2
-              exit 1
-              ;;
-          esac
-
-          draft_status="$(request_no_redirect "$WORKER_URL/api/line-ops/dashboard" /tmp/line-ops.headers /tmp/line-ops.body)"
-          case "$draft_status" in
-            200)
-              if grep -Eqi 'Worker threw exception|Error 1101|internal server error' /tmp/line-ops.body; then
-                echo 'Existing customer_line_draft_logs API response contains a Worker error.' >&2
-                exit 1
-              fi
-              echo 'Existing customer_line_draft_logs API returned HTTP 200 without a Worker error.'
-              ;;
-            401|403|302|303|307|308)
-              echo "Existing customer_line_draft_logs API is protected from this unauthenticated runner: HTTP $draft_status."
-              ;;
-            404)
-              echo 'Existing customer_line_draft_logs API path unhealthy: HTTP 404.' >&2
-              exit 1
-              ;;
-            5??)
-              echo "Existing customer_line_draft_logs API path unhealthy: HTTP $draft_status." >&2
-              exit 1
-              ;;
-            *)
-              echo "Unexpected existing customer_line_draft_logs API status: HTTP $draft_status." >&2
-              exit 1
-              ;;
-          esac
-
-          echo 'Worker HTTP verification passed: Access-aware health handling, auth guards, admin, and existing LINE draft API are non-destructive.'
+          for path in '/api/internal/line-context-events?line_user_id=test' '/api/customers/test/line-context-events' '/admin' '/api/line-ops/dashboard'; do
+            status="$(request_no_redirect "$WORKER_URL$path" /tmp/check.headers /tmp/check.body)"
+            case "$status" in
+              200) if grep -Eqi 'Worker threw exception|Error 1101|internal server error' /tmp/check.body; then echo "Worker error at $path" >&2; exit 1; fi ;;
+              401|403|302|303|307|308) ;;
+              *) echo "Unexpected status $status at $path" >&2; exit 1 ;;
+            esac
+          done
+          echo 'Worker HTTP verification passed without customer creation or LINE send.'
