@@ -2,8 +2,9 @@ import app from "./production-index-crm-delivery-deadline-alerts-entry.js";
 import { handleLineContextEvents, lineContextHealth } from "./crm-line-context-events.mjs";
 import { handleInternalCustomerDetail, internalCustomerDetailHealth } from "./crm-internal-customer-detail.mjs";
 import { handleReconciliationReview, patchReconciliationHealth } from "./crm-reconciliation-review.mjs";
+import { handleCustomerIdentityResolver, customerIdentityHealth } from "./customer-identity-resolver.mjs";
 
-const BUILD = "customer-crm-api-browser-root-20260817-04";
+const BUILD = "customer-crm-api-browser-root-20260818-identity-01";
 
 function copyHeaders(response){
   const headers = new Headers(response.headers);
@@ -26,6 +27,7 @@ async function patchHealth(response, env){
   try { data = raw ? JSON.parse(raw) : {}; } catch (_) {}
   const lineContext = await lineContextHealth(env);
   const customerDetail = internalCustomerDetailHealth(env);
+  const customerIdentity = customerIdentityHealth(env);
   const headers = copyHeaders(response);
   headers.set("content-type", "application/json; charset=utf-8");
   return new Response(JSON.stringify({
@@ -34,7 +36,8 @@ async function patchHealth(response, env){
     build: BUILD,
     browser_root_redirect: "/admin",
     ...lineContext,
-    ...customerDetail
+    ...customerDetail,
+    ...customerIdentity
   }, null, 2), { status: response.status, headers });
 }
 
@@ -53,6 +56,9 @@ async function injectReviewLink(response, url){
 export default {
   async fetch(request, env, ctx){
     const url = new URL(request.url);
+
+    const identityResponse = await handleCustomerIdentityResolver(request, env);
+    if(identityResponse) return identityResponse;
 
     const reviewResponse = await handleReconciliationReview(request, env);
     if(reviewResponse) return reviewResponse;
