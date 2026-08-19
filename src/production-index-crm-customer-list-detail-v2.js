@@ -1,14 +1,14 @@
 // ======================================================
 // CUSTOMER CRM / CUSTOMER LIST DETAIL V2 WRAPPER
-// build: customer-crm-customer-list-detail-v2-20260614-03
-// - Makes stable customer list cards open a reliable detail panel
-// - Adds dedicated customer detail API independent from old DOM click
-// - LINE history is shown as a light timeline list, not chat bubbles
+// build: customer-crm-customer-list-detail-v2-20260819-02
+// - Stable customer detail panel
+// - customer_id-only linkage for reservation/LINE/task history
+// - Operation-first summary; no LINE send or customer writes
 // ======================================================
 
 import app from "./production-index-crm-stable-customer-list.js";
 
-const BUILD = "customer-crm-customer-list-detail-v2-20260614-03";
+const BUILD = "customer-crm-customer-list-detail-v2-20260819-02";
 
 function json(data, status = 200){
   return new Response(JSON.stringify(data, null, 2), {
@@ -43,13 +43,14 @@ function firstValue(row, names, fallback = ""){
   return fallback;
 }
 
-function normalizeCustomer(row){
+export function normalizeCustomer(row){
   return {
-    id: firstValue(row, ["id", "customer_id", "line_user_id"]),
+    id: firstValue(row, ["id", "customer_id"]),
     customer_id: firstValue(row, ["customer_id", "id"]),
     name: firstValue(row, ["name", "customer_name", "line_display_name", "display_name", "full_name"], "名前未設定"),
     kana: firstValue(row, ["furigana", "kana", "name_kana", "yomi"]),
     line_display_name: firstValue(row, ["line_display_name", "line_name"]),
+    line_linked: !!String(firstValue(row, ["line_user_id"], "")).trim(),
     phone: firstValue(row, ["phone", "tel", "telephone"]),
     email: firstValue(row, ["email", "mail"]),
     last_shoot_date: firstValue(row, ["last_shoot_date", "last_reservation_date", "shoot_date"]),
@@ -62,44 +63,57 @@ function normalizeCustomer(row){
   };
 }
 
-async function customerDetail(env, url){
-  const id = (url.searchParams.get("id") || url.searchParams.get("customer_id") || "").trim();
-  if(!id) return json({ok:false, build:BUILD, error:"customer id is required"}, 400);
-  if(!await tableExists(env, "customers")) return json({ok:true, build:BUILD, customer:null, reservations:[], line_logs:[], message:"customers table not found"});
+function exactCustomerRows(rows, customerId){
+  return (rows || []).filter(row => String(row && row.customer_id != null ? row.customer_id : "").trim() === customerId);
+}
 
-  const cRes = await safeAll(env, `SELECT * FROM customers WHERE CAST(id AS TEXT)=? OR CAST(customer_id AS TEXT)=? OR CAST(line_user_id AS TEXT)=? LIMIT 1`, [id, id, id]);
+function reservationSortValue(row){
+  return String(firstValue(row, ["shoot_date", "created_at"], "")).trim();
+}
+
+export async function customerDetail(env, url){
+  const requestedId = (url.searchParams.get("customer_id") || url.searchParams.get("id") || "").trim();
+  if(!requestedId) return json({ok:false, build:BUILD, error:"customer_id is required", code:"customer_id_missing"}, 400);
+  if(!await tableExists(env, "customers")) return json({ok:true, build:BUILD, lookup_key:"customer_id", fallback_used:false, customer:null, reservations:[], line_logs:[], follow_tasks:[], message:"customers table not found"});
+
+  // Existing numeric IDs remain valid when legacy rows have an empty customer_id column.
+  // No name or LINE ID matching is allowed for customer resolution.
+  const cRes = await safeAll(env, `SELECT * FROM customers WHERE CAST(customer_id AS TEXT)=? OR (COALESCE(CAST(customer_id AS TEXT),'')='' AND CAST(id AS TEXT)=?) LIMIT 1`, [requestedId, requestedId]);
   const customer = cRes.results && cRes.results[0] ? normalizeCustomer(cRes.results[0]) : null;
-  if(!customer) return json({ok:true, build:BUILD, customer:null, reservations:[], line_logs:[], message:"customer not found"});
+  if(!customer) return json({ok:true, build:BUILD, lookup_key:"customer_id", fallback_used:false, customer:null, reservations:[], line_logs:[], follow_tasks:[], message:"customer not found"});
+  const customerId=String(customer.customer_id || customer.id || "").trim();
+  if(customerId !== requestedId) return json({ok:false, build:BUILD, lookup_key:"customer_id", fallback_used:false, code:"customer_id_mismatch", customer_id:requestedId, error:"customer id mismatch"},409);
 
   const reservations = [];
   const lineLogs = [];
   const followTasks = [];
 
   if(await tableExists(env, "customer_reservations")){
-    const r = await safeAll(env, `SELECT * FROM customer_reservations WHERE CAST(customer_id AS TEXT)=? OR CAST(customer_name AS TEXT)=? ORDER BY COALESCE(shoot_date, created_at, '') DESC LIMIT 20`, [String(customer.customer_id || customer.id), customer.name]);
-    if(r.results && r.results.length) reservations.push(...r.results);
+    const r = await safeAll(env, `SELECT * FROM customer_reservations WHERE CAST(customer_id AS TEXT)=? ORDER BY COALESCE(shoot_date, created_at, '') DESC LIMIT 20`, [customerId]);
+    reservations.push(...exactCustomerRows(r.results, customerId));
   }
   if(await tableExists(env, "crm_reservation_drafts")){
-    const r = await safeAll(env, `SELECT * FROM crm_reservation_drafts WHERE CAST(customer_id AS TEXT)=? OR customer_name=? ORDER BY COALESCE(shoot_date, created_at, '') DESC LIMIT 20`, [String(customer.customer_id || customer.id), customer.name]);
-    if(r.results && r.results.length) reservations.push(...r.results.map(x => ({...x, source:"draft"})));
+    const r = await safeAll(env, `SELECT * FROM crm_reservation_drafts WHERE CAST(customer_id AS TEXT)=? ORDER BY COALESCE(shoot_date, created_at, '') DESC LIMIT 20`, [customerId]);
+    reservations.push(...exactCustomerRows(r.results, customerId).map(x => ({...x, source:"draft"})));
   }
+  reservations.sort((a,b) => reservationSortValue(b).localeCompare(reservationSortValue(a), "ja-JP", {numeric:true}));
   if(await tableExists(env, "customer_line_draft_logs")){
-    const r = await safeAll(env, `SELECT * FROM customer_line_draft_logs WHERE CAST(customer_id AS TEXT)=? OR customer_name=? ORDER BY COALESCE(created_at, copied_at, '') DESC LIMIT 20`, [String(customer.customer_id || customer.id), customer.name]);
-    if(r.results && r.results.length) lineLogs.push(...r.results);
+    const r = await safeAll(env, `SELECT * FROM customer_line_draft_logs WHERE CAST(customer_id AS TEXT)=? ORDER BY COALESCE(created_at, copied_at, '') DESC LIMIT 20`, [customerId]);
+    lineLogs.push(...exactCustomerRows(r.results, customerId));
   }
   if(await tableExists(env, "crm_follow_tasks")){
-    const r = await safeAll(env, `SELECT * FROM crm_follow_tasks WHERE CAST(customer_id AS TEXT)=? OR customer_name=? ORDER BY COALESCE(due_date, created_at, '') DESC LIMIT 20`, [String(customer.customer_id || customer.id), customer.name]);
-    if(r.results && r.results.length) followTasks.push(...r.results);
+    const r = await safeAll(env, `SELECT * FROM crm_follow_tasks WHERE CAST(customer_id AS TEXT)=? ORDER BY COALESCE(due_date, created_at, '') DESC LIMIT 20`, [customerId]);
+    followTasks.push(...exactCustomerRows(r.results, customerId));
   }
 
-  return json({ok:true, build:BUILD, customer, reservations, line_logs:lineLogs, follow_tasks:followTasks});
+  return json({ok:true, build:BUILD, lookup_key:"customer_id", fallback_used:false, linkage_key:"customer_id", customer, reservations, line_logs:lineLogs, follow_tasks:followTasks});
 }
 
-function injectDetailV2(html){
+export function injectDetailV2(html){
   if(!html || html.includes("crm-customer-detail-v2-script")) return html;
 
   const style = `<style id="crm-customer-detail-v2-style">
-.crm-v2-detail-panel{position:fixed!important;right:18px!important;top:18px!important;bottom:18px!important;width:min(760px,calc(100vw - 36px))!important;background:#fff!important;border:1px solid #dbe5ef!important;border-radius:24px!important;box-shadow:0 28px 70px rgba(15,23,42,.24)!important;z-index:2147483100!important;display:none!important;overflow:hidden!important;color:#07111f!important}.crm-v2-detail-panel.open{display:flex!important;flex-direction:column!important}.crm-v2-detail-head{padding:18px 64px 16px 18px!important;border-bottom:1px solid #e2e8f0!important;background:linear-gradient(135deg,#f8fafc,#fff)!important}.crm-v2-detail-head h2{font-size:24px!important;line-height:1.25!important;margin:0 0 6px!important;font-weight:950!important}.crm-v2-detail-head p{font-size:13px!important;color:#64748b!important;line-height:1.7!important;margin:0!important}.crm-v2-detail-close{position:absolute!important;right:14px!important;top:14px!important;width:42px!important;height:42px!important;border-radius:999px!important;border:1px solid #dbe5ef!important;background:#fff!important;font-size:22px!important;font-weight:950!important;cursor:pointer!important}.crm-v2-detail-body{overflow:auto!important;padding:18px!important;display:grid!important;gap:14px!important}.crm-v2-detail-grid{display:grid!important;grid-template-columns:repeat(2,1fr)!important;gap:10px!important}.crm-v2-detail-card{border:1px solid #e2e8f0!important;border-radius:18px!important;background:#fff!important;padding:14px!important}.crm-v2-detail-card b{display:block!important;font-size:20px!important;color:#07111f!important}.crm-v2-detail-card span{font-size:13px!important;color:#64748b!important}.crm-v2-section h3{font-size:18px!important;margin:0 0 8px!important;font-weight:950!important}.crm-v2-row{border:1px solid #e2e8f0!important;border-radius:16px!important;padding:12px!important;background:#f8fafc!important;margin-bottom:8px!important;font-size:13px!important;line-height:1.6!important}.crm-v2-empty{border:1px dashed #cbd5e1!important;border-radius:16px!important;padding:14px!important;color:#64748b!important;background:#f8fafc!important}.crm-line-lite-list{display:grid!important;gap:8px!important}.crm-line-lite-item{border:1px solid #e2e8f0!important;border-radius:14px!important;background:#fff!important;padding:10px 12px!important;display:grid!important;gap:4px!important}.crm-line-lite-top{display:flex!important;align-items:center!important;gap:8px!important;font-size:12px!important;color:#64748b!important}.crm-line-lite-badge{display:inline-flex!important;align-items:center!important;justify-content:center!important;min-width:44px!important;height:22px!important;border-radius:999px!important;font-size:11px!important;font-weight:950!important}.crm-line-lite-badge.out{background:#dcfce7!important;color:#166534!important}.crm-line-lite-badge.in{background:#e0f2fe!important;color:#075985!important}.crm-line-lite-text{font-size:14px!important;line-height:1.6!important;color:#07111f!important;white-space:normal!important;word-break:break-word!important}@media(max-width:767px){.crm-v2-detail-panel{inset:8px!important;width:auto!important;border-radius:20px!important}.crm-v2-detail-head{padding:16px 62px 14px 16px!important}.crm-v2-detail-head h2{font-size:22px!important}.crm-v2-detail-body{padding:12px 12px calc(24px + env(safe-area-inset-bottom))!important}.crm-v2-detail-grid{grid-template-columns:1fr 1fr!important}}
+.crm-v2-detail-panel{position:fixed!important;right:18px!important;top:18px!important;bottom:18px!important;width:min(820px,calc(100vw - 36px))!important;background:#fff!important;border:1px solid #dbe5ef!important;border-radius:24px!important;box-shadow:0 28px 70px rgba(15,23,42,.24)!important;z-index:2147483100!important;display:none!important;overflow:hidden!important;color:#07111f!important}.crm-v2-detail-panel.open{display:flex!important;flex-direction:column!important}.crm-v2-detail-head{padding:18px 64px 16px 18px!important;border-bottom:1px solid #e2e8f0!important;background:linear-gradient(135deg,#f8fafc,#fff)!important}.crm-v2-detail-head h2{font-size:24px!important;line-height:1.25!important;margin:0 0 6px!important;font-weight:950!important}.crm-v2-detail-head p{font-size:13px!important;color:#64748b!important;line-height:1.7!important;margin:0!important;overflow-wrap:anywhere}.crm-v2-detail-close{position:absolute!important;right:14px!important;top:14px!important;width:42px!important;height:42px!important;border-radius:999px!important;border:1px solid #dbe5ef!important;background:#fff!important;font-size:22px!important;font-weight:950!important;cursor:pointer!important}.crm-v2-detail-body{overflow:auto!important;overflow-x:hidden!important;padding:18px!important;display:grid!important;gap:14px!important}.crm-v2-detail-grid{display:grid!important;grid-template-columns:repeat(3,minmax(0,1fr))!important;gap:10px!important}.crm-v2-detail-card{min-width:0!important;border:1px solid #e2e8f0!important;border-radius:18px!important;background:#fff!important;padding:12px!important}.crm-v2-detail-card b{display:block!important;font-size:18px!important;color:#07111f!important;overflow-wrap:anywhere}.crm-v2-detail-card span{font-size:12px!important;color:#64748b!important}.crm-v2-section{min-width:0!important}.crm-v2-section h3{font-size:17px!important;margin:0 0 8px!important;font-weight:950!important}.crm-v2-row{border:1px solid #e2e8f0!important;border-radius:16px!important;padding:12px!important;background:#f8fafc!important;margin-bottom:8px!important;font-size:13px!important;line-height:1.6!important;overflow-wrap:anywhere}.crm-v2-contact-grid{display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:8px!important}.crm-v2-contact{border:1px solid #e2e8f0!important;border-radius:14px!important;padding:10px 12px!important;background:#fff!important;min-width:0!important}.crm-v2-contact b{display:block!important;font-size:13px!important;overflow-wrap:anywhere}.crm-v2-contact span{display:block!important;margin-bottom:3px!important;font-size:11px!important;color:#64748b!important;font-weight:850!important}.crm-v2-memo{white-space:pre-wrap!important}.crm-v2-empty{border:1px dashed #cbd5e1!important;border-radius:16px!important;padding:14px!important;color:#64748b!important;background:#f8fafc!important}.crm-line-lite-list{display:grid!important;gap:8px!important}.crm-line-lite-item{border:1px solid #e2e8f0!important;border-radius:14px!important;background:#fff!important;padding:10px 12px!important;display:grid!important;gap:4px!important}.crm-line-lite-top{display:flex!important;align-items:center!important;gap:8px!important;font-size:12px!important;color:#64748b!important}.crm-line-lite-badge{display:inline-flex!important;align-items:center!important;justify-content:center!important;min-width:44px!important;height:22px!important;border-radius:999px!important;font-size:11px!important;font-weight:950!important}.crm-line-lite-badge.out{background:#dcfce7!important;color:#166534!important}.crm-line-lite-badge.in{background:#e0f2fe!important;color:#075985!important}.crm-line-lite-text{font-size:14px!important;line-height:1.6!important;color:#07111f!important;white-space:normal!important;word-break:break-word!important}@media(max-width:767px){.crm-v2-detail-panel{inset:8px!important;width:auto!important;border-radius:20px!important}.crm-v2-detail-head{padding:16px 62px 14px 16px!important}.crm-v2-detail-head h2{font-size:22px!important}.crm-v2-detail-body{padding:12px 12px calc(24px + env(safe-area-inset-bottom))!important}.crm-v2-detail-grid{grid-template-columns:repeat(2,minmax(0,1fr))!important}.crm-v2-contact-grid{grid-template-columns:1fr!important}}
 </style>`;
 
   const script = `<script id="crm-customer-detail-v2-script">
@@ -108,8 +122,9 @@ function injectDetailV2(html){
   window.__crmCustomerDetailV2 = 1;
   function yen(n){ return '¥' + Math.round(Number(n || 0)).toLocaleString('ja-JP'); }
   function text(v){ return String(v == null ? '' : v); }
+  function present(v){ return v !== null && v !== undefined && String(v) !== ''; }
   function closeDetail(){ document.getElementById('crmV2DetailPanel')?.classList.remove('open'); }
-  function esc(s){ return text(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+  function esc(s){ return text(s).replace(/[&<>\"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;'}[c])); }
   function ensureDetailPanel(){
     if(document.getElementById('crmV2DetailPanel')) return;
     const panel = document.createElement('div');
@@ -119,7 +134,8 @@ function injectDetailV2(html){
     panel.querySelector('.crm-v2-detail-close').onclick = closeDetail;
     document.body.appendChild(panel);
   }
-  function row(title, value){ return '<div class="crm-v2-detail-card"><b>'+esc(value || '未設定')+'</b><span>'+esc(title)+'</span></div>'; }
+  function row(title, value){ const shown=present(value)?value:'未設定'; return '<div class="crm-v2-detail-card"><b>'+esc(shown)+'</b><span>'+esc(title)+'</span></div>'; }
+  function contact(title,value){return '<div class="crm-v2-contact"><span>'+esc(title)+'</span><b>'+esc(present(value)?value:'未設定')+'</b></div>';}
   function lineText(r){ return r.message_text || r.message || r.text || r.body || r.memo || r.action_label || r.status || ''; }
   function lineTime(r){ return r.sent_at || r.replied_at || r.copied_at || r.created_at || r.updated_at || ''; }
   function isIncoming(r){ const s=String(r.direction||r.message_type||r.action_type||r.status||'').toLowerCase(); return /in|reply|replied|receive|user/.test(s); }
@@ -143,13 +159,21 @@ function injectDetailV2(html){
     panel.classList.add('open');
     body.innerHTML = '<div class="crm-v2-empty">読み込み中...</div>';
     try{
-      const r = await fetch('/api/stable-customer-detail?id=' + encodeURIComponent(id), {cache:'no-store'});
+      const r = await fetch('/api/stable-customer-detail?customer_id=' + encodeURIComponent(id), {cache:'no-store'});
       const j = await r.json();
-      if(!j.customer){ body.innerHTML = '<div class="crm-v2-empty">顧客詳細が見つかりませんでした。</div>'; return; }
+      if(!r.ok || !j.customer || j.lookup_key!=='customer_id' || j.fallback_used!==false || String(j.customer.customer_id)!==String(id)){ body.innerHTML = '<div class="crm-v2-empty">顧客詳細が見つからないか、顧客IDが一致しませんでした。</div>'; return; }
       const c = j.customer;
+      const lineStatus=c.line_display_name || (c.line_linked?'連携済み':'未連携');
+      const latest=(j.reservations&&j.reservations[0])||null;
       panel.querySelector('h2').textContent = c.name || '顧客詳細';
-      panel.querySelector('.crm-v2-detail-head p').textContent = ['LINE: '+(c.line_display_name || '未設定'), c.genre_history ? 'ジャンル: '+c.genre_history : '', c.last_shoot_date ? '直近: '+c.last_shoot_date : ''].filter(Boolean).join(' / ');
-      body.innerHTML = '<div class="crm-v2-detail-grid">'+row('撮影回数', c.repeat_count || 0)+row('累計売上', yen(c.total_revenue))+row('ランク', c.customer_rank || '未設定')+row('電話', c.phone || '未設定')+'</div><div class="crm-v2-section"><h3>撮影・予約履歴</h3>'+listRows(j.reservations, '撮影・予約履歴はまだありません。')+'</div><div class="crm-v2-section"><h3>LINE履歴</h3>'+lineRows(j.line_logs)+'</div><div class="crm-v2-section"><h3>フォロー予定</h3>'+listRows(j.follow_tasks, 'フォロー予定はまだありません。')+'</div>';
+      panel.querySelector('.crm-v2-detail-head p').textContent = ['顧客ID: '+c.customer_id, 'LINE: '+lineStatus, c.last_shoot_date ? '最終利用: '+c.last_shoot_date : '', latest&&latest.shoot_date?'直近予約: '+latest.shoot_date:''].filter(Boolean).join(' / ');
+      const summary='<div class="crm-v2-detail-grid">'+row('顧客ID',c.customer_id)+row('顧客ランク',c.customer_rank || '未設定')+row('撮影回数',Number(c.repeat_count||0)+'回')+row('累計売上',yen(c.total_revenue))+row('最終利用',c.last_shoot_date || '未設定')+row('LINE',lineStatus)+'</div>';
+      const reservations='<div class="crm-v2-section"><h3>予約履歴</h3>'+listRows(j.reservations,'予約履歴はまだありません。')+'</div>';
+      const contacts='<div class="crm-v2-section"><h3>LINE / 連絡情報</h3><div class="crm-v2-contact-grid">'+contact('LINE表示名',c.line_display_name || (c.line_linked?'連携済み':'未連携'))+contact('電話',c.phone)+contact('メール',c.email)+'</div></div>';
+      const line='<div class="crm-v2-section"><h3>LINE履歴</h3>'+lineRows(j.line_logs)+'</div>';
+      const follow='<div class="crm-v2-section"><h3>対応 / フォロー</h3>'+listRows(j.follow_tasks,'フォロー予定はまだありません。')+'</div>';
+      const memo='<div class="crm-v2-section"><h3>メモ / その他</h3>'+(c.memo?'<div class="crm-v2-row crm-v2-memo">'+esc(c.memo)+'</div>':'<div class="crm-v2-empty">メモはありません。</div>')+'</div>';
+      body.innerHTML = summary+reservations+contacts+line+follow+memo;
     }catch(e){ body.innerHTML = '<div class="crm-v2-empty">詳細の読み込みに失敗しました。状態確認を実行してください。</div>'; }
   }
   window.__crmOpenCustomerDetailV2 = openDetail;
