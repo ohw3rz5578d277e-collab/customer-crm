@@ -19,8 +19,8 @@ assert.throws(()=>formatCanonicalCustomerId(2026,1000000),/customer_identity_seq
 
 // initialize from numeric max; preserve allocator contract.
 {const {raw,env}=setup({},[{id:'26000126'}]);const r=await resolveOrCreateCustomerIdentity(env,input(1),{year:2026});assert.equal(r.customer_id,'26000127');assert.equal(raw.prepare(`SELECT last_value FROM customer_identity_sequence`).get().last_value,127);}
-// customer ID collision skips safely.
-{const {raw,env}=setup({},[{id:'25000127'}]);raw.prepare(`UPDATE customer_identity_sequence SET last_value=126`).run();raw.prepare(`INSERT INTO customers(customer_id,name,line_user_id) VALUES(?,?,?)`).run('26000127','keep',uid(99));const r=await resolveOrCreateCustomerIdentity(env,input(2),{year:2026});assert.equal(r.customer_id,'26000128');assert.equal(raw.prepare(`SELECT name FROM customers WHERE customer_id='26000127'`).get().name,'keep');}
+// global six-digit sequence may not be reused across years even if the sequence row drifts backwards.
+{const {raw,env}=setup({},[{id:'25000127'}]);raw.prepare(`UPDATE customer_identity_sequence SET last_value=126`).run();const r=await resolveOrCreateCustomerIdentity(env,input(2),{year:2026});assert.equal(r.customer_id,'26000128');assert.equal(raw.prepare(`SELECT last_value FROM customer_identity_sequence`).get().last_value,128);}
 // existing exact LINE customer is reused and a missing registry is reconciled without allocation.
 {const {raw,env}=setup({},[{id:'26000126',line:uid(3),name:'Real Name'}]);const before=raw.prepare(`SELECT last_value FROM customer_identity_sequence`).get().last_value;const r=await resolveOrCreateCustomerIdentity(env,input(3,'existing-registry-reconcile',{line_display_name:'LINE Nick'}),{year:2026});assert.equal(r.customer_id,'26000126');assert.equal(raw.prepare(`SELECT last_value FROM customer_identity_sequence`).get().last_value,before);assert.equal(raw.prepare(`SELECT customer_id FROM customer_identity_registry WHERE line_user_id=?`).get(uid(3)).customer_id,'26000126');assert.equal(raw.prepare(`SELECT name FROM customers WHERE customer_id='26000126'`).get().name,'Real Name');assert.equal(raw.prepare(`SELECT line_display_name FROM customers WHERE customer_id='26000126'`).get().line_display_name,'LINE Nick');}
 // new customer is numeric 8 digit and stores display name as metadata/fallback display name.
@@ -47,4 +47,4 @@ assert.throws(()=>formatCanonicalCustomerId(2026,1000000),/customer_identity_seq
 // auth is mandatory.
 {const {env}=setup();const reqBody=JSON.stringify(input(15));const noAuth=await handleCustomerIdentityResolver(new Request('https://internal/api/internal/customer-identity/resolve-or-create',{method:'POST',headers:{'content-type':'application/json'},body:reqBody}),env);assert.equal(noAuth.status,401);}
 
-console.log('customer identity YY+6digit resolver / metadata / registry reconcile PASS');
+console.log('customer identity YY+6digit global resolver / metadata / registry reconcile PASS');
