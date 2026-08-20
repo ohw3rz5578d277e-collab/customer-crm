@@ -4,7 +4,7 @@
 
 import { resolveOrCreateCustomerIdentity, isFormalLineUserId, isPlaceholderCustomerName } from './customer-identity-resolver.mjs';
 
-const BUILD='crm-canonical-customer-guards-20260820-02';
+const BUILD='crm-canonical-customer-guards-20260820-03';
 const GUARDED_UPSERT_PATHS=new Set(['/api/customers/upsert','/api/sync/customers/upsert']);
 function text(v){return v==null?'':String(v).trim();}
 function json(data,status=200){return new Response(JSON.stringify(data,null,2),{status,headers:{'content-type':'application/json; charset=utf-8','cache-control':'no-store','x-crm-canonical-customer-guards-build':BUILD}});}
@@ -92,7 +92,7 @@ export async function handleGuardedCustomerUpsert(request,env,app,ctx){
     if(r.flags.display_name_fallback)displayFallback++;
   }
   const payload=Array.isArray(body)?sanitized:(Array.isArray(body&&body.items)?{...body,items:sanitized}:sanitized[0]);
-  const headers=new Headers(request.headers);headers.set('content-type','application/json');headers.set('x-crm-canonical-line-guard','1');
+  const headers=new Headers(request.headers);headers.delete('content-length');headers.set('content-type','application/json');headers.set('x-crm-canonical-line-guard','1');
   const guarded=new Request(request.url,{method:'POST',headers,body:JSON.stringify(payload),redirect:request.redirect});
   const res=await app.fetch(guarded,env,ctx);
   const ct=res.headers.get('content-type')||'';
