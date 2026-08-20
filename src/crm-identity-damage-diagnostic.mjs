@@ -2,7 +2,7 @@
 // READ ONLY identity damage diagnostics. No repair, merge, DDL, UPDATE, or DELETE.
 
 import { isFormalLineUserId } from './customer-identity-resolver.mjs';
-const BUILD='crm-identity-damage-diagnostic-20260820-02';
+const BUILD='crm-identity-damage-diagnostic-20260820-03';
 const SAMPLE_LIMIT=20;
 function text(v){return v==null?'':String(v).trim();}
 function json(data,status=200){return new Response(JSON.stringify(data,null,2),{status,headers:{'content-type':'application/json; charset=utf-8','cache-control':'no-store','x-crm-identity-damage-diagnostic-build':BUILD}});}
@@ -12,6 +12,7 @@ async function all(db,sql,...params){let s=db.prepare(sql);if(params.length)s=s.
 async function first(db,sql,...params){let s=db.prepare(sql);if(params.length)s=s.bind(...params);return await s.first();}
 async function tableExists(db,name){return !!(await first(db,"SELECT name FROM sqlite_master WHERE type='table' AND name=? LIMIT 1",name));}
 async function columns(db,table){const rows=await all(db,`PRAGMA table_info(${table})`);return new Set(rows.map(x=>text(x.name)));}
+function canonicalSequenceValue(customerId){const id=text(customerId);return /^\d{8}$/.test(id)?Number(id.slice(2)):null;}
 
 export async function runIdentityDamageDiagnostic(env){
   if(!env||!env.DB)return{ok:false,statusCode:500,error:'db_binding_missing',read_only:true};
@@ -37,8 +38,17 @@ export async function runIdentityDamageDiagnostic(env){
   customers.forEach(c=>addLink(c.customer_id,c.line_user_id));registry.forEach(r=>addLink(r.customer_id,r.line_user_id));
   const conflictingCustomerGroups=[];for(const [cid,ids] of linksByCustomerId)if(ids.size>1)conflictingCustomerGroups.push({customer_id:cid,line_user_ids:[...ids]});
   const invalidCustomers=customers.filter(c=>text(c.line_user_id)&&!isFormalLineUserId(c.line_user_id));
-  let sequence={table_present:sequencePresent,row_present:false,ok:false,last_value:null,max:999999};
-  if(sequencePresent){const row=await first(db,'SELECT sequence_key,last_value FROM customer_identity_sequence WHERE sequence_key=? LIMIT 1','canonical_customer_id');const n=Number(row&&row.last_value);sequence={table_present:true,row_present:!!row,ok:!!row&&Number.isInteger(n)&&n>=0&&n<=999999,last_value:row?n:null,max:999999};}
+
+  const usedSequenceValues=[...customers,...registry].map(x=>canonicalSequenceValue(x.customer_id)).filter(Number.isInteger);
+  const maxObservedSequence=usedSequenceValues.length?Math.max(...usedSequenceValues):0;
+  let sequence={table_present:sequencePresent,row_present:false,ok:false,last_value:null,max:999999,max_observed_sequence:maxObservedSequence,behind_observed:false};
+  if(sequencePresent){
+    const row=await first(db,'SELECT sequence_key,last_value FROM customer_identity_sequence WHERE sequence_key=? LIMIT 1','canonical_customer_id');
+    const n=Number(row&&row.last_value);
+    const valid=!!row&&Number.isInteger(n)&&n>=0&&n<=999999;
+    const behind=valid&&n<maxObservedSequence;
+    sequence={table_present:true,row_present:!!row,ok:valid&&!behind,last_value:row?n:null,max:999999,max_observed_sequence:maxObservedSequence,behind_observed:behind};
+  }
   const categories={
     customer_id_missing:customers.filter(c=>!text(c.customer_id)).length,
     name_null:customers.filter(c=>c.name==null).length,
@@ -82,4 +92,4 @@ export async function handleIdentityDamageDiagnostic(req,env){
   if(internalToken(req)!==expected)return json({ok:false,error:'unauthorized',read_only:true},401);
   try{const out=await runIdentityDamageDiagnostic(env);const status=out.statusCode||200;delete out.statusCode;return json(out,status);}catch(e){return json({ok:false,error:'identity_diagnostic_failed',detail:text(e&&e.message||e),build:BUILD,read_only:true},500);}
 }
-export function identityDamageDiagnosticHealth(){return{identity_damage_diagnostic_enabled:true,identity_damage_diagnostic_endpoint:'/api/internal/customer-identity/damage-diagnostic',identity_damage_diagnostic_read_only:true,identity_damage_diagnostic_repair:false,identity_damage_diagnostic_categories:'A-M',identity_damage_diagnostic_build:BUILD};}
+export function identityDamageDiagnosticHealth(){return{identity_damage_diagnostic_enabled:true,identity_damage_diagnostic_endpoint:'/api/internal/customer-identity/damage-diagnostic',identity_damage_diagnostic_read_only:true,identity_damage_diagnostic_repair:false,identity_damage_diagnostic_categories:'A-M',identity_damage_diagnostic_sequence_drift_check:true,identity_damage_diagnostic_build:BUILD};}
