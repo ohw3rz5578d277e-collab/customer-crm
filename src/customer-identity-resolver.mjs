@@ -1,4 +1,4 @@
-const BUILD = "customer-identity-resolver-20260820-line-follow-01";
+const BUILD = "customer-identity-resolver-20260820-line-follow-02";
 const SEQUENCE_KEY = "canonical_customer_id";
 const MAX_SEQUENCE = 999999;
 const MAX_COLLISION_RETRIES = 32;
@@ -32,6 +32,14 @@ async function registryByLine(db,lineUserId){ return first(db,`SELECT * FROM cus
 async function registryByIdempotency(db,key){ return first(db,`SELECT * FROM customer_identity_registry WHERE idempotency_key=? LIMIT 1`,key); }
 async function registryByCustomerId(db,customerId){ return first(db,`SELECT * FROM customer_identity_registry WHERE customer_id=? LIMIT 1`,customerId); }
 async function customerById(db,customerId){ return first(db,`SELECT customer_id,line_user_id,name,line_display_name FROM customers WHERE customer_id=? LIMIT 1`,customerId); }
+async function globalSequenceValueInUse(db,sequence){
+  const suffix=String(Number(sequence)).padStart(6,"0");
+  const pattern="[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]";
+  const customer=await first(db,`SELECT customer_id FROM customers WHERE length(customer_id)=8 AND customer_id GLOB ? AND substr(customer_id,3,6)=? LIMIT 1`,pattern,suffix);
+  if(customer) return true;
+  const registry=await first(db,`SELECT customer_id FROM customer_identity_registry WHERE customer_id IS NOT NULL AND length(customer_id)=8 AND customer_id GLOB ? AND substr(customer_id,3,6)=? LIMIT 1`,pattern,suffix);
+  return !!registry;
+}
 
 function effectiveName(existingName,customerName,lineDisplayName){
   const existing=text(existingName), incoming=text(customerName), display=text(lineDisplayName);
@@ -68,9 +76,10 @@ async function allocateCustomerId(db,year){
     const allocated=await allocateSequence(db);
     if(!allocated.ok) return allocated;
     const candidate=formatCanonicalCustomerId(year,allocated.value);
+    if(await globalSequenceValueInUse(db,allocated.value)) continue;
     if(!(await customerById(db,candidate)) && !(await registryByCustomerId(db,candidate))) return {ok:true,customer_id:candidate,sequence:allocated.value};
   }
-  return failure("identity_customer_id_collision_limit",409);
+  return failure("identity_customer_id_collision_limit",409,{global_sequence:true});
 }
 
 function rawRegistryInput(input){
@@ -219,6 +228,7 @@ export function customerIdentityHealth(env){
     customer_identity_format:"YY+6digit-global-sequence",
     customer_identity_sequence_max:MAX_SEQUENCE,
     customer_identity_year_timezone:"Asia/Tokyo",
+    customer_identity_global_sequence_collision_check:true,
     customer_identity_internal_auth_configured:!!text(env&&env.CRM_INTERNAL_TOKEN),
     customer_identity_name_matching:false,
     customer_identity_reservation_generator:false,
