@@ -4,8 +4,9 @@ import { handleInternalCustomerDetail, internalCustomerDetailHealth } from "./cr
 import { handleReconciliationReview, patchReconciliationHealth } from "./crm-reconciliation-review.mjs";
 import { handleCustomerIdentityResolver, customerIdentityHealth } from "./customer-identity-resolver.mjs";
 import { handleCanonicalLineFollow, handleGuardedCustomerUpsert, canonicalCustomerGuardHealth } from "./crm-canonical-customer-guards.mjs";
+import { handleIdentityDamageDiagnostic, identityDamageDiagnosticHealth } from "./crm-identity-damage-diagnostic.mjs";
 
-const BUILD = "customer-crm-api-browser-root-20260820-canonical-line-01";
+const BUILD = "customer-crm-api-browser-root-20260820-canonical-line-02";
 
 function copyHeaders(response){
   const headers = new Headers(response.headers);
@@ -30,6 +31,7 @@ async function patchHealth(response, env){
   const customerDetail = internalCustomerDetailHealth(env);
   const customerIdentity = customerIdentityHealth(env);
   const canonicalGuard = canonicalCustomerGuardHealth(env);
+  const identityDiagnostic = identityDamageDiagnosticHealth(env);
   const headers = copyHeaders(response);
   headers.set("content-type", "application/json; charset=utf-8");
   return new Response(JSON.stringify({
@@ -40,7 +42,8 @@ async function patchHealth(response, env){
     ...lineContext,
     ...customerDetail,
     ...customerIdentity,
-    ...canonicalGuard
+    ...canonicalGuard,
+    ...identityDiagnostic
   }, null, 2), { status: response.status, headers });
 }
 
@@ -59,6 +62,9 @@ async function injectReviewLink(response, url){
 export default {
   async fetch(request, env, ctx){
     const url = new URL(request.url);
+
+    const diagnosticResponse = await handleIdentityDamageDiagnostic(request, env);
+    if(diagnosticResponse) return diagnosticResponse;
 
     const canonicalFollowResponse = await handleCanonicalLineFollow(request, env);
     if(canonicalFollowResponse) return canonicalFollowResponse;
