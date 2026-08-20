@@ -3,8 +3,9 @@ import { handleLineContextEvents, lineContextHealth } from "./crm-line-context-e
 import { handleInternalCustomerDetail, internalCustomerDetailHealth } from "./crm-internal-customer-detail.mjs";
 import { handleReconciliationReview, patchReconciliationHealth } from "./crm-reconciliation-review.mjs";
 import { handleCustomerIdentityResolver, customerIdentityHealth } from "./customer-identity-resolver.mjs";
+import { handleCanonicalLineFollow, handleGuardedCustomerUpsert, canonicalCustomerGuardHealth } from "./crm-canonical-customer-guards.mjs";
 
-const BUILD = "customer-crm-api-browser-root-20260818-identity-01";
+const BUILD = "customer-crm-api-browser-root-20260820-canonical-line-01";
 
 function copyHeaders(response){
   const headers = new Headers(response.headers);
@@ -28,6 +29,7 @@ async function patchHealth(response, env){
   const lineContext = await lineContextHealth(env);
   const customerDetail = internalCustomerDetailHealth(env);
   const customerIdentity = customerIdentityHealth(env);
+  const canonicalGuard = canonicalCustomerGuardHealth(env);
   const headers = copyHeaders(response);
   headers.set("content-type", "application/json; charset=utf-8");
   return new Response(JSON.stringify({
@@ -37,7 +39,8 @@ async function patchHealth(response, env){
     browser_root_redirect: "/admin",
     ...lineContext,
     ...customerDetail,
-    ...customerIdentity
+    ...customerIdentity,
+    ...canonicalGuard
   }, null, 2), { status: response.status, headers });
 }
 
@@ -56,6 +59,12 @@ async function injectReviewLink(response, url){
 export default {
   async fetch(request, env, ctx){
     const url = new URL(request.url);
+
+    const canonicalFollowResponse = await handleCanonicalLineFollow(request, env);
+    if(canonicalFollowResponse) return canonicalFollowResponse;
+
+    const guardedUpsertResponse = await handleGuardedCustomerUpsert(request, env, app, ctx);
+    if(guardedUpsertResponse) return guardedUpsertResponse;
 
     const identityResponse = await handleCustomerIdentityResolver(request, env);
     if(identityResponse) return identityResponse;
