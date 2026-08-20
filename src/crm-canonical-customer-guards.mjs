@@ -4,7 +4,7 @@
 
 import { resolveOrCreateCustomerIdentity, isFormalLineUserId, isPlaceholderCustomerName } from './customer-identity-resolver.mjs';
 
-const BUILD='crm-canonical-customer-guards-20260820-03';
+const BUILD='crm-canonical-customer-guards-20260820-04';
 const GUARDED_UPSERT_PATHS=new Set(['/api/customers/upsert','/api/sync/customers/upsert']);
 function text(v){return v==null?'':String(v).trim();}
 function json(data,status=200){return new Response(JSON.stringify(data,null,2),{status,headers:{'content-type':'application/json; charset=utf-8','cache-control':'no-store','x-crm-canonical-customer-guards-build':BUILD}});}
@@ -13,15 +13,28 @@ function internalToken(req){return text(req.headers.get('x-internal-token'))||be
 export {isFormalLineUserId};
 function displayNameFromPayload(v){return text(v&&(v.line_display_name||v.display_name||v.profile_display_name));}
 function itemsOf(body){return Array.isArray(body)?body:Array.isArray(body&&body.items)?body.items:[body];}
-async function existingName(env,customerId){if(!env||!env.DB||!customerId)return'';try{const r=await env.DB.prepare('SELECT name FROM customers WHERE customer_id=? LIMIT 1').bind(customerId).first();return text(r&&r.name);}catch(_){return'';}}
+async function existingIdentity(env,customerId){if(!env||!env.DB||!customerId)return null;try{return await env.DB.prepare('SELECT customer_id,name,line_user_id FROM customers WHERE customer_id=? LIMIT 1').bind(customerId).first();}catch(_){return null;}}
+async function ownersByLine(env,lineUserId){if(!env||!env.DB||!lineUserId)return[];try{const r=await env.DB.prepare('SELECT customer_id,line_user_id FROM customers WHERE line_user_id=? LIMIT 3').bind(lineUserId).all();return r.results||[];}catch(_){return[];}}
 
 async function sanitizeCustomerItem(item,env){
   const next={...item};
   const flags={ignored_invalid_line_user_id:false,protected_existing_real_name:false,display_name_fallback:false};
+  const customerId=text(next.customer_id);
+  const existing=await existingIdentity(env,customerId);
   const incomingLineId=text(next.line_user_id||next.lineUserId||next.line_id||next.line_uid||next.line_mid);
   if(incomingLineId){
-    if(isFormalLineUserId(incomingLineId)) next.line_user_id=incomingLineId;
-    else{
+    if(isFormalLineUserId(incomingLineId)){
+      const existingLineId=text(existing&&existing.line_user_id);
+      if(existingLineId && existingLineId!==incomingLineId){
+        return {item:next,flags,conflict:{error:'customer_line_identity_conflict',customer_id:customerId,existing_line_user_id:existingLineId,incoming_line_user_id:incomingLineId}};
+      }
+      const owners=await ownersByLine(env,incomingLineId);
+      const foreign=owners.filter(r=>text(r.customer_id)!==customerId);
+      if(foreign.length){
+        return {item:next,flags,conflict:{error:'line_identity_already_owned',customer_id:customerId||null,line_user_id:incomingLineId,owner_customer_ids:foreign.map(r=>text(r.customer_id)).filter(Boolean)}};
+      }
+      next.line_user_id=incomingLineId;
+    }else{
       delete next.line_user_id;delete next.lineUserId;delete next.line_id;delete next.line_uid;delete next.line_mid;
       next.line_user_id=null;
       flags.ignored_invalid_line_user_id=true;
@@ -30,8 +43,7 @@ async function sanitizeCustomerItem(item,env){
 
   const displayName=displayNameFromPayload(next);
   if(displayName) next.line_display_name=displayName;
-  const customerId=text(next.customer_id);
-  const currentName=await existingName(env,customerId);
+  const currentName=text(existing&&existing.name);
   const incomingName=text(next.name||next.customer_name);
   if(!isPlaceholderCustomerName(currentName) && (isPlaceholderCustomerName(incomingName) || (!incomingName&&displayName))){
     next.name=currentName;
@@ -43,7 +55,7 @@ async function sanitizeCustomerItem(item,env){
     delete next.name;delete next.customer_name;
   }
   next.identity_guard={...(next.identity_guard||{}),...flags};
-  return {item:next,flags};
+  return {item:next,flags,conflict:null};
 }
 
 export async function handleCanonicalLineFollow(request,env){
@@ -86,7 +98,9 @@ export async function handleGuardedCustomerUpsert(request,env,app,ctx){
   const source=itemsOf(body).filter(Boolean);
   const sanitized=[];let invalid=0,protectedNames=0,displayFallback=0;
   for(const item of source){
-    const r=await sanitizeCustomerItem(item,env);sanitized.push(r.item);
+    const r=await sanitizeCustomerItem(item,env);
+    if(r.conflict)return json({ok:false,...r.conflict,review_required:true,canonical_line_guard:true,mutation_forwarded:false,build_guard:BUILD},409);
+    sanitized.push(r.item);
     if(r.flags.ignored_invalid_line_user_id)invalid++;
     if(r.flags.protected_existing_real_name)protectedNames++;
     if(r.flags.display_name_fallback)displayFallback++;
@@ -108,6 +122,8 @@ export function canonicalCustomerGuardHealth(){
     canonical_customer_id_owner:'customer-crm',
     canonical_line_id_name_matching:false,
     canonical_invalid_line_id_overwrite:false,
+    canonical_existing_line_id_relink:false,
+    canonical_duplicate_line_identity_write:false,
     canonical_placeholder_name_overwrite:false,
     canonical_guarded_upsert_paths:[...GUARDED_UPSERT_PATHS],
     canonical_line_follow_receiver:'/api/internal/line/follow-canonical-customer',
