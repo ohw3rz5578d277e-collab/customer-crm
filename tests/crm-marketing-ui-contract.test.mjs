@@ -1,0 +1,12 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+const cockpit = fs.readFileSync(new URL('../src/crm-marketing-cockpit.mjs', import.meta.url), 'utf8');
+const rules = fs.readFileSync(new URL('../src/crm-marketing-rules.mjs', import.meta.url), 'utf8');
+assert.ok(cockpit.includes('HOME') && cockpit.includes('顧客') && cockpit.includes('セグメント') && cockpit.includes('キャンペーン') && cockpit.includes('分析'), 'navigation labels must exist');
+assert.ok(cockpit.includes('名前・顧客ID・LINEで検索'), 'global search placeholder must exist');
+assert.ok(cockpit.includes('配信実行なし'), 'campaign page must be planning only');
+assert.equal(/broadcast|multicast|message\/push|replyMessage|pushMessage/.test(cockpit), false, 'marketing UI must not add LINE send controls or endpoints');
+assert.ok(cockpit.includes('crmMBottom'), 'mobile bottom navigation must exist');
+assert.ok(cockpit.includes('@media(max-width:760px)'), 'mobile viewport rules must exist');
+assert.ok(rules.includes('repeatOpportunityDays') && rules.includes('dormantDays'), 'segment rules must be centralized');
+console.log('crm-marketing-ui-contract tests PASS');
