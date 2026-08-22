@@ -5,8 +5,9 @@ import { handleReconciliationReview, patchReconciliationHealth } from "./crm-rec
 import { handleCustomerIdentityResolver, customerIdentityHealth } from "./customer-identity-resolver.mjs";
 import { handleCanonicalLineFollow, handleGuardedCustomerUpsert, canonicalCustomerGuardHealth } from "./crm-canonical-customer-guards.mjs";
 import { handleIdentityDamageDiagnostic, identityDamageDiagnosticHealth } from "./crm-identity-damage-diagnostic.mjs";
+import { reservationInternalUser, reservationHandoffBasePath, reservationBrowserHandoffHealth, patchReservationHandoffHtml } from "./crm-reservation-browser-handoff.mjs";
 
-const BUILD = "customer-crm-api-browser-root-20260820-canonical-line-02";
+const BUILD = "customer-crm-api-browser-root-20260822-reservation-handoff-01";
 
 function copyHeaders(response){
   const headers = new Headers(response.headers);
@@ -32,6 +33,7 @@ async function patchHealth(response, env){
   const customerIdentity = customerIdentityHealth(env);
   const canonicalGuard = canonicalCustomerGuardHealth(env);
   const identityDiagnostic = identityDamageDiagnosticHealth(env);
+  const reservationHandoff = reservationBrowserHandoffHealth();
   const headers = copyHeaders(response);
   headers.set("content-type", "application/json; charset=utf-8");
   return new Response(JSON.stringify({
@@ -43,7 +45,8 @@ async function patchHealth(response, env){
     ...customerDetail,
     ...customerIdentity,
     ...canonicalGuard,
-    ...identityDiagnostic
+    ...identityDiagnostic,
+    ...reservationHandoff
   }, null, 2), { status: response.status, headers });
 }
 
@@ -57,6 +60,24 @@ async function injectReviewLink(response, url){
   body = body.includes("</body>") ? body.replace("</body>", link + "</body>") : body + link;
   const headers = copyHeaders(response); headers.set("content-type","text/html; charset=utf-8");
   return new Response(body,{status:response.status,headers});
+}
+
+async function patchAdminForReservationHandoff(response, request, url, env){
+  const internal = reservationInternalUser(request, env);
+  if(!internal) return injectReviewLink(response, url);
+  const basePath = reservationHandoffBasePath(request, env);
+  if(!basePath){
+    const headers = copyHeaders(response);
+    headers.set("content-type", "application/json; charset=utf-8");
+    return new Response(JSON.stringify({ok:false,error:"invalid_reservation_handoff_base_path"}), {status:400,headers});
+  }
+  const ct = response.headers.get("content-type") || "";
+  if(response.status !== 200 || !ct.includes("text/html")) return response;
+  const body = patchReservationHandoffHtml(await response.text(), basePath);
+  const headers = copyHeaders(response);
+  headers.set("content-type", "text/html; charset=utf-8");
+  headers.set("x-crm-reservation-handoff", "reservation-app");
+  return new Response(body,{status:response.status,statusText:response.statusText,headers});
 }
 
 export default {
@@ -94,7 +115,7 @@ export default {
       response = await patchHealth(response, env);
       return patchReconciliationHealth(response);
     }
-    if(request.method === "GET" && url.pathname === "/admin") return injectReviewLink(response,url);
+    if(request.method === "GET" && url.pathname === "/admin") return patchAdminForReservationHandoff(response,request,url,env);
     return response;
   }
 };
