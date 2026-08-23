@@ -1,0 +1,94 @@
+name: Temporary CRM Customer ID Full Regression
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: CRM customer ID full regression
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout actual PR head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Verify checkout identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          actual="$(git rev-parse HEAD)"
+          expected="${{ github.event.pull_request.head.sha }}"
+          test "$actual" = "$expected"
+          echo "PR_HEAD_SHA=$actual"
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Existing-customer E1-E10 and identity resolver
+        run: node tests/customer-identity-resolver.mjs
+
+      - name: Customer identity regression
+        run: node tests/customer-identity-regression.mjs
+
+      - name: Customer Management UX
+        run: node tests/customer-management-ux.mjs
+
+      - name: Customer Reservation History Order
+        run: node tests/customer-reservation-history-order.mjs
+
+      - name: CRM Internal Customer Detail
+        run: node tests/crm-internal-customer-detail.mjs
+
+      - name: Canonical customer guards
+        run: node tests/crm-canonical-customer-guards.test.mjs
+
+      - name: Sequence monotonic guard
+        run: node tests/deploy-identity-sequence-monotonic-guard.test.mjs
+
+      - name: Sequence workflow contract
+        run: node tests/deploy-identity-sequence-workflow-contract.test.mjs
+
+      - name: Managed migration guards A-E
+        run: node tests/deploy-managed-migration-guard.mjs
+
+      - name: Existing reconciliation review regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          node tests/customer-id-reconciliation-review.mjs
+          node tests/customer-id-reconciliation-review-runtime.mjs
+
+      - name: Production entry import
+        run: node --input-type=module -e "await import('./src/production-index-crm-browser-root-entry.js'); console.log('PRODUCTION_ENTRY_IMPORT=PASS')"
+
+      - name: Wrangler main contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const fs = require('fs');
+          const raw = fs.readFileSync('wrangler.jsonc', 'utf8')
+            .replace(/\/\*[\s\S]*?\*\//g, '')
+            .replace(/^\s*\/\/.*$/gm, '');
+          const cfg = JSON.parse(raw);
+          const expected = 'src/production-index-crm-browser-root-entry.js';
+          if (cfg.main !== expected) throw new Error(`wrangler main expected ${expected}, got ${cfg.main}`);
+          if (!fs.existsSync(cfg.main)) throw new Error(`wrangler main target missing: ${cfg.main}`);
+          console.log(`WRANGLER_MAIN=PASS ${cfg.main}`);
+          NODE
+
+      - name: Install existing Playwright browser dependency
+        run: |
+          npm install --no-save --package-lock=false playwright@1.54.2
+          npx playwright install --with-deps chromium
+
+      - name: Customer Management Browser
+        run: node tests/customer-management-browser.mjs
