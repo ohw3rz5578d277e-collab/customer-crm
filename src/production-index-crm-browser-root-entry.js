@@ -5,8 +5,10 @@ import { handleReconciliationReview, patchReconciliationHealth } from "./crm-rec
 import { handleCustomerIdentityResolver, customerIdentityHealth } from "./customer-identity-resolver.mjs";
 import { handleCanonicalLineFollow, handleGuardedCustomerUpsert, canonicalCustomerGuardHealth } from "./crm-canonical-customer-guards.mjs";
 import { handleIdentityDamageDiagnostic, identityDamageDiagnosticHealth } from "./crm-identity-damage-diagnostic.mjs";
+import { handleMarketingCrmRoute, marketingCockpitHealth, patchMarketingCrmHtml } from "./crm-marketing-cockpit.mjs";
+import { marketingBrowserPolishHealth, patchMarketingBrowserPolish } from "./crm-marketing-browser-polish.mjs";
 
-const BUILD = "customer-crm-api-browser-root-20260820-canonical-line-02";
+const BUILD = "customer-crm-api-browser-root-20260823-marketing-cockpit-02";
 
 function copyHeaders(response){
   const headers = new Headers(response.headers);
@@ -32,6 +34,8 @@ async function patchHealth(response, env){
   const customerIdentity = customerIdentityHealth(env);
   const canonicalGuard = canonicalCustomerGuardHealth(env);
   const identityDiagnostic = identityDamageDiagnosticHealth(env);
+  const marketingCockpit = marketingCockpitHealth(env);
+  const marketingBrowserPolish = marketingBrowserPolishHealth(env);
   const headers = copyHeaders(response);
   headers.set("content-type", "application/json; charset=utf-8");
   return new Response(JSON.stringify({
@@ -43,7 +47,9 @@ async function patchHealth(response, env){
     ...customerDetail,
     ...customerIdentity,
     ...canonicalGuard,
-    ...identityDiagnostic
+    ...identityDiagnostic,
+    ...marketingCockpit,
+    ...marketingBrowserPolish
   }, null, 2), { status: response.status, headers });
 }
 
@@ -72,6 +78,9 @@ export default {
     const guardedUpsertResponse = await handleGuardedCustomerUpsert(request, env, app, ctx);
     if(guardedUpsertResponse) return guardedUpsertResponse;
 
+    const marketingResponse = await handleMarketingCrmRoute(request, env);
+    if(marketingResponse) return marketingResponse;
+
     const identityResponse = await handleCustomerIdentityResolver(request, env);
     if(identityResponse) return identityResponse;
 
@@ -94,7 +103,11 @@ export default {
       response = await patchHealth(response, env);
       return patchReconciliationHealth(response);
     }
-    if(request.method === "GET" && url.pathname === "/admin") return injectReviewLink(response,url);
+    if(request.method === "GET" && url.pathname === "/admin"){
+      response = await injectReviewLink(response,url);
+      response = await patchMarketingCrmHtml(response, env);
+      return patchMarketingBrowserPolish(response, env);
+    }
     return response;
   }
 };
