@@ -1,4 +1,4 @@
-const BUILD = "customer-identity-resolver-20260820-line-follow-02";
+const BUILD = "customer-identity-resolver-20260823-existing-missing-id-01";
 const SEQUENCE_KEY = "canonical_customer_id";
 const MAX_SEQUENCE = 999999;
 const MAX_COLLISION_RETRIES = 32;
@@ -9,6 +9,7 @@ function json(data,status=200){ return new Response(JSON.stringify(data,null,2),
 function bearer(request){ const a=text(request.headers.get("authorization")); return /^Bearer\s+/i.test(a)?a.replace(/^Bearer\s+/i,"").trim():""; }
 function internalToken(request){ return text(request.headers.get("x-internal-token")) || bearer(request); }
 function failure(error,status=409,extra={}){ return {ok:false,statusCode:status,error,review_required:status===409,...extra}; }
+function changedRows(result){ return Number(result?.meta?.changes ?? result?.changes ?? result?.rowsAffected ?? 0); }
 
 export function isFormalLineUserId(v){ return /^U[0-9a-fA-F]{20,}$/.test(text(v)); }
 export function isPlaceholderCustomerName(v){ const s=text(v); return !s || s==="名称未設定"; }
@@ -21,7 +22,7 @@ export function formatCanonicalCustomerId(year,sequence){
   const y=Number(year), n=Number(sequence);
   if(!Number.isInteger(y)||y<2000||y>9999) throw new Error("invalid_customer_identity_year");
   if(!Number.isInteger(n)||n<1||n>MAX_SEQUENCE) throw new Error("customer_identity_sequence_exhausted");
-  return String(y%100).padStart(2,"0")+String(n).padStart(6,"0");
+  return String(y%100).padStart(2,"")+String(n).padStart(6,"0");
 }
 
 async function all(db,sql,...params){ let s=db.prepare(sql); if(params.length)s=s.bind(...params); const r=await s.all(); return r.results||[]; }
@@ -119,6 +120,33 @@ async function reconcileExistingRegistry(db,existing,reg,input){
   return null;
 }
 
+async function resolveExistingMissingCustomerId(db,existing,reg,input,year){
+  const lineUserId=input.line_user_id;
+  const regId=text(reg&&reg.customer_id);
+  if(regId) return failure("identity_registry_mismatch",409,{customer_id:regId});
+
+  const allocation=await allocateCustomerId(db,year);
+  if(!allocation.ok) return allocation;
+  let customerId=allocation.customer_id;
+  let updatedExisting={...existing,customer_id:customerId};
+
+  const assigned=await run(db,`UPDATE customers SET customer_id=?,updated_at=? WHERE line_user_id=? AND (customer_id IS NULL OR trim(customer_id)='')`,customerId,nowIso(),lineUserId);
+  if(changedRows(assigned)!==1){
+    const refreshed=await existingByLine(db,lineUserId);
+    if(refreshed.length>1) return failure("duplicate_existing_line_identity",409,{customer_count:refreshed.length});
+    const winner=text(refreshed[0]&&refreshed[0].customer_id);
+    if(!winner) return failure("existing_customer_id_assignment_failed",409);
+    customerId=winner;
+    updatedExisting=refreshed[0];
+  }
+
+  const refreshedReg=await registryByLine(db,lineUserId);
+  const mismatch=await reconcileExistingRegistry(db,updatedExisting,refreshedReg,input);
+  if(mismatch) return mismatch;
+  const finalCustomer=await applyCustomerMetadata(db,updatedExisting,input);
+  return {ok:true,status:"resolved_existing",customer_id:text(finalCustomer.customer_id),created:false,canonical:true,replayed:false};
+}
+
 async function resumeRegistry(db,reg,input,year){
   const lineUserId=input.line_user_id;
   let customerId=text(reg.customer_id);
@@ -182,6 +210,7 @@ export async function resolveOrCreateCustomerIdentity(env,input={},options={}){
 
     if(existing.length===1){
       if(lineReg && idem && Number(lineReg.id)!==Number(idem.id)) return failure("identity_registry_mismatch",409);
+      if(!text(existing[0].customer_id)) return resolveExistingMissingCustomerId(db,existing[0],lineReg,normalizedInput,year);
       const mismatch=await reconcileExistingRegistry(db,existing[0],lineReg,normalizedInput);
       if(mismatch) return mismatch;
       await applyCustomerMetadata(db,existing[0],normalizedInput);
