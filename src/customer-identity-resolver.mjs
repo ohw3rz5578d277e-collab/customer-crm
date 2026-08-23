@@ -22,7 +22,7 @@ export function formatCanonicalCustomerId(year,sequence){
   const y=Number(year), n=Number(sequence);
   if(!Number.isInteger(y)||y<2000||y>9999) throw new Error("invalid_customer_identity_year");
   if(!Number.isInteger(n)||n<1||n>MAX_SEQUENCE) throw new Error("customer_identity_sequence_exhausted");
-  return String(y%100).padStart(2,"")+String(n).padStart(6,"0");
+  return String(y%100).padStart(2,"0")+String(n).padStart(6,"0");
 }
 
 async function all(db,sql,...params){ let s=db.prepare(sql); if(params.length)s=s.bind(...params); const r=await s.all(); return r.results||[]; }
