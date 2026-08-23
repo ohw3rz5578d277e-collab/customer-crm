@@ -1,0 +1,88 @@
+name: Deploy responsive CRM UI hotfix
+
+on:
+  push:
+    branches:
+      - hotfix/crm-responsive-production-20260823
+    paths:
+      - src/production-index-crm-browser-root-entry.js
+      - .github/workflows/deploy-responsive-ui-hotfix.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: customer-crm-responsive-ui-hotfix
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Validate and deploy UI-only hotfix
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout hotfix branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify UI-only diff and syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main --depth=1
+          changed="$(git diff --name-only origin/main...HEAD)"
+          printf '%s\n' "$changed"
+          allowed='^(src/production-index-crm-browser-root-entry\.js|\.github/workflows/deploy-responsive-ui-hotfix\.yml)$'
+          if printf '%s\n' "$changed" | grep -Ev "$allowed"; then
+            echo "Unexpected non-UI hotfix file detected" >&2
+            exit 1
+          fi
+          node --check src/production-index-crm-browser-root-entry.js
+          node - <<'NODE'
+          const fs=require('fs');
+          const s=fs.readFileSync('src/production-index-crm-browser-root-entry.js','utf8');
+          for(const token of [
+            'crm-responsive-production-hotfix-20260823',
+            '.app,body>main,main,.main',
+            '.crm-bottom-nav,.crm-mf-bottom,.crm-mf-fab,.crm-mf-scrolltop',
+            '@media (min-width:1024px)',
+            '@media (min-width:768px) and (max-width:1023px)',
+            '@media (max-width:767px)'
+          ]) if(!s.includes(token)) throw new Error('Responsive hotfix token missing: '+token);
+          if(s.includes('customer_identity_sequence') || s.includes('customer_identity_registry')) throw new Error('Identity schema change detected in UI hotfix');
+          console.log('UI-only responsive hotfix validation PASS');
+          NODE
+
+      - name: Confirm Cloudflare authentication
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          wranglerVersion: "4"
+          command: whoami
+
+      - name: Deploy customer-crm-api UI hotfix
+        id: deploy_worker
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          wranglerVersion: "4"
+          command: deploy
+
+      - name: Verify production responsive hotfix
+        shell: bash
+        run: |
+          set -euo pipefail
+          base='https://customer-crm-api.ohw3rz5578d277e.workers.dev'
+          curl -fsS --retry 5 --retry-delay 2 "$base/health" -o /tmp/health.json
+          node - <<'NODE'
+          const h=require('/tmp/health.json');
+          if(h.responsive_admin_hotfix!==true) throw new Error('responsive_admin_hotfix health marker missing');
+          if(h.responsive_admin_hotfix_marker!=='crm-responsive-production-hotfix-20260823') throw new Error('responsive hotfix marker mismatch');
+          console.log('Responsive health marker PASS');
+          NODE
+          curl -fsS --retry 5 --retry-delay 2 "$base/admin" -o /tmp/admin.html
+          grep -q 'crm-responsive-production-hotfix-20260823' /tmp/admin.html
+          echo 'Production /admin responsive marker PASS'
