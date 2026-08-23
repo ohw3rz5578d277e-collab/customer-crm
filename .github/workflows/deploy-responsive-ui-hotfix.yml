@@ -1,9 +1,13 @@
 name: Deploy responsive CRM UI hotfix
 
 on:
-  push:
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
     branches:
-      - hotfix/crm-responsive-production-20260823
+      - main
     paths:
       - src/production-index-crm-browser-root-entry.js
       - .github/workflows/deploy-responsive-ui-hotfix.yml
@@ -17,6 +21,7 @@ concurrency:
 
 jobs:
   deploy:
+    if: github.event.pull_request.head.ref == 'hotfix/crm-responsive-production-20260823'
     name: Validate and deploy UI-only hotfix
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -24,7 +29,9 @@ jobs:
       - name: Checkout hotfix branch
         uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Verify UI-only diff and syntax
         shell: bash
