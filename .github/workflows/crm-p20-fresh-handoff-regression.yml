@@ -1,0 +1,72 @@
+name: Temporary CRM P20 Fresh Handoff Regression
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+
+permissions:
+  contents: read
+
+jobs:
+  p20-fresh-handoff-regression:
+    name: Fresh exact-head handoff and identity regression
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.number == 20
+    steps:
+      - name: Checkout exact PR head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Record exact tested head
+        run: |
+          set -euo pipefail
+          echo "TESTED_HEAD=${{ github.event.pull_request.head.sha }}"
+          test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
+
+      - name: Customer ID inheritance and resolver regression
+        run: |
+          set -euo pipefail
+          node tests/customer-identity-resolver.mjs
+
+      - name: CRM UX and browser regression
+        run: |
+          set -euo pipefail
+          node tests/customer-management-ux.mjs
+          node tests/customer-reservation-history-order.mjs
+          node tests/crm-internal-customer-detail.mjs
+          node tests/customer-management-browser.mjs
+
+      - name: Guards, registry, sequence, migration, and internal auth regression
+        run: |
+          set -euo pipefail
+          node tests/crm-canonical-customer-guards.test.mjs
+          node tests/deploy-identity-sequence-monotonic-guard.test.mjs
+          node tests/deploy-identity-sequence-workflow-contract.test.mjs
+
+      - name: Reservation seamless handoff regression
+        run: |
+          set -euo pipefail
+          node tests/crm-reservation-browser-handoff.test.mjs
+
+      - name: Production entry and wrangler main
+        run: |
+          set -euo pipefail
+          node --check src/production-index-crm-browser-root-entry.js
+          node --input-type=module -e "await import('./src/production-index-crm-browser-root-entry.js'); console.log('production entry import PASS')"
+          test -f wrangler.jsonc
+          grep -q 'src/production-index-crm-browser-root-entry.js' wrangler.jsonc
+          echo 'wrangler main PASS'
+
+      - name: Negative safety check
+        run: |
+          set -euo pipefail
+          ! grep -R "workflow_dispatch" -n .github/workflows/crm-p20-fresh-handoff-regression.yml
+          ! grep -R "wrangler deploy\|d1 execute\|pull_request_target" -n .github/workflows/crm-p20-fresh-handoff-regression.yml
+          echo 'temporary verifier safety PASS'
