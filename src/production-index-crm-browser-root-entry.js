@@ -3,6 +3,8 @@ import { handleLineContextEvents, lineContextHealth } from "./crm-line-context-e
 import { handleInternalCustomerDetail, internalCustomerDetailHealth } from "./crm-internal-customer-detail.mjs";
 import { handleReconciliationReview, patchReconciliationHealth } from "./crm-reconciliation-review.mjs";
 import { handleCustomerIdentityResolver, customerIdentityHealth } from "./customer-identity-resolver.mjs";
+import { handleCanonicalLineFollow, handleGuardedCustomerUpsert, canonicalCustomerGuardHealth } from "./crm-canonical-customer-guards.mjs";
+import { handleIdentityDamageDiagnostic, identityDamageDiagnosticHealth } from "./crm-identity-damage-diagnostic.mjs";
 
 const BUILD = "customer-crm-api-browser-root-20260823-responsive-hotfix-01";
 const RESPONSIVE_MARKER = "crm-responsive-production-hotfix-20260823";
@@ -29,6 +31,8 @@ async function patchHealth(response, env){
   const lineContext = await lineContextHealth(env);
   const customerDetail = internalCustomerDetailHealth(env);
   const customerIdentity = customerIdentityHealth(env);
+  const canonicalGuard = canonicalCustomerGuardHealth(env);
+  const identityDiagnostic = identityDamageDiagnosticHealth(env);
   const headers = copyHeaders(response);
   headers.set("content-type", "application/json; charset=utf-8");
   return new Response(JSON.stringify({
@@ -41,7 +45,9 @@ async function patchHealth(response, env){
     responsive_desktop_bottom_nav: false,
     ...lineContext,
     ...customerDetail,
-    ...customerIdentity
+    ...customerIdentity,
+    ...canonicalGuard,
+    ...identityDiagnostic
   }, null, 2), { status: response.status, headers });
 }
 
@@ -100,6 +106,15 @@ html,body{width:100%!important;max-width:none!important;min-width:0!important}
 export default {
   async fetch(request, env, ctx){
     const url = new URL(request.url);
+
+    const diagnosticResponse = await handleIdentityDamageDiagnostic(request, env);
+    if(diagnosticResponse) return diagnosticResponse;
+
+    const canonicalFollowResponse = await handleCanonicalLineFollow(request, env);
+    if(canonicalFollowResponse) return canonicalFollowResponse;
+
+    const guardedUpsertResponse = await handleGuardedCustomerUpsert(request, env, app, ctx);
+    if(guardedUpsertResponse) return guardedUpsertResponse;
 
     const identityResponse = await handleCustomerIdentityResolver(request, env);
     if(identityResponse) return identityResponse;

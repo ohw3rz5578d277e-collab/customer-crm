@@ -171,6 +171,23 @@ jobs:
           wranglerVersion: "4"
           command: d1 migrations apply customer-crm-db --remote
 
+      - name: Verify identity sequence before deploy (READ ONLY)
+        id: verify_sequence_predeploy
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          wranglerVersion: "4"
+          command: d1 execute customer-crm-db --remote --command "SELECT s.sequence_key,s.last_value,(SELECT COALESCE(MAX(CAST(SUBSTR(customer_id,3,6) AS INTEGER)),0) FROM customers WHERE customer_id GLOB '[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]') AS existing_numeric_suffix_max FROM customer_identity_sequence s WHERE s.sequence_key='canonical_customer_id';" --json
+
+      - name: Assert identity sequence monotonic before deploy
+        shell: bash
+        env:
+          SEQUENCE_OUTPUT: ${{ steps.verify_sequence_predeploy.outputs.command-output }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$SEQUENCE_OUTPUT" | node scripts/assert-customer-identity-sequence-monotonic.mjs
+
       - name: Deploy customer-crm-api
         id: deploy_worker
         uses: cloudflare/wrangler-action@v4
@@ -223,7 +240,7 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           wranglerVersion: "4"
-          command: d1 execute customer-crm-db --remote --command "SELECT sequence_key,last_value FROM customer_identity_sequence WHERE sequence_key='canonical_customer_id'; SELECT COALESCE(MAX(CAST(SUBSTR(customer_id,3,6) AS INTEGER)),0) AS existing_numeric_suffix_max FROM customers WHERE customer_id GLOB '[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]';" --json
+          command: d1 execute customer-crm-db --remote --command "SELECT s.sequence_key,s.last_value,(SELECT COALESCE(MAX(CAST(SUBSTR(customer_id,3,6) AS INTEGER)),0) FROM customers WHERE customer_id GLOB '[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]') AS existing_numeric_suffix_max FROM customer_identity_sequence s WHERE s.sequence_key='canonical_customer_id';" --json
 
       - name: Assert D1 verification results
         shell: bash
@@ -270,8 +287,9 @@ jobs:
           const missingIndexes = requiredIndexes.filter(x => !indexes.includes(x));
           if (missingIndexes.length) throw new Error(`Missing indexes: ${missingIndexes.join(', ')}`);
           if (!sequence.includes('canonical_customer_id') || !sequence.includes('last_value') || !sequence.includes('existing_numeric_suffix_max')) throw new Error('Identity sequence state missing');
-          console.log('Managed tracking, D1 tables, columns, indexes, and sequence state verified.');
+          console.log('Managed tracking, D1 tables, columns, indexes, and sequence state presence verified.');
           NODE
+          printf '%s' "$SEQUENCE_OUTPUT" | node scripts/assert-customer-identity-sequence-monotonic.mjs
 
       - name: Verify deployed Worker safety (READ ONLY HTTP)
         shell: bash

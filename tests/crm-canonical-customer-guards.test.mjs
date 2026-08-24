@@ -1,0 +1,60 @@
+import fs from 'node:fs';
+import assert from 'node:assert/strict';
+import {DatabaseSync} from 'node:sqlite';
+import {handleCanonicalLineFollow,handleGuardedCustomerUpsert,isFormalLineUserId} from '../src/crm-canonical-customer-guards.mjs';
+import {runIdentityDamageDiagnostic} from '../src/crm-identity-damage-diagnostic.mjs';
+
+const registryMigration=fs.readFileSync('migrations_managed/20260818_customer_identity_registry.sql','utf8');
+const sequenceMigration=fs.readFileSync('migrations_managed/20260818_customer_identity_sequence.sql','utf8');
+const resolverSource=fs.readFileSync('src/customer-identity-resolver.mjs','utf8');
+const uid=n=>'U'+String(n).padStart(32,'0');
+function d1(db){return{prepare(sql){let params=[];return{bind(...v){params=v;return this},async all(){return{results:db.prepare(sql).all(...params)}},async first(){return db.prepare(sql).get(...params)||null},async run(){return db.prepare(sql).run(...params)}}}}}
+function setup(){const db=new DatabaseSync(':memory:');db.exec(`CREATE TABLE customers(customer_id TEXT PRIMARY KEY,name TEXT,line_display_name TEXT,line_user_id TEXT,acquisition_source TEXT,created_at TEXT,updated_at TEXT);`);db.exec(registryMigration);db.exec(sequenceMigration);return{raw:db,env:{DB:d1(db),CRM_INTERNAL_TOKEN:'test-secret'}}}
+async function follow(env,n,event='evt-'+n,display='LINE-'+n){const r=await handleCanonicalLineFollow(new Request('https://crm.example/api/internal/line/follow-canonical-customer',{method:'POST',headers:{'content-type':'application/json','x-internal-token':'test-secret'},body:JSON.stringify({line_user_id:uid(n),display_name:display,webhook_event_id:event,followed_at:'2026-08-20T08:00:00Z',source:'line_follow'})}),env);return{res:r,json:await r.json()};}
+
+assert.equal(isFormalLineUserId('U1234567890abcdef1234'),true);
+assert.equal(isFormalLineUserId('26000123'),false);
+assert.equal(isFormalLineUserId('reservation-R123'),false);
+assert.equal(isFormalLineUserId('Uzzzzzzzzzzzzzzzzzzzz'),false);
+
+// CASE 1: new LINE follow creates canonical Customer ID and registry/customer row.
+{const {raw,env}=setup();const {res,json}=await follow(env,1);assert.equal(res.status,200);assert.equal(json.ok,true);assert.match(json.customer_id,/^26\d{6}$/);assert.equal(raw.prepare('SELECT COUNT(*) n FROM customers').get().n,1);assert.equal(raw.prepare('SELECT COUNT(*) n FROM customer_identity_registry').get().n,1);}
+// CASE 2: follow-only/message-0 lifecycle still creates customer; no message dependency exists in handler.
+{const {raw,env}=setup();const {json}=await follow(env,2);assert.equal(json.ok,true);assert.equal(raw.prepare('SELECT COUNT(*) n FROM customers').get().n,1);assert.equal(json.line_send_executed,false);}
+// CASE 3 + 4: LINE display name is saved and becomes display name only when real name is absent.
+{const {raw,env}=setup();const {json}=await follow(env,3,'evt-3','はな');const c=raw.prepare('SELECT name,line_display_name,line_user_id FROM customers WHERE customer_id=?').get(json.customer_id);assert.equal(c.name,'はな');assert.equal(c.line_display_name,'はな');assert.equal(c.line_user_id,uid(3));}
+// CASE 5: existing real name is preserved while LINE display metadata can update; missing registry is safely reconciled.
+{const {raw,env}=setup();raw.prepare('INSERT INTO customers(customer_id,name,line_display_name,line_user_id) VALUES(?,?,?,?)').run('26000120','山田 花子','old',uid(5));const before=raw.prepare("SELECT last_value FROM customer_identity_sequence WHERE sequence_key='canonical_customer_id'").get().last_value;const {json}=await follow(env,5,'evt-5','はな');assert.equal(json.customer_id,'26000120');const c=raw.prepare("SELECT name,line_display_name FROM customers WHERE customer_id='26000120'").get();assert.equal(c.name,'山田 花子');assert.equal(c.line_display_name,'はな');assert.equal(raw.prepare('SELECT customer_id FROM customer_identity_registry WHERE line_user_id=?').get(uid(5)).customer_id,'26000120');assert.equal(raw.prepare("SELECT last_value FROM customer_identity_sequence WHERE sequence_key='canonical_customer_id'").get().last_value,before);}
+// CASE 6: same LINE resend returns same Customer ID even with a different follow event ID.
+{const {raw,env}=setup();const a=await follow(env,6,'evt-6-a');const b=await follow(env,6,'evt-6-b');assert.equal(a.json.customer_id,b.json.customer_id);assert.equal(raw.prepare('SELECT COUNT(*) n FROM customers').get().n,1);}
+// CASE 7: same webhook retry is idempotent.
+{const {raw,env}=setup();const a=await follow(env,7,'evt-7');const b=await follow(env,7,'evt-7');assert.equal(a.json.customer_id,b.json.customer_id);assert.equal(raw.prepare('SELECT COUNT(*) n FROM customer_identity_registry').get().n,1);}
+// CASE 8: same display name with different formal LINE IDs creates different customers.
+{const {env}=setup();const a=await follow(env,8,'evt-8','同じ名前');const b=await follow(env,9,'evt-9','同じ名前');assert.notEqual(a.json.customer_id,b.json.customer_id);}
+// CASE 9: invalid LINE ID fails closed without customer creation.
+{const {raw,env}=setup();const r=await handleCanonicalLineFollow(new Request('https://crm.example/api/internal/line/follow-canonical-customer',{method:'POST',headers:{'content-type':'application/json','x-internal-token':'test-secret'},body:JSON.stringify({line_user_id:'26000123',display_name:'x',webhook_event_id:'bad'})}),env);assert.equal(r.status,400);assert.equal((await r.json()).error,'invalid_line_user_id');assert.equal(raw.prepare('SELECT COUNT(*) n FROM customers').get().n,0);}
+// CASE 10: duplicate existing formal LINE identity fails closed for review; no auto merge.
+{const {raw,env}=setup();raw.prepare('INSERT INTO customers(customer_id,name,line_user_id) VALUES(?,?,?)').run('26000020','A',uid(10));raw.prepare('INSERT INTO customers(customer_id,name,line_user_id) VALUES(?,?,?)').run('26000021','B',uid(10));const {res,json}=await follow(env,10,'evt-10');assert.equal(res.status,409);assert.equal(json.error,'duplicate_existing_line_identity');assert.equal(json.review_required,true);assert.equal(raw.prepare('SELECT COUNT(*) n FROM customers').get().n,2);}
+// CASE 11: allocator skips customer and registry collisions.
+{const {raw,env}=setup();raw.prepare("UPDATE customer_identity_sequence SET last_value=126 WHERE sequence_key='canonical_customer_id'").run();raw.prepare('INSERT INTO customers(customer_id,name,line_user_id) VALUES(?,?,?)').run('26000127','keep',uid(90));raw.prepare("INSERT INTO customer_identity_registry(customer_id,line_user_id,idempotency_key,source,status) VALUES(?,?,?,?,?)").run('26000128',uid(91),'reserved','test','allocating');const {json}=await follow(env,11,'evt-11');assert.equal(json.customer_id,'26000129');}
+// CASE 12: no random/time-based Customer ID generator exists.
+assert.doesNotMatch(resolverSource,/Math\.random|randomUUID|crypto\.randomUUID/);
+assert.match(resolverSource,/UPDATE customer_identity_sequence[\s\S]*RETURNING last_value/);
+assert.doesNotMatch(resolverSource,/Date\.now\(\)[\s\S]{0,80}customer/i);
+
+// Invalid LINE IDs cannot overwrite an existing valid linkage on either customer upsert path; placeholder/display data cannot overwrite a real name.
+for(const path of ['/api/customers/upsert','/api/sync/customers/upsert']){
+  const {raw,env}=setup();raw.prepare('INSERT INTO customers(customer_id,name,line_display_name,line_user_id) VALUES(?,?,?,?)').run('26000200','実名','old',uid(20));
+  const app={async fetch(req){const b=await req.json();const item=Array.isArray(b)?b[0]:(Array.isArray(b.items)?b.items[0]:b);const old=raw.prepare('SELECT * FROM customers WHERE customer_id=?').get(item.customer_id);const line=item.line_user_id==null?old.line_user_id:item.line_user_id;const name=item.name==null?old.name:item.name;const display=item.line_display_name==null?old.line_display_name:item.line_display_name;raw.prepare('UPDATE customers SET name=?,line_display_name=?,line_user_id=? WHERE customer_id=?').run(name,display,line,item.customer_id);return new Response(JSON.stringify({ok:true}),{headers:{'content-type':'application/json'}})}};
+  const req=new Request('https://crm.example'+path,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({customer_id:'26000200',name:'名称未設定',line_display_name:'LINE nick',line_user_id:'reservation-R123'})});
+  const res=await handleGuardedCustomerUpsert(req,env,app,{});const out=await res.json();const c=raw.prepare("SELECT * FROM customers WHERE customer_id='26000200'").get();assert.equal(c.line_user_id,uid(20),path);assert.equal(c.name,'実名',path);assert.equal(c.line_display_name,'LINE nick',path);assert.equal(out.ignored_invalid_line_user_id_count,1,path);assert.equal(out.protected_existing_real_name_count,1,path);
+}
+
+// Formal LINE identity cannot be silently re-linked or assigned to a second Customer ID through normal upsert.
+{const {raw,env}=setup();raw.prepare('INSERT INTO customers(customer_id,name,line_user_id) VALUES(?,?,?)').run('26000210','owner',uid(21));raw.prepare('INSERT INTO customers(customer_id,name,line_user_id) VALUES(?,?,?)').run('26000211','target',null);let forwarded=false;const app={async fetch(){forwarded=true;return new Response('{}',{headers:{'content-type':'application/json'}})}};const req=new Request('https://crm.example/api/sync/customers/upsert',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({customer_id:'26000211',line_user_id:uid(21)})});const res=await handleGuardedCustomerUpsert(req,env,app,{});const out=await res.json();assert.equal(res.status,409);assert.equal(out.error,'line_identity_already_owned');assert.equal(out.review_required,true);assert.equal(out.mutation_forwarded,false);assert.equal(forwarded,false);assert.equal(raw.prepare("SELECT line_user_id FROM customers WHERE customer_id='26000211'").get().line_user_id,null);}
+{const {raw,env}=setup();raw.prepare('INSERT INTO customers(customer_id,name,line_user_id) VALUES(?,?,?)').run('26000212','owner',uid(22));let forwarded=false;const app={async fetch(){forwarded=true;return new Response('{}',{headers:{'content-type':'application/json'}})}};const req=new Request('https://crm.example/api/customers/upsert',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({customer_id:'26000212',line_user_id:uid(23)})});const res=await handleGuardedCustomerUpsert(req,env,app,{});const out=await res.json();assert.equal(res.status,409);assert.equal(out.error,'customer_line_identity_conflict');assert.equal(forwarded,false);assert.equal(raw.prepare("SELECT line_user_id FROM customers WHERE customer_id='26000212'").get().line_user_id,uid(22));}
+
+// Damage audit is read-only and covers A-M with exact formal LINE validation.
+{const {raw,env}=setup();raw.prepare('INSERT INTO customers(customer_id,name,line_display_name,line_user_id) VALUES(?,?,?,?)').run('reservation-R1','名称未設定',null,'26000123');raw.prepare('INSERT INTO customers(customer_id,name,line_display_name,line_user_id) VALUES(?,?,?,?)').run('26000300','Real','nick',uid(30));const beforeCustomers=raw.prepare('SELECT COUNT(*) n FROM customers').get().n;const beforeRegistry=raw.prepare('SELECT COUNT(*) n FROM customer_identity_registry').get().n;const d=await runIdentityDamageDiagnostic(env);assert.equal(d.ok,true);for(const k of ['customer_id_missing','name_null','name_empty','name_placeholder','line_display_name_missing','line_user_id_missing','line_user_id_invalid_format','line_user_id_equals_customer_id','customer_id_reservation_prefix','registry_missing_for_line_linked_customers','registry_customer_id_mismatch','same_formal_line_id_multiple_customers','same_customer_id_conflicting_line_ids'])assert.ok(Object.hasOwn(d.categories,k),k);assert.equal(d.categories.line_user_id_invalid_format,1);assert.equal(d.categories.customer_id_reservation_prefix,1);assert.equal(d.read_only,true);assert.equal(d.mutation_executed,false);assert.equal(raw.prepare('SELECT COUNT(*) n FROM customers').get().n,beforeCustomers);assert.equal(raw.prepare('SELECT COUNT(*) n FROM customer_identity_registry').get().n,beforeRegistry);}
+
+console.log('CRM canonical LINE follow / upsert safety / read-only audit PASS');
