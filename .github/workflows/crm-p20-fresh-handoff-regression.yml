@@ -24,6 +24,12 @@ jobs:
         with:
           node-version: '22'
 
+      - name: Install browser test runtime
+        run: |
+          set -euo pipefail
+          npm install --no-save playwright
+          npx playwright install chromium
+
       - name: Record exact tested head
         run: |
           set -euo pipefail
