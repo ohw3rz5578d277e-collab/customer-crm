@@ -5,6 +5,7 @@ import { handleReconciliationReview, patchReconciliationHealth } from "./crm-rec
 import { handleCustomerIdentityResolver, customerIdentityHealth } from "./customer-identity-resolver.mjs";
 import { handleCanonicalLineFollow, handleGuardedCustomerUpsert, canonicalCustomerGuardHealth } from "./crm-canonical-customer-guards.mjs";
 import { handleIdentityDamageDiagnostic, identityDamageDiagnosticHealth } from "./crm-identity-damage-diagnostic.mjs";
+import { reservationInternalUser, reservationHandoffBasePath, reservationBrowserHandoffHealth, patchReservationHandoffHtml } from "./crm-reservation-browser-handoff.mjs";
 
 const BUILD = "customer-crm-api-browser-root-20260823-responsive-hotfix-01";
 const RESPONSIVE_MARKER = "crm-responsive-production-hotfix-20260823";
@@ -33,6 +34,7 @@ async function patchHealth(response, env){
   const customerIdentity = customerIdentityHealth(env);
   const canonicalGuard = canonicalCustomerGuardHealth(env);
   const identityDiagnostic = identityDamageDiagnosticHealth(env);
+  const reservationHandoff = reservationBrowserHandoffHealth();
   const headers = copyHeaders(response);
   headers.set("content-type", "application/json; charset=utf-8");
   return new Response(JSON.stringify({
@@ -47,7 +49,8 @@ async function patchHealth(response, env){
     ...customerDetail,
     ...customerIdentity,
     ...canonicalGuard,
-    ...identityDiagnostic
+    ...identityDiagnostic,
+    ...reservationHandoff
   }, null, 2), { status: response.status, headers });
 }
 
@@ -103,6 +106,29 @@ html,body{width:100%!important;max-width:none!important;min-width:0!important}
   return new Response(body,{status:response.status,headers});
 }
 
+async function injectReviewLink(response, url){
+  return patchAdminUi(response, url);
+}
+
+async function patchAdminForReservationHandoff(response, request, url, env){
+  const internal = reservationInternalUser(request, env);
+  if(!internal) return injectReviewLink(response, url);
+  const basePath = reservationHandoffBasePath(request, env);
+  if(!basePath){
+    const headers = copyHeaders(response);
+    headers.set("content-type", "application/json; charset=utf-8");
+    return new Response(JSON.stringify({ok:false,error:"invalid_reservation_handoff_base_path"}), {status:400,headers});
+  }
+  const adminResponse = await patchAdminUi(response, url);
+  const ct = adminResponse.headers.get("content-type") || "";
+  if(adminResponse.status !== 200 || !ct.includes("text/html")) return adminResponse;
+  const body = patchReservationHandoffHtml(await adminResponse.text(), basePath);
+  const headers = copyHeaders(adminResponse);
+  headers.set("content-type", "text/html; charset=utf-8");
+  headers.set("x-crm-reservation-handoff", "reservation-app");
+  return new Response(body,{status:adminResponse.status,statusText:adminResponse.statusText,headers});
+}
+
 export default {
   async fetch(request, env, ctx){
     const url = new URL(request.url);
@@ -138,7 +164,7 @@ export default {
       response = await patchHealth(response, env);
       return patchReconciliationHealth(response);
     }
-    if(request.method === "GET" && url.pathname === "/admin") return patchAdminUi(response,url);
+    if(request.method === "GET" && url.pathname === "/admin") return patchAdminForReservationHandoff(response,request,url,env);
     return response;
   }
 };

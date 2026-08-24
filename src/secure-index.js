@@ -4,6 +4,7 @@
 // ======================================================
 
 import app from "./index.js";
+import { reservationInternalUser } from "./crm-reservation-browser-handoff.mjs";
 
 const BUILD = "customer-crm-api-google-access-20260612-01";
 const ROOT_ADMIN_EMAIL = "ohw3rz5578d277e@gmail.com";
@@ -95,6 +96,8 @@ async function ensureSoftDeleteSchema(env) {
 }
 
 async function getCurrentUser(request, env) {
+  const internal = reservationInternalUser(request, env);
+  if (internal) return internal;
   const email = accessEmail(request);
   if (!email) return null;
   await ensureAdminUsers(env);
