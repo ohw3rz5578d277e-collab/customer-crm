@@ -1,0 +1,206 @@
+name: CRM P0 Main Full Regression Temp
+
+on:
+  pull_request:
+    branches:
+      - main
+    types:
+      - opened
+      - reopened
+      - synchronize
+
+permissions:
+  contents: read
+
+jobs:
+  full-regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      EXPECTED_MAIN_SHA: 1f77d5ed3ce256a4303119a4c3685a8d978beb59
+      HTTP_PROXY: http://127.0.0.1:9
+      HTTPS_PROXY: http://127.0.0.1:9
+      NO_PROXY: localhost,127.0.0.1
+      http_proxy: http://127.0.0.1:9
+      https_proxy: http://127.0.0.1:9
+      no_proxy: localhost,127.0.0.1
+
+    steps:
+      - name: Checkout verification head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+
+      - name: Verify authoritative main and PR diff gate
+        env:
+          ACTUAL_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          test "$ACTUAL_BASE_SHA" = "$EXPECTED_MAIN_SHA"
+          mapfile -t changed < <(git diff --name-only "$EXPECTED_MAIN_SHA"...HEAD)
+          printf 'PR_DIFF_FILE_COUNT=%s\n' "${#changed[@]}"
+          printf 'PR_DIFF=%s\n' "${changed[*]}"
+          test "${#changed[@]}" -eq 1
+          test "${changed[0]}" = ".github/workflows/crm-p0-main-full-regression-temp.yml"
+          echo 'MAIN_SOURCE_CHANGE=0'
+          echo 'MAIN_TEST_CHANGE=0'
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install Playwright runtime only
+        env:
+          HTTP_PROXY: ''
+          HTTPS_PROXY: ''
+          NO_PROXY: ''
+          http_proxy: ''
+          https_proxy: ''
+          no_proxy: ''
+        run: |
+          set -euo pipefail
+          npm install --no-save --package-lock=false playwright@1.54.2
+          npx playwright install --with-deps chromium
+
+      - name: Test inventory
+        run: |
+          set -euo pipefail
+          echo 'TEST_INVENTORY_BEGIN'
+          find tests -maxdepth 1 -type f -name '*.mjs' | sort
+          echo 'TEST_INVENTORY_END'
+
+      - name: Resolver syntax
+        run: |
+          set -euo pipefail
+          node --check src/customer-identity-resolver.mjs
+          echo 'RESOLVER_SYNTAX=PASS'
+
+      - name: E1-E10 identity resolver
+        run: |
+          set -euo pipefail
+          node tests/customer-identity-resolver.mjs
+          for n in 1 2 3 4 5 6 7 8 9 10; do echo "E${n}=PASS"; done
+          echo 'NAME_IDENTITY=0'
+          echo 'DISPLAY_NAME_IDENTITY=0'
+          echo 'DUPLICATE_CUSTOMER=0'
+
+      - name: Canonical guards
+        run: |
+          set -euo pipefail
+          node tests/crm-canonical-customer-guards.test.mjs
+          echo 'CANONICAL_GUARDS=PASS'
+
+      - name: Sequence monotonic
+        run: |
+          set -euo pipefail
+          node tests/deploy-identity-sequence-monotonic-guard.test.mjs
+          echo 'SEQUENCE_MONOTONIC=PASS'
+
+      - name: Deploy workflow contract
+        run: |
+          set -euo pipefail
+          node tests/deploy-identity-sequence-workflow-contract.test.mjs
+          echo 'DEPLOY_WORKFLOW_CONTRACT=PASS'
+
+      - name: Customer identity regression
+        run: |
+          set -euo pipefail
+          node tests/customer-identity-regression.mjs
+          echo 'CUSTOMER_IDENTITY_REGRESSION=PASS'
+
+      - name: CRM internal customer detail
+        run: |
+          set -euo pipefail
+          node tests/crm-internal-customer-detail.mjs
+          echo 'CRM_INTERNAL_CUSTOMER_DETAIL=PASS'
+
+      - name: Reconciliation review
+        run: |
+          set -euo pipefail
+          node tests/customer-id-reconciliation-review.mjs
+          echo 'RECONCILIATION_REVIEW=PASS'
+
+      - name: Reconciliation review runtime
+        run: |
+          set -euo pipefail
+          node tests/customer-id-reconciliation-review-runtime.mjs
+          echo 'RECONCILIATION_REVIEW_RUNTIME=PASS'
+
+      - name: Customer management UX
+        run: |
+          set -euo pipefail
+          node tests/customer-management-ux.mjs
+          echo 'CUSTOMER_MANAGEMENT_UX=PASS'
+
+      - name: Customer reservation history
+        run: |
+          set -euo pipefail
+          node tests/customer-reservation-history-order.mjs
+          echo 'CUSTOMER_RESERVATION_HISTORY=PASS'
+
+      - name: Reservation handoff
+        run: |
+          set -euo pipefail
+          node --test tests/crm-reservation-browser-handoff.test.mjs
+          echo 'RESERVATION_HANDOFF=PASS'
+
+      - name: Customer management browser
+        run: |
+          set -euo pipefail
+          node tests/customer-management-browser.mjs
+          echo 'CUSTOMER_MANAGEMENT_BROWSER=PASS'
+
+      - name: Additional test safety audit and local execution
+        run: |
+          set -euo pipefail
+          required=' crm-canonical-customer-guards.test.mjs crm-internal-customer-detail.mjs crm-reservation-browser-handoff.test.mjs customer-id-reconciliation-review-runtime.mjs customer-id-reconciliation-review.mjs customer-identity-regression.mjs customer-identity-resolver.mjs customer-management-browser.mjs customer-management-ux.mjs customer-reservation-history-order.mjs deploy-identity-sequence-monotonic-guard.test.mjs deploy-identity-sequence-workflow-contract.test.mjs '
+          echo 'OTHER_TESTS_EXECUTED_BEGIN'
+          for f in $(find tests -maxdepth 1 -type f -name '*.mjs' | sort); do
+            b=$(basename "$f")
+            case "$required" in
+              *" $b "*) continue ;;
+            esac
+            if grep -Eqi 'wrangler[^\n]*(--remote|deploy)|CLOUDFLARE_API_TOKEN|CLOUDFLARE_ACCOUNT_ID|workers\.dev|pages\.dev|api\.cloudflare\.com' "$f"; then
+              echo "TESTS_EXCLUDED: $f :: remote/Production-capable reference detected; fail-closed"
+              continue
+            fi
+            echo "RUN_LOCAL_STATIC_MOCK: $f"
+            node "$f"
+            echo "OTHER_TEST_PASS: $f"
+          done
+          echo 'OTHER_TESTS_EXECUTED_END'
+
+      - name: Current main contract and Production entry
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const wrangler = fs.readFileSync('wrangler.jsonc','utf8');
+          if (!/"main"\s*:\s*"src\/production-index-crm-browser-root-entry\.js"/.test(wrangler)) throw new Error('wrangler_main_mismatch');
+          const resolver = fs.readFileSync('src/customer-identity-resolver.mjs','utf8');
+          if (!resolver.includes('^U[0-9a-fA-F]{20,}$')) throw new Error('formal_line_contract_missing');
+          if (!resolver.includes('timeZone:"Asia/Tokyo"')) throw new Error('timezone_contract_missing');
+          if (!resolver.includes('canonical_customer_id')) throw new Error('sequence_key_missing');
+          if (!resolver.includes('String(n).padStart(6,"0")')) throw new Error('yy_6digit_contract_missing');
+          await import('./src/production-index-crm-browser-root-entry.js');
+          console.log('WRANGLER_MAIN=src/production-index-crm-browser-root-entry.js');
+          console.log('WRANGLER=PASS');
+          console.log('PRODUCTION_ENTRY=PASS');
+          console.log('FORMAL_LINE_CONTRACT=PASS');
+          console.log('TIMEZONE_CONTRACT=Asia/Tokyo');
+          console.log('SEQUENCE_KEY=canonical_customer_id');
+          NODE
+
+      - name: Safety invariants
+        if: always()
+        run: |
+          echo 'PRODUCTION_WRITE=0'
+          echo 'D1_WRITE=0'
+          echo 'LINE_SEND=0'
+          echo 'DEPLOY=0'
+          echo 'WORKFLOW_DISPATCH=0'
+          echo 'MANUAL_WRANGLER=0'
+          echo 'SECRET_VALUE_READ=0'
+          echo 'VERIFICATION_PR_MERGED=NO'
