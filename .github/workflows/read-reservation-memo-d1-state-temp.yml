@@ -21,6 +21,23 @@ jobs:
           ref: ${{ github.sha }}
           fetch-depth: 0
 
+      - name: Create temporary Reservation read-only Wrangler config
+        shell: bash
+        run: |
+          cat > /tmp/reservation-readonly-wrangler.jsonc <<'JSON'
+          {
+            "name": "reservation-readonly-diagnostic",
+            "compatibility_date": "2026-05-01",
+            "d1_databases": [
+              {
+                "binding": "DB",
+                "database_name": "reservation-app-db",
+                "database_id": "507be6dd-7c94-4c84-ae28-81624834f84a"
+              }
+            ]
+          }
+          JSON
+
       - name: Confirm Cloudflare authentication
         uses: cloudflare/wrangler-action@v4
         with:
@@ -36,7 +53,7 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           wranglerVersion: "4"
-          command: d1 migrations list reservation-app-db --remote
+          command: d1 migrations list reservation-app-db --remote --config /tmp/reservation-readonly-wrangler.jsonc
 
       - name: Read Reservation memo schema READ ONLY
         id: schema
@@ -46,7 +63,7 @@ jobs:
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           wranglerVersion: "4"
           command: >-
-            d1 execute reservation-app-db --remote --command
+            d1 execute reservation-app-db --remote --config /tmp/reservation-readonly-wrangler.jsonc --command
             "SELECT type,name FROM sqlite_master WHERE name IN ('reservation_memos','reservation_memo_attachments','idx_reservation_memos_reservation_created','idx_reservation_memo_attachments_reservation') ORDER BY name;"
             --json
 
