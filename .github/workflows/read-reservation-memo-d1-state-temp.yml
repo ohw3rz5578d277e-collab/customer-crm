@@ -1,0 +1,74 @@
+name: Read Reservation memo D1 state via CRM credential
+
+on:
+  push:
+    branches:
+      - verify/reservation-memo-d1-readonly-via-crm-token
+    paths:
+      - .github/workflows/read-reservation-memo-d1-state-temp.yml
+
+permissions:
+  contents: read
+
+jobs:
+  read-only:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - name: Confirm Cloudflare authentication
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          wranglerVersion: "4"
+          command: whoami
+
+      - name: List Reservation D1 pending migrations READ ONLY
+        id: pending
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          wranglerVersion: "4"
+          command: d1 migrations list reservation-app-db --remote
+
+      - name: Read Reservation memo schema READ ONLY
+        id: schema
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          wranglerVersion: "4"
+          command: >-
+            d1 execute reservation-app-db --remote --command
+            "SELECT type,name FROM sqlite_master WHERE name IN ('reservation_memos','reservation_memo_attachments','idx_reservation_memos_reservation_created','idx_reservation_memo_attachments_reservation') ORDER BY name;"
+            --json
+
+      - name: Summarize without secrets
+        shell: bash
+        env:
+          PENDING: ${{ steps.pending.outputs.command-output }}
+          SCHEMA: ${{ steps.schema.outputs.command-output }}
+        run: |
+          set -euo pipefail
+          node - <<'NODE'
+          const pending=process.env.PENDING||'';
+          const schema=process.env.SCHEMA||'';
+          const files=[...new Set([...pending.matchAll(/[A-Za-z0-9_.-]+\.sql/g)].map(m=>m[0]))];
+          const required=['reservation_memos','reservation_memo_attachments','idx_reservation_memos_reservation_created','idx_reservation_memo_attachments_reservation'];
+          const present=required.filter(x=>schema.includes(x));
+          console.log('RESERVATION_PENDING_MIGRATIONS='+files.join(','));
+          console.log('RESERVATION_MEMO_SCHEMA_OBJECTS='+present.join(','));
+          console.log('RESERVATION_MEMO_SCHEMA_OBJECT_COUNT='+present.length);
+          NODE
+          echo 'PRODUCTION_D1_WRITE=0'
+          echo 'PRODUCTION_CUSTOMER_WRITE=0'
+          echo 'PRODUCTION_RESERVATION_WRITE=0'
+          echo 'DEPLOY=0'
+          echo 'LINE_SEND=0'
