@@ -25,23 +25,28 @@ jobs:
           ref: ${{ github.sha }}
           fetch-depth: 0
 
-      - name: Verify exact validated UI-only parent
+      - name: Verify validated UI-only Product tree
         shell: bash
         run: |
           set -euo pipefail
           validated='18ffc91f7946ec4495fe08202f29120bcd1f1744'
+          source_head='45e65dc3298ca2c1846659bc32278dbd92d4580d'
           deployed_base='7c1acdd9a3d3f7eabd1bf70f752abef4bc34b276'
-          parent="$(git rev-parse HEAD^)"
-          test "$parent" = "$validated"
-          product_changed="$(git diff --name-only "$deployed_base" "$validated")"
+
+          # The two commits after the validated head are history-only; Product tree must be identical.
+          git diff --quiet "$validated" "$source_head"
+
+          product_changed="$(git diff --name-only "$deployed_base" "$source_head")"
           printf '%s\n' "$product_changed"
           test "$(printf '%s\n' "$product_changed" | sed '/^$/d' | wc -l | tr -d ' ')" = '2'
           printf '%s\n' "$product_changed" | grep -qx 'src/production-index-crm-browser-root-entry.js'
           printf '%s\n' "$product_changed" | grep -qx 'tests/customer-production-owner-layout-regression.mjs'
-          workflow_changed="$(git diff --name-only "$validated" HEAD)"
+
+          workflow_changed="$(git diff --name-only "$source_head" HEAD)"
           test "$workflow_changed" = '.github/workflows/deploy-crm-owner-layout-hotfix-temp.yml'
+
           node --check src/production-index-crm-browser-root-entry.js
-          echo 'EXACT_VALIDATED_UI_ONLY_SOURCE=PASS'
+          echo 'VALIDATED_UI_ONLY_PRODUCT_TREE=PASS'
 
       - name: Confirm Cloudflare authentication
         uses: cloudflare/wrangler-action@v4
