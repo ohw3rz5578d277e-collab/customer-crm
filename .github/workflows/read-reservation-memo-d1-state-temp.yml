@@ -58,18 +58,34 @@ jobs:
             "SELECT type,name FROM sqlite_master WHERE name IN ('reservation_memos','reservation_memo_attachments','idx_reservation_memos_reservation_created','idx_reservation_memo_attachments_reservation') ORDER BY name;"
             --json
 
+      - name: Read D1 migration ledger READ ONLY
+        id: ledger
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          wranglerVersion: "4"
+          command: >-
+            d1 execute reservation-app-db --remote --config /tmp/reservation-readonly-wrangler.jsonc --command
+            "SELECT id,name,applied_at FROM d1_migrations ORDER BY id;"
+            --json
+
       - name: Summarize without secrets
         shell: bash
         env:
           SCHEMA: ${{ steps.schema.outputs.command-output }}
+          LEDGER: ${{ steps.ledger.outputs.command-output }}
         run: |
           set -euo pipefail
           node - <<'NODE'
           const schema=process.env.SCHEMA||'';
+          const ledger=process.env.LEDGER||'';
           const required=['reservation_memos','reservation_memo_attachments','idx_reservation_memos_reservation_created','idx_reservation_memo_attachments_reservation'];
           const present=required.filter(x=>schema.includes(x));
+          const applied=[...new Set([...ledger.matchAll(/[A-Za-z0-9_.-]+\.sql/g)].map(m=>m[0]))];
           console.log('RESERVATION_MEMO_SCHEMA_OBJECTS='+present.join(','));
           console.log('RESERVATION_MEMO_SCHEMA_OBJECT_COUNT='+present.length);
+          console.log('RESERVATION_APPLIED_MIGRATIONS='+applied.join(','));
           NODE
           echo 'PRODUCTION_D1_WRITE=0'
           echo 'PRODUCTION_CUSTOMER_WRITE=0'
