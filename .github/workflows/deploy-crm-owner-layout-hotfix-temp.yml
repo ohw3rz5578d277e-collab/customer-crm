@@ -1,0 +1,74 @@
+name: Deploy CRM owner layout hotfix one-shot
+
+on:
+  push:
+    branches:
+      - hotfix/crm-production-desktop-layout-owner-fail-20260825
+    paths:
+      - .github/workflows/deploy-crm-owner-layout-hotfix-temp.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: crm-owner-layout-hotfix-one-shot
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout exact pushed head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - name: Verify exact validated UI-only parent
+        shell: bash
+        run: |
+          set -euo pipefail
+          validated='18ffc91f7946ec4495fe08202f29120bcd1f1744'
+          deployed_base='7c1acdd9a3d3f7eabd1bf70f752abef4bc34b276'
+          parent="$(git rev-parse HEAD^)"
+          test "$parent" = "$validated"
+          product_changed="$(git diff --name-only "$deployed_base" "$validated")"
+          printf '%s\n' "$product_changed"
+          test "$(printf '%s\n' "$product_changed" | sed '/^$/d' | wc -l | tr -d ' ')" = '2'
+          printf '%s\n' "$product_changed" | grep -qx 'src/production-index-crm-browser-root-entry.js'
+          printf '%s\n' "$product_changed" | grep -qx 'tests/customer-production-owner-layout-regression.mjs'
+          workflow_changed="$(git diff --name-only "$validated" HEAD)"
+          test "$workflow_changed" = '.github/workflows/deploy-crm-owner-layout-hotfix-temp.yml'
+          node --check src/production-index-crm-browser-root-entry.js
+          echo 'EXACT_VALIDATED_UI_ONLY_SOURCE=PASS'
+
+      - name: Confirm Cloudflare authentication
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          wranglerVersion: "4"
+          command: whoami
+
+      - name: Deploy exact UI-only hotfix
+        id: deploy_worker
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          wranglerVersion: "4"
+          command: deploy
+
+      - name: Deployment evidence
+        shell: bash
+        env:
+          DEPLOYMENT_URL: ${{ steps.deploy_worker.outputs.deployment-url }}
+          DEPLOY_OUTPUT: ${{ steps.deploy_worker.outputs.command-output }}
+        run: |
+          set -euo pipefail
+          echo "DEPLOYMENT_URL=${DEPLOYMENT_URL}"
+          printf '%s\n' "$DEPLOY_OUTPUT" | grep -E 'Uploaded|Deployed|Version ID|Current Version ID|workers.dev' || true
+          echo 'PRODUCTION_D1_WRITE=0'
+          echo 'PRODUCTION_CUSTOMER_WRITE=0'
+          echo 'LINE_SEND=0'
