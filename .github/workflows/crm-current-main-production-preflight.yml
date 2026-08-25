@@ -128,6 +128,35 @@ jobs:
           console.log('PRODUCTION_D1_READONLY_EVIDENCE=PASS');
           NODE
 
+      - name: Read identity sequence monotonic state READ ONLY
+        id: sequence
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          wranglerVersion: '4'
+          command: d1 execute customer-crm-db --remote --command "SELECT s.sequence_key,s.last_value,(SELECT COALESCE(MAX(CAST(SUBSTR(customer_id,3,6) AS INTEGER)),0) FROM customers WHERE customer_id GLOB '[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]') AS existing_numeric_suffix_max FROM customer_identity_sequence s WHERE s.sequence_key='canonical_customer_id';" --json
+
+      - name: Assert identity sequence monotonic READ ONLY
+        shell: bash
+        env:
+          SEQUENCE: ${{ steps.sequence.outputs.command-output }}
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const out = process.env.SEQUENCE || '';
+          if (!out.includes('canonical_customer_id')) throw new Error('Canonical sequence row missing');
+          const last = out.match(/"last_value"\s*:\s*([0-9]+)/)?.[1];
+          const max = out.match(/"existing_numeric_suffix_max"\s*:\s*([0-9]+)/)?.[1];
+          if (last == null || max == null) throw new Error('Sequence numeric evidence missing');
+          const lastValue = Number(last), maxExisting = Number(max);
+          if (!Number.isSafeInteger(lastValue) || !Number.isSafeInteger(maxExisting)) throw new Error('Sequence evidence is not integer-safe');
+          if (lastValue < maxExisting) throw new Error(`Sequence is behind existing Customer IDs: ${lastValue} < ${maxExisting}`);
+          console.log(`IDENTITY_SEQUENCE_LAST_VALUE=${lastValue}`);
+          console.log(`EXISTING_NUMERIC_SUFFIX_MAX=${maxExisting}`);
+          console.log('IDENTITY_SEQUENCE_MONOTONIC=PASS');
+          NODE
+
       - name: Safety declaration
         run: |
           echo 'PRODUCTION_D1_WRITE=0'
