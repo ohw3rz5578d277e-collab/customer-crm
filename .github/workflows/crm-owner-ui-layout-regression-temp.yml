@@ -1,0 +1,103 @@
+name: Temporary CRM Owner UI Layout Regression
+
+on:
+  push:
+    branches:
+      - hotfix/crm-production-desktop-layout-owner-fail-20260825
+
+permissions:
+  contents: read
+
+jobs:
+  owner-ui-regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout exact hotfix head
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Enforce deployed-base UI-only scope
+        run: |
+          set -euo pipefail
+          BASE=7c1acdd9a3d3f7eabd1bf70f752abef4bc34b276
+          git cat-file -e "$BASE^{commit}"
+          mapfile -t changed < <(git diff --name-only "$BASE"...HEAD)
+          printf 'CHANGED_FILES=%s\n' "${changed[*]}"
+          allowed='^(src/production-index-crm-browser-root-entry\.js|tests/customer-production-owner-layout-regression\.mjs|\.github/workflows/crm-owner-ui-layout-regression-temp\.yml)$'
+          if printf '%s\n' "${changed[@]}" | grep -Ev "$allowed"; then
+            echo 'Unexpected file outside UI/test/temp-workflow scope' >&2
+            exit 1
+          fi
+          if printf '%s\n' "${changed[@]}" | grep -Eq 'customer-identity-resolver|canonical-customer-guards|migration|migrations|wrangler'; then
+            echo 'Identity/migration/wrangler change forbidden' >&2
+            exit 1
+          fi
+          echo 'IDENTITY_SOURCE_CHANGE=0'
+          echo 'MIGRATION_CHANGE=0'
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install Playwright runtime only
+        run: |
+          set -euo pipefail
+          npm install --no-save --package-lock=false playwright@1.54.2
+          npx playwright install --with-deps chromium
+
+      - name: Syntax and UI static regression
+        env:
+          HTTP_PROXY: http://127.0.0.1:9
+          HTTPS_PROXY: http://127.0.0.1:9
+          NO_PROXY: localhost,127.0.0.1
+          http_proxy: http://127.0.0.1:9
+          https_proxy: http://127.0.0.1:9
+          no_proxy: localhost,127.0.0.1
+        run: |
+          set -euo pipefail
+          node --check src/production-index-crm-browser-root-entry.js
+          node tests/customer-management-ux.mjs
+          node tests/customer-reservation-history-order.mjs
+
+      - name: Existing customer browser regression
+        env:
+          HTTP_PROXY: http://127.0.0.1:9
+          HTTPS_PROXY: http://127.0.0.1:9
+          NO_PROXY: localhost,127.0.0.1
+          http_proxy: http://127.0.0.1:9
+          https_proxy: http://127.0.0.1:9
+          no_proxy: localhost,127.0.0.1
+        run: node tests/customer-management-browser.mjs
+
+      - name: Owner computed layout and screenshots
+        env:
+          HTTP_PROXY: http://127.0.0.1:9
+          HTTPS_PROXY: http://127.0.0.1:9
+          NO_PROXY: localhost,127.0.0.1
+          http_proxy: http://127.0.0.1:9
+          https_proxy: http://127.0.0.1:9
+          no_proxy: localhost,127.0.0.1
+        run: node tests/customer-production-owner-layout-regression.mjs
+
+      - name: Upload owner screenshot evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: customer-production-owner-layout
+          path: artifacts/customer-production-owner-layout/
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Safety invariants
+        if: always()
+        run: |
+          echo 'PRODUCTION_CUSTOMER_WRITE=0'
+          echo 'PRODUCTION_D1_WRITE=0'
+          echo 'LINE_SEND=0'
+          echo 'DEPLOY=0'
+          echo 'MERGE=0'
+          echo 'MANUAL_WRANGLER=0'
+          echo 'SECRET_VALUE_READ=0'
