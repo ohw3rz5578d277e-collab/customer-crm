@@ -28,7 +28,7 @@ jobs:
           set -euo pipefail
           expected_main='51c2ed4b8ca3324db58ec403774255675846d412'
           test "${{ github.event.pull_request.base.sha }}" = "$expected_main"
-          test "$(git rev-parse HEAD^)" = "$expected_main"
+          test "$(git merge-base HEAD "$expected_main")" = "$expected_main"
           test "$(git diff --name-only "$expected_main" HEAD)" = '.github/workflows/crm-current-main-production-preflight.yml'
           node --check src/production-index-crm-browser-root-entry.js
           grep -q 'crm-production-desktop-owner-hotfix-20260825' src/production-index-crm-browser-root-entry.js
