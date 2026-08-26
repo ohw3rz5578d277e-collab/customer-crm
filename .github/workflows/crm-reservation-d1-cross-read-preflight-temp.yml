@@ -1,7 +1,9 @@
 name: Temporary CRM credential Reservation D1 read-only preflight
 
 on:
-  pull_request:
+  push:
+    branches:
+      - 'task/crm-reservation-d1-cross-read-preflight-01'
     paths:
       - '.github/workflows/crm-reservation-d1-cross-read-preflight-temp.yml'
 
