@@ -1,0 +1,106 @@
+name: Dispatch Reservation memo schema from release-gate issue
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  issues: read
+  actions: write
+
+concurrency:
+  group: reservation-memo-production-dispatch-via-crm
+  cancel-in-progress: false
+
+jobs:
+  dispatch:
+    name: Validate Issue #28 command and dispatch canonical migration
+    if: >-
+      github.event.issue.number == 28 &&
+      github.event.issue.pull_request == null &&
+      github.actor == 'ohw3rz5578d277e-collab' &&
+      github.event.comment.user.login == 'ohw3rz5578d277e-collab' &&
+      startsWith(github.event.comment.body, '/reservation-memo-production-migrate ')
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Validate exact command and current CRM main
+        id: gate
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMMAND_BODY: ${{ github.event.comment.body }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$COMMAND_BODY" =~ ^/reservation-memo-production-migrate[[:space:]]+confirm_production=true[[:space:]]+crm_sha=([0-9a-f]{40})[[:space:]]+reservation_sha=([0-9a-f]{40})[[:space:]]+migration_sha256=([0-9a-f]{64})$ ]]; then
+            echo '::error::Invalid Reservation memo production migration command.'
+            exit 1
+          fi
+          crm_sha="${BASH_REMATCH[1]}"
+          reservation_sha="${BASH_REMATCH[2]}"
+          migration_sha256="${BASH_REMATCH[3]}"
+
+          current_crm_sha="$(
+            curl --fail --silent --show-error \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H 'Accept: application/vnd.github+json' \
+              -H 'X-GitHub-Api-Version: 2022-11-28' \
+              "https://api.github.com/repos/${GITHUB_REPOSITORY}/commits/main" \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin)["sha"])'
+          )"
+
+          test "$current_crm_sha" = "$crm_sha"
+          test "$reservation_sha" = '61b1184eb1753822afc1a2d3e923202d08a074ab'
+          test "$migration_sha256" = 'd3b7620d000aff41cf750ee758e5acc73000f9ac9ebd56cb2f445489578030de'
+
+          echo "crm_sha=$crm_sha" >> "$GITHUB_OUTPUT"
+          echo "reservation_sha=$reservation_sha" >> "$GITHUB_OUTPUT"
+          echo "migration_sha256=$migration_sha256" >> "$GITHUB_OUTPUT"
+          echo 'RELEASE_GATE_ISSUE=28'
+
+      - name: Fresh read-only Reservation D1 capability gate
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          wranglerVersion: '4'
+          command: d1 execute reservation-app-db --remote --command "SELECT 1 AS ok;" --json
+
+      - name: Dispatch canonical Reservation memo migration workflow
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CRM_SHA: ${{ steps.gate.outputs.crm_sha }}
+          RESERVATION_SHA: ${{ steps.gate.outputs.reservation_sha }}
+          MIGRATION_SHA256: ${{ steps.gate.outputs.migration_sha256 }}
+        run: |
+          set -euo pipefail
+          payload="$(python3 - <<'PY'
+          import json, os
+          print(json.dumps({
+            'ref':'main',
+            'inputs':{
+              'confirm_production': True,
+              'confirm_crm_sha': os.environ['CRM_SHA'],
+              'confirm_reservation_sha': os.environ['RESERVATION_SHA'],
+              'confirm_migration_sha256': os.environ['MIGRATION_SHA256'],
+            }
+          }))
+          PY
+          )"
+          code="$(curl --silent --show-error --output /tmp/dispatch.txt --write-out '%{http_code}' \
+            --request POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/apply-reservation-memo-schema-via-crm.yml/dispatches" \
+            -d "$payload")"
+          if [[ "$code" != '204' ]]; then
+            cat /tmp/dispatch.txt >&2 || true
+            echo "::error::Canonical Reservation memo migration dispatch failed: HTTP $code"
+            exit 1
+          fi
+          echo 'CANONICAL_WORKFLOW=apply-reservation-memo-schema-via-crm.yml'
+          echo 'CANONICAL_EVENT=workflow_dispatch'
+          echo 'BRIDGE_PRODUCTION_WRITE=0'
