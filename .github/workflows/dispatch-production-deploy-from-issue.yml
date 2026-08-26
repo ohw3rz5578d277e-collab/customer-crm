@@ -1,0 +1,96 @@
+name: Dispatch CRM Production deploy from release-gate issue
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  issues: read
+  actions: write
+
+concurrency:
+  group: customer-crm-production-dispatch-bridge
+  cancel-in-progress: false
+
+jobs:
+  dispatch:
+    name: Validate release-gate command and dispatch canonical deploy
+    if: >-
+      github.event.issue.number == 26 &&
+      github.event.issue.pull_request == null &&
+      github.actor == 'ohw3rz5578d277e-collab' &&
+      github.event.comment.user.login == 'ohw3rz5578d277e-collab' &&
+      startsWith(github.event.comment.body, '/crm-production-deploy ')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Validate exact command and current main
+        id: gate
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMMAND_BODY: ${{ github.event.comment.body }}
+          EXPECTED_ACTOR: ohw3rz5578d277e-collab
+          EVENT_ACTOR: ${{ github.actor }}
+        run: |
+          set -euo pipefail
+
+          test "$EVENT_ACTOR" = "$EXPECTED_ACTOR"
+
+          if [[ ! "$COMMAND_BODY" =~ ^/crm-production-deploy[[:space:]]+confirm_production=true[[:space:]]+sha=([0-9a-f]{40})$ ]]; then
+            echo '::error::Invalid production deploy command format.'
+            exit 1
+          fi
+          expected_sha="${BASH_REMATCH[1]}"
+
+          current_sha="$(
+            curl --fail --silent --show-error \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H 'Accept: application/vnd.github+json' \
+              -H 'X-GitHub-Api-Version: 2022-11-28' \
+              "https://api.github.com/repos/${GITHUB_REPOSITORY}/commits/main" \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin)["sha"])'
+          )"
+
+          if [[ "$current_sha" != "$expected_sha" ]]; then
+            echo "::error::Main drift detected. expected=$expected_sha current=$current_sha"
+            exit 1
+          fi
+
+          echo "expected_sha=$expected_sha" >> "$GITHUB_OUTPUT"
+          echo "CURRENT_MAIN_SHA=$current_sha"
+          echo 'RELEASE_GATE_ISSUE=26'
+          echo 'CONFIRM_PRODUCTION=true'
+
+      - name: Dispatch existing canonical Production workflow
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_SHA: ${{ steps.gate.outputs.expected_sha }}
+        run: |
+          set -euo pipefail
+
+          response_code="$(
+            curl --silent --show-error \
+              --output /tmp/dispatch-response.txt \
+              --write-out '%{http_code}' \
+              --request POST \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H 'Accept: application/vnd.github+json' \
+              -H 'X-GitHub-Api-Version: 2022-11-28' \
+              "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/deploy-cloudflare.yml/dispatches" \
+              -d '{"ref":"main"}'
+          )"
+
+          if [[ "$response_code" != '204' ]]; then
+            cat /tmp/dispatch-response.txt >&2 || true
+            echo "::error::Workflow dispatch failed with HTTP $response_code"
+            exit 1
+          fi
+
+          echo 'CANONICAL_WORKFLOW=deploy-cloudflare.yml'
+          echo 'CANONICAL_EVENT=workflow_dispatch'
+          echo "DISPATCH_REQUESTED_FOR_SHA=$EXPECTED_SHA"
+          echo 'PRODUCTION_WRITE_PERFORMED_BY_BRIDGE=0'
