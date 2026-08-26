@@ -81,7 +81,7 @@ jobs:
           print(json.dumps({
             'ref':'main',
             'inputs':{
-              'confirm_production': True,
+              'confirm_production': 'true',
               'confirm_crm_sha': os.environ['CRM_SHA'],
               'confirm_reservation_sha': os.environ['RESERVATION_SHA'],
               'confirm_migration_sha256': os.environ['MIGRATION_SHA256'],
