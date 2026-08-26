@@ -1,0 +1,165 @@
+name: Temporary apply Reservation memo schema with CRM D1 credential
+
+on:
+  push:
+    branches:
+      - 'task/crm-reservation-d1-cross-read-preflight-01'
+    paths:
+      - '.github/workflows/crm-reservation-memo-migration-once-temp.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: reservation-memo-production-migration-via-crm-credential
+  cancel-in-progress: false
+
+jobs:
+  migrate:
+    name: Apply exact Reservation memo schema and verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Materialize exact approved Reservation memo SQL
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > /tmp/20260825_reservation_memos.sql <<'SQL'
+          CREATE TABLE IF NOT EXISTS reservation_memos (
+            memo_id TEXT PRIMARY KEY,
+            reservation_id TEXT NOT NULL,
+            message_text TEXT NOT NULL DEFAULT '',
+            sender TEXT NOT NULL DEFAULT 'internal',
+            source TEXT NOT NULL DEFAULT 'reservation_detail',
+            client_request_id TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            UNIQUE(reservation_id, client_request_id)
+          );
+
+          CREATE INDEX IF NOT EXISTS idx_reservation_memos_reservation_created
+            ON reservation_memos(reservation_id, created_at, memo_id);
+
+          CREATE TABLE IF NOT EXISTS reservation_memo_attachments (
+            attachment_id TEXT PRIMARY KEY,
+            memo_id TEXT NOT NULL UNIQUE,
+            reservation_id TEXT NOT NULL,
+            file_name TEXT NOT NULL DEFAULT '',
+            mime_type TEXT NOT NULL,
+            byte_size INTEGER NOT NULL,
+            image_blob BLOB NOT NULL,
+            created_at TEXT NOT NULL
+          );
+
+          CREATE INDEX IF NOT EXISTS idx_reservation_memo_attachments_reservation
+            ON reservation_memo_attachments(reservation_id, created_at, attachment_id);
+          SQL
+          actual_sha256="$(sha256sum /tmp/20260825_reservation_memos.sql | awk '{print $1}')"
+          expected_sha256='d3b7620d000aff41cf750ee758e5acc73000f9ac9ebd56cb2f445489578030de'
+          test "$actual_sha256" = "$expected_sha256"
+          echo "EXACT_MIGRATION_SHA256=$actual_sha256"
+
+      - name: Guard exact SQL safety
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const fs = require('fs');
+          let sql = fs.readFileSync('/tmp/20260825_reservation_memos.sql','utf8')
+            .replace(/--.*$/gm,' ')
+            .replace(/\/\*[\s\S]*?\*\//g,' ');
+          const forbidden = [
+            /\bDROP\b/i,/\bALTER\b/i,/\bDELETE\b/i,/\bUPDATE\b/i,
+            /\bINSERT\b/i,/\bREPLACE\b/i,/\bTRUNCATE\b/i,/\bPRAGMA\b/i,
+            /\bATTACH\b/i,/\bDETACH\b/i
+          ];
+          for (const p of forbidden) if (p.test(sql)) throw new Error(`Forbidden SQL token: ${p}`);
+          const statements = sql.split(';').map(x=>x.trim()).filter(Boolean);
+          if (statements.length !== 4) throw new Error(`Expected exactly 4 statements, got ${statements.length}`);
+          for (const statement of statements) {
+            if (!/^CREATE\s+(TABLE|INDEX)\s+IF\s+NOT\s+EXISTS\b/i.test(statement)) {
+              throw new Error(`Non-approved statement: ${statement.slice(0,120)}`);
+            }
+          }
+          for (const token of [
+            'CREATE TABLE IF NOT EXISTS reservation_memos',
+            'idx_reservation_memos_reservation_created',
+            'CREATE TABLE IF NOT EXISTS reservation_memo_attachments',
+            'idx_reservation_memo_attachments_reservation'
+          ]) if (!sql.includes(token)) throw new Error(`Required migration token missing: ${token}`);
+          console.log('EXACT_MEMO_SQL_SAFETY=PASS');
+          NODE
+
+      - name: Confirm CRM Cloudflare credential authentication
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          wranglerVersion: '4'
+          command: whoami
+
+      - name: Read pre-migration Reservation Production schema and row count
+        id: pre
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          wranglerVersion: '4'
+          command: d1 execute reservation-app-db --remote --command "SELECT type,name FROM sqlite_master WHERE name IN ('reservation_memos','reservation_memo_attachments','idx_reservation_memos_reservation_created','idx_reservation_memo_attachments_reservation') ORDER BY name; SELECT COUNT(*) AS reservation_count_before FROM reservations;" --json
+
+      - name: Apply exact Reservation memo migration
+        id: migrate_exact
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          wranglerVersion: '4'
+          command: d1 execute reservation-app-db --remote --file /tmp/20260825_reservation_memos.sql
+
+      - name: Verify Reservation Production memo schema and row count
+        id: post
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          wranglerVersion: '4'
+          command: d1 execute reservation-app-db --remote --command "SELECT type,name FROM sqlite_master WHERE name IN ('reservation_memos','reservation_memo_attachments','idx_reservation_memos_reservation_created','idx_reservation_memo_attachments_reservation') ORDER BY name; PRAGMA table_info(reservation_memos); PRAGMA table_info(reservation_memo_attachments); SELECT COUNT(*) AS reservation_count_after FROM reservations;" --json
+
+      - name: Assert post-migration evidence
+        shell: bash
+        env:
+          PRE: ${{ steps.pre.outputs.command-output }}
+          POST: ${{ steps.post.outputs.command-output }}
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const pre = process.env.PRE || '';
+          const post = process.env.POST || '';
+          for (const name of [
+            'reservation_memos',
+            'reservation_memo_attachments',
+            'idx_reservation_memos_reservation_created',
+            'idx_reservation_memo_attachments_reservation'
+          ]) if (!post.includes(name)) throw new Error(`Missing Production schema object: ${name}`);
+          for (const col of [
+            'memo_id','reservation_id','message_text','sender','source','client_request_id','created_at',
+            'attachment_id','file_name','mime_type','byte_size','image_blob'
+          ]) if (!post.includes(col)) throw new Error(`Missing memo schema column evidence: ${col}`);
+          const before = pre.match(/reservation_count_before[^0-9]*([0-9]+)/i)?.[1];
+          const after = post.match(/reservation_count_after[^0-9]*([0-9]+)/i)?.[1];
+          if (before == null || after == null) throw new Error('Reservation count evidence missing');
+          if (before !== after) throw new Error(`Reservation row count changed during schema migration: ${before} -> ${after}`);
+          console.log(`RESERVATION_ROW_COUNT_UNCHANGED=${before}`);
+          console.log('RESERVATION_MEMO_PRODUCTION_SCHEMA=PASS');
+          NODE
+
+      - name: Safety declaration
+        run: |
+          echo 'MIGRATION_MODE=EXACT_SCHEMA_ONLY'
+          echo 'GENERIC_D1_MIGRATIONS_APPLY=0'
+          echo 'PRODUCTION_RESERVATION_ROW_WRITE=0'
+          echo 'PRODUCTION_CUSTOMER_WRITE=0'
+          echo 'PRODUCTION_LINE_SEND=0'
+          echo 'WORKER_DEPLOY=0'
