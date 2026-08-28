@@ -6,6 +6,7 @@ import { injectMobileOwnerInteractionRecovery } from './crm-mobile-owner-interac
 import { injectMobileOwnerCardSummary } from './crm-mobile-owner-card-summary.mjs';
 
 const BUILD='customer-crm-customer360-family-marketing-20260828-01';
+const RAW_SCRIPT_CLOSE='<'+String.fromCharCode(92)+'/script>';
 
 function headersFrom(response){
   const h=new Headers(response.headers);
@@ -32,7 +33,9 @@ async function patchHtml(response){
   const withMarketing=injectCustomer360Marketing(await response.text());
   const withSearchFocus=injectCustomer360SearchFocus(withMarketing);
   const withCardSummary=injectMobileOwnerCardSummary(withSearchFocus);
-  return new Response(injectMobileOwnerInteractionRecovery(withCardSummary),{status:response.status,statusText:response.statusText,headers:h});
+  const withRecovery=injectMobileOwnerInteractionRecovery(withCardSummary);
+  const normalized=withRecovery.split(RAW_SCRIPT_CLOSE).join('</script>');
+  return new Response(normalized,{status:response.status,statusText:response.statusText,headers:h});
 }
 
 export default {
