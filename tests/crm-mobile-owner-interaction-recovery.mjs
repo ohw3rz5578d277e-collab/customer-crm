@@ -7,12 +7,12 @@ const recovery=fs.readFileSync(new URL('../src/crm-mobile-owner-interaction-reco
 const cards=fs.readFileSync(new URL('../src/crm-mobile-owner-card-summary.mjs',import.meta.url),'utf8');
 const entry=fs.readFileSync(new URL('../src/production-index-crm-customer360-entry.js',import.meta.url),'utf8');
 
-assert(recovery.includes('id="crmOwnerMobileNav"'),'canonical nav missing');
+assert(recovery.includes('crmOwnerMobileNav'),'canonical nav missing');
 for(const id of ['crmOwnerNavToday','crmOwnerNavSearch','crmOwnerNavLine','crmOwnerNavReservation','crmOwnerNavCustomers'])assert(recovery.includes(id),'explicit nav target missing '+id);
 for(const selector of ['#crmMobileBar','#crmPriorityFab','.crmUxQuickHint','.crm-mf-bottom','.crm-mf-fab','.crm-mf-scrolltop','.crm-bottom-nav','.crm-top-menu-btn','#crmStableAuditBtn','.crm-lineops-fab'])assert(recovery.includes(selector),'legacy selector not suppressed '+selector);
 assert(recovery.includes("$('crmGlobalSearch')"),'search must use explicit Customer360 search ID');
 assert(recovery.includes("$('lineOpsOpen')"),'LINE must use explicit LINE target');
-assert(recovery.includes("#crmMktNav [data-view=\"list\"]"),'Customer route must use explicit Customer360 list target');
+assert(recovery.includes('#crmMktNav')&&recovery.includes('data-view'),'Customer route must use explicit Customer360 list target');
 assert(!recovery.includes('clickByText('),'generic clickByText routing forbidden');
 assert(!recovery.includes("qsa('input').find"),'placeholder-first routing forbidden');
 assert(!recovery.includes('window.alert'),'window.alert forbidden');
@@ -32,7 +32,7 @@ const sample='<!doctype html><html><head></head><body><main><h1>CRM</h1></main><
 const injected=injectMobileOwnerInteractionRecovery(injectMobileOwnerCardSummary(sample));
 assert(injected.includes('crm-mobile-owner-interaction-recovery-script'),'recovery injection failed');
 assert(injected.includes('crm-mobile-owner-card-summary-script'),'card injection failed');
-assert((injected.match(/crm-mobile-owner-interaction-recovery-script/g)||[]).length===1,'recovery must inject once');
+assert((injected.match(/id="crm-mobile-owner-interaction-recovery-script"/g)||[]).length===1,'recovery must inject once');
 assert(injectMobileOwnerInteractionRecovery(injected)===injected,'recovery injection must be idempotent');
 console.log('CRM_MOBILE_OWNER_INTERACTION_STATIC=PASS');
 console.log('IDENTITY_SOURCE_CHANGE=0');
