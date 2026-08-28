@@ -4,6 +4,12 @@ import {
   mergeFamilyMembers,
   CUSTOMER360_HIGH_LTV_THRESHOLD
 } from './crm-customer360-marketing-engine.mjs';
+import {
+  parseCustomerSearchParams,
+  searchCustomerViews,
+  buildFacets,
+  listCustomerDto
+} from './crm-customer360-search.mjs';
 
 const CUSTOMER_ID_RE=/^\d{8}$/;
 const RELATIONS=new Set(['spouse','child','parent','grandparent','other']);
@@ -12,7 +18,7 @@ const num=(v,f=0)=>{const n=Number(String(v??'').replace(/[,円¥\s]/g,''));retu
 const bool=v=>v===true||v===1||String(v).toLowerCase()==='true'||String(v)==='1';
 const dateOnly=v=>{const m=text(v).match(/^(\d{4}-\d{2}-\d{2})/);return m?m[1]:''};
 
-function json(data,status=200){return new Response(JSON.stringify(data,null,2),{status,headers:{'content-type':'application/json; charset=utf-8','cache-control':'no-store','x-robots-tag':'noindex, nofollow','referrer-policy':'no-referrer'}})}
+function json(data,status=200){return new Response(JSON.stringify(data),{status,headers:{'content-type':'application/json; charset=utf-8','cache-control':'no-store','x-robots-tag':'noindex, nofollow','referrer-policy':'no-referrer'}})}
 function accessEmail(request){return text(request.headers.get('cf-access-authenticated-user-email')||request.headers.get('Cf-Access-Authenticated-User-Email')||request.headers.get('cf-access-user-email'))}
 function authorized(request,env){return env?.CRM_LOCAL_TEST_AUTH==='1'||!!accessEmail(request)}
 async function safeAll(env,sql,params=[]){try{let s=env.DB.prepare(sql);if(params.length)s=s.bind(...params);const r=await s.all();return r.results||[]}catch(_){return[]}}
@@ -20,14 +26,42 @@ async function safeFirst(env,sql,params=[]){try{let s=env.DB.prepare(sql);if(par
 async function tableExists(env,name){return !!(await safeFirst(env,"SELECT name FROM sqlite_master WHERE type='table' AND name=? LIMIT 1",[name]))}
 async function familyRows(env,id){if(!(await tableExists(env,'customer_family_members')))return[];return safeAll(env,"SELECT * FROM customer_family_members WHERE customer_id=? AND (deleted_at IS NULL OR deleted_at='') ORDER BY created_at ASC,id ASC",[id])}
 async function profileRow(env,id){if(!(await tableExists(env,'customer_marketing_profiles')))return{};return (await safeFirst(env,"SELECT * FROM customer_marketing_profiles WHERE customer_id=? LIMIT 1",[id]))||{}}
-async function activeCustomers(env){return (await safeAll(env,"SELECT * FROM customers LIMIT 1000")).filter(x=>!text(x.deleted_at))}
+async function activeCustomers(env){return (await safeAll(env,"SELECT * FROM customers")).filter(x=>!text(x.deleted_at))}
 async function viewFor(env,c,onDate){return buildCustomerMarketingView(c,await familyRows(env,text(c.customer_id)),await profileRow(env,text(c.customer_id)),onDate)}
 
+async function loadCustomerViews(env,onDate){
+  const customers=await activeCustomers(env);
+  const managedFamily=await tableExists(env,'customer_family_members')?await safeAll(env,"SELECT * FROM customer_family_members WHERE deleted_at IS NULL OR deleted_at='' ORDER BY customer_id,created_at,id"):[];
+  const profiles=await tableExists(env,'customer_marketing_profiles')?await safeAll(env,"SELECT * FROM customer_marketing_profiles"):[];
+  const familyByCustomer=new Map(),profileByCustomer=new Map();
+  for(const m of managedFamily){const id=text(m.customer_id);if(!familyByCustomer.has(id))familyByCustomer.set(id,[]);familyByCustomer.get(id).push(m)}
+  for(const p of profiles)profileByCustomer.set(text(p.customer_id),p);
+  return customers.map(c=>buildCustomerMarketingView(c,familyByCustomer.get(text(c.customer_id))||[],profileByCustomer.get(text(c.customer_id))||{},onDate));
+}
+
+async function facetData(env,views){
+  const facets=buildFacets(views);
+  if(await tableExists(env,'crm_marketing_campaigns')){
+    const campaignRows=await safeAll(env,"SELECT name FROM crm_marketing_campaigns WHERE (deleted_at IS NULL OR deleted_at='') AND (status IS NULL OR status!='deleted') ORDER BY name");
+    facets.campaigns=[...new Set([...facets.campaigns,...campaignRows.map(x=>text(x.name)).filter(Boolean)])].sort((a,b)=>a.localeCompare(b,'ja'));
+  }
+  return facets;
+}
+
 export async function marketingHomeData(env,onDate=jstToday()){
-  const customers=await activeCustomers(env),views=[];for(const c of customers)views.push(await viewFor(env,c,onDate));
-  const approach=views.filter(v=>v.recommendation.priority_score>0).sort((a,b)=>b.recommendation.priority_score-a.recommendation.priority_score||(a.next_opportunity?.days??99999)-(b.next_opportunity?.days??99999));
+  const views=await loadCustomerViews(env,onDate);
+  const approach=views.filter(v=>v.recommendation.priority_score>0).sort((a,b)=>b.recommendation.priority_score-a.recommendation.priority_score||(a.next_opportunity?.days??99999)-(b.next_opportunity?.days??99999)||text(a.customer_id).localeCompare(text(b.customer_id)));
   const avg=views.length?Math.round(views.reduce((s,v)=>s+v.realized_ltv,0)/views.length):0;
-  return {as_of:onDate,kpis:{customers:views.length,average_realized_ltv:avg,repeat_rate_pct:views.length?Math.round(views.filter(v=>v.shoot_count>=2).length/views.length*100):0,vip_high_ltv:views.filter(v=>v.realized_ltv>=CUSTOMER360_HIGH_LTV_THRESHOLD||v.marketing_classes.includes('VIP')).length,event_90d:views.filter(v=>v.opportunities.some(o=>o.days!=null&&o.days>=0&&o.days<=90)).length,dormant_180:views.filter(v=>num(v.raw.dormant_days)>=180).length,line_link_rate_pct:views.length?Math.round(views.filter(v=>v.line_linked).length/views.length*100):0,approach_this_month:approach.filter(v=>(v.next_opportunity?.days??99999)<=30||v.recommendation.priority_score>=650).length},approach,customers:views};
+  return {as_of:onDate,kpis:{customers:views.length,average_realized_ltv:avg,repeat_rate_pct:views.length?Math.round(views.filter(v=>v.shoot_count>=2).length/views.length*100):0,vip_high_ltv:views.filter(v=>v.realized_ltv>=CUSTOMER360_HIGH_LTV_THRESHOLD||v.marketing_classes.includes('VIP')).length,event_90d:views.filter(v=>v.opportunities.some(o=>o.days!=null&&o.days>=0&&o.days<=90)).length,dormant_180:views.filter(v=>num(v.raw.dormant_days)>=180).length,line_link_rate_pct:views.length?Math.round(views.filter(v=>v.line_linked).length/views.length*100):0,approach_this_month:approach.filter(v=>(v.next_opportunity?.days??99999)<=30||v.recommendation.priority_score>=650).length},top_opportunities:approach.slice(0,12).map(listCustomerDto),facets:await facetData(env,views)};
+}
+
+export async function customerListData(env,searchParams,onDate=jstToday()){
+  const started=Date.now();
+  let parsed;
+  try{parsed=parseCustomerSearchParams(searchParams)}catch(error){return{error:text(error?.message)||'invalid_filter'}}
+  parsed.on_date=parsed.on_date||onDate;
+  const views=await loadCustomerViews(env,onDate),result=searchCustomerViews(views,parsed);
+  return {...result,all_total:views.length,facets:await facetData(env,views),meta:{server_ms:Date.now()-started,privacy_safe_list_dto:true,identity_resolution_used:false}};
 }
 
 export async function customer360Data(env,id,onDate=jstToday()){
@@ -37,7 +71,6 @@ export async function customer360Data(env,id,onDate=jstToday()){
 }
 
 function validateMember(body){const relation=text(body.relation)||'other';if(!RELATIONS.has(relation))return{error:'invalid_relation'};return{member:{relation,name:text(body.name),furigana:text(body.furigana),birthdate:dateOnly(body.birthdate),gender:text(body.gender)||null,school_stage:text(body.school_stage)||null,memo:text(body.memo)}}}
-
 async function familyWrite(request,env){
   if(env?.CRM_CUSTOMER360_WRITE_ENABLED!=='1')return json({ok:false,error:'family_write_disabled'},403);
   const body=await request.json().catch(()=>({})),customerId=text(body.customer_id);if(!CUSTOMER_ID_RE.test(customerId))return json({ok:false,error:'invalid_customer_id'},400);
@@ -47,7 +80,6 @@ async function familyWrite(request,env){
   const v=validateMember(body);if(v.error)return json({ok:false,error:v.error},400);const id=text(body.id)||`fm_${crypto.randomUUID()}`;const existing=await safeFirst(env,"SELECT customer_id FROM customer_family_members WHERE id=? LIMIT 1",[id]);if(existing&&text(existing.customer_id)!==customerId)return json({ok:false,error:'family_member_customer_mismatch'},409);
   const m=v.member,actor=accessEmail(request)||'local-test';await env.DB.prepare(`INSERT INTO customer_family_members(id,customer_id,relation,name,furigana,birthdate,gender,school_stage,memo,created_at,updated_at,updated_by,deleted_at) VALUES(?,?,?,?,?,?,?,?,?,datetime('now'),datetime('now'),?,NULL) ON CONFLICT(id) DO UPDATE SET relation=excluded.relation,name=excluded.name,furigana=excluded.furigana,birthdate=excluded.birthdate,gender=excluded.gender,school_stage=excluded.school_stage,memo=excluded.memo,updated_at=datetime('now'),updated_by=excluded.updated_by,deleted_at=NULL`).bind(id,customerId,m.relation,m.name,m.furigana,m.birthdate,m.gender,m.school_stage,m.memo,actor).run();return json({ok:true,id,customer_id:customerId});
 }
-
 async function profileWrite(request,env){
   if(env?.CRM_CUSTOMER360_WRITE_ENABLED!=='1')return json({ok:false,error:'profile_write_disabled'},403);
   if(!(await tableExists(env,'customer_marketing_profiles')))return json({ok:false,error:'profile_schema_not_applied'},409);
@@ -58,7 +90,8 @@ async function profileWrite(request,env){
 export async function handleCustomer360Request(request,env){
   const url=new URL(request.url);if(!url.pathname.startsWith('/api/customer360/'))return null;if(!authorized(request,env))return json({ok:false,error:'authentication_required'},401);
   const asOf=text(url.searchParams.get('as_of'))||jstToday();
-  if(request.method==='GET'&&(url.pathname==='/api/customer360/marketing-home'||url.pathname==='/api/customer360/customers'))return json({ok:true,...await marketingHomeData(env,asOf)});
+  if(request.method==='GET'&&url.pathname==='/api/customer360/marketing-home')return json({ok:true,...await marketingHomeData(env,asOf)});
+  if(request.method==='GET'&&url.pathname==='/api/customer360/customers'){const data=await customerListData(env,url.searchParams,asOf);return data.error?json({ok:false,error:data.error},400):json({ok:true,...data})}
   if(request.method==='GET'&&url.pathname==='/api/customer360/family'){const id=text(url.searchParams.get('customer_id'));if(!CUSTOMER_ID_RE.test(id))return json({ok:false,error:'invalid_customer_id'},400);const c=await safeFirst(env,"SELECT * FROM customers WHERE customer_id=? LIMIT 1",[id]);if(!c)return json({ok:false,error:'customer_not_found'},404);return json({ok:true,customer_id:id,family:mergeFamilyMembers(c,await familyRows(env,id))})}
   if(request.method==='POST'&&url.pathname==='/api/customer360/family')return familyWrite(request,env);
   if(request.method==='POST'&&url.pathname==='/api/customer360/profile')return profileWrite(request,env);
@@ -66,4 +99,4 @@ export async function handleCustomer360Request(request,env){
   return json({ok:false,error:'not_found'},404);
 }
 
-export function customer360Health(){return{customer360_family_marketing_foundation:true,family_member_limit:'unlimited',family_identity_source:false,realized_ltv_field:'total_revenue',marketing_line_auto_send:false,marketing_profile_default_opt_in:false,production_migration_required:true}}
+export function customer360Health(){return{customer360_family_marketing_foundation:true,customer360_search_first:true,customer360_list_privacy_safe:true,customer360_server_filtering:true,customer360_page_size_max:100,family_member_limit:'unlimited',family_identity_source:false,search_identity_source:false,realized_ltv_field:'total_revenue',marketing_line_auto_send:false,marketing_profile_default_opt_in:false,customer360_write_default_enabled:false}}
