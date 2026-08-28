@@ -8,6 +8,10 @@ import { injectMobileOwnerCardSummary } from './crm-mobile-owner-card-summary.mj
 const BUILD='customer-crm-customer360-family-marketing-20260828-01';
 const RAW_SCRIPT_CLOSE='<'+String.fromCharCode(92)+'/script>';
 
+export function normalizeCustomer360InjectedHtml(html){
+  return String(html||'').split(RAW_SCRIPT_CLOSE).join('</script>');
+}
+
 function headersFrom(response){
   const h=new Headers(response.headers);
   h.delete('content-length');
@@ -34,8 +38,7 @@ async function patchHtml(response){
   const withSearchFocus=injectCustomer360SearchFocus(withMarketing);
   const withCardSummary=injectMobileOwnerCardSummary(withSearchFocus);
   const withRecovery=injectMobileOwnerInteractionRecovery(withCardSummary);
-  const normalized=withRecovery.split(RAW_SCRIPT_CLOSE).join('</script>');
-  return new Response(normalized,{status:response.status,statusText:response.statusText,headers:h});
+  return new Response(normalizeCustomer360InjectedHtml(withRecovery),{status:response.status,statusText:response.statusText,headers:h});
 }
 
 export default {
