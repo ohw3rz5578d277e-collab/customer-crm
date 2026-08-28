@@ -2,8 +2,15 @@ import app from './production-index-crm-browser-root-entry.js';
 import { handleCustomer360Request, customer360Health } from './crm-customer360-runtime.mjs';
 import { injectCustomer360Marketing } from './crm-customer360-ui.mjs';
 import { injectCustomer360SearchFocus } from './crm-customer360-search-focus.mjs';
+import { injectMobileOwnerInteractionRecovery } from './crm-mobile-owner-interaction-recovery.mjs';
+import { injectMobileOwnerCardSummary } from './crm-mobile-owner-card-summary.mjs';
 
 const BUILD='customer-crm-customer360-family-marketing-20260828-01';
+const RAW_SCRIPT_CLOSE='<'+String.fromCharCode(92)+'/script>';
+
+export function normalizeCustomer360InjectedHtml(html){
+  return String(html||'').split(RAW_SCRIPT_CLOSE).join('</script>');
+}
 
 function headersFrom(response){
   const h=new Headers(response.headers);
@@ -28,7 +35,10 @@ async function patchHtml(response){
   const h=headersFrom(response);
   h.set('content-type','text/html; charset=utf-8');
   const withMarketing=injectCustomer360Marketing(await response.text());
-  return new Response(injectCustomer360SearchFocus(withMarketing),{status:response.status,statusText:response.statusText,headers:h});
+  const withSearchFocus=injectCustomer360SearchFocus(withMarketing);
+  const withCardSummary=injectMobileOwnerCardSummary(withSearchFocus);
+  const withRecovery=injectMobileOwnerInteractionRecovery(withCardSummary);
+  return new Response(normalizeCustomer360InjectedHtml(withRecovery),{status:response.status,statusText:response.statusText,headers:h});
 }
 
 export default {
