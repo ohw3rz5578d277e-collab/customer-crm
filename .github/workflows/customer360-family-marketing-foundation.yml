@@ -44,7 +44,9 @@ jobs:
           ! grep -E "ALTER[[:space:]]+TABLE[[:space:]]+customers" migrations_managed/20260828_customer360_family_marketing_foundation.sql
 
       - name: Unit and static regression
-        run: node tests/customer360-family-marketing-foundation.mjs
+        run: |
+          node tests/customer360-family-marketing-foundation.mjs
+          node tests/customer360-family-marketing-birthday-thresholds.mjs
 
       - name: Install local browser/build tooling
         run: |
