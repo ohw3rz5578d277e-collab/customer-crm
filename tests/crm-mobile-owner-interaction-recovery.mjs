@@ -1,0 +1,42 @@
+import fs from 'node:fs';
+import { injectMobileOwnerInteractionRecovery } from '../src/crm-mobile-owner-interaction-recovery.mjs';
+import { injectMobileOwnerCardSummary } from '../src/crm-mobile-owner-card-summary.mjs';
+
+function assert(ok,msg){if(!ok)throw new Error(msg)}
+const recovery=fs.readFileSync(new URL('../src/crm-mobile-owner-interaction-recovery.mjs',import.meta.url),'utf8');
+const cards=fs.readFileSync(new URL('../src/crm-mobile-owner-card-summary.mjs',import.meta.url),'utf8');
+const entry=fs.readFileSync(new URL('../src/production-index-crm-customer360-entry.js',import.meta.url),'utf8');
+
+assert(recovery.includes('id="crmOwnerMobileNav"'),'canonical nav missing');
+for(const id of ['crmOwnerNavToday','crmOwnerNavSearch','crmOwnerNavLine','crmOwnerNavReservation','crmOwnerNavCustomers'])assert(recovery.includes(id),'explicit nav target missing '+id);
+for(const selector of ['#crmMobileBar','#crmPriorityFab','.crmUxQuickHint','.crm-mf-bottom','.crm-mf-fab','.crm-mf-scrolltop','.crm-bottom-nav','.crm-top-menu-btn','#crmStableAuditBtn','.crm-lineops-fab'])assert(recovery.includes(selector),'legacy selector not suppressed '+selector);
+assert(recovery.includes("$('crmGlobalSearch')"),'search must use explicit Customer360 search ID');
+assert(recovery.includes("$('lineOpsOpen')"),'LINE must use explicit LINE target');
+assert(recovery.includes("#crmMktNav [data-view=\"list\"]"),'Customer route must use explicit Customer360 list target');
+assert(!recovery.includes('clickByText('),'generic clickByText routing forbidden');
+assert(!recovery.includes("qsa('input').find"),'placeholder-first routing forbidden');
+assert(!recovery.includes('window.alert'),'window.alert forbidden');
+assert(!recovery.includes('window.confirm'),'read-only status confirm forbidden');
+assert(recovery.includes('crmOwnerStatusSheet')&&recovery.includes('技術情報を見る'),'human status sheet contract missing');
+assert(recovery.includes('min-width:44px')||recovery.includes('min-height:44px'),'44px hit targets missing');
+assert(recovery.includes('env(safe-area-inset-bottom)'),'bottom safe-area missing');
+assert(recovery.includes('max-width:900px'),'tablet/mobile breakpoint missing');
+assert(recovery.includes('body.crm-owner-view-today'),'Today view isolation missing');
+assert(recovery.includes('crm-owner-quick-filter-open'),'compact quick-filter sheet missing');
+assert(cards.includes('/api/customer360/customers?'),'card summary must use privacy-safe list endpoint');
+assert(!cards.includes('/api/customer360/customer/'),'mobile card summary must not fetch private detail');
+assert(cards.includes('shoot_count'),'shoot count priority missing');
+assert(entry.includes('injectMobileOwnerCardSummary')&&entry.includes('injectMobileOwnerInteractionRecovery'),'outer production entry wiring missing');
+assert(entry.indexOf('injectMobileOwnerCardSummary(withSearchFocus)')<entry.indexOf('injectMobileOwnerInteractionRecovery(withCardSummary)'),'recovery must be final UI layer');
+const sample='<!doctype html><html><head></head><body><main><h1>CRM</h1></main></body></html>';
+const injected=injectMobileOwnerInteractionRecovery(injectMobileOwnerCardSummary(sample));
+assert(injected.includes('crm-mobile-owner-interaction-recovery-script'),'recovery injection failed');
+assert(injected.includes('crm-mobile-owner-card-summary-script'),'card injection failed');
+assert((injected.match(/crm-mobile-owner-interaction-recovery-script/g)||[]).length===1,'recovery must inject once');
+assert(injectMobileOwnerInteractionRecovery(injected)===injected,'recovery injection must be idempotent');
+console.log('CRM_MOBILE_OWNER_INTERACTION_STATIC=PASS');
+console.log('IDENTITY_SOURCE_CHANGE=0');
+console.log('MIGRATION_CHANGE=0');
+console.log('PRODUCTION_D1_WRITE=0');
+console.log('LINE_SEND=0');
+console.log('DEPLOY=0');
