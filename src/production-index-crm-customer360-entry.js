@@ -1,6 +1,7 @@
 import app from './production-index-crm-browser-root-entry.js';
 import { handleCustomer360Request, customer360Health } from './crm-customer360-runtime.mjs';
 import { injectCustomer360Marketing } from './crm-customer360-ui.mjs';
+import { injectCustomer360SearchFocus } from './crm-customer360-search-focus.mjs';
 
 const BUILD='customer-crm-customer360-family-marketing-20260828-01';
 
@@ -26,7 +27,8 @@ async function patchHtml(response){
   if(response.status!==200||!ct.includes('text/html'))return response;
   const h=headersFrom(response);
   h.set('content-type','text/html; charset=utf-8');
-  return new Response(injectCustomer360Marketing(await response.text()),{status:response.status,statusText:response.statusText,headers:h});
+  const withMarketing=injectCustomer360Marketing(await response.text());
+  return new Response(injectCustomer360SearchFocus(withMarketing),{status:response.status,statusText:response.statusText,headers:h});
 }
 
 export default {
