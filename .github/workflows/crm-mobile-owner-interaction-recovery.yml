@@ -1,0 +1,118 @@
+name: CRM mobile owner interaction recovery
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'src/crm-mobile-owner-interaction-recovery.mjs'
+      - 'src/crm-mobile-owner-card-summary.mjs'
+      - 'src/production-index-crm-customer360-entry.js'
+      - 'tests/**'
+      - '.github/workflows/crm-mobile-owner-interaction-recovery.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Checkout exact PR head
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Guard scope and Production safety
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$HEAD_SHA"
+          git cat-file -e "$BASE_SHA^{commit}"
+          mapfile -t changed < <(git diff --name-only "$BASE_SHA...$HEAD_SHA")
+          printf 'CHANGED_FILE=%s\n' "${changed[@]}"
+          test "${#changed[@]}" -gt 0
+          if printf '%s\n' "${changed[@]}" | grep -Eq '^(migrations/|migrations_managed/|src/.*(identity|customer-id|canonical-customer))'; then
+            echo '::error::Identity or migration source changed in mobile UX hotfix.'
+            exit 1
+          fi
+          echo 'IDENTITY_SOURCE_CHANGE=0'
+          echo 'MIGRATION_CHANGE=0'
+          echo 'PRODUCTION_D1_WRITE=0'
+          echo 'PRODUCTION_CUSTOMER_WRITE=0'
+          echo 'PRODUCTION_FAMILY_WRITE=0'
+          echo 'PRODUCTION_PROFILE_WRITE=0'
+          echo 'LINE_SEND=0'
+          echo 'RESERVATION_WRITE=0'
+          echo 'DEPLOY=0'
+          echo 'MERGE=0'
+          echo 'CUSTOMER360_WRITE_ENABLE=0'
+
+      - name: Set up Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+
+      - name: Install browser and Wrangler tooling
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --no-save playwright@1.55.0 wrangler@4.33.1
+          npx playwright install --with-deps chromium
+
+      - name: Syntax and canonical mobile contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check src/crm-mobile-owner-interaction-recovery.mjs
+          node --check src/crm-mobile-owner-card-summary.mjs
+          node --check src/production-index-crm-customer360-entry.js
+          node tests/crm-mobile-owner-interaction-recovery.mjs
+
+      - name: Full local static mocked read-only regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t tests < <(find tests -maxdepth 1 -type f -name '*.mjs' -printf '%p\n' | sort)
+          test "${#tests[@]}" -gt 0
+          echo 'TEST_INVENTORY_BEGIN'
+          printf '%s\n' "${tests[@]}"
+          echo 'TEST_INVENTORY_END'
+          echo 'EXCLUDED_TESTS=NONE'
+          for test_file in "${tests[@]}"; do
+            echo "::group::$test_file"
+            node "$test_file"
+            echo '::endgroup::'
+          done
+          echo "FULL_LOCAL_TEST_FILES=${#tests[@]} PASS"
+
+      - name: Production entry import and Wrangler dry-run only
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ''
+          CLOUDFLARE_ACCOUNT_ID: ''
+        run: |
+          set -euo pipefail
+          node -e "import('./src/production-index-crm-customer360-entry.js').then(()=>console.log('PRODUCTION_ENTRY_IMPORT=PASS'))"
+          npx wrangler deploy --dry-run --outdir /tmp/crm-mobile-owner-interaction-dry-run
+          test -n "$(find /tmp/crm-mobile-owner-interaction-dry-run -type f -print -quit)"
+          echo 'WRANGLER_DRY_RUN=PASS'
+          echo 'PRODUCTION_D1_WRITE=0'
+          echo 'WORKER_DEPLOY=0'
+          echo 'PAGES_PRODUCTION_DEPLOY=0'
+          echo 'LINE_SEND=0'
+
+      - name: Upload Owner acceptance screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: crm-mobile-owner-interaction-recovery-screenshots
+          path: artifacts/crm-mobile-owner-interaction/
+          if-no-files-found: error
+          retention-days: 7
