@@ -109,9 +109,11 @@ await test('Reservation Workspace strict internal customer source remains custom
   assert(internal.includes('WHERE CAST(customer_id AS TEXT)=?')&&!internal.includes('customer_name=?'),'internal reservation lookup not strict');
 });
 
-await test('wrangler production main remains browser root entry',async()=>{
+await test('wrangler production main is Customer360 and preserves browser-root UX chain',async()=>{
   const wrangler=JSON.parse(fs.readFileSync(new URL('../wrangler.jsonc',import.meta.url),'utf8'));
-  assert(wrangler.main==='src/production-index-crm-browser-root-entry.js','wrangler main changed');
+  const customer360=fs.readFileSync(new URL('../src/production-index-crm-customer360-entry.js',import.meta.url),'utf8');
+  assert(wrangler.main==='src/production-index-crm-customer360-entry.js','wrangler main changed');
+  assert(/import app from ['"]\.\/production-index-crm-browser-root-entry\.js['"]/.test(customer360),'Customer360 no longer preserves browser-root chain');
 });
 
 console.log(`CUSTOMER_MANAGEMENT_UX=${passed}/${passed} PASS`);
