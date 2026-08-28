@@ -1,0 +1,61 @@
+name: Customer 360 family marketing foundation
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'src/crm-customer360-*.mjs'
+      - 'src/production-index-crm-customer360-entry.js'
+      - 'migrations_managed/20260828_customer360_family_marketing_foundation.sql'
+      - 'tests/customer360-family-marketing-*.mjs'
+      - 'wrangler.jsonc'
+      - '.github/workflows/customer360-family-marketing-foundation.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout PR head
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Set up Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+
+      - name: Syntax and identity safety checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check src/crm-customer360-marketing-engine.mjs
+          node --check src/crm-customer360-runtime.mjs
+          node --check src/crm-customer360-ui.mjs
+          node --check src/production-index-crm-customer360-entry.js
+          ! grep -R -E "(INSERT[[:space:]]+INTO|UPDATE|DELETE[[:space:]]+FROM)[[:space:]]+customers\b" src/crm-customer360-*.mjs
+          ! grep -R -E "LINE_SERVICE.*(send|push|multicast)|api.line.me.*message" src/crm-customer360-*.mjs src/production-index-crm-customer360-entry.js
+          ! grep -E "ALTER[[:space:]]+TABLE[[:space:]]+customers" migrations_managed/20260828_customer360_family_marketing_foundation.sql
+
+      - name: Unit and static regression
+        run: node tests/customer360-family-marketing-foundation.mjs
+
+      - name: Install local browser/build tooling
+        run: |
+          npm install --no-save playwright@1.55.0 wrangler@4.33.1
+          npx playwright install --with-deps chromium
+
+      - name: Responsive browser regression
+        run: node tests/customer360-family-marketing-browser.mjs
+
+      - name: Wrangler local dry-run build only
+        env:
+          CLOUDFLARE_API_TOKEN: ''
+          CLOUDFLARE_ACCOUNT_ID: ''
+        run: npx wrangler deploy --dry-run --outdir /tmp/customer360-dry-run
