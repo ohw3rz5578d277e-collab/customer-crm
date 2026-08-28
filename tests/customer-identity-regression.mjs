@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import assert from 'node:assert/strict';
 
+const customer360Entry=fs.readFileSync('src/production-index-crm-customer360-entry.js','utf8');
 const entry=fs.readFileSync('src/production-index-crm-browser-root-entry.js','utf8');
 const wrangler=JSON.parse(fs.readFileSync('wrangler.jsonc','utf8'));
 const core=fs.readFileSync('src/index.js','utf8');
@@ -11,7 +12,9 @@ const resolver=fs.readFileSync('src/customer-identity-resolver.mjs','utf8');
 const registry=fs.readFileSync('migrations_managed/20260818_customer_identity_registry.sql','utf8');
 const sequence=fs.readFileSync('migrations_managed/20260818_customer_identity_sequence.sql','utf8');
 
-assert.equal(wrangler.main,'src/production-index-crm-browser-root-entry.js');
+assert.equal(wrangler.main,'src/production-index-crm-customer360-entry.js');
+assert.match(customer360Entry,/import app from ['"]\.\/production-index-crm-browser-root-entry\.js['"]/);
+assert.match(customer360Entry,/return response/);
 assert.match(entry,/production-index-crm-delivery-deadline-alerts-entry/);
 assert.match(entry,/handleCustomerIdentityResolver/);assert.match(entry,/handleLineContextEvents/);assert.match(entry,/handleInternalCustomerDetail/);assert.match(entry,/handleReconciliationReview/);
 assert.match(core,/customer_id TEXT PRIMARY KEY/);assert.match(core,/ON CONFLICT\(customer_id\) DO UPDATE SET/);

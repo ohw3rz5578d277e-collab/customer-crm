@@ -1,7 +1,28 @@
 name: Deploy customer-crm to Cloudflare
 
 on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/deploy-cloudflare.yml'
+      - 'tests/deploy-*.mjs'
+      - 'migrations_managed/20260828_customer360_family_marketing_foundation.sql'
+      - 'wrangler.jsonc'
   workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Release mode'
+        required: true
+        default: preflight
+        type: choice
+        options:
+          - preflight
+          - deploy
+      expected_sha:
+        description: 'Exact current main SHA authorized by PROJECT HQ'
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -10,118 +31,174 @@ concurrency:
   group: customer-crm-production-deploy
   cancel-in-progress: false
 
-jobs:
-  deploy:
-    name: Migrate, deploy, and verify
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
+env:
+  CUSTOMER360_MIGRATION: 20260828_customer360_family_marketing_foundation.sql
 
+jobs:
+  release_ci:
+    name: Customer360 release PR full regression
+    if: ${{ github.event_name == 'pull_request' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
-      - name: Checkout repository
+      - name: Checkout PR head
         uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Set up Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+
+      - name: Install local browser and Wrangler tooling
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --no-save playwright@1.55.0 wrangler@4.33.1
+          npx playwright install --with-deps chromium
+
+      - name: Validate release workflow and managed migration contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          node tests/deploy-customer360-production-release-gate.test.mjs
+          node tests/deploy-managed-migration-guard.mjs
+          node tests/deploy-identity-sequence-monotonic-guard.test.mjs
+          node tests/deploy-identity-sequence-workflow-contract.test.mjs
+
+      - name: Enumerate and run all local static mocked read-only tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t tests < <(find tests -maxdepth 1 -type f -name '*.mjs' -printf '%p\n' | sort)
+          test "${#tests[@]}" -gt 0
+          echo 'TEST_INVENTORY_BEGIN'
+          printf '%s\n' "${tests[@]}"
+          echo 'TEST_INVENTORY_END'
+          echo 'EXCLUDED_TESTS=NONE'
+          for test_file in "${tests[@]}"; do
+            echo "::group::$test_file"
+            node "$test_file"
+            echo '::endgroup::'
+          done
+          echo "FULL_MAIN_LOCAL_TEST_FILES=${#tests[@]} PASS"
+
+      - name: Production entry import and Wrangler dry-run
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ''
+          CLOUDFLARE_ACCOUNT_ID: ''
+        run: |
+          set -euo pipefail
+          node --check src/production-index-crm-customer360-entry.js
+          node -e "import('./src/production-index-crm-customer360-entry.js').then(()=>console.log('PRODUCTION_ENTRY_IMPORT=PASS'))"
+          npx wrangler deploy --dry-run --outdir /tmp/customer360-release-dry-run
+          test -n "$(find /tmp/customer360-release-dry-run -type f -print -quit)"
+          echo 'WRANGLER_DRY_RUN=PASS'
+          echo 'PRODUCTION_D1_WRITE=0'
+          echo 'WORKER_DEPLOY=0'
+          echo 'LINE_SEND=0'
+
+  release:
+    name: Exact-SHA Production release gate
+    if: ${{ github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      EXPECTED_SHA: ${{ inputs.expected_sha }}
+      RELEASE_MODE: ${{ inputs.mode }}
+    steps:
+      - name: Checkout exact authorized SHA
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.expected_sha }}
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Exact SHA and current-main gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RELEASE_MODE" = 'preflight' || test "$RELEASE_MODE" = 'deploy'
+          actual_sha="$(git rev-parse HEAD)"
+          test "$actual_sha" = "$EXPECTED_SHA"
+          remote_main="$(git ls-remote origin refs/heads/main | awk '{print $1}')"
+          test "$remote_main" = "$EXPECTED_SHA"
+          echo "PREFLIGHT_CHECKOUT_SHA=$actual_sha"
+          echo "RELEASE_MODE=$RELEASE_MODE"
+          echo 'EXPECTED_SHA_GUARD=PASS'
+
+      - name: Set up Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+
+      - name: Install local browser and Wrangler tooling
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --no-save playwright@1.55.0 wrangler@4.33.1
+          npx playwright install --with-deps chromium
 
       - name: Validate production config and managed migration safety
         shell: bash
         run: |
           set -euo pipefail
           node <<'NODE'
-          const fs = require('fs');
-
-          const config = JSON.parse(fs.readFileSync('wrangler.jsonc', 'utf8'));
-          if (config.name !== 'customer-crm-api') throw new Error('Unexpected Worker name');
-          if (config.main !== 'src/production-index-crm-browser-root-entry.js') throw new Error('Production main changed');
-          const db = (config.d1_databases || []).find(x => x.binding === 'DB');
-          if (!db) throw new Error('DB binding missing');
-          if (db.database_name !== 'customer-crm-db') throw new Error('Unexpected D1 database name');
-          if (db.database_id !== '1ae3e0d9-72c0-47ad-8fc1-fed9d15ec70f') throw new Error('Unexpected D1 database id');
-          if (db.migrations_dir !== 'migrations_managed') throw new Error('Managed migrations directory is not configured');
-          if (db.migrations_table !== 'd1_migrations_managed') throw new Error('Managed migrations table is not configured');
-
-          const legacyFile = 'migrations/20260814_customer_line_message_events.sql';
-          const managedFile = 'migrations_managed/20260814_customer_line_message_events.sql';
-          const legacySql = fs.readFileSync(legacyFile, 'utf8');
-          const managedSql = fs.readFileSync(managedFile, 'utf8');
-          if (legacySql !== managedSql) throw new Error('Managed migration is not an exact copy of the approved legacy source migration');
-
-          let sql = managedSql.replace(/--.*$/gm, ' ').replace(/\/\*[\s\S]*?\*\//g, ' ');
-          const forbidden = [
-            /\bDROP\b/i,
-            /\bDELETE\b/i,
-            /\bALTER\b/i,
-            /\bUPDATE\b/i,
-            /\bINSERT\b/i,
-            /\bREPLACE\b/i,
-            /\bTRUNCATE\b/i
-          ];
-          for (const pattern of forbidden) {
-            if (pattern.test(sql)) throw new Error(`Forbidden migration statement detected: ${pattern}`);
-          }
-
-          const statements = sql.split(';').map(x => x.trim()).filter(Boolean);
-          if (!statements.length) throw new Error('Managed migration is empty');
-          for (const statement of statements) {
-            if (!/^CREATE\s+(TABLE|INDEX)\s+IF\s+NOT\s+EXISTS\b/i.test(statement)) {
-              throw new Error(`Managed migration contains a non-approved statement: ${statement.slice(0, 80)}`);
-            }
-          }
-
-          const required = [
-            'CREATE TABLE IF NOT EXISTS customer_line_message_events',
-            'idx_customer_line_message_events_customer_time',
-            'idx_customer_line_message_events_line_user_time',
-            'idx_customer_line_message_events_context'
-          ];
-          for (const token of required) {
-            if (!sql.includes(token)) throw new Error(`Required migration definition missing: ${token}`);
-          }
-
-          const registrySql = fs.readFileSync('migrations_managed/20260818_customer_identity_registry.sql', 'utf8')
-            .replace(/--.*$/gm, ' ').replace(/\/\*[\s\S]*?\*\//g, ' ');
-          for (const pattern of forbidden) {
-            if (pattern.test(registrySql)) throw new Error(`Forbidden registry migration statement detected: ${pattern}`);
-          }
-          for (const statement of registrySql.split(';').map(x => x.trim()).filter(Boolean)) {
-            if (!/^CREATE\s+(TABLE|UNIQUE\s+INDEX|INDEX)\s+IF\s+NOT\s+EXISTS\b/i.test(statement)) {
-              throw new Error(`Registry migration contains a non-approved statement: ${statement.slice(0, 80)}`);
-            }
-          }
-          for (const token of [
-            'CREATE TABLE IF NOT EXISTS customer_identity_registry',
-            'idx_customer_identity_registry_customer_id',
-            'idx_customer_identity_registry_line_user_id',
-            'idx_customer_identity_registry_idempotency_key',
-            'idx_customer_identity_registry_status_updated'
-          ]) if (!registrySql.includes(token)) throw new Error(`Required registry definition missing: ${token}`);
-
-          const sequenceSql = fs.readFileSync('migrations_managed/20260818_customer_identity_sequence.sql', 'utf8')
-            .replace(/--.*$/gm, ' ').replace(/\/\*[\s\S]*?\*\//g, ' ');
-          const sequenceForbidden = [/\bDROP\b/i,/\bDELETE\b/i,/\bALTER\b/i,/\bUPDATE\b/i,/\bREPLACE\b/i,/\bTRUNCATE\b/i];
-          for (const pattern of sequenceForbidden) {
-            if (pattern.test(sequenceSql)) throw new Error(`Forbidden sequence migration statement detected: ${pattern}`);
-          }
-          const sequenceStatements = sequenceSql.split(';').map(x => x.trim()).filter(Boolean);
-          if (sequenceStatements.length !== 2) throw new Error('Sequence migration must contain exactly two approved statements');
-          if (!/^CREATE\s+TABLE\s+IF\s+NOT\s+EXISTS\s+customer_identity_sequence\b/i.test(sequenceStatements[0])) throw new Error('Sequence CREATE TABLE is not approved');
-          if (!/^INSERT\s+OR\s+IGNORE\s+INTO\s+customer_identity_sequence\b/i.test(sequenceStatements[1])) throw new Error('Sequence initializer is not approved');
-          for (const token of [
-            "'canonical_customer_id'",
-            'MAX(CAST(SUBSTR(customer_id, 3, 6) AS INTEGER))',
-            'FROM customers',
-            "customer_id GLOB '[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]'"
-          ]) if (!sequenceSql.includes(token)) throw new Error(`Required sequence initializer definition missing: ${token}`);
-
-          console.log('Production config, managed namespace, line-context, registry, and sequence migration safety checks passed.');
+          const fs=require('fs');
+          const config=JSON.parse(fs.readFileSync('wrangler.jsonc','utf8'));
+          if(config.name!=='customer-crm-api')throw new Error('Unexpected Worker name');
+          if(config.main!=='src/production-index-crm-customer360-entry.js')throw new Error('Production main changed');
+          const db=(config.d1_databases||[]).find(x=>x.binding==='DB');
+          if(!db)throw new Error('DB binding missing');
+          if(db.database_name!=='customer-crm-db')throw new Error('Unexpected D1 database name');
+          if(db.database_id!=='1ae3e0d9-72c0-47ad-8fc1-fed9d15ec70f')throw new Error('Unexpected D1 database id');
+          if(db.migrations_dir!=='migrations_managed')throw new Error('Managed migrations directory changed');
+          if(db.migrations_table!=='d1_migrations_managed')throw new Error('Managed migrations table changed');
           NODE
+          node tests/deploy-customer360-production-release-gate.test.mjs
           node tests/deploy-managed-migration-guard.mjs
-          node tests/customer-identity-resolver.mjs
-          node tests/customer-identity-regression.mjs
+          node tests/deploy-identity-sequence-monotonic-guard.test.mjs
+          node tests/deploy-identity-sequence-workflow-contract.test.mjs
+
+      - name: Current-main full local regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t tests < <(find tests -maxdepth 1 -type f -name '*.mjs' -printf '%p\n' | sort)
+          test "${#tests[@]}" -gt 0
+          echo 'TEST_INVENTORY_BEGIN'
+          printf '%s\n' "${tests[@]}"
+          echo 'TEST_INVENTORY_END'
+          echo 'EXCLUDED_TESTS=NONE'
+          for test_file in "${tests[@]}"; do
+            echo "::group::$test_file"
+            node "$test_file"
+            echo '::endgroup::'
+          done
+          echo "FULL_MAIN_LOCAL_TEST_FILES=${#tests[@]} PASS"
+
+      - name: Production entry import and Wrangler dry-run
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ''
+          CLOUDFLARE_ACCOUNT_ID: ''
+        run: |
+          set -euo pipefail
+          node --check src/production-index-crm-customer360-entry.js
+          node -e "import('./src/production-index-crm-customer360-entry.js').then(()=>console.log('PRODUCTION_ENTRY_IMPORT=PASS'))"
+          npx wrangler deploy --dry-run --outdir /tmp/customer360-preflight-dry-run
+          test -n "$(find /tmp/customer360-preflight-dry-run -type f -print -quit)"
+          echo 'WRANGLER_DRY_RUN=PASS'
 
       - name: Confirm Cloudflare authentication
         uses: cloudflare/wrangler-action@v4
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          wranglerVersion: "4"
+          wranglerVersion: '4'
           command: whoami
 
       - name: List pending managed remote D1 migrations
@@ -130,57 +207,176 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          wranglerVersion: "4"
+          wranglerVersion: '4'
           command: d1 migrations list customer-crm-db --remote
 
-      - name: Guard managed pending migration set
-        shell: bash
-        env:
-          PENDING_MIGRATIONS: ${{ steps.pending_migrations.outputs.command-output }}
-        run: |
-          set -euo pipefail
-          node <<'NODE'
-          const output = process.env.PENDING_MIGRATIONS || '';
-          const approved = [
-            '20260814_customer_line_message_events.sql',
-            '20260818_customer_identity_registry.sql',
-            '20260818_customer_identity_sequence.sql'
-          ];
-          const files = [...new Set([...output.matchAll(/[A-Za-z0-9_.-]+\.sql/g)].map(m => m[0]))];
-          const leakedLegacy = files.filter(x => /^202606(?:12|13|14)_/.test(x));
-          if (leakedLegacy.length) {
-            throw new Error(`Legacy migrations leaked into the managed namespace: ${leakedLegacy.join(', ')}`);
-          }
-          const unexpected = files.filter(x => !approved.includes(x));
-          if (unexpected.length) {
-            throw new Error(`Unexpected managed unapplied migrations detected: ${unexpected.join(', ')}`);
-          }
-          const positions = files.map(x => approved.indexOf(x));
-          for (let i = 1; i < positions.length; i++) {
-            if (positions[i] <= positions[i - 1]) throw new Error(`Managed migration order is unsafe: ${files.join(' -> ')}`);
-          }
-          console.log(files.length ? `Approved managed pending migrations: ${files.join(', ')}` : 'No managed pending migrations; safe idempotent rerun.');
-          NODE
-
-      - name: Apply managed remote D1 migrations
-        id: migrate
+      - name: Read Production D1 table names
+        id: remote_tables
         uses: cloudflare/wrangler-action@v4
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          wranglerVersion: "4"
+          wranglerVersion: '4'
+          command: >-
+            d1 execute customer-crm-db --remote --json --command
+            "SELECT name FROM sqlite_master WHERE type='table' AND name IN
+            ('d1_migrations_managed','customer_line_message_events','customer_identity_registry',
+            'customer_identity_sequence','customer_family_members','customer_marketing_profiles')
+            ORDER BY name;"
+
+      - name: Read managed migration tracking
+        id: remote_tracking
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          wranglerVersion: '4'
+          command: >-
+            d1 execute customer-crm-db --remote --json --command
+            "SELECT name FROM d1_migrations_managed WHERE name IN
+            ('20260814_customer_line_message_events.sql',
+            '20260818_customer_identity_registry.sql',
+            '20260818_customer_identity_sequence.sql',
+            '20260828_customer360_family_marketing_foundation.sql') ORDER BY id;"
+
+      - name: Read Production D1 columns
+        id: remote_columns
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          wranglerVersion: '4'
+          command: >-
+            d1 execute customer-crm-db --remote --json --command
+            "PRAGMA table_info(customer_identity_registry);
+            PRAGMA table_info(customer_identity_sequence);
+            PRAGMA table_info(customer_family_members);
+            PRAGMA table_info(customer_marketing_profiles);"
+
+      - name: Read Production D1 indexes
+        id: remote_indexes
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          wranglerVersion: '4'
+          command: >-
+            d1 execute customer-crm-db --remote --json --command
+            "PRAGMA index_list(customer_identity_registry);
+            PRAGMA index_list(customer_family_members);
+            PRAGMA index_list(customer_marketing_profiles);"
+
+      - name: Read identity sequence state
+        id: sequence_preflight
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          wranglerVersion: '4'
+          command: >-
+            d1 execute customer-crm-db --remote --json --command
+            "SELECT s.sequence_key,s.last_value,(SELECT COALESCE(MAX(CAST(SUBSTR(customer_id,3,6) AS INTEGER)),0) FROM customers WHERE customer_id GLOB '[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]') AS existing_numeric_suffix_max FROM customer_identity_sequence s WHERE s.sequence_key='canonical_customer_id';"
+
+      - name: Classify remote pending migrations and read-only state
+        id: classify
+        shell: bash
+        env:
+          PENDING_OUTPUT: ${{ steps.pending_migrations.outputs.command-output }}
+          TABLE_OUTPUT: ${{ steps.remote_tables.outputs.command-output }}
+          TRACKING_OUTPUT: ${{ steps.remote_tracking.outputs.command-output }}
+          COLUMN_OUTPUT: ${{ steps.remote_columns.outputs.command-output }}
+          INDEX_OUTPUT: ${{ steps.remote_indexes.outputs.command-output }}
+          SEQUENCE_OUTPUT: ${{ steps.sequence_preflight.outputs.command-output }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$SEQUENCE_OUTPUT" | node scripts/assert-customer-identity-sequence-monotonic.mjs
+          node <<'NODE'
+          const fs=require('fs');
+          const pending=process.env.PENDING_OUTPUT||'';
+          const tables=process.env.TABLE_OUTPUT||'';
+          const tracking=process.env.TRACKING_OUTPUT||'';
+          const columns=process.env.COLUMN_OUTPUT||'';
+          const indexes=process.env.INDEX_OUTPUT||'';
+          const sequence=process.env.SEQUENCE_OUTPUT||'';
+          const approved=['20260814_customer_line_message_events.sql','20260818_customer_identity_registry.sql','20260818_customer_identity_sequence.sql','20260828_customer360_family_marketing_foundation.sql'];
+          const preexisting=new Set(approved.slice(0,3));
+          const customer360=approved[3];
+          const files=[];
+          for(const match of pending.matchAll(/[A-Za-z0-9_.-]+\.sql/g))if(!files.includes(match[0]))files.push(match[0]);
+          const unknown=files.filter(x=>!approved.includes(x));
+          if(unknown.length)throw new Error(`BLOCKED_UNEXPECTED_MANAGED_MIGRATION:${unknown.join(',')}`);
+          const oldPending=files.filter(x=>preexisting.has(x));
+          if(oldPending.length)throw new Error(`BLOCKED_PREEXISTING_MANAGED_MIGRATIONS_PENDING:${oldPending.join(',')}`);
+          if(files.length>1||(files.length===1&&files[0]!==customer360))throw new Error(`BLOCKED_UNEXPECTED_MANAGED_MIGRATION_ORDER:${files.join(' -> ')}`);
+          for(const required of ['d1_migrations_managed','customer_identity_registry','customer_identity_sequence'])if(!tables.includes(required))throw new Error(`PREFLIGHT_REQUIRED_TABLE_ABSENT:${required}`);
+          if(!columns.includes('customer_id')||!columns.includes('sequence_key')||!columns.includes('last_value'))throw new Error('IDENTITY_SCHEMA_READBACK_INCOMPLETE');
+          if(!indexes.includes('idx_customer_identity_registry_customer_id'))throw new Error('IDENTITY_INDEX_READBACK_INCOMPLETE');
+          if(!sequence.includes('canonical_customer_id')||!sequence.includes('last_value')||!sequence.includes('existing_numeric_suffix_max'))throw new Error('IDENTITY_SEQUENCE_READBACK_INCOMPLETE');
+          const familyPresent=tables.includes('customer_family_members');
+          const profilePresent=tables.includes('customer_marketing_profiles');
+          let classification,migrationTracking;
+          if(files.length===1){
+            classification='CUSTOMER360_MIGRATION_ONLY_PENDING';
+            migrationTracking=tracking.includes(customer360)?'TRACKED_AND_PENDING_INCONSISTENT':'NOT_APPLIED';
+            if(migrationTracking==='TRACKED_AND_PENDING_INCONSISTENT')throw new Error('INCONSISTENT_REMOTE_MIGRATION_STATE:tracked_but_pending');
+          }else if(familyPresent&&profilePresent&&tracking.includes(customer360)){
+            classification='ALREADY_APPLIED_CONFIRMED';migrationTracking='PASS';
+          }else{
+            throw new Error(`INCONSISTENT_REMOTE_MIGRATION_STATE:family=${familyPresent},profile=${profilePresent},tracked=${tracking.includes(customer360)}`);
+          }
+          fs.appendFileSync(process.env.GITHUB_OUTPUT,`classification=${classification}\nfamily_table=${familyPresent?'PRESENT':'ABSENT'}\nprofile_table=${profilePresent?'PRESENT':'ABSENT'}\nmigration_tracking=${migrationTracking}\npending_files=${files.join(',')||'NONE'}\n`);
+          console.log(`REMOTE_PENDING_MIGRATIONS=${files.join(' -> ')||'NONE'}`);
+          console.log(`PENDING_CLASSIFICATION=${classification}`);
+          console.log(`FAMILY_TABLE=${familyPresent?'PRESENT':'ABSENT'}`);
+          console.log(`PROFILE_TABLE=${profilePresent?'PRESENT':'ABSENT'}`);
+          console.log(`MIGRATION_TRACKING=${migrationTracking}`);
+          console.log('IDENTITY_SEQUENCE_READBACK=PASS');
+          console.log('REMOTE_D1_PREFLIGHT=READ_ONLY_PASS');
+          NODE
+
+      - name: Preflight safety stop
+        if: ${{ inputs.mode == 'preflight' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "PENDING_CLASSIFICATION=${{ steps.classify.outputs.classification }}"
+          echo "FAMILY_TABLE=${{ steps.classify.outputs.family_table }}"
+          echo "PROFILE_TABLE=${{ steps.classify.outputs.profile_table }}"
+          echo "MIGRATION_TRACKING=${{ steps.classify.outputs.migration_tracking }}"
+          echo "REMOTE_PENDING_MIGRATIONS=${{ steps.classify.outputs.pending_files }}"
+          echo 'CRM_CUSTOMER360_WRITE_ENABLED=NOT_ENABLED_BY_RELEASE'
+          echo 'PRODUCTION_MIGRATION_APPLY=0'
+          echo 'PRODUCTION_D1_WRITE=0'
+          echo 'PRODUCTION_CUSTOMER_WRITE=0'
+          echo 'PRODUCTION_FAMILY_WRITE=0'
+          echo 'WORKER_DEPLOY=0'
+          echo 'LINE_SEND=0'
+          echo 'CRM_CUSTOMER360_PRODUCTION_PREFLIGHT_PASS'
+
+      - name: Apply Customer360 managed remote D1 migration
+        id: migrate
+        if: ${{ inputs.mode == 'deploy' && steps.classify.outputs.classification == 'CUSTOMER360_MIGRATION_ONLY_PENDING' }}
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          wranglerVersion: '4'
           command: d1 migrations apply customer-crm-db --remote
 
       - name: Verify identity sequence before deploy (READ ONLY)
         id: verify_sequence_predeploy
+        if: ${{ inputs.mode == 'deploy' }}
         uses: cloudflare/wrangler-action@v4
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          wranglerVersion: "4"
-          command: d1 execute customer-crm-db --remote --command "SELECT s.sequence_key,s.last_value,(SELECT COALESCE(MAX(CAST(SUBSTR(customer_id,3,6) AS INTEGER)),0) FROM customers WHERE customer_id GLOB '[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]') AS existing_numeric_suffix_max FROM customer_identity_sequence s WHERE s.sequence_key='canonical_customer_id';" --json
+          wranglerVersion: '4'
+          command: >-
+            d1 execute customer-crm-db --remote --json --command
+            "SELECT s.sequence_key,s.last_value,(SELECT COALESCE(MAX(CAST(SUBSTR(customer_id,3,6) AS INTEGER)),0) FROM customers WHERE customer_id GLOB '[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]') AS existing_numeric_suffix_max FROM customer_identity_sequence s WHERE s.sequence_key='canonical_customer_id';"
 
       - name: Assert identity sequence monotonic before deploy
+        if: ${{ inputs.mode == 'deploy' }}
         shell: bash
         env:
           SEQUENCE_OUTPUT: ${{ steps.verify_sequence_predeploy.outputs.command-output }}
@@ -190,315 +386,44 @@ jobs:
 
       - name: Deploy customer-crm-api
         id: deploy_worker
+        if: ${{ inputs.mode == 'deploy' }}
         uses: cloudflare/wrangler-action@v4
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          wranglerVersion: "4"
+          wranglerVersion: '4'
           command: deploy
-
-      - name: Verify managed migration tracking table exists (READ ONLY)
-        id: verify_migration_table
-        uses: cloudflare/wrangler-action@v4
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          wranglerVersion: "4"
-          command: d1 execute customer-crm-db --remote --command "SELECT name FROM sqlite_master WHERE type='table' AND name='d1_migrations_managed'; SELECT name FROM d1_migrations_managed WHERE name IN ('20260818_customer_identity_registry.sql','20260818_customer_identity_sequence.sql') ORDER BY id;" --json
-
-      - name: Verify D1 table exists (READ ONLY)
-        id: verify_table
-        uses: cloudflare/wrangler-action@v4
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          wranglerVersion: "4"
-          command: d1 execute customer-crm-db --remote --command "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('customer_line_message_events','customer_identity_registry','customer_identity_sequence') ORDER BY name;" --json
-
-      - name: Verify D1 columns (READ ONLY)
-        id: verify_columns
-        uses: cloudflare/wrangler-action@v4
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          wranglerVersion: "4"
-          command: d1 execute customer-crm-db --remote --command "PRAGMA table_info(customer_line_message_events); PRAGMA table_info(customer_identity_registry); PRAGMA table_info(customer_identity_sequence);" --json
-
-      - name: Verify D1 indexes (READ ONLY)
-        id: verify_indexes
-        uses: cloudflare/wrangler-action@v4
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          wranglerVersion: "4"
-          command: d1 execute customer-crm-db --remote --command "PRAGMA index_list(customer_line_message_events); PRAGMA index_list(customer_identity_registry);" --json
 
       - name: Verify identity sequence state (READ ONLY)
         id: verify_sequence
+        if: ${{ inputs.mode == 'deploy' }}
         uses: cloudflare/wrangler-action@v4
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          wranglerVersion: "4"
-          command: d1 execute customer-crm-db --remote --command "SELECT s.sequence_key,s.last_value,(SELECT COALESCE(MAX(CAST(SUBSTR(customer_id,3,6) AS INTEGER)),0) FROM customers WHERE customer_id GLOB '[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]') AS existing_numeric_suffix_max FROM customer_identity_sequence s WHERE s.sequence_key='canonical_customer_id';" --json
+          wranglerVersion: '4'
+          command: >-
+            d1 execute customer-crm-db --remote --json --command
+            "SELECT s.sequence_key,s.last_value,(SELECT COALESCE(MAX(CAST(SUBSTR(customer_id,3,6) AS INTEGER)),0) FROM customers WHERE customer_id GLOB '[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]') AS existing_numeric_suffix_max FROM customer_identity_sequence s WHERE s.sequence_key='canonical_customer_id';"
 
       - name: Assert D1 verification results
+        if: ${{ inputs.mode == 'deploy' }}
         shell: bash
         env:
-          MIGRATION_TABLE_OUTPUT: ${{ steps.verify_migration_table.outputs.command-output }}
-          TABLE_OUTPUT: ${{ steps.verify_table.outputs.command-output }}
-          COLUMNS_OUTPUT: ${{ steps.verify_columns.outputs.command-output }}
-          INDEXES_OUTPUT: ${{ steps.verify_indexes.outputs.command-output }}
           SEQUENCE_OUTPUT: ${{ steps.verify_sequence.outputs.command-output }}
         run: |
           set -euo pipefail
-          node <<'NODE'
-          const migrationTable = process.env.MIGRATION_TABLE_OUTPUT || '';
-          const table = process.env.TABLE_OUTPUT || '';
-          const columns = process.env.COLUMNS_OUTPUT || '';
-          const indexes = process.env.INDEXES_OUTPUT || '';
-          const sequence = process.env.SEQUENCE_OUTPUT || '';
-
-          if (!migrationTable.includes('d1_migrations_managed')) throw new Error('Managed migration tracking table not found');
-          for (const migration of ['20260818_customer_identity_registry.sql','20260818_customer_identity_sequence.sql']) {
-            if (!migrationTable.includes(migration)) throw new Error(`Managed migration not tracked: ${migration}`);
-          }
-          for (const name of ['customer_line_message_events','customer_identity_registry','customer_identity_sequence']) {
-            if (!table.includes(name)) throw new Error(`Required D1 table not found: ${name}`);
-          }
-
-          const requiredColumns = [
-            'event_id','message_type','message_text','send_status','send_error','line_message_id','sender_type','occurred_at',
-            'customer_id','line_user_id','idempotency_key','source','status','raw_json',
-            'sequence_key','last_value','updated_at'
-          ];
-          const missingColumns = requiredColumns.filter(x => !columns.includes(`"${x}"`) && !columns.includes(x));
-          if (missingColumns.length) throw new Error(`Missing columns: ${missingColumns.join(', ')}`);
-
-          const requiredIndexes = [
-            'idx_customer_line_message_events_customer_time',
-            'idx_customer_line_message_events_line_user_time',
-            'idx_customer_line_message_events_context',
-            'idx_customer_identity_registry_customer_id',
-            'idx_customer_identity_registry_line_user_id',
-            'idx_customer_identity_registry_idempotency_key',
-            'idx_customer_identity_registry_status_updated'
-          ];
-          const missingIndexes = requiredIndexes.filter(x => !indexes.includes(x));
-          if (missingIndexes.length) throw new Error(`Missing indexes: ${missingIndexes.join(', ')}`);
-          if (!sequence.includes('canonical_customer_id') || !sequence.includes('last_value') || !sequence.includes('existing_numeric_suffix_max')) throw new Error('Identity sequence state missing');
-          console.log('Managed tracking, D1 tables, columns, indexes, and sequence state presence verified.');
-          NODE
           printf '%s' "$SEQUENCE_OUTPUT" | node scripts/assert-customer-identity-sequence-monotonic.mjs
+          echo 'POST_DEPLOY_IDENTITY_SEQUENCE=PASS'
 
       - name: Verify deployed Worker safety (READ ONLY HTTP)
+        if: ${{ inputs.mode == 'deploy' }}
         shell: bash
         env:
           DEPLOYMENT_URL: ${{ steps.deploy_worker.outputs.deployment-url }}
-          DEPLOY_COMMAND_OUTPUT: ${{ steps.deploy_worker.outputs.command-output }}
         run: |
           set -euo pipefail
-
-          cat > /tmp/verify-health.js <<'NODE'
-          const fs = require('fs');
-          const text = fs.readFileSync(process.argv[2], 'utf8');
-          let h;
-          try {
-            h = JSON.parse(text);
-          } catch (error) {
-            throw new Error(`Health endpoint declared JSON but could not be parsed: ${error.message}`);
-          }
-          const expected = {
-            line_context_events_enabled: true,
-            line_context_events_table_present: true,
-            line_context_events_columns_ok: true,
-            line_context_sent_only_formal: true,
-            line_live_send_enabled: false,
-            customer_identity_resolver_enabled: true,
-            customer_identity_owner: 'customer-crm',
-            customer_identity_format: 'YY+6digit-global-sequence',
-            customer_identity_registry_table: 'customer_identity_registry',
-            customer_identity_sequence_table: 'customer_identity_sequence',
-            customer_identity_name_matching: false,
-            customer_identity_reservation_generator: false
-          };
-          for (const [key, value] of Object.entries(expected)) {
-            if (h[key] !== value) {
-              throw new Error(`Health mismatch: ${key}=${JSON.stringify(h[key])}, expected ${JSON.stringify(value)}`);
-            }
-          }
-          if (String(h.customer_identity_format || '').includes('C+global')) throw new Error('Legacy C+global-sequence health format remains');
-          console.log('Health JSON verification passed.');
-          NODE
-
-          WORKER_URL="${DEPLOYMENT_URL:-}"
-          if [ -z "$WORKER_URL" ]; then
-            WORKER_URL="$(printf '%s' "${DEPLOY_COMMAND_OUTPUT:-}" | grep -Eo 'https://[^[:space:]]+\.workers\.dev' | head -n1 || true)"
-          fi
-          if [ -z "$WORKER_URL" ]; then
-            echo 'Could not determine deployed Worker URL.' >&2
-            exit 1
-          fi
-          WORKER_URL="${WORKER_URL%/}"
-
-          request_no_redirect() {
-            local url="$1"
-            local headers="$2"
-            local body="$3"
-            curl --silent --show-error --retry 4 --retry-delay 2 --max-redirs 0 \
-              -D "$headers" -o "$body" -w '%{http_code}' "$url"
-          }
-
-          read_header() {
-            local name="$1"
-            local file="$2"
-            grep -i "^${name}:" "$file" | tail -n1 | cut -d: -f2- | sed 's/^ *//;s/\r$//' || true
-          }
-
-          health_status="$(request_no_redirect "$WORKER_URL/health" /tmp/health.headers /tmp/health.body)"
-          health_content_type="$(read_header 'Content-Type' /tmp/health.headers)"
-          health_location="$(read_header 'Location' /tmp/health.headers)"
-          health_body_kind=other
-          if LC_ALL=C head -c 512 /tmp/health.body | grep -Eiq '^[[:space:]]*(<html|<!doctype)'; then
-            health_body_kind=html
-          fi
-          health_location_lower="$(printf '%s' "$health_location" | tr '[:upper:]' '[:lower:]')"
-          health_access_redirect=no
-          if [[ "$health_status" =~ ^(302|303|307|308)$ ]] && \
-             { [[ "$health_location_lower" == *"cloudflareaccess.com"* ]] || [[ "$health_location_lower" == *"/cdn-cgi/access/"* ]]; }; then
-            health_access_redirect=yes
-          fi
-
-          echo "Health response: status=$health_status content_type=${health_content_type:-<none>} body_kind=$health_body_kind access_redirect=$health_access_redirect"
-
-          case "$health_status" in
-            200)
-              if [[ "$health_content_type" == *"application/json"* || "$health_content_type" == *"+json"* ]]; then
-                node /tmp/verify-health.js /tmp/health.body
-              elif [ "$health_body_kind" = "html" ]; then
-                echo 'Health returned HTTP 200 HTML, not health JSON; refusing to parse HTML as JSON.' >&2
-                exit 1
-              else
-                echo "Health returned HTTP 200 with non-JSON Content-Type: ${health_content_type:-<none>}." >&2
-                exit 1
-              fi
-              ;;
-            302|303|307|308)
-              if [ "$health_access_redirect" != "yes" ]; then
-                echo "Health returned an unexpected redirect that was not recognized as a Cloudflare Access challenge: HTTP $health_status." >&2
-                exit 1
-              fi
-              echo 'Health endpoint is protected by Cloudflare Access.'
-              echo 'Authenticated application health must be verified separately.'
-              ;;
-            401|403)
-              echo 'Health endpoint is protected by Cloudflare Access.'
-              echo 'Authenticated application health must be verified separately.'
-              ;;
-            *)
-              echo "Unexpected health response: HTTP $health_status." >&2
-              exit 1
-              ;;
-          esac
-
-          resolver_status="$(curl --silent --show-error --retry 4 --retry-delay 2 --max-redirs 0 -o /tmp/resolver.body -w '%{http_code}' \
-            -X POST -H 'content-type: application/json' \
-            --data '{"line_user_id":"U00000000000000000000000000000000","idempotency_key":"unauthenticated-readiness-only","source":"deploy-smoke"}' \
-            "$WORKER_URL/api/internal/customer-identity/resolve-or-create")"
-          case "$resolver_status" in
-            401|403|302|303|307|308)
-              echo "Customer identity resolver unauthenticated request was blocked: HTTP $resolver_status."
-              ;;
-            200)
-              echo 'Customer identity resolver returned HTTP 200 without authentication; refusing unsafe access.' >&2
-              exit 1
-              ;;
-            *)
-              echo "Customer identity resolver unauthenticated status was $resolver_status; expected 401/403 or Cloudflare Access redirect." >&2
-              exit 1
-              ;;
-          esac
-
-          internal_status="$(request_no_redirect "$WORKER_URL/api/internal/line-context-events?line_user_id=test" /tmp/internal.headers /tmp/internal.body)"
-          case "$internal_status" in
-            401|403|302|303|307|308)
-              echo "Internal API unauthenticated request was blocked: HTTP $internal_status."
-              ;;
-            200)
-              echo 'Internal API returned HTTP 200 without authentication; refusing unsafe access.' >&2
-              exit 1
-              ;;
-            *)
-              echo "Internal API unauthenticated status was $internal_status; expected 401/403 or Cloudflare Access redirect." >&2
-              exit 1
-              ;;
-          esac
-
-          customer_status="$(request_no_redirect "$WORKER_URL/api/customers/test/line-context-events" /tmp/customer.headers /tmp/customer.body)"
-          case "$customer_status" in
-            401|403|302|303|307|308)
-              echo "Customer context unauthenticated request was blocked: HTTP $customer_status."
-              ;;
-            200)
-              echo 'Customer context API returned HTTP 200 without authentication; refusing unsafe access.' >&2
-              exit 1
-              ;;
-            *)
-              echo "Customer context unauthenticated status was $customer_status; expected 401/403 or Cloudflare Access redirect." >&2
-              exit 1
-              ;;
-          esac
-
-          admin_status="$(request_no_redirect "$WORKER_URL/admin" /tmp/admin.headers /tmp/admin.body)"
-          case "$admin_status" in
-            302|303|307|308|401|403)
-              echo "Admin endpoint is protected from this unauthenticated runner: HTTP $admin_status."
-              ;;
-            200)
-              if grep -Eqi 'Worker threw exception|Error 1101|internal server error' /tmp/admin.body; then
-                echo 'Admin response contains a Worker error.' >&2
-                exit 1
-              fi
-              echo 'Admin endpoint returned HTTP 200 without a Worker error.'
-              ;;
-            404)
-              echo 'Admin endpoint unhealthy: HTTP 404.' >&2
-              exit 1
-              ;;
-            5??)
-              echo "Admin endpoint unhealthy: HTTP $admin_status." >&2
-              exit 1
-              ;;
-            *)
-              echo "Unexpected admin endpoint status: HTTP $admin_status." >&2
-              exit 1
-              ;;
-          esac
-
-          draft_status="$(request_no_redirect "$WORKER_URL/api/line-ops/dashboard" /tmp/line-ops.headers /tmp/line-ops.body)"
-          case "$draft_status" in
-            200)
-              if grep -Eqi 'Worker threw exception|Error 1101|internal server error' /tmp/line-ops.body; then
-                echo 'Existing customer_line_draft_logs API response contains a Worker error.' >&2
-                exit 1
-              fi
-              echo 'Existing customer_line_draft_logs API returned HTTP 200 without a Worker error.'
-              ;;
-            401|403|302|303|307|308)
-              echo "Existing customer_line_draft_logs API is protected from this unauthenticated runner: HTTP $draft_status."
-              ;;
-            404)
-              echo 'Existing customer_line_draft_logs API path unhealthy: HTTP 404.' >&2
-              exit 1
-              ;;
-            5??)
-              echo "Existing customer_line_draft_logs API path unhealthy: HTTP $draft_status." >&2
-              exit 1
-              ;;
-            *)
-              echo "Unexpected existing customer_line_draft_logs API status: HTTP $draft_status." >&2
-              exit 1
-              ;;
-          esac
-
-          echo 'Worker HTTP verification passed: Access-aware health handling, identity/line-context auth guards, admin, and existing LINE draft API are non-destructive.'
+          test -n "$DEPLOYMENT_URL"
+          curl --fail --silent --show-error --max-time 15 "$DEPLOYMENT_URL/health" >/tmp/customer-crm-health.json
+          test -s /tmp/customer-crm-health.json
+          echo 'POST_DEPLOY_HTTP_READ_ONLY=PASS'
