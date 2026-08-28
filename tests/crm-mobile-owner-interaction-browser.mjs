@@ -6,6 +6,7 @@ import { injectCustomer360Marketing } from '../src/crm-customer360-ui.mjs';
 import { injectCustomer360SearchFocus } from '../src/crm-customer360-search-focus.mjs';
 import { injectMobileOwnerCardSummary } from '../src/crm-mobile-owner-card-summary.mjs';
 import { injectMobileOwnerInteractionRecovery } from '../src/crm-mobile-owner-interaction-recovery.mjs';
+import { normalizeCustomer360InjectedHtml } from '../src/production-index-crm-customer360-entry.js';
 import { parseCustomerSearchParams, searchCustomerViews, buildFacets, listCustomerDto } from '../src/crm-customer360-search.mjs';
 
 function assert(ok,msg){if(!ok)throw new Error(msg)}
@@ -42,7 +43,7 @@ document.querySelector('.crm-settings-close').onclick=()=>document.getElementByI
 document.getElementById('crmTodayFilterApply').onclick=()=>window.__todayFilterApply++;
 </script>`;
 let html='<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"></head><body>'+legacy+'</body></html>';
-html=injectCustomer360Marketing(html);html=injectCustomer360SearchFocus(html);html=injectMobileOwnerCardSummary(html);html=injectMobileOwnerInteractionRecovery(html);
+html=injectCustomer360Marketing(html);html=injectCustomer360SearchFocus(html);html=injectMobileOwnerCardSummary(html);html=normalizeCustomer360InjectedHtml(injectMobileOwnerInteractionRecovery(html));
 const requests=[],writes=[];
 function send(res,status,data,type='application/json; charset=utf-8'){res.writeHead(status,{'content-type':type,'cache-control':'no-store'});res.end(type.startsWith('application/json')?JSON.stringify(data):data)}
 const server=http.createServer((req,res)=>{const u=new URL(req.url,'http://127.0.0.1');requests.push(req.method+' '+u.pathname+u.search);if(!['GET','HEAD'].includes(req.method))writes.push(req.method+' '+u.pathname);if(u.pathname==='/'||u.pathname==='/admin')return send(res,200,html,'text/html; charset=utf-8');if(u.pathname==='/api/customer360/marketing-home')return send(res,200,{ok:true,as_of:asOf,kpis,top_opportunities:top,facets});if(u.pathname==='/api/customer360/customers'){let p;try{p=parseCustomerSearchParams(u.searchParams);p.on_date=asOf}catch(e){return send(res,400,{ok:false,error:e.message})}return send(res,200,{ok:true,...searchCustomerViews(views,p),all_total:views.length,facets,meta:{privacy_safe_list_dto:true}})}if(u.pathname.startsWith('/api/customer360/customer/')){const id=decodeURIComponent(u.pathname.slice('/api/customer360/customer/'.length)),c=details.get(id);return c?send(res,200,{ok:true,customer:c}):send(res,404,{ok:false})}if(u.pathname==='/api/crm-health-check')return send(res,200,{ok:true,build:'fixture-health',bindings:{DB:true,LINE_SERVICE:true,RESERVATION_SERVICE:true},customer360_marketing_foundation:true,tables:[{table:'customers',ok:true}]});if(u.pathname==='/api/today-dashboard.csv')return send(res,200,'kind,name\npriority,山田','text/csv; charset=utf-8');return send(res,404,{ok:false})});
