@@ -19,7 +19,7 @@ function eventMatches(o,type){if(!type)return true;if(type==='school')return /sc
 function inDateRange(value,from,to){const d=dateOnly(value);if(!from&&!to)return true;if(!d)return false;return(!from||d>=from)&&(!to||d<=to)}
 function finiteRange(value,min,max){return(min==null||value>=min)&&(max==null||value<=max)}
 function maybeNumber(sp,name,{min=0,max=Number.MAX_SAFE_INTEGER,integer=false}={}){const raw=sp.get(name);if(raw==null||raw==='')return null;const n=num(raw);if(!Number.isFinite(n)||n<min||n>max||(integer&&!Number.isInteger(n)))throw new Error(`invalid_${name}`);return n}
-function maybeDate(sp,name){const raw=text(sp.get(name));if(!raw)return'';if(!/^\d{4}-\d{2}-\d{2}$/.test(raw))throw new Error(`invalid_${name}`);return raw}
+function maybeDate(sp,name){const raw=text(sp.get(name));if(!raw)return'';const m=raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);if(!m)throw new Error(`invalid_${name}`);const y=Number(m[1]),mo=Number(m[2]),d=Number(m[3]),dt=new Date(Date.UTC(y,mo-1,d));if(dt.getUTCFullYear()!==y||dt.getUTCMonth()+1!==mo||dt.getUTCDate()!==d)throw new Error(`invalid_${name}`);return raw}
 function ensureOrder(a,b,label){if(a!=null&&b!=null&&a>b)throw new Error(`invalid_${label}_range`)}
 
 export function parseCustomerSearchParams(sp){
