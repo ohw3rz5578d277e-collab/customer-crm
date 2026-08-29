@@ -4,12 +4,22 @@ import { injectCustomer360Marketing } from './crm-customer360-ui.mjs';
 import { injectCustomer360SearchFocus } from './crm-customer360-search-focus.mjs';
 import { injectMobileOwnerInteractionRecovery } from './crm-mobile-owner-interaction-recovery.mjs';
 import { injectMobileOwnerCardSummary } from './crm-mobile-owner-card-summary.mjs';
+import { injectCustomer360DirectNavigation } from './crm-customer360-direct-navigation.mjs';
 
 const BUILD='customer-crm-customer360-family-marketing-20260828-01';
 const RAW_SCRIPT_CLOSE='<'+String.fromCharCode(92)+'/script>';
 
 export function normalizeCustomer360InjectedHtml(html){
   return String(html||'').split(RAW_SCRIPT_CLOSE).join('</script>');
+}
+
+export function composeCustomer360AdminHtml(html){
+  const withMarketing=injectCustomer360Marketing(html);
+  const withSearchFocus=injectCustomer360SearchFocus(withMarketing);
+  const withCardSummary=injectMobileOwnerCardSummary(withSearchFocus);
+  const withRecovery=injectMobileOwnerInteractionRecovery(withCardSummary);
+  const withDirectNavigation=injectCustomer360DirectNavigation(withRecovery);
+  return normalizeCustomer360InjectedHtml(withDirectNavigation);
 }
 
 function headersFrom(response){
@@ -34,11 +44,7 @@ async function patchHtml(response){
   if(response.status!==200||!ct.includes('text/html'))return response;
   const h=headersFrom(response);
   h.set('content-type','text/html; charset=utf-8');
-  const withMarketing=injectCustomer360Marketing(await response.text());
-  const withSearchFocus=injectCustomer360SearchFocus(withMarketing);
-  const withCardSummary=injectMobileOwnerCardSummary(withSearchFocus);
-  const withRecovery=injectMobileOwnerInteractionRecovery(withCardSummary);
-  return new Response(normalizeCustomer360InjectedHtml(withRecovery),{status:response.status,statusText:response.statusText,headers:h});
+  return new Response(composeCustomer360AdminHtml(await response.text()),{status:response.status,statusText:response.statusText,headers:h});
 }
 
 export default {
