@@ -2,6 +2,7 @@ export function injectCustomer360DirectNavigation(html){
   if(!html||html.includes('crm-customer360-direct-navigation-script'))return html;
   const style=String.raw`<style id="crm-customer360-direct-navigation-style">
 .crm-owner-customer-load-error{margin:10px 0;padding:12px;border:1px solid #fecaca;border-radius:12px;background:#fff7f7;color:#7f1d1d}.crm-owner-customer-load-error strong{display:block;margin-bottom:4px}.crm-owner-customer-load-error button{min-height:44px;margin-top:8px;border:1px solid #fca5a5;border-radius:10px;background:#fff;padding:8px 12px;font-weight:800}.crm-owner-customer-fallback{margin:10px 0;display:grid;gap:8px}.crm-owner-customer-fallback button{min-height:52px;text-align:left;border:1px solid #dce5e8;border-radius:12px;background:#fff;padding:10px 12px}.crm-owner-customer-fallback small{display:block;color:#64748b;margin-top:3px}
+@media(max-width:900px){body.crm-owner-line-nav-open #crmOwnerMobileNav{display:grid!important}body.crm-owner-line-nav-open #lineOpsPanel.crm-lineops-panel.open{bottom:calc(76px + env(safe-area-inset-bottom))!important}}
 </style>`;
   const script=String.raw`<script id="crm-customer360-direct-navigation-script">
 (()=>{
@@ -9,7 +10,8 @@ if(window.__crmCustomer360DirectNavigation)return;window.__crmCustomer360DirectN
 const $=id=>document.getElementById(id);
 const visible=el=>{if(!el)return false;const s=getComputedStyle(el);return s.display!=='none'&&s.visibility!=='hidden'&&s.opacity!=='0'&&el.getClientRects().length>0};
 function setOwnerActive(name){document.querySelectorAll('#crmOwnerMobileNav [data-owner-tab]').forEach(el=>el.classList.toggle('active',el.dataset.ownerTab===name))}
-function closeSheets(){for(const sel of ['#crmFilterDrawer','#crmMktDetail','#crmSettingsPanel','#lineOpsPanel','#crmOwnerStatusSheet'])document.querySelector(sel)?.classList.remove('open');$('crmTodayFilterPanel')?.classList.remove('crm-owner-quick-filter-open');document.body.classList.remove('crm-owner-sheet-open')}
+function syncLineNav(){const panel=$('lineOpsPanel');document.body.classList.toggle('crm-owner-line-nav-open',!!panel&&panel.classList.contains('open'))}
+function closeSheets(){for(const sel of ['#crmFilterDrawer','#crmMktDetail','#crmSettingsPanel','#lineOpsPanel','#crmOwnerStatusSheet'])document.querySelector(sel)?.classList.remove('open');$('crmTodayFilterPanel')?.classList.remove('crm-owner-quick-filter-open');document.body.classList.remove('crm-owner-sheet-open','crm-owner-line-nav-open')}
 function setCustomer360View(view){const list=$('crmMktList'),home=$('crmMktHome');if(!list||!home)return false;document.body.classList.remove('crm-owner-view-today');list.classList.toggle('open',view==='list');home.classList.toggle('open',view==='home');document.querySelectorAll('#crmMktNav [data-view]').forEach(b=>b.classList.toggle('primary',b.dataset.view===view));return true}
 function removeLoadState(){document.querySelector('.crm-owner-customer-load-error')?.remove();document.querySelector('.crm-owner-customer-fallback')?.remove()}
 function showLoadError(message){const list=$('crmMktList');if(!list)return;removeLoadState();const box=document.createElement('div');box.className='crm-owner-customer-load-error';box.innerHTML='<strong>顧客データを読み込めませんでした</strong><div></div><button type="button">再読み込み</button>';box.querySelector('div').textContent=message||'通信状態を確認して再読み込みしてください。';box.querySelector('button').onclick=()=>refreshList({force:true});list.prepend(box)}
@@ -20,8 +22,8 @@ function scrollList(){const target=$('crmOwnerCustomerTitle')||$('crmMktList')?.
 function showList(options={}){closeSheets();const ok=setCustomer360View('list');setOwnerActive(options.ownerTab||'customers');if(ok){scrollList();void refreshList()}window.__crmOwnerMobileInteraction?.syncSheetState?.();return ok}
 function focusSearch(){showList({ownerTab:'search'});let tries=0;const focus=()=>{const input=$('crmGlobalSearch');if(input&&visible(input)){input.scrollIntoView({block:'center'});input.focus({preventScroll:true});return}if(++tries<40)setTimeout(focus,50)};focus();return true}
 function showHome(){closeSheets();const ok=setCustomer360View('home');window.__crmOwnerMobileInteraction?.syncSheetState?.();return ok}
-function bindOwnerNav(){const customer=$('crmOwnerNavCustomers'),search=$('crmOwnerNavSearch');if(customer)customer.onclick=()=>showList({ownerTab:'customers'});if(search)search.onclick=focusSearch;if(window.__crmOwnerMobileInteraction){window.__crmOwnerMobileInteraction.showCustomers=()=>showList({ownerTab:'customers'});window.__crmOwnerMobileInteraction.showSearch=focusSearch}}
-function boot(){window.__crmCustomer360UI={showList,showHome,focusSearch,refreshList};bindOwnerNav();new MutationObserver(()=>bindOwnerNav()).observe(document.documentElement,{childList:true,subtree:true})}
+function bindOwnerNav(){const customer=$('crmOwnerNavCustomers'),search=$('crmOwnerNavSearch');if(customer)customer.onclick=()=>window.__crmCustomer360UI?.showList({ownerTab:'customers'});if(search)search.onclick=()=>window.__crmCustomer360UI?.focusSearch();if(window.__crmOwnerMobileInteraction){window.__crmOwnerMobileInteraction.showCustomers=()=>window.__crmCustomer360UI?.showList({ownerTab:'customers'});window.__crmOwnerMobileInteraction.showSearch=()=>window.__crmCustomer360UI?.focusSearch()}}
+function boot(){window.__crmCustomer360UI={showList,showHome,focusSearch,refreshList};bindOwnerNav();syncLineNav();document.addEventListener('click',()=>setTimeout(syncLineNav,0),true);new MutationObserver(()=>bindOwnerNav()).observe(document.documentElement,{childList:true,subtree:true})}
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot,{once:true});else boot();
 })();
 <\/script>`;
