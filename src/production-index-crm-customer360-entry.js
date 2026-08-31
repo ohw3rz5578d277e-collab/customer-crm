@@ -5,6 +5,7 @@ import { injectCustomer360SearchFocus } from './crm-customer360-search-focus.mjs
 import { injectMobileOwnerInteractionRecovery } from './crm-mobile-owner-interaction-recovery.mjs';
 import { injectMobileOwnerCardSummary } from './crm-mobile-owner-card-summary.mjs';
 import { injectCustomer360DirectNavigation } from './crm-customer360-direct-navigation.mjs';
+import { injectOwnerViewState } from './crm-owner-view-state.mjs';
 
 const BUILD='customer-crm-customer360-family-marketing-20260828-01';
 const RAW_SCRIPT_CLOSE='<'+String.fromCharCode(92)+'/script>';
@@ -19,7 +20,8 @@ export function composeCustomer360AdminHtml(html){
   const withCardSummary=injectMobileOwnerCardSummary(withSearchFocus);
   const withRecovery=injectMobileOwnerInteractionRecovery(withCardSummary);
   const withDirectNavigation=injectCustomer360DirectNavigation(withRecovery);
-  return normalizeCustomer360InjectedHtml(withDirectNavigation);
+  const withOwnerViewState=injectOwnerViewState(withDirectNavigation);
+  return normalizeCustomer360InjectedHtml(withOwnerViewState);
 }
 
 function headersFrom(response){
