@@ -1,6 +1,7 @@
 import app from './production-index-crm-browser-root-entry.js';
 import { handleCustomer360Request, customer360Health } from './crm-customer360-runtime.mjs';
 import { injectCustomer360Marketing } from './crm-customer360-ui.mjs';
+import { injectCustomerListDailyOperations } from './crm-customer-list-daily-operations.mjs';
 import { injectCustomer360SearchFocus } from './crm-customer360-search-focus.mjs';
 import { injectMobileOwnerInteractionRecovery } from './crm-mobile-owner-interaction-recovery.mjs';
 import { injectMobileOwnerCardSummary } from './crm-mobile-owner-card-summary.mjs';
@@ -16,7 +17,8 @@ export function normalizeCustomer360InjectedHtml(html){
 
 export function composeCustomer360AdminHtml(html){
   const withMarketing=injectCustomer360Marketing(html);
-  const withSearchFocus=injectCustomer360SearchFocus(withMarketing);
+  const withDailyOperations=injectCustomerListDailyOperations(withMarketing);
+  const withSearchFocus=injectCustomer360SearchFocus(withDailyOperations);
   const withCardSummary=injectMobileOwnerCardSummary(withSearchFocus);
   const withRecovery=injectMobileOwnerInteractionRecovery(withCardSummary);
   const withDirectNavigation=injectCustomer360DirectNavigation(withRecovery);
