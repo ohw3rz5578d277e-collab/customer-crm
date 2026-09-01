@@ -10,7 +10,7 @@ const REPLACEMENTS=Object.freeze([
   [OLD_ROW,NEW_ROW],
   ['placeholder="名前・電話・Customer ID・家族名から検索"','placeholder="名前・顧客ID・LINE表示名・電話で検索"'],
   ['<thead><tr><th>顧客</th><th>次イベント</th><th>実績LTV</th><th>家族</th><th>最終撮影</th><th>地域</th><th>LINE</th><th>おすすめ</th><th>操作</th></tr></thead>','<thead><tr><th>顧客</th><th>関係</th><th>撮影回数</th><th>累計売上</th><th>最終撮影</th><th>LINE</th><th>次の候補</th><th>詳細</th></tr></thead>'],
-  ['top.map(row).join(\'\')','top.map(marketingRow).join(\'\')']
+  ["top.map(row).join('')","top.map(marketingRow).join('')"]
 ]);
 
 const DAILY_STYLE=`<style id="${DAILY_STYLE_ID}">
