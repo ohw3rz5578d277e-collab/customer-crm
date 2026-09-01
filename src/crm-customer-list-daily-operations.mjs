@@ -11,7 +11,7 @@ const NEW_SEARCH='名前・顧客ID・LINE表示名・電話で検索';
 
 const DAILY_STYLE=`<style id="${DAILY_STYLE_ID}">
 .crm-daily-row .crm-daily-count,.crm-daily-row .crm-daily-ltv{font-weight:900;color:#10212d}.crm-daily-row td[data-label="詳細"] .crm-mkt-btn{white-space:nowrap}.crm-daily-row td[data-label="関係"] .crm-status{white-space:nowrap}
-@media(max-width:767px){.crm-daily-row{padding:12px!important}.crm-daily-row td:first-child{display:block!important;padding:3px 3px 9px!important}.crm-daily-row td:first-child:before{display:none!important}.crm-daily-row .crm-mkt-name{font-size:17px}.crm-daily-row td{grid-template-columns:78px minmax(0,1fr)!important}.crm-daily-row td[data-label="詳細"]{display:block!important;padding-top:9px!important}.crm-daily-row td[data-label="詳細"]:before{display:none!important}.crm-daily-row td[data-label="詳細"] .crm-mkt-btn{width:100%;min-height:44px}.crm-daily-row td[data-label="次の候補"]{padding-top:8px}}
+@media(max-width:900px){#crmMktList .crm-daily-row{padding:12px!important}#crmMktList .crm-daily-row td{display:grid!important;grid-template-columns:78px minmax(0,1fr)!important}#crmMktList .crm-daily-row td:first-child{display:block!important;padding:3px 3px 9px!important}#crmMktList .crm-daily-row td:first-child:before{display:none!important}#crmMktList .crm-daily-row .crm-mkt-name{font-size:17px}#crmMktList .crm-daily-row td[data-label="詳細"]{display:block!important;padding-top:9px!important}#crmMktList .crm-daily-row td[data-label="詳細"]:before{display:none!important}#crmMktList .crm-daily-row td[data-label="詳細"] .crm-mkt-btn{width:100%;min-height:44px}#crmMktList .crm-daily-row td[data-label="次の候補"]{padding-top:8px!important}}
 </style>`;
 
 export function injectCustomerListDailyOperations(html){
