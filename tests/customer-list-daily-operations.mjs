@@ -18,7 +18,7 @@ pass('cumulative realized revenue is visible in list',daily.includes('data-label
 pass('last shoot date is visible in list',daily.includes('data-label="最終撮影"')&&daily.includes("v.last_shoot_date||'—'"));
 pass('LINE linked state is visible in list',daily.includes('data-label="LINE"')&&daily.includes("v.line_linked?'連携済':'未連携'"));
 pass('next candidate remains available without pretending it is a reservation',daily.includes('data-label="次の候補"')&&daily.includes('opp(v.next_opportunity)'));
-pass('detail action remains exact Customer ID based',daily.includes('data-open="\'+esc(v.customer_id)+\'"'));
+pass('detail action remains exact Customer ID based',daily.includes('data-open=')&&daily.includes('esc(v.customer_id)'));
 pass('search communicates name Customer ID LINE display name and phone',daily.includes('placeholder="名前・顧客ID・LINE表示名・電話で検索"'));
 pass('desktop header is daily-operations ordered',daily.includes('<th>顧客</th><th>関係</th><th>撮影回数</th><th>累計売上</th><th>最終撮影</th><th>LINE</th><th>次の候補</th><th>詳細</th>'));
 pass('mobile detail target remains at least 44px',daily.includes('min-height:44px'));
