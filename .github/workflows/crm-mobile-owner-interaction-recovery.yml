@@ -7,6 +7,12 @@ on:
     paths:
       - 'src/crm-mobile-owner-interaction-recovery.mjs'
       - 'src/crm-mobile-owner-card-summary.mjs'
+      - 'src/crm-owner-view-state.mjs'
+      - 'src/crm-customer-list-daily-operations.mjs'
+      - 'src/crm-customer360-runtime.mjs'
+      - 'src/crm-customer360-search.mjs'
+      - 'src/crm-customer-id-autofill-runtime.mjs'
+      - 'src/customer-identity-resolver.mjs'
       - 'src/production-index-crm-customer360-entry.js'
       - 'tests/**'
       - '.github/workflows/crm-mobile-owner-interaction-recovery.yml'
@@ -38,14 +44,23 @@ jobs:
           mapfile -t changed < <(git diff --name-only "$BASE_SHA...$HEAD_SHA")
           printf 'CHANGED_FILE=%s\n' "${changed[@]}"
           test "${#changed[@]}" -gt 0
-          if printf '%s\n' "${changed[@]}" | grep -Eq '^(migrations/|migrations_managed/|src/.*(identity|customer-id|canonical-customer))'; then
-            echo '::error::Identity or migration source changed in mobile UX hotfix.'
+          if printf '%s\n' "${changed[@]}" | grep -Eq '^(migrations/|migrations_managed/)'; then
+            echo '::error::Migration change is not authorized for Customer ID autofill recovery.'
             exit 1
           fi
-          echo 'IDENTITY_SOURCE_CHANGE=0'
+          mapfile -t identity_changed < <(printf '%s\n' "${changed[@]}" | grep -E '^src/.*(identity|customer-id|canonical-customer)' || true)
+          for path in "${identity_changed[@]}"; do
+            case "$path" in
+              src/customer-identity-resolver.mjs|src/crm-customer-id-autofill-runtime.mjs) ;;
+              *) echo "::error::Unexpected identity source change: $path"; exit 1 ;;
+            esac
+          done
+          echo 'IDENTITY_SOURCE_CHANGE=AUTHORIZED_CANONICAL_RESOLVER_AND_AUTOFILL_ONLY'
           echo 'MIGRATION_CHANGE=0'
           echo 'PRODUCTION_D1_WRITE=0'
           echo 'PRODUCTION_CUSTOMER_WRITE=0'
+          echo 'PRODUCTION_ID_GENERATION=0'
+          echo 'PRODUCTION_SEQUENCE_UPDATE=0'
           echo 'PRODUCTION_FAMILY_WRITE=0'
           echo 'PRODUCTION_PROFILE_WRITE=0'
           echo 'LINE_SEND=0'
@@ -72,10 +87,13 @@ jobs:
           set -euo pipefail
           node --check src/crm-mobile-owner-interaction-recovery.mjs
           node --check src/crm-mobile-owner-card-summary.mjs
+          node --check src/crm-owner-view-state.mjs
+          node --check src/crm-customer-id-autofill-runtime.mjs
+          node --check src/customer-identity-resolver.mjs
           node --check src/production-index-crm-customer360-entry.js
           node tests/crm-mobile-owner-interaction-recovery.mjs
 
-      - name: Full local static mocked read-only regression
+      - name: Full local mocked regression
         shell: bash
         run: |
           set -euo pipefail
@@ -104,6 +122,8 @@ jobs:
           test -n "$(find /tmp/crm-mobile-owner-interaction-dry-run -type f -print -quit)"
           echo 'WRANGLER_DRY_RUN=PASS'
           echo 'PRODUCTION_D1_WRITE=0'
+          echo 'PRODUCTION_ID_GENERATION=0'
+          echo 'PRODUCTION_SEQUENCE_UPDATE=0'
           echo 'WORKER_DEPLOY=0'
           echo 'PAGES_PRODUCTION_DEPLOY=0'
           echo 'LINE_SEND=0'
