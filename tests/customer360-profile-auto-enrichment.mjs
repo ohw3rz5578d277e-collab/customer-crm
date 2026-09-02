@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { __test, customerProfileEnrichmentHealth } from '../src/crm-customer360-profile-enrichment.mjs';
+import { customerProfileEnrichmentHealth } from '../src/crm-customer360-profile-enrichment.mjs';
+import { __test as lineTest, customer360LineProfileExtractionHealth } from '../src/crm-customer360-line-profile-extraction.mjs';
 import { injectCustomer360ProfileUi } from '../src/crm-customer360-profile-ui.mjs';
 
 const root=new URL('../',import.meta.url);
 const runtime=await readFile(new URL('src/crm-customer360-profile-enrichment.mjs',root),'utf8');
+const lineRuntime=await readFile(new URL('src/crm-customer360-line-profile-extraction.mjs',root),'utf8');
 const migration=await readFile(new URL('migrations_managed/20260903_customer360_profile_auto_enrichment.sql',root),'utf8');
 const client=await readFile(new URL('src/crm-customer360-profile-ui-client.mjs',root),'utf8');
 const entry=await readFile(new URL('src/production-index-crm-customer360-entry.js',root),'utf8');
@@ -24,27 +26,36 @@ ok('derived metrics use reservation runtime semantics',()=>{
 });
 
 ok('LINE high confidence extraction recognizes explicit phone and email',()=>{
-  const out=__test.extractedCandidates('電話番号は090-1234-5678です。メールはtest@example.comです。');
+  const out=lineTest.extractedCandidates('電話番号は090-1234-5678です。メールはtest@example.comです。');
   assert.equal(out.find(x=>x.field==='phone')?.value,'090-1234-5678');
   assert.equal(out.find(x=>x.field==='email')?.value,'test@example.com');
   assert.ok(out.every(x=>x.confidence>=0&&x.confidence<=1));
 });
 
-ok('child and anniversary extraction produce candidates only',()=>{
-  const child=__test.extractedCandidates('第一子の名前は陽葵です。第一子は2023年10月5日生まれです。');
+ok('child and anniversary extraction produce clean candidates',()=>{
+  const child=lineTest.extractedCandidates('第一子の名前は陽葵です。第一子は2023年10月5日生まれです。');
   assert.equal(child.find(x=>x.field==='child.1.name')?.value,'陽葵');
   assert.equal(child.find(x=>x.field==='child.1.birth_date')?.value,'2023-10-05');
-  const ann=__test.extractedCandidates('結婚記念日は2020年6月20日です。');
+  const ann=lineTest.extractedCandidates('結婚記念日は2020年6月20日です。');
   assert.equal(ann.find(x=>x.field==='wedding_anniversary')?.value,'2020-06-20');
+});
+
+ok('exact LINE identity and canonical ledger direction are mandatory',()=>{
+  assert.match(lineRuntime,/CAST\(customer_id AS TEXT\)=\?/);
+  assert.match(lineRuntime,/line_user_id=\?/);
+  assert.match(lineRuntime,/direction='incoming'/);
+  assert.match(lineRuntime,/send_status='received'/);
+  assert.match(lineRuntime,/fallback_used:false/);
+  assert.match(lineRuntime,/auto_apply:false/);
+  const health=customer360LineProfileExtractionHealth();
+  assert.equal(health.exact_customer_id_and_line_user_id,true);
+  assert.equal(health.line_event_direction,'incoming');
 });
 
 ok('identity unresolved/conflict cannot silently write',()=>{
   assert.match(runtime,/exactCustomer\(env,id\)/);
-  assert.match(runtime,/customer_id AS TEXT\)=\?/);
-  assert.match(runtime,/line_user_id=\?/);
-  assert.match(runtime,/fallback_used:false/);
-  assert.match(runtime,/auto_apply:false/);
-  assert.match(runtime,/status=existing&&existing!==text\(c\.value\)\?'conflict':'candidate'/);
+  assert.match(lineRuntime,/status=existing&&existing!==text\(c\.value\)\?'conflict':'candidate'/);
+  assert.match(lineRuntime,/auto_apply:false/);
 });
 
 ok('human confirmed data is represented and LINE extraction never auto applies it',()=>{
@@ -67,7 +78,7 @@ ok('attribution remains read-model reference and source categories are not rewri
   assert.match(runtime,/Attribution remains reference\/read-model data/);
   assert.match(runtime,/first_touch_source/);
   assert.match(runtime,/last_touch_source/);
-  assert.ok(!runtime.includes("UPDATE customer_attribution"));
+  assert.ok(!runtime.includes('UPDATE customer_attribution'));
 });
 
 ok('security requires Owner or internal auth and does not expose tokens',()=>{
@@ -88,6 +99,7 @@ ok('Customer ID generation and destructive migrations remain zero',()=>{
 
 ok('production entry composes the real Customer360 profile feature',()=>{
   assert.ok(entry.includes("./crm-customer360-profile-enrichment.mjs"));
+  assert.ok(entry.includes("./crm-customer360-line-profile-extraction.mjs"));
   assert.ok(entry.includes("./crm-customer360-profile-ui.mjs"));
   const html=injectCustomer360ProfileUi('<html><head></head><body><main>CRM</main></body></html>');
   assert.ok(html.includes('crm-customer360-profile-script'));
@@ -96,9 +108,10 @@ ok('production entry composes the real Customer360 profile feature',()=>{
 
 ok('LINE send remains absent',()=>{
   assert.ok(!runtime.includes('LINE_SERVICE.fetch'));
-  assert.ok(!runtime.includes('/push'));
-  assert.ok(!runtime.includes('/multicast'));
+  assert.ok(!lineRuntime.includes('LINE_SERVICE.fetch'));
+  assert.ok(!lineRuntime.includes('/push'));
+  assert.ok(!lineRuntime.includes('/multicast'));
 });
 
-console.log(`RESULT ${pass}/12 PASS`);
+console.log(`RESULT ${pass}/13 PASS`);
 if(process.exitCode)process.exit(process.exitCode);
