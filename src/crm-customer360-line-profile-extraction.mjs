@@ -17,7 +17,21 @@ function extractedCandidates(message){
   return out;
 }
 
-async function existingValue(env,customer,id,field){if(field==='phone'||field==='email')return text(customer[field]);if(field==='wedding_anniversary'&&await tableExists(env,'customer_profile_enrichment'))return text((await first(env,'SELECT wedding_anniversary FROM customer_profile_enrichment WHERE customer_id=?',[id]))?.wedding_anniversary);return''}
+async function childValue(env,id,birthOrder,key){
+  if(!(await tableExists(env,'customer_family_members')))return'';
+  let row=null;
+  if(await tableExists(env,'customer_family_member_metadata')){
+    row=await first(env,"SELECT f.name,f.birthdate FROM customer_family_members f JOIN customer_family_member_metadata m ON m.member_id=f.id AND m.customer_id=f.customer_id WHERE f.customer_id=? AND f.relation='child' AND m.birth_order=? AND COALESCE(f.deleted_at,'')='' LIMIT 1",[id,birthOrder]);
+  }
+  if(!row){const rows=await all(env,"SELECT name,birthdate FROM customer_family_members WHERE customer_id=? AND relation='child' AND COALESCE(deleted_at,'')='' ORDER BY created_at,id LIMIT 20",[id]);row=rows[birthOrder-1]||null;}
+  return key==='birth_date'?text(row?.birthdate).slice(0,10):text(row?.name);
+}
+async function existingValue(env,customer,id,field){
+  if(field==='phone'||field==='email')return text(customer[field]);
+  if(field==='wedding_anniversary'&&await tableExists(env,'customer_profile_enrichment'))return text((await first(env,'SELECT wedding_anniversary FROM customer_profile_enrichment WHERE customer_id=?',[id]))?.wedding_anniversary);
+  const m=field.match(/^child\.(\d+)\.(name|birth_date)$/);if(m)return childValue(env,id,Number(m[1]),m[2]);
+  return'';
+}
 
 export async function handleCustomer360LineProfileExtraction(request,env){
   const match=new URL(request.url).pathname.match(/^\/api\/customer360\/profile\/([0-9]{8})\/extract-line$/);if(!match)return null;
@@ -43,5 +57,5 @@ export async function handleCustomer360LineProfileExtraction(request,env){
   return json({ok:true,customer_id:id,extracted:inserted,candidates,identity:{lookup_key:'customer_id',line_user_id_exact_match:true,fallback_used:false},auto_apply:false,ledger_direction:'incoming'});
 }
 
-export function customer360LineProfileExtractionHealth(){return{customer360_line_profile_extraction:true,line_event_direction:'incoming',line_event_receive_status:'received',exact_customer_id_and_line_user_id:true,line_profile_auto_apply:false};}
+export function customer360LineProfileExtractionHealth(){return{customer360_line_profile_extraction:true,line_event_direction:'incoming',line_event_receive_status:'received',exact_customer_id_and_line_user_id:true,line_profile_auto_apply:false,child_conflict_check:true};}
 export const __test={extractedCandidates};
