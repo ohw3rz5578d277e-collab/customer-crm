@@ -1,6 +1,7 @@
 import app from './production-index-crm-browser-root-entry.js';
 import { handleCustomer360Request, customer360Health } from './crm-customer360-runtime.mjs';
 import { handleCustomerProfileEnrichmentRequest, customerProfileEnrichmentHealth } from './crm-customer360-profile-enrichment.mjs';
+import { handleCustomer360LineProfileExtraction, customer360LineProfileExtractionHealth } from './crm-customer360-line-profile-extraction.mjs';
 import { injectCustomer360Marketing } from './crm-customer360-ui.mjs';
 import { injectCustomerListDailyOperations } from './crm-customer-list-daily-operations.mjs';
 import { injectCustomer360SearchFocus } from './crm-customer360-search-focus.mjs';
@@ -10,7 +11,7 @@ import { injectCustomer360DirectNavigation } from './crm-customer360-direct-navi
 import { injectOwnerViewState } from './crm-owner-view-state.mjs';
 import { injectCustomer360ProfileUi } from './crm-customer360-profile-ui.mjs';
 
-const BUILD='customer-crm-customer360-profile-enrichment-20260903-01';
+const BUILD='customer-crm-customer360-profile-enrichment-20260903-02';
 const RAW_SCRIPT_CLOSE='<'+String.fromCharCode(92)+'/script>';
 
 export function normalizeCustomer360InjectedHtml(html){
@@ -43,7 +44,7 @@ async function patchHealth(response){
   try{data=raw?JSON.parse(raw):{}}catch(_){}
   const h=headersFrom(response);
   h.set('content-type','application/json; charset=utf-8');
-  return new Response(JSON.stringify({...data,...customer360Health(),...customerProfileEnrichmentHealth(),customer360_build:BUILD},null,2),{status:response.status,headers:h});
+  return new Response(JSON.stringify({...data,...customer360Health(),...customerProfileEnrichmentHealth(),...customer360LineProfileExtractionHealth(),customer360_build:BUILD},null,2),{status:response.status,headers:h});
 }
 
 async function patchHtml(response){
@@ -56,6 +57,8 @@ async function patchHtml(response){
 
 export default {
   async fetch(request,env,ctx){
+    const lineProfileApi=await handleCustomer360LineProfileExtraction(request,env);
+    if(lineProfileApi)return lineProfileApi;
     const profileApi=await handleCustomerProfileEnrichmentRequest(request,env);
     if(profileApi)return profileApi;
     const api=await handleCustomer360Request(request,env);
