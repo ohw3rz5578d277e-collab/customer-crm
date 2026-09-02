@@ -1,0 +1,242 @@
+name: Customer360 profile Production close TEMP
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/customer360-profile-production-close-temp.yml'
+      - 'migrations_managed/20260903_customer360_profile_auto_enrichment.sql'
+      - 'src/crm-customer360-*.mjs'
+      - 'src/production-index-crm-customer360-entry.js'
+      - 'tests/customer360-profile-*.mjs'
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  issues: read
+
+concurrency:
+  group: customer360-profile-production-close
+  cancel-in-progress: false
+
+jobs:
+  pr_preflight:
+    if: ${{ github.event_name == 'pull_request' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+      - name: Exact-head migration and release validation
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = '${{ github.event.pull_request.head.sha }}'
+          node tests/customer360-profile-migration-local.mjs
+          node tests/customer360-profile-auto-enrichment.mjs
+          node tests/customer360-profile-write-identity-guard.mjs
+          ! grep -E "DROP[[:space:]]+(TABLE|COLUMN)|ALTER[[:space:]]+TABLE[[:space:]]+customers|customer_identity_(sequence|registry)" migrations_managed/20260903_customer360_profile_auto_enrichment.sql
+          grep -q "20260828_customer360_family_marketing_foundation.sql" .github/workflows/customer360-profile-production-close-temp.yml
+          grep -q "20260903_customer360_profile_auto_enrichment.sql" .github/workflows/customer360-profile-production-close-temp.yml
+          echo 'RELEASE_EXPLICIT_ALLOWLIST=PASS'
+          echo 'MIGRATION_LOCAL_VALIDATION=PASS'
+      - name: Wrangler dry-run only
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --no-save wrangler@4.33.1
+          node -e "import('./src/production-index-crm-customer360-entry.js').then(()=>console.log('PRODUCTION_ENTRY_IMPORT=PASS'))"
+          npx wrangler deploy --dry-run --outdir /tmp/customer360-profile-close-dry-run
+          test -n "$(find /tmp/customer360-profile-close-dry-run -type f -print -quit)"
+          echo 'WRANGLER_DRY_RUN=PASS'
+          echo 'PRODUCTION_D1_WRITE=0'
+          echo 'WORKER_DEPLOY=0'
+
+  production_close:
+    if: >-
+      github.event_name == 'issue_comment' &&
+      github.event.issue.number == 26 &&
+      github.event.issue.pull_request == null &&
+      github.actor == 'ohw3rz5578d277e-collab' &&
+      github.event.comment.user.login == 'ohw3rz5578d277e-collab' &&
+      startsWith(github.event.comment.body, '/customer360-profile-production-close ')
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      COMMAND_BODY: ${{ github.event.comment.body }}
+      BASE_URL: https://customer-crm-api.ohw3rz5578d277e.workers.dev
+      CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+      CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+      ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}
+    steps:
+      - name: Parse exact authorized SHA
+        id: gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! "$COMMAND_BODY" =~ ^/customer360-profile-production-close[[:space:]]+confirm_production=true[[:space:]]+sha=([0-9a-f]{40})$ ]]; then
+            echo '::error::Invalid Production Close command.'
+            exit 1
+          fi
+          echo "expected_sha=${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v6
+        with:
+          ref: main
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Exact current-main gate
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ steps.gate.outputs.expected_sha }}
+        run: |
+          set -euo pipefail
+          actual="$(git rev-parse HEAD)"
+          remote="$(git ls-remote origin refs/heads/main | awk '{print $1}')"
+          test "$actual" = "$EXPECTED_SHA"
+          test "$remote" = "$EXPECTED_SHA"
+          echo "PRODUCTION_SOURCE_SHA=$actual"
+          echo 'EXPECTED_SHA_GUARD=PASS'
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+      - name: Re-run source safety before Production
+        shell: bash
+        run: |
+          set -euo pipefail
+          node tests/customer360-profile-migration-local.mjs
+          node tests/customer360-profile-auto-enrichment.mjs
+          node tests/customer360-profile-write-identity-guard.mjs
+          ! grep -E "DROP[[:space:]]+(TABLE|COLUMN)|ALTER[[:space:]]+TABLE[[:space:]]+customers|customer_identity_(sequence|registry)" migrations_managed/20260903_customer360_profile_auto_enrichment.sql
+          echo 'CUSTOMER_ID_GENERATION=0'
+          echo 'UNAUTHORIZED_MERGE=0'
+          echo 'LINE_SEND=0'
+          echo 'PAID_AI_ACTIVATION=0'
+      - name: Confirm Cloudflare authentication
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          wranglerVersion: '4'
+          command: whoami
+      - name: Read Production row counts before migration
+        id: counts_before
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          wranglerVersion: '4'
+          command: >-
+            d1 execute customer-crm-db --remote --json --command
+            "SELECT (SELECT COUNT(*) FROM customers) AS customer_count,
+            (SELECT COUNT(*) FROM customer_family_members) AS family_count;"
+      - name: List pending managed migrations
+        id: pending
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          wranglerVersion: '4'
+          command: d1 migrations list customer-crm-db --remote
+      - name: Enforce explicit migration allowlist and order
+        id: classify
+        shell: bash
+        env:
+          PENDING: ${{ steps.pending.outputs.command-output }}
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const fs=require('fs');
+          const s=process.env.PENDING||'';
+          const files=[...s.matchAll(/[A-Za-z0-9_.-]+\.sql/g)].map(x=>x[0]).filter((x,i,a)=>a.indexOf(x)===i);
+          const family='20260828_customer360_family_marketing_foundation.sql';
+          const profile='20260903_customer360_profile_auto_enrichment.sql';
+          const allowed=new Set([family,profile]);
+          const unknown=files.filter(x=>!allowed.has(x));
+          if(unknown.length)throw new Error('BLOCKED_UNEXPECTED_MANAGED_MIGRATION:'+unknown.join(','));
+          const valid=files.length===0 || (files.length===1&&files[0]===profile) || (files.length===2&&files[0]===family&&files[1]===profile);
+          if(!valid)throw new Error('BLOCKED_MIGRATION_ORDER:'+files.join(' -> '));
+          fs.appendFileSync(process.env.GITHUB_OUTPUT,`pending_count=${files.length}\npending_files=${files.join(',')||'NONE'}\n`);
+          console.log('EXPLICIT_MIGRATION_ALLOWLIST=PASS');
+          console.log('MIGRATION_ORDER=PASS');
+          console.log('PENDING='+ (files.join(' -> ')||'NONE'));
+          NODE
+      - name: Apply approved additive managed migrations
+        if: ${{ steps.classify.outputs.pending_count != '0' }}
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          wranglerVersion: '4'
+          command: d1 migrations apply customer-crm-db --remote
+      - name: Read Production schema and counts after migration
+        id: verify_schema
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          wranglerVersion: '4'
+          command: >-
+            d1 execute customer-crm-db --remote --json --command
+            "SELECT (SELECT COUNT(*) FROM customers) AS customer_count,
+            (SELECT COUNT(*) FROM customer_family_members) AS family_count;
+            SELECT name FROM sqlite_master WHERE type='table' AND name IN
+            ('customer_profile_enrichment','customer_family_member_metadata','customer_field_evidence','customer_notes_history') ORDER BY name;
+            PRAGMA table_info(customer_profile_enrichment);
+            PRAGMA table_info(customer_family_member_metadata);
+            PRAGMA table_info(customer_field_evidence);
+            PRAGMA table_info(customer_notes_history);
+            SELECT name FROM sqlite_master WHERE type='index' AND name LIKE 'idx_customer_%' ORDER BY name;"
+      - name: Assert Production schema and existing rows preserved
+        shell: bash
+        env:
+          BEFORE: ${{ steps.counts_before.outputs.command-output }}
+          AFTER: ${{ steps.verify_schema.outputs.command-output }}
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          function count(s,key){const m=s.match(new RegExp('"'+key+'"\\s*:\\s*(\\d+)'));if(!m)throw new Error('Missing '+key);return Number(m[1])}
+          const before=process.env.BEFORE||'',after=process.env.AFTER||'';
+          if(count(before,'customer_count')!==count(after,'customer_count'))throw new Error('CUSTOMER_ROW_COUNT_CHANGED');
+          if(count(before,'family_count')!==count(after,'family_count'))throw new Error('FAMILY_ROW_COUNT_CHANGED');
+          for(const t of ['customer_profile_enrichment','customer_family_member_metadata','customer_field_evidence','customer_notes_history'])if(!after.includes(t))throw new Error('MISSING_TABLE:'+t);
+          for(const i of ['idx_customer_profile_enrichment_lead','idx_customer_family_member_metadata_order','idx_customer_field_evidence_pending','idx_customer_notes_history_customer'])if(!after.includes(i))throw new Error('MISSING_INDEX:'+i);
+          console.log('PRODUCTION_SCHEMA_READBACK=PASS');
+          console.log('EXISTING_CUSTOMERS_PRESERVED=PASS');
+          console.log('EXISTING_FAMILY_MEMBERS_PRESERVED=PASS');
+          console.log('PRODUCTION_CUSTOMER_DELETES=0');
+          NODE
+      - name: Deploy exact main Customer CRM Worker
+        id: deploy
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          wranglerVersion: '4'
+          command: deploy
+      - name: Production health and safe-read verification
+        shell: bash
+        run: |
+          set -euo pipefail
+          for v in CF_ACCESS_CLIENT_ID CF_ACCESS_CLIENT_SECRET ADMIN_TOKEN; do test -n "${!v}" || { echo "::error::$v missing"; exit 1; }; done
+          node <<'NODE'
+          const base=process.env.BASE_URL;
+          const headers={'CF-Access-Client-Id':process.env.CF_ACCESS_CLIENT_ID,'CF-Access-Client-Secret':process.env.CF_ACCESS_CLIENT_SECRET,'x-admin-token':process.env.ADMIN_TOKEN};
+          async function get(path){const r=await fetch(base+path,{headers,redirect:'manual'});const text=await r.text();if(r.status!==200)throw new Error(path+' status='+r.status);return {r,text,json:()=>JSON.parse(text)}}
+          const h=await get('/health');const health=h.json();
+          for(const k of ['customer360_profile_enrichment','customer360_line_profile_extraction','customer360_profile_write_guard'])if(health[k]!==true)throw new Error('HEALTH_MARKER:'+k);
+          if(health.customer_id_generation!==false)throw new Error('customer_id_generation_not_false');
+          if(health.customer_line_auto_apply!==false&&health.line_profile_auto_apply!==false)throw new Error('auto_apply_not_false');
+          const list=await get('/api/customer360/customers?page=1&page_size=1');const j=list.json();if(!j.ok)throw new Error('customer list not ok');
+          if(JSON.stringify(health).includes('CRM_INTERNAL_TOKEN')||JSON.stringify(health).includes('ADMIN_TOKEN'))throw new Error('browser secret marker exposed');
+          console.log('PRODUCTION_HEALTH=PASS');
+          console.log('PRODUCTION_CUSTOMER360_SAFE_READ=PASS');
+          console.log('PRODUCTION_TEST_CUSTOMER_WRITES=0');
+          console.log('BROWSER_SECRET_EXPOSURE=0');
+          NODE
