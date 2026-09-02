@@ -8,6 +8,7 @@ import { injectMobileOwnerInteractionRecovery } from './crm-mobile-owner-interac
 import { injectMobileOwnerCardSummary } from './crm-mobile-owner-card-summary.mjs';
 import { injectCustomer360DirectNavigation } from './crm-customer360-direct-navigation.mjs';
 import { injectOwnerViewState } from './crm-owner-view-state.mjs';
+import { injectCustomer360ProfileUi } from './crm-customer360-profile-ui.mjs';
 
 const BUILD='customer-crm-customer360-profile-enrichment-20260903-01';
 const RAW_SCRIPT_CLOSE='<'+String.fromCharCode(92)+'/script>';
@@ -24,7 +25,8 @@ export function composeCustomer360AdminHtml(html){
   const withRecovery=injectMobileOwnerInteractionRecovery(withCardSummary);
   const withDirectNavigation=injectCustomer360DirectNavigation(withRecovery);
   const withOwnerViewState=injectOwnerViewState(withDirectNavigation);
-  return normalizeCustomer360InjectedHtml(withOwnerViewState);
+  const withProfile=injectCustomer360ProfileUi(withOwnerViewState);
+  return normalizeCustomer360InjectedHtml(withProfile);
 }
 
 function headersFrom(response){
