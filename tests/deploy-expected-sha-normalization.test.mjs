@@ -47,7 +47,7 @@ assert.ok(workflow.includes("::error::INVALID_RELEASE_MODE"));
 assert.ok(workflow.includes('echo "EXPECTED_SHA=$normalized_sha" >> "$GITHUB_ENV"'));
 assert.ok(workflow.includes('ref: ${{ steps.authorized_sha.outputs.sha }}'),'checkout must use normalized output');
 assert.ok(!workflow.includes('ref: ${{ inputs.expected_sha }}'),'raw input must never be a checkout ref');
-assert.ok(!workflow.includes('EXPECTED_SHA: ${{ inputs.expected_sha }}'),'raw input must not remain the canonical expected SHA');
+assert.ok(!/^\s*EXPECTED_SHA:\s*\$\{\{\s*inputs\.expected_sha\s*\}\}\s*$/m.test(workflow),'raw input must not remain the canonical expected SHA');
 
 const releaseStart=workflow.indexOf('  release:');
 const normalizeStep=workflow.indexOf('- name: Normalize and validate authorized SHA',releaseStart);
