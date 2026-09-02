@@ -22,8 +22,9 @@ for(const viewport of [{width:390,height:844,name:'390'},{width:1440,height:900,
   const page=await ctx.newPage(),consoleErrors=[],pageErrors=[];
   page.on('console',m=>{if(m.type()==='error')consoleErrors.push(m.text())});page.on('pageerror',e=>pageErrors.push(String(e)));
   await page.goto(origin+'/admin',{waitUntil:'domcontentloaded'});
-  await page.waitForFunction(()=>window.__crmOwnerView&&document.querySelector('#crmOwnerNavCustomers'));
-  await page.locator('#crmOwnerNavCustomers').click();
+  await page.waitForFunction(()=>window.__crmOwnerView&&document.querySelector('#crmMktList'));
+  const customerNav=page.locator('#crmOwnerNavCustomers');
+  if(await customerNav.isVisible()) await customerNav.click();
   await page.locator('#crmMktList.open').waitFor();
   const open=page.locator('[data-open="'+customerId+'"]:visible').first();await open.waitFor();await open.click();
   await page.locator('#crmMktDetail.open').waitFor();const detail=page.locator('#crmMktDetailBody');const profileUi=detail.locator('.crm-pe');await profileUi.getByRole('heading',{name:'顧客プロフィール',exact:true}).waitFor();
