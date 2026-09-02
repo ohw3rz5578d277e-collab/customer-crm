@@ -22,11 +22,16 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
-      - name: Checkout PR head
+      - name: Checkout exact PR head
         uses: actions/checkout@v6
         with:
+          ref: ${{ github.event.pull_request.head.sha }}
           persist-credentials: false
           fetch-depth: 0
+
+      - name: Assert exact PR head
+        shell: bash
+        run: test "$(git rev-parse HEAD)" = '${{ github.event.pull_request.head.sha }}'
 
       - name: Set up Node
         uses: actions/setup-node@v5
@@ -59,6 +64,7 @@ jobs:
           node tests/customer360-family-marketing-birthday-thresholds.mjs
           node tests/customer360-profile-auto-enrichment.mjs
           node tests/customer360-profile-write-identity-guard.mjs
+          node tests/customer360-profile-migration-local.mjs
 
       - name: Install local browser/build tooling
         run: |
