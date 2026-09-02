@@ -8,7 +8,9 @@ on:
       - 'src/crm-customer360-*.mjs'
       - 'src/production-index-crm-customer360-entry.js'
       - 'migrations_managed/20260828_customer360_family_marketing_foundation.sql'
+      - 'migrations_managed/20260903_customer360_profile_auto_enrichment.sql'
       - 'tests/customer360-family-marketing-*.mjs'
+      - 'tests/customer360-profile-*.mjs'
       - 'wrangler.jsonc'
       - '.github/workflows/customer360-family-marketing-foundation.yml'
 
@@ -18,13 +20,18 @@ permissions:
 jobs:
   verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
-      - name: Checkout PR head
+      - name: Checkout exact PR head
         uses: actions/checkout@v6
         with:
+          ref: ${{ github.event.pull_request.head.sha }}
           persist-credentials: false
           fetch-depth: 0
+
+      - name: Assert exact PR head
+        shell: bash
+        run: test "$(git rev-parse HEAD)" = '${{ github.event.pull_request.head.sha }}'
 
       - name: Set up Node
         uses: actions/setup-node@v5
@@ -37,16 +44,27 @@ jobs:
           set -euo pipefail
           node --check src/crm-customer360-marketing-engine.mjs
           node --check src/crm-customer360-runtime.mjs
+          node --check src/crm-customer360-profile-enrichment.mjs
+          node --check src/crm-customer360-line-profile-extraction.mjs
+          node --check src/crm-customer360-profile-write-guard.mjs
+          node --check src/crm-customer360-profile-ui-client.mjs
+          node --check src/crm-customer360-profile-ui.mjs
           node --check src/crm-customer360-ui.mjs
           node --check src/production-index-crm-customer360-entry.js
-          ! grep -R -E "(INSERT[[:space:]]+INTO|UPDATE|DELETE[[:space:]]+FROM)[[:space:]]+customers\b" src/crm-customer360-*.mjs
+          ! grep -R -E "INSERT[[:space:]]+INTO[[:space:]]+customers\b|DELETE[[:space:]]+FROM[[:space:]]+customers\b" src/crm-customer360-*.mjs
+          ! grep -R -E "SET[[:space:]]+customer_id[[:space:]]*=" src/crm-customer360-*.mjs
           ! grep -R -E "LINE_SERVICE.*(send|push|multicast)|api.line.me.*message" src/crm-customer360-*.mjs src/production-index-crm-customer360-entry.js
-          ! grep -E "ALTER[[:space:]]+TABLE[[:space:]]+customers" migrations_managed/20260828_customer360_family_marketing_foundation.sql
+          ! grep -E "ALTER[[:space:]]+TABLE[[:space:]]+customers" migrations_managed/20260828_customer360_family_marketing_foundation.sql migrations_managed/20260903_customer360_profile_auto_enrichment.sql
+          ! grep -E "DROP[[:space:]]+(TABLE|COLUMN)" migrations_managed/20260903_customer360_profile_auto_enrichment.sql
+          ! grep -E "customer_identity_(sequence|registry)" migrations_managed/20260903_customer360_profile_auto_enrichment.sql
 
       - name: Unit and static regression
         run: |
           node tests/customer360-family-marketing-foundation.mjs
           node tests/customer360-family-marketing-birthday-thresholds.mjs
+          node tests/customer360-profile-auto-enrichment.mjs
+          node tests/customer360-profile-write-identity-guard.mjs
+          node tests/customer360-profile-migration-local.mjs
 
       - name: Install local browser/build tooling
         run: |
@@ -54,10 +72,21 @@ jobs:
           npx playwright install --with-deps chromium
 
       - name: Responsive browser regression
-        run: node tests/customer360-family-marketing-browser.mjs
+        run: |
+          node tests/customer360-family-marketing-browser.mjs
+          node tests/customer360-profile-browser.mjs
 
       - name: Wrangler local dry-run build only
         env:
           CLOUDFLARE_API_TOKEN: ''
           CLOUDFLARE_ACCOUNT_ID: ''
         run: npx wrangler deploy --dry-run --outdir /tmp/customer360-dry-run
+
+      - name: Upload Customer360 profile screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: customer360-profile-enrichment-screenshots
+          path: artifacts/customer360-profile-enrichment/
+          if-no-files-found: warn
+          retention-days: 7

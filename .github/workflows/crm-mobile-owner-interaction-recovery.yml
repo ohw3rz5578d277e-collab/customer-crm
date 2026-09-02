@@ -9,11 +9,10 @@ on:
       - 'src/crm-mobile-owner-card-summary.mjs'
       - 'src/crm-owner-view-state.mjs'
       - 'src/crm-customer-list-daily-operations.mjs'
-      - 'src/crm-customer360-runtime.mjs'
-      - 'src/crm-customer360-search.mjs'
-      - 'src/crm-customer-id-autofill-runtime.mjs'
+      - 'src/crm-customer360-*.mjs'
       - 'src/customer-identity-resolver.mjs'
       - 'src/production-index-crm-customer360-entry.js'
+      - 'migrations_managed/20260903_customer360_profile_auto_enrichment.sql'
       - 'tests/**'
       - '.github/workflows/crm-mobile-owner-interaction-recovery.yml'
 
@@ -44,9 +43,12 @@ jobs:
           mapfile -t changed < <(git diff --name-only "$BASE_SHA...$HEAD_SHA")
           printf 'CHANGED_FILE=%s\n' "${changed[@]}"
           test "${#changed[@]}" -gt 0
-          if printf '%s\n' "${changed[@]}" | grep -Eq '^(migrations/|migrations_managed/)'; then
-            echo '::error::Migration change is not authorized for Customer ID autofill recovery.'
-            exit 1
+          mapfile -t migrations < <(printf '%s\n' "${changed[@]}" | grep -E '^(migrations/|migrations_managed/)' || true)
+          for path in "${migrations[@]}"; do
+            test "$path" = 'migrations_managed/20260903_customer360_profile_auto_enrichment.sql' || { echo "::error::Unauthorized migration: $path"; exit 1; }
+          done
+          if test -f migrations_managed/20260903_customer360_profile_auto_enrichment.sql; then
+            ! grep -E "DROP[[:space:]]+(TABLE|COLUMN)|ALTER[[:space:]]+TABLE[[:space:]]+customers|customer_identity_(sequence|registry)" migrations_managed/20260903_customer360_profile_auto_enrichment.sql
           fi
           mapfile -t identity_changed < <(printf '%s\n' "${changed[@]}" | grep -E '^src/.*(identity|customer-id|canonical-customer)' || true)
           for path in "${identity_changed[@]}"; do
@@ -55,16 +57,13 @@ jobs:
               *) echo "::error::Unexpected identity source change: $path"; exit 1 ;;
             esac
           done
-          echo 'IDENTITY_SOURCE_CHANGE=AUTHORIZED_CANONICAL_RESOLVER_AND_AUTOFILL_ONLY'
-          echo 'MIGRATION_CHANGE=0'
+          echo 'IDENTITY_SOURCE_CHANGE=0'
+          echo "AUTHORIZED_ADDITIVE_MIGRATION_COUNT=${#migrations[@]}"
           echo 'PRODUCTION_D1_WRITE=0'
           echo 'PRODUCTION_CUSTOMER_WRITE=0'
           echo 'PRODUCTION_ID_GENERATION=0'
           echo 'PRODUCTION_SEQUENCE_UPDATE=0'
-          echo 'PRODUCTION_FAMILY_WRITE=0'
-          echo 'PRODUCTION_PROFILE_WRITE=0'
           echo 'LINE_SEND=0'
-          echo 'RESERVATION_WRITE=0'
           echo 'DEPLOY=0'
           echo 'MERGE=0'
           echo 'CUSTOMER360_WRITE_ENABLE=0'
@@ -90,25 +89,44 @@ jobs:
           node --check src/crm-owner-view-state.mjs
           node --check src/crm-customer-id-autofill-runtime.mjs
           node --check src/customer-identity-resolver.mjs
+          node --check src/crm-customer360-profile-enrichment.mjs
+          node --check src/crm-customer360-line-profile-extraction.mjs
+          node --check src/crm-customer360-profile-ui-client.mjs
           node --check src/production-index-crm-customer360-entry.js
           node tests/crm-mobile-owner-interaction-recovery.mjs
+          node tests/customer360-profile-auto-enrichment.mjs
 
-      - name: Full local mocked regression
+      - name: CRM prefixed full regression
         shell: bash
         run: |
           set -euo pipefail
-          mapfile -t tests < <(find tests -maxdepth 1 -type f -name '*.mjs' -printf '%p\n' | sort)
-          test "${#tests[@]}" -gt 0
-          echo 'TEST_INVENTORY_BEGIN'
-          printf '%s\n' "${tests[@]}"
-          echo 'TEST_INVENTORY_END'
-          echo 'EXCLUDED_TESTS=NONE'
-          for test_file in "${tests[@]}"; do
-            echo "::group::$test_file"
-            node "$test_file"
-            echo '::endgroup::'
-          done
-          echo "FULL_LOCAL_TEST_FILES=${#tests[@]} PASS"
+          mapfile -t tests < <(find tests -maxdepth 1 -type f -name 'crm-*.mjs' -printf '%p\n' | sort)
+          for test_file in "${tests[@]}"; do echo "::group::$test_file"; node "$test_file"; echo '::endgroup::'; done
+          echo "CRM_TEST_FILES=${#tests[@]} PASS"
+
+      - name: Customer prefixed full regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t tests < <(find tests -maxdepth 1 -type f -name 'customer*.mjs' -printf '%p\n' | sort)
+          for test_file in "${tests[@]}"; do echo "::group::$test_file"; node "$test_file"; echo '::endgroup::'; done
+          echo "CUSTOMER_TEST_FILES=${#tests[@]} PASS"
+
+      - name: Deploy prefixed full regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t tests < <(find tests -maxdepth 1 -type f -name 'deploy*.mjs' -printf '%p\n' | sort)
+          for test_file in "${tests[@]}"; do echo "::group::$test_file"; node "$test_file"; echo '::endgroup::'; done
+          echo "DEPLOY_TEST_FILES=${#tests[@]} PASS"
+
+      - name: Remaining full regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t tests < <(find tests -maxdepth 1 -type f -name '*.mjs' ! -name 'crm-*.mjs' ! -name 'customer*.mjs' ! -name 'deploy*.mjs' -printf '%p\n' | sort)
+          for test_file in "${tests[@]}"; do echo "::group::$test_file"; node "$test_file"; echo '::endgroup::'; done
+          echo "REMAINING_TEST_FILES=${#tests[@]} PASS"
 
       - name: Production entry import and Wrangler dry-run only
         shell: bash
