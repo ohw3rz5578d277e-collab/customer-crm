@@ -3,6 +3,7 @@ import { handleCustomer360Request, customer360Health } from './crm-customer360-r
 import { handleCustomerProfileEnrichmentRequest, customerProfileEnrichmentHealth } from './crm-customer360-profile-enrichment.mjs';
 import { handleCustomer360LineProfileExtraction, customer360LineProfileExtractionHealth } from './crm-customer360-line-profile-extraction.mjs';
 import { guardCustomer360ProfileWrite, customer360ProfileWriteGuardHealth } from './crm-customer360-profile-write-guard.mjs';
+import { handleCustomer360CombinedDetail, customer360CombinedDetailHealth } from './crm-customer360-combined-detail.mjs';
 import { injectCustomer360Marketing } from './crm-customer360-ui.mjs';
 import { injectCustomerListDailyOperations } from './crm-customer-list-daily-operations.mjs';
 import { injectCustomer360SearchFocus } from './crm-customer360-search-focus.mjs';
@@ -12,7 +13,7 @@ import { injectCustomer360DirectNavigation } from './crm-customer360-direct-navi
 import { injectOwnerViewState } from './crm-owner-view-state.mjs';
 import { injectCustomer360ProfileUi } from './crm-customer360-profile-ui.mjs';
 
-const BUILD='customer-crm-customer360-profile-enrichment-20260903-03';
+const BUILD='customer-crm-customer360-profile-enrichment-20260903-04';
 const RAW_SCRIPT_CLOSE='<'+String.fromCharCode(92)+'/script>';
 
 export function normalizeCustomer360InjectedHtml(html){
@@ -45,7 +46,7 @@ async function patchHealth(response){
   try{data=raw?JSON.parse(raw):{}}catch(_){}
   const h=headersFrom(response);
   h.set('content-type','application/json; charset=utf-8');
-  return new Response(JSON.stringify({...data,...customer360Health(),...customerProfileEnrichmentHealth(),...customer360LineProfileExtractionHealth(),...customer360ProfileWriteGuardHealth(),customer360_build:BUILD},null,2),{status:response.status,headers:h});
+  return new Response(JSON.stringify({...data,...customer360Health(),...customerProfileEnrichmentHealth(),...customer360LineProfileExtractionHealth(),...customer360ProfileWriteGuardHealth(),...customer360CombinedDetailHealth(),customer360_build:BUILD},null,2),{status:response.status,headers:h});
 }
 
 async function patchHtml(response){
@@ -64,6 +65,8 @@ export default {
     if(profileWriteGuard)return profileWriteGuard;
     const profileApi=await handleCustomerProfileEnrichmentRequest(request,env);
     if(profileApi)return profileApi;
+    const combinedDetail=await handleCustomer360CombinedDetail(request,env);
+    if(combinedDetail)return combinedDetail;
     const api=await handleCustomer360Request(request,env);
     if(api)return api;
 
