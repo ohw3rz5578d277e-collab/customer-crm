@@ -10,6 +10,7 @@ import {
   buildFacets,
   listCustomerDto
 } from './crm-customer360-search.mjs';
+import { assignCanonicalCustomerIdToCustomerRef } from './crm-customer-id-autofill-runtime.mjs';
 
 const CUSTOMER_ID_RE=/^\d{8}$/;
 const RELATIONS=new Set(['spouse','child','parent','grandparent','other']);
@@ -26,7 +27,7 @@ async function safeFirst(env,sql,params=[]){try{let s=env.DB.prepare(sql);if(par
 async function tableExists(env,name){return !!(await safeFirst(env,"SELECT name FROM sqlite_master WHERE type='table' AND name=? LIMIT 1",[name]))}
 async function familyRows(env,id){if(!(await tableExists(env,'customer_family_members')))return[];return safeAll(env,"SELECT * FROM customer_family_members WHERE customer_id=? AND (deleted_at IS NULL OR deleted_at='') ORDER BY created_at ASC,id ASC",[id])}
 async function profileRow(env,id){if(!(await tableExists(env,'customer_marketing_profiles')))return{};return (await safeFirst(env,"SELECT * FROM customer_marketing_profiles WHERE customer_id=? LIMIT 1",[id]))||{}}
-async function activeCustomers(env){return (await safeAll(env,"SELECT * FROM customers")).filter(x=>!text(x.deleted_at))}
+async function activeCustomers(env){return (await safeAll(env,"SELECT rowid AS __customer_ref,* FROM customers")).filter(x=>!text(x.deleted_at))}
 async function viewFor(env,c,onDate){return buildCustomerMarketingView(c,await familyRows(env,text(c.customer_id)),await profileRow(env,text(c.customer_id)),onDate)}
 
 async function loadCustomerViews(env,onDate){
@@ -61,7 +62,7 @@ export async function customerListData(env,searchParams,onDate=jstToday()){
   try{parsed=parseCustomerSearchParams(searchParams)}catch(error){return{error:text(error?.message)||'invalid_filter'}}
   parsed.on_date=parsed.on_date||onDate;
   const views=await loadCustomerViews(env,onDate),result=searchCustomerViews(views,parsed);
-  return {...result,all_total:views.length,facets:await facetData(env,views),meta:{server_ms:Date.now()-started,privacy_safe_list_dto:true,identity_resolution_used:false}};
+  return {...result,all_total:views.length,facets:await facetData(env,views),meta:{server_ms:Date.now()-started,privacy_safe_list_dto:true,identity_resolution_used:false,customer_ref_identity_source:false}};
 }
 
 export async function customer360Data(env,id,onDate=jstToday()){
@@ -92,6 +93,10 @@ export async function handleCustomer360Request(request,env){
   const asOf=text(url.searchParams.get('as_of'))||jstToday();
   if(request.method==='GET'&&url.pathname==='/api/customer360/marketing-home')return json({ok:true,...await marketingHomeData(env,asOf)});
   if(request.method==='GET'&&url.pathname==='/api/customer360/customers'){const data=await customerListData(env,url.searchParams,asOf);return data.error?json({ok:false,error:data.error},400):json({ok:true,...data})}
+  if(request.method==='POST'&&url.pathname==='/api/customer360/customer-id/allocate'){
+    const body=await request.json().catch(()=>null);if(!body)return json({ok:false,error:'invalid_json'},400);
+    const out=await assignCanonicalCustomerIdToCustomerRef(env,body);const status=Number(out.statusCode||200);delete out.statusCode;return json(out,status);
+  }
   if(request.method==='GET'&&url.pathname==='/api/customer360/family'){const id=text(url.searchParams.get('customer_id'));if(!CUSTOMER_ID_RE.test(id))return json({ok:false,error:'invalid_customer_id'},400);const c=await safeFirst(env,"SELECT * FROM customers WHERE customer_id=? LIMIT 1",[id]);if(!c)return json({ok:false,error:'customer_not_found'},404);return json({ok:true,customer_id:id,family:mergeFamilyMembers(c,await familyRows(env,id))})}
   if(request.method==='POST'&&url.pathname==='/api/customer360/family')return familyWrite(request,env);
   if(request.method==='POST'&&url.pathname==='/api/customer360/profile')return profileWrite(request,env);
@@ -99,4 +104,4 @@ export async function handleCustomer360Request(request,env){
   return json({ok:false,error:'not_found'},404);
 }
 
-export function customer360Health(){return{customer360_family_marketing_foundation:true,customer360_search_first:true,customer360_list_privacy_safe:true,customer360_server_filtering:true,customer360_page_size_max:100,family_member_limit:'unlimited',family_identity_source:false,search_identity_source:false,realized_ltv_field:'total_revenue',marketing_line_auto_send:false,marketing_profile_default_opt_in:false,customer360_write_default_enabled:false}}
+export function customer360Health(){return{customer360_family_marketing_foundation:true,customer360_search_first:true,customer360_list_privacy_safe:true,customer360_server_filtering:true,customer360_page_size_max:100,family_member_limit:'unlimited',family_identity_source:false,search_identity_source:false,realized_ltv_field:'total_revenue',marketing_line_auto_send:false,marketing_profile_default_opt_in:false,customer360_write_default_enabled:false,customer_id_autofill_owner_authorized:true,customer_id_autofill_customer360_write_flag_required:false}}
