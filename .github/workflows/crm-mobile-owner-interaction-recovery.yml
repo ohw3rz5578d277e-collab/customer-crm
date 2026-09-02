@@ -90,27 +90,43 @@ jobs:
           node --check src/crm-customer-id-autofill-runtime.mjs
           node --check src/customer-identity-resolver.mjs
           node --check src/crm-customer360-profile-enrichment.mjs
+          node --check src/crm-customer360-line-profile-extraction.mjs
           node --check src/crm-customer360-profile-ui-client.mjs
           node --check src/production-index-crm-customer360-entry.js
           node tests/crm-mobile-owner-interaction-recovery.mjs
           node tests/customer360-profile-auto-enrichment.mjs
 
-      - name: Full local mocked regression
+      - name: CRM prefixed full regression
         shell: bash
         run: |
           set -euo pipefail
-          mapfile -t tests < <(find tests -maxdepth 1 -type f -name '*.mjs' -printf '%p\n' | sort)
-          test "${#tests[@]}" -gt 0
-          echo 'TEST_INVENTORY_BEGIN'
-          printf '%s\n' "${tests[@]}"
-          echo 'TEST_INVENTORY_END'
-          echo 'EXCLUDED_TESTS=NONE'
-          for test_file in "${tests[@]}"; do
-            echo "::group::$test_file"
-            node "$test_file"
-            echo '::endgroup::'
-          done
-          echo "FULL_LOCAL_TEST_FILES=${#tests[@]} PASS"
+          mapfile -t tests < <(find tests -maxdepth 1 -type f -name 'crm-*.mjs' -printf '%p\n' | sort)
+          for test_file in "${tests[@]}"; do echo "::group::$test_file"; node "$test_file"; echo '::endgroup::'; done
+          echo "CRM_TEST_FILES=${#tests[@]} PASS"
+
+      - name: Customer prefixed full regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t tests < <(find tests -maxdepth 1 -type f -name 'customer*.mjs' -printf '%p\n' | sort)
+          for test_file in "${tests[@]}"; do echo "::group::$test_file"; node "$test_file"; echo '::endgroup::'; done
+          echo "CUSTOMER_TEST_FILES=${#tests[@]} PASS"
+
+      - name: Deploy prefixed full regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t tests < <(find tests -maxdepth 1 -type f -name 'deploy*.mjs' -printf '%p\n' | sort)
+          for test_file in "${tests[@]}"; do echo "::group::$test_file"; node "$test_file"; echo '::endgroup::'; done
+          echo "DEPLOY_TEST_FILES=${#tests[@]} PASS"
+
+      - name: Remaining full regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t tests < <(find tests -maxdepth 1 -type f -name '*.mjs' ! -name 'crm-*.mjs' ! -name 'customer*.mjs' ! -name 'deploy*.mjs' -printf '%p\n' | sort)
+          for test_file in "${tests[@]}"; do echo "::group::$test_file"; node "$test_file"; echo '::endgroup::'; done
+          echo "REMAINING_TEST_FILES=${#tests[@]} PASS"
 
       - name: Production entry import and Wrangler dry-run only
         shell: bash
