@@ -107,13 +107,34 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 35
     env:
-      EXPECTED_SHA: ${{ inputs.expected_sha }}
       RELEASE_MODE: ${{ inputs.mode }}
     steps:
+      - name: Normalize and validate authorized SHA
+        id: authorized_sha
+        shell: bash
+        env:
+          RAW_EXPECTED_SHA: ${{ inputs.expected_sha }}
+          RAW_RELEASE_MODE: ${{ inputs.mode }}
+        run: |
+          set -euo pipefail
+          case "$RAW_RELEASE_MODE" in
+            preflight|deploy) ;;
+            *) echo '::error::INVALID_RELEASE_MODE'; exit 1 ;;
+          esac
+          normalized_sha="$(printf '%s' "$RAW_EXPECTED_SHA" | python3 -c 'import sys; print(sys.stdin.read().strip().lower(), end="")')"
+          if [[ ! "$normalized_sha" =~ ^[0-9a-f]{40}$ ]]; then
+            echo '::error::INVALID_EXPECTED_SHA_FORMAT'
+            exit 1
+          fi
+          echo "sha=$normalized_sha" >> "$GITHUB_OUTPUT"
+          echo "EXPECTED_SHA=$normalized_sha" >> "$GITHUB_ENV"
+          echo "AUTHORIZED_SHA=$normalized_sha"
+          echo "RELEASE_MODE=$RAW_RELEASE_MODE"
+
       - name: Checkout exact authorized SHA
         uses: actions/checkout@v6
         with:
-          ref: ${{ inputs.expected_sha }}
+          ref: ${{ steps.authorized_sha.outputs.sha }}
           persist-credentials: false
           fetch-depth: 0
 
@@ -121,13 +142,25 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$RELEASE_MODE" = 'preflight' || test "$RELEASE_MODE" = 'deploy'
+          case "$RELEASE_MODE" in
+            preflight|deploy) ;;
+            *) echo '::error::INVALID_RELEASE_MODE'; exit 1 ;;
+          esac
           actual_sha="$(git rev-parse HEAD)"
-          test "$actual_sha" = "$EXPECTED_SHA"
           remote_main="$(git ls-remote origin refs/heads/main | awk '{print $1}')"
-          test "$remote_main" = "$EXPECTED_SHA"
-          echo "PREFLIGHT_CHECKOUT_SHA=$actual_sha"
+          echo "AUTHORIZED_SHA=$EXPECTED_SHA"
+          echo "CHECKOUT_SHA=$actual_sha"
+          echo "CURRENT_MAIN_SHA=$remote_main"
           echo "RELEASE_MODE=$RELEASE_MODE"
+          if [[ "$actual_sha" != "$EXPECTED_SHA" ]]; then
+            echo '::error::BLOCKED_CHECKOUT_SHA_MISMATCH'
+            exit 1
+          fi
+          if [[ "$remote_main" != "$EXPECTED_SHA" ]]; then
+            echo '::error::BLOCKED_CURRENT_MAIN_SHA_MISMATCH'
+            exit 1
+          fi
+          echo "PREFLIGHT_CHECKOUT_SHA=$actual_sha"
           echo 'EXPECTED_SHA_GUARD=PASS'
 
       - name: Set up Node
