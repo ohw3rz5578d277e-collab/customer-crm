@@ -72,7 +72,7 @@ async function allocateSequence(db){
   return {ok:true,value};
 }
 
-async function allocateCustomerId(db,year){
+export async function allocateCustomerId(db,year){
   for(let attempt=0;attempt<MAX_COLLISION_RETRIES;attempt++){
     const allocated=await allocateSequence(db);
     if(!allocated.ok) return allocated;
