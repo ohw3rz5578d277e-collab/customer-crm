@@ -1,4 +1,4 @@
-const BUILD='crm-customer360-profile-enrichment-20260903-01';
+const BUILD='crm-customer360-profile-enrichment-20260903-02';
 const CUSTOMER_ID_RE=/^\d{8}$/;
 const LEAD_STATUS=new Set(['inquiry','scheduling','quoted','booked','completed','lost','cancelled']);
 const LOST_REASON=new Set(['schedule_mismatch','price','competitor','no_response','postponed','other','unknown']);
@@ -6,7 +6,7 @@ const PUBLICATION=new Set(['unknown','allowed','partial','denied']);
 const MARKETING_PERMISSION=new Set(['unknown','allowed','denied']);
 const CORE_EDITABLE=new Set(['name','furigana','line_display_name','phone','address','email','memo']);
 const EXT_EDITABLE=new Set(['wedding_anniversary','first_inquiry_at','last_contact_at','lead_status','lost_reason','referrer_customer_id','referrer_name','nps_score','nps_answered_at','nps_comment','publication_permission','marketing_contact_permission','notes']);
-const COMPLETED_STATUSES=new Set(['撮影完了','completed','complete','done']);
+const COMPLETED_STATUSES=new Set(['撮影完了','撮影済み','先行データ待ち','本納品まち','納品済み','completed','complete','done']);
 const CANCEL_STATUSES=new Set(['キャンセル','cancelled','canceled']);
 
 const text=v=>v==null?'':String(v).trim();
@@ -74,7 +74,8 @@ async function candidateRows(env,id){
 async function profileView(env,id){
   const customer=await exactCustomer(env,id);if(!customer)return null;
   const ext=await extension(env,id),children=(await family(env,id)).filter(x=>x.relation==='child'),metrics=await reservationMetrics(env,id),attribution=await attributionView(env,customer,id),candidates=await candidateRows(env,id);
-  return{customer_id:id,core:{name:text(customer.name),name_kana:text(customer.furigana),line_display_name:text(customer.line_display_name),phone:text(customer.phone),address:text(customer.address),email:text(customer.email),line_linked:!!text(customer.line_user_id)},family:{children,wedding_anniversary:dateOnly(ext.wedding_anniversary||customer.anniversary)},metrics,attribution,lifecycle:{first_inquiry_at:text(ext.first_inquiry_at),first_shoot_date:metrics.first_shoot_date,last_shoot_date:metrics.last_shoot_date,last_contact_at:text(ext.last_contact_at),lead_status:text(ext.lead_status)||'inquiry',lost_reason:text(ext.lost_reason)},referral:{referrer_customer_id:text(ext.referrer_customer_id),referrer_name:text(ext.referrer_name)},experience:{nps_score:ext.nps_score==null?null:Number(ext.nps_score),nps_answered_at:text(ext.nps_answered_at),nps_comment:text(ext.nps_comment),publication_permission:text(ext.publication_permission)||'unknown',marketing_contact_permission:text(ext.marketing_contact_permission)||'unknown'},notes:{current:text(ext.notes||customer.memo),updated_at:text(ext.notes_updated_at||customer.updated_at),updated_by:text(ext.notes_updated_by)},line_candidates:candidates,meta:{customer_identity_source:'crm_customer_id',customer_id_generation:false,derived_metrics_source:'customer_reservations',auto_apply:false,candidate_only:true}};
+  const notesEdited=!!text(ext.notes_updated_at);
+  return{customer_id:id,core:{name:text(customer.name),name_kana:text(customer.furigana),line_display_name:text(customer.line_display_name),phone:text(customer.phone),address:text(customer.address),email:text(customer.email),line_linked:!!text(customer.line_user_id)},family:{children,wedding_anniversary:dateOnly(ext.wedding_anniversary||customer.anniversary)},metrics,attribution,lifecycle:{first_inquiry_at:text(ext.first_inquiry_at),first_shoot_date:metrics.first_shoot_date,last_shoot_date:metrics.last_shoot_date,last_contact_at:text(ext.last_contact_at),lead_status:text(ext.lead_status)||'inquiry',lost_reason:text(ext.lost_reason)},referral:{referrer_customer_id:text(ext.referrer_customer_id),referrer_name:text(ext.referrer_name)},experience:{nps_score:ext.nps_score==null?null:Number(ext.nps_score),nps_answered_at:text(ext.nps_answered_at),nps_comment:text(ext.nps_comment),publication_permission:text(ext.publication_permission)||'unknown',marketing_contact_permission:text(ext.marketing_contact_permission)||'unknown'},notes:{current:notesEdited?text(ext.notes):text(customer.memo),updated_at:text(ext.notes_updated_at||customer.updated_at),updated_by:text(ext.notes_updated_by)},line_candidates:candidates,meta:{customer_identity_source:'crm_customer_id',customer_id_generation:false,derived_metrics_source:'customer_reservations',auto_apply:false,candidate_only:true}};
 }
 
 function validateExtensionPatch(p){
@@ -88,7 +89,8 @@ function validateExtensionPatch(p){
 
 async function recordConfirmed(env,id,field,value,actor,source='manual',snippet='Owner edit'){
   if(!(await tableExists(env,'customer_field_evidence')))return;
-  const cid=`fe_${crypto.randomUUID()}`;await env.DB.prepare("INSERT INTO customer_field_evidence(candidate_id,customer_id,field_name,candidate_value,source,confidence,evidence_snippet,status,confirmed_by_human,confirmed_at,confirmed_by,created_at,updated_at) VALUES(?,?,?,?,?,1,?,'confirmed',1,datetime('now'),?,datetime('now'),datetime('now'))").bind(cid,id,field,text(value),source,clipEvidence(snippet),actor).run();
+  const cid=`fe_${crypto.randomUUID()}`;
+  await env.DB.prepare("INSERT INTO customer_field_evidence(candidate_id,customer_id,field_name,candidate_value,source,confidence,evidence_snippet,status,confirmed_by_human,confirmed_at,confirmed_by,first_seen_at,last_seen_at,created_at,updated_at) VALUES(?,?,?,?,?,1,?,'confirmed',1,datetime('now'),?,datetime('now'),datetime('now'),datetime('now'),datetime('now')) ON CONFLICT DO UPDATE SET status='confirmed',confirmed_by_human=1,confirmed_at=datetime('now'),confirmed_by=excluded.confirmed_by,last_seen_at=datetime('now'),updated_at=datetime('now')").bind(cid,id,field,text(value),source,clipEvidence(snippet),actor).run();
 }
 
 async function patchCustomer(request,env,id){
@@ -101,9 +103,16 @@ async function patchCustomer(request,env,id){
       const col=k==='name_kana'?'furigana':k;if(!customerCols.has(col))continue;await env.DB.prepare(`UPDATE customers SET ${col}=?, updated_at=datetime('now') WHERE customer_id=?`).bind(text(v),id).run();await recordConfirmed(env,id,k,v,actor);changed++;continue;
     }
     if(EXT_EDITABLE.has(k)){
-      if(!(await tableExists(env,'customer_profile_enrichment')))return json({ok:false,error:'profile_enrichment_schema_not_applied'},409);const val=k==='nps_score'?(v==null||v===''?null:Number(v)):text(v)||null;
+      if(!(await tableExists(env,'customer_profile_enrichment')))return json({ok:false,error:'profile_enrichment_schema_not_applied'},409);
+      if(k==='notes'){
+        const val=text(v);
+        await env.DB.prepare("INSERT INTO customer_profile_enrichment(customer_id,notes,notes_updated_at,notes_updated_by,created_at,updated_at,updated_by) VALUES(?,?,datetime('now'),?,datetime('now'),datetime('now'),?) ON CONFLICT(customer_id) DO UPDATE SET notes=excluded.notes,notes_updated_at=datetime('now'),notes_updated_by=excluded.notes_updated_by,updated_at=datetime('now'),updated_by=excluded.updated_by").bind(id,val,actor,actor).run();
+        if(await tableExists(env,'customer_notes_history'))await env.DB.prepare("INSERT INTO customer_notes_history(note_id,customer_id,body,created_at,created_by) VALUES(?,?,?,datetime('now'),?)").bind(`note_${crypto.randomUUID()}`,id,val,actor).run();
+        await recordConfirmed(env,id,k,val,actor);changed++;continue;
+      }
+      const val=k==='nps_score'?(v==null||v===''?null:Number(v)):text(v)||null;
       await env.DB.prepare(`INSERT INTO customer_profile_enrichment(customer_id,${k},created_at,updated_at,updated_by) VALUES(?,?,datetime('now'),datetime('now'),?) ON CONFLICT(customer_id) DO UPDATE SET ${k}=excluded.${k},updated_at=datetime('now'),updated_by=excluded.updated_by`).bind(id,val,actor).run();
-      if(k==='notes'&&text(v)&&await tableExists(env,'customer_notes_history'))await env.DB.prepare("INSERT INTO customer_notes_history(note_id,customer_id,body,created_at,created_by) VALUES(?,?,?,datetime('now'),?)").bind(`note_${crypto.randomUUID()}`,id,text(v),actor).run();await recordConfirmed(env,id,k,v,actor);changed++;
+      await recordConfirmed(env,id,k,v,actor);changed++;
     }
   }
   if(!changed)return json({ok:false,error:'no_editable_changes'},400);return json({ok:true,changed,customer:await profileView(env,id)});
@@ -129,10 +138,10 @@ async function currentFieldValue(env,customer,id,field){
 
 async function extractFromLine(request,env,id){
   if(env?.CRM_CUSTOMER360_WRITE_ENABLED!=='1')return json({ok:false,error:'customer360_write_disabled'},403);const customer=await exactCustomer(env,id);if(!customer)return json({ok:false,error:'customer_not_found'},404);if(!(await tableExists(env,'customer_line_message_events')))return json({ok:false,error:'line_context_table_missing'},409);if(!(await tableExists(env,'customer_field_evidence')))return json({ok:false,error:'profile_enrichment_schema_not_applied'},409);const lineId=text(customer.line_user_id);if(!lineId)return json({ok:true,customer_id:id,extracted:0,candidates:[],reason:'line_not_linked'});
-  const events=await all(env,"SELECT event_id,customer_id,line_user_id,message_text,occurred_at,created_at FROM customer_line_message_events WHERE CAST(customer_id AS TEXT)=? AND line_user_id=? AND direction='inbound' ORDER BY COALESCE(occurred_at,created_at,'') DESC LIMIT 50",[id,lineId]);let inserted=0;
+  const events=await all(env,"SELECT event_id,customer_id,line_user_id,message_text,occurred_at,created_at FROM customer_line_message_events WHERE CAST(customer_id AS TEXT)=? AND line_user_id=? AND direction='incoming' AND send_status='received' ORDER BY COALESCE(occurred_at,created_at,'') DESC LIMIT 50",[id,lineId]);let inserted=0;
   for(const event of events){if(text(event.customer_id)!==id||text(event.line_user_id)!==lineId)continue;for(const c of extractedCandidates(event.message_text)){const existing=await currentFieldValue(env,customer,id,c.field),status=existing&&existing!==text(c.value)?'conflict':'candidate',cid=`fe_${crypto.randomUUID()}`;try{await env.DB.prepare("INSERT INTO customer_field_evidence(candidate_id,customer_id,field_name,candidate_value,source,confidence,evidence_snippet,source_event_id,status,first_seen_at,last_seen_at,confirmed_by_human,created_at,updated_at) VALUES(?,?,?,?,'line',?,?,?, ?,datetime('now'),datetime('now'),0,datetime('now'),datetime('now'))").bind(cid,id,c.field,text(c.value),c.confidence,clipEvidence(event.message_text),text(event.event_id),status).run();inserted++}catch(_){}}
   }
-  return json({ok:true,customer_id:id,extracted:inserted,candidates:await candidateRows(env,id),identity:{lookup_key:'customer_id',line_user_id_exact_match:true,fallback_used:false},auto_apply:false});
+  return json({ok:true,customer_id:id,extracted:inserted,candidates:await candidateRows(env,id),identity:{lookup_key:'customer_id',line_user_id_exact_match:true,fallback_used:false},auto_apply:false,ledger_direction:'incoming',ledger_send_status:'received'});
 }
 
 async function resolveCandidate(request,env,id,candidateId){
@@ -151,6 +160,6 @@ export async function handleCustomerProfileEnrichmentRequest(request,env){
   return json({ok:false,error:'not_found'},404);
 }
 
-export function customerProfileEnrichmentHealth(){return{customer360_profile_enrichment:true,customer360_profile_build:BUILD,customer_identity_crm_canonical_only:true,customer_id_generation:false,customer_line_extraction_exact_identity_only:true,customer_line_auto_apply:false,customer_line_extraction_mode:'candidate-only',human_confirmed_overwrite_by_line:false,derived_metrics_runtime_only:true,destructive_schema_changes:false,browser_secret_exposure:false};}
+export function customerProfileEnrichmentHealth(){return{customer360_profile_enrichment:true,customer360_profile_build:BUILD,customer_identity_crm_canonical_only:true,customer_id_generation:false,customer_line_extraction_exact_identity_only:true,customer_line_event_direction:'incoming',customer_line_event_send_status:'received',customer_line_auto_apply:false,customer_line_extraction_mode:'candidate-only',human_confirmed_overwrite_by_line:false,derived_metrics_runtime_only:true,destructive_schema_changes:false,browser_secret_exposure:false};}
 
 export const __test={extractedCandidates};
