@@ -1,0 +1,139 @@
+name: Customer360 profile Production verify TEMP
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  issues: read
+
+concurrency:
+  group: customer360-profile-production-verify-temp
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    if: >-
+      github.event.issue.number == 26 &&
+      github.event.issue.pull_request == null &&
+      github.actor == 'ohw3rz5578d277e-collab' &&
+      github.event.comment.user.login == 'ohw3rz5578d277e-collab' &&
+      startsWith(github.event.comment.body, '/customer360-profile-production-verify ')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      COMMAND_BODY: ${{ github.event.comment.body }}
+      BASE_URL: https://customer-crm-api.ohw3rz5578d277e.workers.dev
+      CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+      CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+      ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}
+      PRODUCTION_SOURCE_SHA: c29c3e5f7574ec0cbcd79965b579a9cf999ee13a
+    steps:
+      - name: Parse exact verification SHA
+        id: gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! "$COMMAND_BODY" =~ ^/customer360-profile-production-verify[[:space:]]+confirm=true[[:space:]]+sha=([0-9a-f]{40})$ ]]; then
+            echo '::error::Invalid verification command.'
+            exit 1
+          fi
+          echo "expected_sha=${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v6
+        with:
+          ref: main
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Exact main and workflow-only drift gate
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ steps.gate.outputs.expected_sha }}
+        run: |
+          set -euo pipefail
+          actual="$(git rev-parse HEAD)"
+          remote="$(git ls-remote origin refs/heads/main | awk '{print $1}')"
+          test "$actual" = "$EXPECTED_SHA"
+          test "$remote" = "$EXPECTED_SHA"
+          git cat-file -e "$PRODUCTION_SOURCE_SHA^{commit}"
+          mapfile -t changed < <(git diff --name-only "$PRODUCTION_SOURCE_SHA...$actual")
+          printf 'VERIFY_DRIFT_FILE=%s\n' "${changed[@]}"
+          test "${#changed[@]}" -eq 1
+          test "${changed[0]}" = '.github/workflows/customer360-profile-production-verify-temp.yml'
+          echo 'PRODUCTION_APP_TREE_DRIFT=0'
+          echo 'PRODUCTION_REDEPLOY=0'
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+      - name: Production authenticated health and safe read
+        shell: bash
+        run: |
+          set -euo pipefail
+          for v in CF_ACCESS_CLIENT_ID CF_ACCESS_CLIENT_SECRET ADMIN_TOKEN; do test -n "${!v}" || { echo "::error::$v missing"; exit 1; }; done
+          node <<'NODE'
+          const base=process.env.BASE_URL;
+          const headers={'CF-Access-Client-Id':process.env.CF_ACCESS_CLIENT_ID,'CF-Access-Client-Secret':process.env.CF_ACCESS_CLIENT_SECRET,'x-admin-token':process.env.ADMIN_TOKEN};
+          async function get(path){const r=await fetch(base+path,{headers,redirect:'manual'});const text=await r.text();console.log(path+' status='+r.status);console.log(path+' final='+r.url);if(r.status!==200)throw new Error(path+' status='+r.status+' location='+(r.headers.get('location')||''));return {text,json:()=>JSON.parse(text),headers:r.headers};}
+          const h=await get('/api/crm-health-check');const health=h.json();
+          for(const k of ['customer360_profile_enrichment','customer360_line_profile_extraction','customer360_profile_write_guard'])if(health[k]!==true)throw new Error('HEALTH_MARKER:'+k);
+          if(health.customer_id_generation!==false)throw new Error('customer_id_generation_not_false');
+          if(health.customer_line_auto_apply!==false)throw new Error('auto_apply_not_false');
+          if(health.customer_line_extraction_mode!=='candidate-only')throw new Error('candidate_only_marker_missing');
+          if(health.browser_secret_exposure!==false)throw new Error('browser_secret_marker_not_false');
+          const list=await get('/api/customer360/customers?page=1&page_size=1');const data=list.json();if(!data.ok||!Array.isArray(data.items))throw new Error('customer list safe read failed');
+          const id=String(data.items[0]?.customer_id||'');if(!/^\d{8}$/.test(id))throw new Error('no canonical customer for detail verification');
+          const detail=await get('/api/customer360/customer/'+id);const dj=detail.json();if(!dj.ok||!dj.customer)throw new Error('customer detail safe read failed');
+          if(!dj.customer.profile)throw new Error('combined profile missing from canonical detail');
+          const serialized=JSON.stringify({health,data:{ok:data.ok,total:data.total},detail:{ok:dj.ok,customer_id:id}});
+          for(const secret of ['CRM_INTERNAL_TOKEN','ADMIN_TOKEN','CF_ACCESS_CLIENT_SECRET'])if(serialized.includes(secret))throw new Error('secret marker exposed');
+          console.log('PRODUCTION_HEALTH=PASS');
+          console.log('PRODUCTION_CUSTOMER_LIST_SAFE_READ=PASS');
+          console.log('PRODUCTION_COMBINED_DETAIL_SAFE_READ=PASS');
+          console.log('BROWSER_SECRET_EXPOSURE=0');
+          console.log('PRODUCTION_TEST_CUSTOMER_WRITES=0');
+          NODE
+      - name: Install Playwright
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --no-save playwright@1.55.0
+          npx playwright install --with-deps chromium
+      - name: Production 390 Customer360 read-only browser verification
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const {chromium}=require('playwright');
+          const base=process.env.BASE_URL;
+          const headers={'CF-Access-Client-Id':process.env.CF_ACCESS_CLIENT_ID,'CF-Access-Client-Secret':process.env.CF_ACCESS_CLIENT_SECRET,'x-admin-token':process.env.ADMIN_TOKEN};
+          const browser=await chromium.launch({headless:true});
+          const context=await browser.newContext({viewport:{width:390,height:844},isMobile:true,hasTouch:true,extraHTTPHeaders:headers});
+          const page=await context.newPage();
+          const consoleErrors=[],pageErrors=[],writes=[];let detailGets=0,profileGets=0;
+          page.on('console',m=>{if(m.type()==='error')consoleErrors.push(m.text())});
+          page.on('pageerror',e=>pageErrors.push(String(e)));
+          page.on('request',r=>{const p=new URL(r.url()).pathname;if(r.method()!=='GET')writes.push(r.method()+' '+p);if(r.method()==='GET'&&/^\/api\/customer360\/customer\/\d{8}$/.test(p))detailGets++;if(r.method()==='GET'&&/^\/api\/customer360\/profile\/\d{8}$/.test(p))profileGets++;});
+          const response=await page.goto(base+'/admin',{waitUntil:'domcontentloaded',timeout:45000});
+          if(!response||response.status()!==200)throw new Error('admin status '+(response?.status()||0)+' url='+page.url());
+          await page.waitForFunction(()=>window.__crmOwnerView&&document.querySelector('#crmMktList'),null,{timeout:20000});
+          const nav=page.locator('#crmOwnerNavCustomers');if(await nav.isVisible())await nav.click();
+          await page.locator('#crmMktList.open').waitFor({timeout:15000});
+          const button=page.locator('[data-open]:visible').first();await button.waitFor({timeout:15000});
+          const id=await button.getAttribute('data-open');if(!/^\d{8}$/.test(id||''))throw new Error('canonical detail id missing');
+          await button.click();await page.locator('#crmMktDetail.open').waitFor({timeout:15000});
+          const detail=page.locator('#crmMktDetailBody');await detail.getByRole('heading',{name:'顧客プロフィール',exact:true}).waitFor({timeout:15000});
+          for(const label of ['基本情報','家族','撮影履歴','売上','集客・紹介','満足度・許可','備考・対応メモ'])if(!(await detail.getByText(label,{exact:false}).first().isVisible()))throw new Error('missing section '+label);
+          const overflow=await page.evaluate(()=>document.documentElement.scrollWidth-document.documentElement.clientWidth);
+          if(overflow>1)throw new Error('horizontal overflow '+overflow);
+          if(detailGets<1)throw new Error('canonical detail GET missing');
+          if(profileGets!==0)throw new Error('extra initial profile GET='+profileGets);
+          if(writes.length)throw new Error('Production browser writes '+writes.join(','));
+          if(consoleErrors.length)throw new Error('console errors '+JSON.stringify(consoleErrors));
+          if(pageErrors.length)throw new Error('page errors '+JSON.stringify(pageErrors));
+          await browser.close();
+          console.log('PRODUCTION_MOBILE_CUSTOMER360=PASS');
+          console.log('PRODUCTION_EXTRA_INITIAL_PROFILE_GET=0');
+          console.log('PRODUCTION_CONSOLE_404=0');
+          console.log('PRODUCTION_BROWSER_WRITES=0');
+          console.log('PRODUCTION_HORIZONTAL_OVERFLOW=0');
+          NODE
