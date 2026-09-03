@@ -99,4 +99,27 @@ async function child(payload){return jsonResponse(await handleCustomerProfileEnr
   console.log('MOBILE_UI_PERFORMANCE_SECURITY_CONTRACT=PASS');
 }
 
+{
+  const entry=fs.readFileSync('src/production-index-crm-customer360-entry.js','utf8');
+  const safeRead=fs.readFileSync('.github/workflows/customer360-production-safe-read.yml','utf8');
+  const deploy=fs.readFileSync('.github/workflows/deploy-cloudflare.yml','utf8');
+  const bridge=fs.readFileSync('.github/workflows/dispatch-production-deploy-from-issue.yml','utf8');
+  for(const marker of ['customer360_profile_enrichment_schema_available','customer360_family_metadata_available','customer360_field_evidence_available','customer360_notes_history_available']){
+    assert.ok(entry.includes(marker),`health schema marker missing: ${marker}`);
+    assert.ok(safeRead.includes(marker),`Production verifier schema marker missing: ${marker}`);
+  }
+  for(const marker of ['customer360_family_marketing_foundation','customer360_profile_enrichment','customer360_line_profile_extraction','referrer_customer_id_exact_existing_customer_only','customer360_profile_composed_into_detail'])assert.ok(safeRead.includes(marker),`canonical health marker missing: ${marker}`);
+  assert.ok(!safeRead.includes("'customer360_profile_write_guard'"));
+  assert.ok(!safeRead.includes("'customer360_combined_detail'"));
+  assert.ok(entry.includes('customer360_identity_fallback:false'));assert.ok(entry.includes('customer360_paid_ai_provider_active:false'));
+  const classifyPos=deploy.indexOf('Classify remote pending migrations and read-only state');
+  const familyCountPos=deploy.indexOf('Read Production existing family count before migration');
+  const applyPos=deploy.indexOf('Apply Customer360 managed remote D1 migration');
+  assert.ok(classifyPos>=0&&familyCountPos>classifyPos&&applyPos>familyCountPos,'family pre-count must be conditional after classification and before migration');
+  assert.ok(deploy.includes("steps.classify.outputs.family_table == 'PRESENT'"));
+  assert.ok(!/Read Production row counts before migration[\s\S]{0,500}COUNT\(\*\) AS family_count FROM customer_family_members/.test(deploy),'unconditional pre-migration family count must remain removed');
+  for(const token of ["'mode':'deploy'","'expected_sha':os.environ['EXPECTED_SHA']",'CANONICAL_MODE=deploy'])assert.ok(bridge.includes(token),`deploy bridge exact input missing: ${token}`);
+  console.log('PRODUCTION_HEALTH_RELEASE_BRIDGE_CONTRACT=PASS');
+}
+
 console.log('CUSTOMER360_PROFILE_PRODUCTION_CLOSE_REGRESSION=PASS');
