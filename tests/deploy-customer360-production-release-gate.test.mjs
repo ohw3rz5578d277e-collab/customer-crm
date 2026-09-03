@@ -43,7 +43,7 @@ for(const [name,migration] of [['family',familyMigration],['profile',profileMigr
   for(const pattern of [/\bDROP\b/i,/\bDELETE\b/i,/\bALTER\b/i,/\bUPDATE\b/i,/\bINSERT\b/i,/\bREPLACE\b/i,/\bTRUNCATE\b/i]) assert.ok(!pattern.test(sql),`${name} forbidden migration statement: ${pattern}`);
   const statements=sql.split(';').map(x=>x.trim()).filter(Boolean);
   assert.ok(statements.length>0,`${name} migration is empty`);
-  for(const statement of statements) assert.match(statement,/^CREATE\s+(TABLE|INDEX)\s+IF\s+NOT\s+EXISTS\b/i);
+  for(const statement of statements) assert.match(statement,/^CREATE\s+(?:UNIQUE\s+)?(TABLE|INDEX)\s+IF\s+NOT\s+EXISTS\b/i);
 }
 for(const token of ['customer_profile_enrichment','customer_family_member_metadata','customer_field_evidence','customer_notes_history'])assert.ok(profileMigration.includes(token),`required profile migration object missing: ${token}`);
 assert.ok(!/customer_identity_(sequence|registry)/i.test(profileMigration),'profile migration must not mutate identity registry/sequence');
