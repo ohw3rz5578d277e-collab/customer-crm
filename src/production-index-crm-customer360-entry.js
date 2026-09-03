@@ -13,8 +13,14 @@ import { injectCustomer360DirectNavigation } from './crm-customer360-direct-navi
 import { injectOwnerViewState } from './crm-owner-view-state.mjs';
 import { injectCustomer360ProfileUi } from './crm-customer360-profile-ui.mjs';
 
-const BUILD='customer-crm-customer360-profile-enrichment-20260903-04';
+const BUILD='customer-crm-customer360-profile-enrichment-20260903-05';
 const RAW_SCRIPT_CLOSE='<'+String.fromCharCode(92)+'/script>';
+const CUSTOMER360_PROFILE_TABLES=[
+  'customer_profile_enrichment',
+  'customer_family_member_metadata',
+  'customer_field_evidence',
+  'customer_notes_history'
+];
 
 export function normalizeCustomer360InjectedHtml(html){
   return String(html||'').split(RAW_SCRIPT_CLOSE).join('</script>');
@@ -40,13 +46,48 @@ function headersFrom(response){
   return h;
 }
 
-async function patchHealth(response){
+async function customer360SchemaHealth(env){
+  const fallback={
+    customer360_profile_enrichment_schema_available:false,
+    customer360_family_metadata_available:false,
+    customer360_field_evidence_available:false,
+    customer360_notes_history_available:false
+  };
+  if(!env?.DB?.prepare)return fallback;
+  try{
+    const placeholders=CUSTOMER360_PROFILE_TABLES.map(()=>'?').join(',');
+    const result=await env.DB.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name IN (${placeholders})`).bind(...CUSTOMER360_PROFILE_TABLES).all();
+    const names=new Set((result?.results||[]).map(row=>String(row?.name||'')));
+    return{
+      customer360_profile_enrichment_schema_available:names.has('customer_profile_enrichment'),
+      customer360_family_metadata_available:names.has('customer_family_member_metadata'),
+      customer360_field_evidence_available:names.has('customer_field_evidence'),
+      customer360_notes_history_available:names.has('customer_notes_history')
+    };
+  }catch(_){
+    return fallback;
+  }
+}
+
+async function patchHealth(response,env){
   const raw=await response.text();
   let data={};
   try{data=raw?JSON.parse(raw):{}}catch(_){}
   const h=headersFrom(response);
   h.set('content-type','application/json; charset=utf-8');
-  return new Response(JSON.stringify({...data,...customer360Health(),...customerProfileEnrichmentHealth(),...customer360LineProfileExtractionHealth(),...customer360ProfileWriteGuardHealth(),...customer360CombinedDetailHealth(),customer360_build:BUILD},null,2),{status:response.status,headers:h});
+  const schema=await customer360SchemaHealth(env);
+  return new Response(JSON.stringify({
+    ...data,
+    ...customer360Health(),
+    ...customerProfileEnrichmentHealth(),
+    ...customer360LineProfileExtractionHealth(),
+    ...customer360ProfileWriteGuardHealth(),
+    ...customer360CombinedDetailHealth(),
+    ...schema,
+    customer360_identity_fallback:false,
+    customer360_paid_ai_provider_active:false,
+    customer360_build:BUILD
+  },null,2),{status:response.status,headers:h});
 }
 
 async function patchHtml(response){
@@ -72,7 +113,7 @@ export default {
 
     const url=new URL(request.url);
     let response=await app.fetch(request,env,ctx);
-    if(request.method==='GET'&&(url.pathname==='/health'||url.pathname==='/api/crm-health-check'))return patchHealth(response);
+    if(request.method==='GET'&&(url.pathname==='/health'||url.pathname==='/api/crm-health-check'))return patchHealth(response,env);
     if(request.method==='GET'&&url.pathname==='/admin')return patchHtml(response);
     return response;
   }
