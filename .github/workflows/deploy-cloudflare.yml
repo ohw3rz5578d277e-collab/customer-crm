@@ -6,8 +6,14 @@ on:
       - main
     paths:
       - '.github/workflows/deploy-cloudflare.yml'
+      - '.github/workflows/dispatch-production-deploy-from-issue.yml'
+      - '.github/workflows/customer360-production-safe-read.yml'
+      - 'src/crm-customer360-*.mjs'
+      - 'src/production-index-crm-customer360-entry.js'
       - 'tests/deploy-*.mjs'
+      - 'tests/customer360-*.mjs'
       - 'migrations_managed/20260828_customer360_family_marketing_foundation.sql'
+      - 'migrations_managed/20260903_customer360_profile_auto_enrichment.sql'
       - 'wrangler.jsonc'
   workflow_dispatch:
     inputs:
@@ -32,7 +38,8 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  CUSTOMER360_MIGRATION: 20260828_customer360_family_marketing_foundation.sql
+  CUSTOMER360_FAMILY_MIGRATION: 20260828_customer360_family_marketing_foundation.sql
+  CUSTOMER360_PROFILE_MIGRATION: 20260903_customer360_profile_auto_enrichment.sql
 
 jobs:
   release_ci:
@@ -44,8 +51,13 @@ jobs:
       - name: Checkout PR head
         uses: actions/checkout@v6
         with:
+          ref: ${{ github.event.pull_request.head.sha }}
           persist-credentials: false
           fetch-depth: 0
+
+      - name: Assert exact PR head
+        shell: bash
+        run: test "$(git rev-parse HEAD)" = '${{ github.event.pull_request.head.sha }}'
 
       - name: Set up Node
         uses: actions/setup-node@v5
@@ -67,6 +79,7 @@ jobs:
           node tests/deploy-managed-migration-guard.mjs
           node tests/deploy-identity-sequence-monotonic-guard.test.mjs
           node tests/deploy-identity-sequence-workflow-contract.test.mjs
+          node tests/deploy-expected-sha-normalization.test.mjs
 
       - name: Enumerate and run all local static mocked read-only tests
         shell: bash
@@ -105,7 +118,7 @@ jobs:
     name: Exact-SHA Production release gate
     if: ${{ github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 40
     env:
       RELEASE_MODE: ${{ inputs.mode }}
     steps:
@@ -195,6 +208,7 @@ jobs:
           node tests/deploy-managed-migration-guard.mjs
           node tests/deploy-identity-sequence-monotonic-guard.test.mjs
           node tests/deploy-identity-sequence-workflow-contract.test.mjs
+          node tests/deploy-expected-sha-normalization.test.mjs
 
       - name: Current-main full local regression
         shell: bash
@@ -254,7 +268,8 @@ jobs:
             d1 execute customer-crm-db --remote --json --command
             "SELECT name FROM sqlite_master WHERE type='table' AND name IN
             ('d1_migrations_managed','customer_line_message_events','customer_identity_registry',
-            'customer_identity_sequence','customer_family_members','customer_marketing_profiles')
+            'customer_identity_sequence','customer_family_members','customer_marketing_profiles',
+            'customer_profile_enrichment','customer_family_member_metadata','customer_field_evidence','customer_notes_history')
             ORDER BY name;"
 
       - name: Read managed migration tracking
@@ -270,7 +285,8 @@ jobs:
             ('20260814_customer_line_message_events.sql',
             '20260818_customer_identity_registry.sql',
             '20260818_customer_identity_sequence.sql',
-            '20260828_customer360_family_marketing_foundation.sql') ORDER BY id;"
+            '20260828_customer360_family_marketing_foundation.sql',
+            '20260903_customer360_profile_auto_enrichment.sql') ORDER BY id;"
 
       - name: Read Production D1 columns
         id: remote_columns
@@ -284,7 +300,11 @@ jobs:
             "PRAGMA table_info(customer_identity_registry);
             PRAGMA table_info(customer_identity_sequence);
             PRAGMA table_info(customer_family_members);
-            PRAGMA table_info(customer_marketing_profiles);"
+            PRAGMA table_info(customer_marketing_profiles);
+            PRAGMA table_info(customer_profile_enrichment);
+            PRAGMA table_info(customer_family_member_metadata);
+            PRAGMA table_info(customer_field_evidence);
+            PRAGMA table_info(customer_notes_history);"
 
       - name: Read Production D1 indexes
         id: remote_indexes
@@ -297,7 +317,11 @@ jobs:
             d1 execute customer-crm-db --remote --json --command
             "PRAGMA index_list(customer_identity_registry);
             PRAGMA index_list(customer_family_members);
-            PRAGMA index_list(customer_marketing_profiles);"
+            PRAGMA index_list(customer_marketing_profiles);
+            PRAGMA index_list(customer_profile_enrichment);
+            PRAGMA index_list(customer_family_member_metadata);
+            PRAGMA index_list(customer_field_evidence);
+            PRAGMA index_list(customer_notes_history);"
 
       - name: Read identity sequence state
         id: sequence_preflight
@@ -331,37 +355,44 @@ jobs:
           const columns=process.env.COLUMN_OUTPUT||'';
           const indexes=process.env.INDEX_OUTPUT||'';
           const sequence=process.env.SEQUENCE_OUTPUT||'';
-          const approved=['20260814_customer_line_message_events.sql','20260818_customer_identity_registry.sql','20260818_customer_identity_sequence.sql','20260828_customer360_family_marketing_foundation.sql'];
+          const approved=['20260814_customer_line_message_events.sql','20260818_customer_identity_registry.sql','20260818_customer_identity_sequence.sql','20260828_customer360_family_marketing_foundation.sql','20260903_customer360_profile_auto_enrichment.sql'];
           const preexisting=new Set(approved.slice(0,3));
-          const customer360=approved[3];
+          const family=approved[3],profile=approved[4];
           const files=[];
           for(const match of pending.matchAll(/[A-Za-z0-9_.-]+\.sql/g))if(!files.includes(match[0]))files.push(match[0]);
           const unknown=files.filter(x=>!approved.includes(x));
           if(unknown.length)throw new Error(`BLOCKED_UNEXPECTED_MANAGED_MIGRATION:${unknown.join(',')}`);
           const oldPending=files.filter(x=>preexisting.has(x));
           if(oldPending.length)throw new Error(`BLOCKED_PREEXISTING_MANAGED_MIGRATIONS_PENDING:${oldPending.join(',')}`);
-          if(files.length>1||(files.length===1&&files[0]!==customer360))throw new Error(`BLOCKED_UNEXPECTED_MANAGED_MIGRATION_ORDER:${files.join(' -> ')}`);
+          const validPending=files.length===0||(files.length===1&&files[0]===profile)||(files.length===2&&files[0]===family&&files[1]===profile);
+          if(!validPending)throw new Error(`BLOCKED_UNEXPECTED_MANAGED_MIGRATION_ORDER:${files.join(' -> ')}`);
           for(const required of ['d1_migrations_managed','customer_identity_registry','customer_identity_sequence'])if(!tables.includes(required))throw new Error(`PREFLIGHT_REQUIRED_TABLE_ABSENT:${required}`);
           if(!columns.includes('customer_id')||!columns.includes('sequence_key')||!columns.includes('last_value'))throw new Error('IDENTITY_SCHEMA_READBACK_INCOMPLETE');
           if(!indexes.includes('idx_customer_identity_registry_customer_id'))throw new Error('IDENTITY_INDEX_READBACK_INCOMPLETE');
           if(!sequence.includes('canonical_customer_id')||!sequence.includes('last_value')||!sequence.includes('existing_numeric_suffix_max'))throw new Error('IDENTITY_SEQUENCE_READBACK_INCOMPLETE');
           const familyPresent=tables.includes('customer_family_members');
-          const profilePresent=tables.includes('customer_marketing_profiles');
+          const marketingPresent=tables.includes('customer_marketing_profiles');
+          const profileTables=['customer_profile_enrichment','customer_family_member_metadata','customer_field_evidence','customer_notes_history'];
+          const profileSchemaPresent=profileTables.every(t=>tables.includes(t));
+          const familyTracked=tracking.includes(family),profileTracked=tracking.includes(profile);
           let classification,migrationTracking;
-          if(files.length===1){
-            classification='CUSTOMER360_MIGRATION_ONLY_PENDING';
-            migrationTracking=tracking.includes(customer360)?'TRACKED_AND_PENDING_INCONSISTENT':'NOT_APPLIED';
-            if(migrationTracking==='TRACKED_AND_PENDING_INCONSISTENT')throw new Error('INCONSISTENT_REMOTE_MIGRATION_STATE:tracked_but_pending');
-          }else if(familyPresent&&profilePresent&&tracking.includes(customer360)){
+          if(files.length===2){
+            classification='CUSTOMER360_MIGRATION_SEQUENCE_PENDING';migrationTracking='FAMILY_AND_PROFILE_NOT_APPLIED';
+            if(familyTracked||profileTracked)throw new Error('INCONSISTENT_REMOTE_MIGRATION_STATE:tracked_but_pending');
+          }else if(files.length===1){
+            classification='CUSTOMER360_PROFILE_MIGRATION_ONLY_PENDING';migrationTracking='PROFILE_NOT_APPLIED';
+            if(files[0]!==profile||profileTracked||!familyTracked||!familyPresent||!marketingPresent)throw new Error('INCONSISTENT_REMOTE_MIGRATION_STATE:profile_pending_preconditions');
+          }else if(familyPresent&&marketingPresent&&profileSchemaPresent&&familyTracked&&profileTracked){
             classification='ALREADY_APPLIED_CONFIRMED';migrationTracking='PASS';
           }else{
-            throw new Error(`INCONSISTENT_REMOTE_MIGRATION_STATE:family=${familyPresent},profile=${profilePresent},tracked=${tracking.includes(customer360)}`);
+            throw new Error(`INCONSISTENT_REMOTE_MIGRATION_STATE:family=${familyPresent},marketing=${marketingPresent},profileSchema=${profileSchemaPresent},familyTracked=${familyTracked},profileTracked=${profileTracked}`);
           }
-          fs.appendFileSync(process.env.GITHUB_OUTPUT,`classification=${classification}\nfamily_table=${familyPresent?'PRESENT':'ABSENT'}\nprofile_table=${profilePresent?'PRESENT':'ABSENT'}\nmigration_tracking=${migrationTracking}\npending_files=${files.join(',')||'NONE'}\n`);
+          fs.appendFileSync(process.env.GITHUB_OUTPUT,`classification=${classification}\nfamily_table=${familyPresent?'PRESENT':'ABSENT'}\nmarketing_table=${marketingPresent?'PRESENT':'ABSENT'}\nprofile_schema=${profileSchemaPresent?'PRESENT':'ABSENT'}\nmigration_tracking=${migrationTracking}\npending_files=${files.join(',')||'NONE'}\n`);
           console.log(`REMOTE_PENDING_MIGRATIONS=${files.join(' -> ')||'NONE'}`);
           console.log(`PENDING_CLASSIFICATION=${classification}`);
           console.log(`FAMILY_TABLE=${familyPresent?'PRESENT':'ABSENT'}`);
-          console.log(`PROFILE_TABLE=${profilePresent?'PRESENT':'ABSENT'}`);
+          console.log(`MARKETING_TABLE=${marketingPresent?'PRESENT':'ABSENT'}`);
+          console.log(`PROFILE_SCHEMA=${profileSchemaPresent?'PRESENT':'ABSENT'}`);
           console.log(`MIGRATION_TRACKING=${migrationTracking}`);
           console.log('IDENTITY_SEQUENCE_READBACK=PASS');
           console.log('REMOTE_D1_PREFLIGHT=READ_ONLY_PASS');
@@ -374,7 +405,8 @@ jobs:
           set -euo pipefail
           echo "PENDING_CLASSIFICATION=${{ steps.classify.outputs.classification }}"
           echo "FAMILY_TABLE=${{ steps.classify.outputs.family_table }}"
-          echo "PROFILE_TABLE=${{ steps.classify.outputs.profile_table }}"
+          echo "MARKETING_TABLE=${{ steps.classify.outputs.marketing_table }}"
+          echo "PROFILE_SCHEMA=${{ steps.classify.outputs.profile_schema }}"
           echo "MIGRATION_TRACKING=${{ steps.classify.outputs.migration_tracking }}"
           echo "REMOTE_PENDING_MIGRATIONS=${{ steps.classify.outputs.pending_files }}"
           echo 'CRM_CUSTOMER360_WRITE_ENABLED=NOT_ENABLED_BY_RELEASE'
@@ -386,15 +418,96 @@ jobs:
           echo 'LINE_SEND=0'
           echo 'CRM_CUSTOMER360_PRODUCTION_PREFLIGHT_PASS'
 
-      - name: Apply Customer360 managed remote D1 migration
+      - name: Read Production customer count before migration
+        id: customer_count_before
+        if: ${{ inputs.mode == 'deploy' }}
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          wranglerVersion: '4'
+          command: >-
+            d1 execute customer-crm-db --remote --json --command
+            "SELECT COUNT(*) AS customer_count FROM customers;"
+
+      - name: Read Production existing family count before migration
+        id: family_count_before
+        if: ${{ inputs.mode == 'deploy' && steps.classify.outputs.family_table == 'PRESENT' }}
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          wranglerVersion: '4'
+          command: >-
+            d1 execute customer-crm-db --remote --json --command
+            "SELECT COUNT(*) AS family_count FROM customer_family_members;"
+
+      - name: Apply Customer360 managed remote D1 migration sequence
         id: migrate
-        if: ${{ inputs.mode == 'deploy' && steps.classify.outputs.classification == 'CUSTOMER360_MIGRATION_ONLY_PENDING' }}
+        if: ${{ inputs.mode == 'deploy' && steps.classify.outputs.classification != 'ALREADY_APPLIED_CONFIRMED' }}
         uses: cloudflare/wrangler-action@v4
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           wranglerVersion: '4'
           command: d1 migrations apply customer-crm-db --remote
+
+      - name: Read Production schema and counts after migration
+        id: schema_after
+        if: ${{ inputs.mode == 'deploy' }}
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          wranglerVersion: '4'
+          command: >-
+            d1 execute customer-crm-db --remote --json --command
+            "SELECT COUNT(*) AS customer_count FROM customers;
+            SELECT COUNT(*) AS family_count FROM customer_family_members;
+            SELECT name FROM d1_migrations_managed WHERE name IN
+            ('20260828_customer360_family_marketing_foundation.sql','20260903_customer360_profile_auto_enrichment.sql') ORDER BY id;
+            SELECT name FROM sqlite_master WHERE type='table' AND name IN
+            ('customer_profile_enrichment','customer_family_member_metadata','customer_field_evidence','customer_notes_history') ORDER BY name;
+            PRAGMA table_info(customer_profile_enrichment);
+            PRAGMA table_info(customer_family_member_metadata);
+            PRAGMA table_info(customer_field_evidence);
+            PRAGMA table_info(customer_notes_history);
+            SELECT name FROM sqlite_master WHERE type='index' AND name IN
+            ('idx_customer_profile_enrichment_lead','idx_customer_family_member_metadata_order','idx_customer_field_evidence_dedupe','idx_customer_field_evidence_pending','idx_customer_notes_history_customer') ORDER BY name;"
+
+      - name: Assert additive migration schema and existing rows preserved
+        if: ${{ inputs.mode == 'deploy' }}
+        shell: bash
+        env:
+          CUSTOMER_BEFORE_OUTPUT: ${{ steps.customer_count_before.outputs.command-output }}
+          FAMILY_BEFORE_OUTPUT: ${{ steps.family_count_before.outputs.command-output }}
+          FAMILY_WAS_PRESENT: ${{ steps.classify.outputs.family_table }}
+          AFTER_OUTPUT: ${{ steps.schema_after.outputs.command-output }}
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const customerBefore=process.env.CUSTOMER_BEFORE_OUTPUT||'';
+          const familyBefore=process.env.FAMILY_BEFORE_OUTPUT||'';
+          const familyWasPresent=process.env.FAMILY_WAS_PRESENT==='PRESENT';
+          const after=process.env.AFTER_OUTPUT||'';
+          function count(s,key){const m=s.match(new RegExp('"'+key+'"\\s*:\\s*(\\d+)'));if(!m)throw new Error('MISSING_COUNT:'+key);return Number(m[1]);}
+          if(count(customerBefore,'customer_count')!==count(after,'customer_count'))throw new Error('CUSTOMER_ROW_COUNT_CHANGED');
+          const expectedFamily=familyWasPresent?count(familyBefore,'family_count'):0;
+          if(expectedFamily!==count(after,'family_count'))throw new Error('FAMILY_ROW_COUNT_CHANGED');
+          for(const name of [
+            '20260828_customer360_family_marketing_foundation.sql',
+            '20260903_customer360_profile_auto_enrichment.sql',
+            'customer_profile_enrichment','customer_family_member_metadata','customer_field_evidence','customer_notes_history',
+            'customer_id','wedding_anniversary','birth_order','candidate_id','note_id',
+            'idx_customer_profile_enrichment_lead','idx_customer_family_member_metadata_order','idx_customer_field_evidence_dedupe','idx_customer_field_evidence_pending','idx_customer_notes_history_customer'
+          ])if(!after.includes(name))throw new Error('MISSING_PRODUCTION_SCHEMA_EVIDENCE:'+name);
+          console.log('PRODUCTION_SCHEMA_READBACK=PASS');
+          console.log('EXISTING_CUSTOMERS_PRESERVED=PASS');
+          console.log('EXISTING_FAMILY_MEMBERS_PRESERVED=PASS');
+          console.log('PRODUCTION_CUSTOMER_DELETES=0');
+          console.log('PRODUCTION_TEST_CUSTOMER_WRITES=0');
+          console.log('DESTRUCTIVE_SCHEMA_CHANGES=0');
+          NODE
 
       - name: Verify identity sequence before deploy (READ ONLY)
         id: verify_sequence_predeploy
@@ -459,4 +572,23 @@ jobs:
           test -n "$DEPLOYMENT_URL"
           curl --fail --silent --show-error --max-time 15 "$DEPLOYMENT_URL/health" >/tmp/customer-crm-health.json
           test -s /tmp/customer-crm-health.json
-          echo 'POST_DEPLOY_HTTP_READ_ONLY=PASS'
+          node <<'NODE'
+          const fs=require('fs');const h=JSON.parse(fs.readFileSync('/tmp/customer-crm-health.json','utf8'));
+          for(const k of [
+            'customer360_family_marketing_foundation','customer360_profile_enrichment','customer360_line_profile_extraction',
+            'referrer_customer_id_exact_existing_customer_only','customer360_profile_composed_into_detail',
+            'customer360_profile_enrichment_schema_available','customer360_family_metadata_available','customer360_field_evidence_available','customer360_notes_history_available'
+          ])if(h[k]!==true)throw new Error('HEALTH_MARKER:'+k);
+          if(h.customer_id_generation!==false)throw new Error('CUSTOMER_ID_GENERATION_NOT_FALSE');
+          if(h.customer_line_auto_apply!==false||h.line_profile_auto_apply!==false)throw new Error('AUTO_APPLY_NOT_FALSE');
+          if(h.customer_line_extraction_mode!=='candidate-only')throw new Error('CANDIDATE_ONLY_MODE_MISSING');
+          if(h.customer360_identity_fallback!==false)throw new Error('IDENTITY_FALLBACK_NOT_FALSE');
+          if(h.customer360_paid_ai_provider_active!==false)throw new Error('PAID_AI_PROVIDER_NOT_FALSE');
+          if(h.line_event_direction!=='incoming'||h.line_event_receive_status!=='received')throw new Error('LINE_CANONICAL_EVENT_CONTRACT');
+          console.log('POST_DEPLOY_HTTP_READ_ONLY=PASS');
+          console.log('CUSTOMER360_PROFILE_SCHEMA=PASS');
+          console.log('CUSTOMER360_CANDIDATE_ONLY=PASS');
+          console.log('CUSTOMER_ID_GENERATION=0');
+          console.log('LINE_SEND=0');
+          console.log('PAID_AI_ACTIVATION=0');
+          NODE
