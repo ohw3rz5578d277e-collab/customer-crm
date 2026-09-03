@@ -53,95 +53,48 @@ async function getProfile(){return jsonResponse(await handleCustomerProfileEnric
 async function patch(changes){return jsonResponse(await handleCustomerProfileEnrichmentRequest(new Request(base,{method:'PATCH',headers:ownerHeaders,body:JSON.stringify({changes})}),env))}
 async function child(payload){return jsonResponse(await handleCustomerProfileEnrichmentRequest(new Request(base+'/children',{method:'POST',headers:ownerHeaders,body:JSON.stringify(payload)}),env))}
 
-// P1: post-shoot canonical workflow states all count as completed shoots.
 {
-  const r=await getProfile();assert.equal(r.status,200);
-  const m=r.body.customer.metrics;
-  assert.equal(m.reservation_count,6);
-  assert.equal(m.completed_shoot_count,4);
-  assert.equal(m.repeat_count,3);
-  assert.equal(m.customer_repeat_share,0.75);
-  assert.equal(m.lifetime_revenue,100000);
-  assert.equal(m.average_shoot_value,25000);
-  assert.deepEqual(m.shoot_genre_history,['七五三','お宮参り','家族','成人']);
-  assert.equal(m.first_shoot_date,'2026-01-01');
-  assert.equal(m.last_shoot_date,'2026-04-01');
-  assert.equal(m.cancel_count,1);
+  const r=await getProfile();assert.equal(r.status,200);const m=r.body.customer.metrics;
+  assert.equal(m.reservation_count,6);assert.equal(m.completed_shoot_count,4);assert.equal(m.repeat_count,3);assert.equal(m.customer_repeat_share,0.75);assert.equal(m.lifetime_revenue,100000);assert.equal(m.average_shoot_value,25000);assert.deepEqual(m.shoot_genre_history,['七五三','お宮参り','家族','成人']);assert.equal(m.first_shoot_date,'2026-01-01');assert.equal(m.last_shoot_date,'2026-04-01');assert.equal(m.cancel_count,1);
   console.log('DERIVED_POST_SHOOT_STATUSES=PASS');
 }
 
-// P1: same Owner edit is idempotent at evidence layer and never returns partial-save 500.
 {
-  const a=await patch({phone:'090-1234-5678'}),b=await patch({phone:'090-1234-5678'});
-  assert.equal(a.status,200);assert.equal(b.status,200);
-  assert.equal(sqlite.prepare("SELECT phone FROM customers WHERE customer_id='26000123'").get().phone,'090-1234-5678');
-  assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM customer_field_evidence WHERE customer_id='26000123' AND field_name='phone' AND candidate_value='090-1234-5678' AND source='manual'").get().n,1);
+  const a=await patch({phone:'090-1234-5678'}),b=await patch({phone:'090-1234-5678'});assert.equal(a.status,200);assert.equal(b.status,200);assert.equal(sqlite.prepare("SELECT phone FROM customers WHERE customer_id='26000123'").get().phone,'090-1234-5678');assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM customer_field_evidence WHERE customer_id='26000123' AND field_name='phone' AND candidate_value='090-1234-5678' AND source='manual'").get().n,1);
   console.log('OWNER_REPEAT_SAVE_IDEMPOTENT=PASS');
 }
 
-// P2: unrelated edits preserve NPS because only supplied fields are mutated.
 {
-  assert.equal((await patch({nps_score:9,nps_answered_at:'2026-09-03T10:00',nps_comment:'満足'})).status,200);
-  assert.equal((await patch({address:'大阪府大阪市'})).status,200);
-  const p=(await getProfile()).body.customer;
-  assert.equal(p.experience.nps_score,9);assert.equal(p.experience.nps_comment,'満足');
+  assert.equal((await patch({nps_score:9,nps_answered_at:'2026-09-03T10:00',nps_comment:'満足'})).status,200);assert.equal((await patch({address:'大阪府大阪市'})).status,200);const p=(await getProfile()).body.customer;assert.equal(p.experience.nps_score,9);assert.equal(p.experience.nps_comment,'満足');
   console.log('UNRELATED_EDIT_PRESERVES_NPS=PASS');
 }
 
-// P2: an explicit empty note is a real clear, not fallback to legacy customer.memo.
 {
-  assert.equal((await getProfile()).body.customer.notes.current,'legacy memo');
-  assert.equal((await patch({notes:''})).status,200);
-  const p=(await getProfile()).body.customer;
-  assert.equal(p.notes.current,'');assert.ok(p.notes.updated_at);
-  const history=sqlite.prepare("SELECT body FROM customer_notes_history WHERE customer_id='26000123' ORDER BY created_at DESC, note_id DESC LIMIT 1").get();
-  assert.equal(history.body,'');
+  assert.equal((await getProfile()).body.customer.notes.current,'legacy memo');assert.equal((await patch({notes:''})).status,200);const p=(await getProfile()).body.customer;assert.equal(p.notes.current,'');assert.ok(p.notes.updated_at);const history=sqlite.prepare("SELECT body FROM customer_notes_history WHERE customer_id='26000123' ORDER BY created_at DESC, note_id DESC LIMIT 1").get();assert.equal(history.body,'');
   console.log('NOTE_EXPLICIT_CLEAR=PASS');
 }
 
-// P2: family model and API remain extensible beyond three children.
 {
-  for(const order of [1,2,3,4,5]){
-    const r=await child({birth_order:order,name:`子${order}`,name_kana:`こ${order}`,birth_date:`202${order}-01-0${order}`});
-    assert.equal(r.status,200,`child ${order}`);
-  }
-  const kids=(await getProfile()).body.customer.family.children;
-  assert.equal(kids.length,5);assert.equal(kids.find(x=>x.birth_order===4)?.name,'子4');assert.equal(kids.find(x=>x.birth_order===5)?.name,'子5');
-  // Re-saving a child also exercises evidence dedupe idempotency.
-  assert.equal((await child({child_id:kids.find(x=>x.birth_order===4).child_id,birth_order:4,name:'子4',name_kana:'こ4',birth_date:'2024-01-04'})).status,200);
+  for(const order of [1,2,3,4,5]){const r=await child({birth_order:order,name:`子${order}`,name_kana:`こ${order}`,birth_date:`202${order}-01-0${order}`});assert.equal(r.status,200,`child ${order}`)}
+  const kids=(await getProfile()).body.customer.family.children;assert.equal(kids.length,5);assert.equal(kids.find(x=>x.birth_order===4)?.name,'子4');assert.equal(kids.find(x=>x.birth_order===5)?.name,'子5');assert.equal((await child({child_id:kids.find(x=>x.birth_order===4).child_id,birth_order:4,name:'子4',name_kana:'こ4',birth_date:'2024-01-04'})).status,200);
   console.log('CHILDREN_OVER_THREE=PASS');
 }
 
-// Referrer guard remains exact, existing and non-self-referential.
 {
-  const self=await guardCustomer360ProfileWrite(new Request(base,{method:'PATCH',headers:ownerHeaders,body:JSON.stringify({changes:{referrer_customer_id:'26000123'}})}),env);
-  assert.equal(self.status,409);
-  const missing=await guardCustomer360ProfileWrite(new Request(base,{method:'PATCH',headers:ownerHeaders,body:JSON.stringify({changes:{referrer_customer_id:'26000888'}})}),env);
-  assert.equal(missing.status,409);
-  const exact=await guardCustomer360ProfileWrite(new Request(base,{method:'PATCH',headers:ownerHeaders,body:JSON.stringify({changes:{referrer_customer_id:'26000999'}})}),env);
-  assert.equal(exact,null);
+  const self=await guardCustomer360ProfileWrite(new Request(base,{method:'PATCH',headers:ownerHeaders,body:JSON.stringify({changes:{referrer_customer_id:'26000123'}})}),env);assert.equal(self.status,409);const missing=await guardCustomer360ProfileWrite(new Request(base,{method:'PATCH',headers:ownerHeaders,body:JSON.stringify({changes:{referrer_customer_id:'26000888'}})}),env);assert.equal(missing.status,409);const exact=await guardCustomer360ProfileWrite(new Request(base,{method:'PATCH',headers:ownerHeaders,body:JSON.stringify({changes:{referrer_customer_id:'26000999'}})}),env);assert.equal(exact,null);
   console.log('REFERRER_EXACT_EXISTING_NON_SELF=PASS');
 }
 
-// Auth remains closed without Owner/internal principal.
 {
-  const locked={...env,CRM_LOCAL_TEST_AUTH:'0'};
-  const read=await handleCustomerProfileEnrichmentRequest(new Request(base),locked);
-  const write=await handleCustomerProfileEnrichmentRequest(new Request(base,{method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify({changes:{phone:'000'}})}),locked);
-  assert.equal(read.status,401);assert.equal(write.status,401);
+  const locked={...env,CRM_LOCAL_TEST_AUTH:'0'};const read=await handleCustomerProfileEnrichmentRequest(new Request(base),locked);const write=await handleCustomerProfileEnrichmentRequest(new Request(base,{method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify({changes:{phone:'000'}})}),locked);assert.equal(read.status,401);assert.equal(write.status,401);
   console.log('UNAUTHENTICATED_READ_WRITE_DENIED=PASS');
 }
 
-// Static UI/release invariants: changed-fields only, dynamic children, one combined initial detail GET, no secrets.
 {
-  const ui=fs.readFileSync('src/crm-customer360-profile-ui-client.mjs','utf8');
-  const runtime=fs.readFileSync('src/crm-customer360-profile-enrichment.mjs','utf8');
-  const line=fs.readFileSync('src/crm-customer360-line-profile-extraction.mjs','utf8');
-  assert.match(ui,/childOrders\(kids,true\)/);assert.ok(!ui.includes('[1,2,3].map'));
-  assert.match(ui,/el\.dataset\.original/);
-  assert.ok(ui.includes("/api/customer360/customer/'+id"));assert.ok(!ui.includes('/api/customer360/profile/'+id+"'"+'',{method:\'GET\''));
-  assert.match(runtime,/direction='incoming' AND send_status='received'/);
-  assert.match(line,/direction='incoming' AND send_status='received'/);
+  const ui=fs.readFileSync('src/crm-customer360-profile-ui-client.mjs','utf8');const runtime=fs.readFileSync('src/crm-customer360-profile-enrichment.mjs','utf8');const line=fs.readFileSync('src/crm-customer360-line-profile-extraction.mjs','utf8');
+  assert.match(ui,/childOrders\(kids,true\)/);assert.ok(!ui.includes('[1,2,3].map'));assert.match(ui,/el\.dataset\.original/);
+  assert.match(ui,/async function load\(customerId\)[\s\S]*?api\('\/api\/customer360\/customer\/'\+id\)/);assert.doesNotMatch(ui,/async function load\(customerId\)[\s\S]*?api\('\/api\/customer360\/profile\/'\+id\)/);
+  assert.match(runtime,/direction='incoming' AND send_status='received'/);assert.match(line,/direction='incoming' AND send_status='received'/);
   for(const secret of ['CRM_INTERNAL_TOKEN','ADMIN_TOKEN','CF_ACCESS_CLIENT_SECRET'])assert.ok(!ui.includes(secret),secret);
   console.log('MOBILE_UI_PERFORMANCE_SECURITY_CONTRACT=PASS');
 }
