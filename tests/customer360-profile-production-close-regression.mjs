@@ -92,7 +92,8 @@ async function child(payload){return jsonResponse(await handleCustomerProfileEnr
 
 {
   const ui=fs.readFileSync('src/crm-customer360-profile-ui-client.mjs','utf8');const runtime=fs.readFileSync('src/crm-customer360-profile-enrichment.mjs','utf8');const line=fs.readFileSync('src/crm-customer360-line-profile-extraction.mjs','utf8');
-  assert.match(ui,/childOrders\(kids,true\)/);assert.ok(!ui.includes('[1,2,3].map'));assert.match(ui,/el\.dataset\.original/);
+  assert.match(ui,/childOrders\(kids,true\)/);assert.ok(!ui.includes('[1,2,3].map'));
+  assert.match(ui,/function changed\(el\)/);assert.match(ui,/if\(el&&changed\(el\)\)changes\[n\]=el\.value/);assert.match(ui,/if\(!changed\(nameEl\)&&!changed\(kanaEl\)&&!changed\(birthEl\)\)continue/);
   assert.match(ui,/async function load\(customerId\)[\s\S]*?api\('\/api\/customer360\/customer\/'\+id\)/);assert.doesNotMatch(ui,/async function load\(customerId\)[\s\S]*?api\('\/api\/customer360\/profile\/'\+id\)/);
   assert.match(runtime,/direction='incoming' AND send_status='received'/);assert.match(line,/direction='incoming' AND send_status='received'/);
   for(const secret of ['CRM_INTERNAL_TOKEN','ADMIN_TOKEN','CF_ACCESS_CLIENT_SECRET'])assert.ok(!ui.includes(secret),secret);
