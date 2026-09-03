@@ -70,15 +70,18 @@ async function customer360SchemaHealth(env){
 }
 
 async function patchHealth(response,env){
+  const inheritedNotFound=response.status===404;
   const raw=await response.text();
   let data={};
   try{data=raw?JSON.parse(raw):{}}catch(_){}
+  if(inheritedNotFound)data={};
   const h=headersFrom(response);
   h.set('content-type','application/json; charset=utf-8');
   const schema=await customer360SchemaHealth(env);
-  const status=response.status===404?200:response.status;
+  const status=inheritedNotFound?200:response.status;
   return new Response(JSON.stringify({
     ...data,
+    ...(inheritedNotFound?{ok:true}:{}),
     service:data.service||'customer-crm-api',
     ...customer360Health(),
     ...customerProfileEnrichmentHealth(),
