@@ -76,8 +76,10 @@ async function patchHealth(response,env){
   const h=headersFrom(response);
   h.set('content-type','application/json; charset=utf-8');
   const schema=await customer360SchemaHealth(env);
+  const status=response.status===404?200:response.status;
   return new Response(JSON.stringify({
     ...data,
+    service:data.service||'customer-crm-api',
     ...customer360Health(),
     ...customerProfileEnrichmentHealth(),
     ...customer360LineProfileExtractionHealth(),
@@ -87,7 +89,7 @@ async function patchHealth(response,env){
     customer360_identity_fallback:false,
     customer360_paid_ai_provider_active:false,
     customer360_build:BUILD
-  },null,2),{status:response.status,headers:h});
+  },null,2),{status,headers:h});
 }
 
 async function patchHtml(response){
