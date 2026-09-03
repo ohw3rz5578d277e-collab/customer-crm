@@ -137,17 +137,32 @@ jobs:
           node <<'NODE'
           const {chromium}=require('playwright');
           const base=process.env.BASE_URL;
-          const auth={
+          const serverAuth={
             'CF-Access-Client-Id':process.env.CF_ACCESS_CLIENT_ID,
             'CF-Access-Client-Secret':process.env.CF_ACCESS_CLIENT_SECRET,
             'x-admin-token':process.env.ADMIN_TOKEN
           };
           const browser=await chromium.launch({headless:true});
           try{
-            const context=await browser.newContext({viewport:{width:390,height:844},screen:{width:390,height:844},isMobile:true,hasTouch:true,extraHTTPHeaders:auth});
+            const context=await browser.newContext({viewport:{width:390,height:844},screen:{width:390,height:844},isMobile:true,hasTouch:true});
             const page=await context.newPage();
-            const pageErrors=[],consoleErrors=[],writes=[];
+            const pageErrors=[],consoleErrors=[],writes=[],browserSecretHeaders=[];
             let detailGets=0,profileGets=0;
+            await page.route(base+'/**',async route=>{
+              const req=route.request();
+              const browserHeaders=await req.allHeaders();
+              for(const name of ['cf-access-client-id','cf-access-client-secret','x-admin-token','authorization','x-internal-token']){
+                if(browserHeaders[name])browserSecretHeaders.push(name);
+              }
+              if(req.method()!=='GET'&&req.method()!=='HEAD'){
+                await route.abort('blockedbyclient');
+                return;
+              }
+              const upstream=await fetch(req.url(),{method:req.method(),headers:{...serverAuth,accept:browserHeaders.accept||'*/*','user-agent':browserHeaders['user-agent']||'Customer360-Production-Verifier'},redirect:'manual'});
+              const responseHeaders=Object.fromEntries(upstream.headers.entries());
+              for(const h of ['content-encoding','content-length','transfer-encoding','connection'])delete responseHeaders[h];
+              await route.fulfill({status:upstream.status,headers:responseHeaders,body:Buffer.from(await upstream.arrayBuffer())});
+            });
             page.on('pageerror',e=>pageErrors.push(String(e)));
             page.on('console',m=>{if(m.type()==='error')consoleErrors.push(m.text())});
             page.on('request',r=>{
@@ -185,6 +200,7 @@ jobs:
             const overflow=await page.evaluate(()=>Math.max(document.documentElement.scrollWidth-document.documentElement.clientWidth,document.body.scrollWidth-document.body.clientWidth));
             if(overflow>1)throw new Error('HORIZONTAL_OVERFLOW_'+overflow);
             if(writes.length)throw new Error('PRODUCTION_BROWSER_WRITE:'+writes.join(','));
+            if(browserSecretHeaders.length)throw new Error('BROWSER_SECRET_HEADER:'+browserSecretHeaders.join(','));
             if(pageErrors.length)throw new Error('PAGE_ERRORS:'+pageErrors.join(' | '));
             const notFound=consoleErrors.filter(x=>/404|not found/i.test(x));
             if(notFound.length)throw new Error('CONSOLE_404:'+notFound.join(' | '));
@@ -193,6 +209,7 @@ jobs:
             console.log(`PRODUCTION_EXTRA_INITIAL_PROFILE_GET=${profileGets}`);
             console.log('PRODUCTION_CONSOLE_404=0');
             console.log('PRODUCTION_BROWSER_WRITES=0');
+            console.log('PRODUCTION_BROWSER_SECRET_HEADERS=0');
             console.log('PRODUCTION_HORIZONTAL_OVERFLOW='+overflow);
           } finally {
             await browser.close();
