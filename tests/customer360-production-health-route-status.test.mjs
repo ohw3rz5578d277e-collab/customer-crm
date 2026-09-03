@@ -1,21 +1,45 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import { patchHealth } from '../src/production-index-crm-customer360-entry.js';
 
 const source=fs.readFileSync(new URL('../src/production-index-crm-customer360-entry.js',import.meta.url),'utf8');
-
 assert.match(source,/url\.pathname==='\/health'\|\|url\.pathname==='\/api\/crm-health-check'/,'Production entry must own the canonical health routes');
-assert.match(source,/const inheritedNotFound=response\.status===404;/,'Owned health route must distinguish inherited not-found from other failures');
-assert.match(source,/if\(inheritedNotFound\)data=\{\};/,'Inherited route-miss payload must be discarded before composing canonical health');
-assert.match(source,/const status=inheritedNotFound\?200:response\.status;/,'Only inherited not-found status may be normalized for the owned health route');
-assert.match(source,/\.\.\.\(inheritedNotFound\?\{ok:true\}:\{\}\)/,'Owned health route must replace stale 404 ok:false semantics');
-assert.match(source,/\{status,headers:h\}/,'Health response must use the normalized status');
-assert.match(source,/service:data\.service\|\|'customer-crm-api'/,'Health must identify the canonical Customer CRM service');
-assert.doesNotMatch(source,/response\.status===401\?200|response\.status===403\?200|response\.status>=500\?200/,'Auth/server failures must never be normalized to success');
-assert.match(source,/if\(request\.method==='GET'&&\(url\.pathname==='\/health'\|\|url\.pathname==='\/api\/crm-health-check'\)\)return patchHealth\(response,env\);[\s\S]*return response;/,'Unrelated routes must retain their lower-app response/status');
+
+async function run(status,payload){
+  const response=new Response(JSON.stringify(payload),{status,headers:{'content-type':'application/json'}});
+  const patched=await patchHealth(response,{});
+  return {status:patched.status,data:await patched.json()};
+}
+
+for(const payload of [
+  {ok:false,message:'Not Found'},
+  {ok:false,error:'route_not_found',message:'Not Found'}
+]){
+  const x=await run(404,payload);
+  assert.equal(x.status,200);
+  assert.equal(x.data.ok,true);
+  assert.equal(x.data.service,'customer-crm-api');
+  assert.equal('message' in x.data,false);
+  assert.equal('error' in x.data,false);
+  for(const key of ['customer360_build','customer360_identity_fallback','customer360_paid_ai_provider_active','customer360_profile_enrichment_schema_available'])assert.ok(key in x.data,`missing health marker ${key}`);
+}
+
+for(const status of [401,403,500,503]){
+  const x=await run(status,{ok:false,error:`status_${status}`});
+  assert.equal(x.status,status);
+  assert.equal(x.data.ok,false);
+  assert.equal(x.data.error,`status_${status}`);
+}
+
+const success=await run(200,{ok:true,service:'lower-service',lower_marker:'retained'});
+assert.equal(success.status,200);
+assert.equal(success.data.ok,true);
+assert.equal(success.data.service,'lower-service');
+assert.equal(success.data.lower_marker,'retained');
 
 console.log('CUSTOMER360_PRODUCTION_HEALTH_ROUTE_OWNERSHIP=PASS');
 console.log('CUSTOMER360_PRODUCTION_HEALTH_INHERITED_404_TO_200=PASS');
 console.log('CUSTOMER360_PRODUCTION_HEALTH_INHERITED_404_PAYLOAD_NORMALIZED=PASS');
-console.log('CUSTOMER360_PRODUCTION_HEALTH_AUTH_SERVER_FAILURE_PRESERVED=PASS');
-console.log('CUSTOMER360_PRODUCTION_HEALTH_UNRELATED_404_PRESERVED=PASS');
+console.log('CUSTOMER360_PRODUCTION_HEALTH_401_403_500_503_PRESERVED=PASS');
+console.log('CUSTOMER360_PRODUCTION_HEALTH_NORMAL_SUCCESS_PRESERVED=PASS');
 console.log('CUSTOMER360_PRODUCTION_HEALTH_SERVICE_MARKER=PASS');
