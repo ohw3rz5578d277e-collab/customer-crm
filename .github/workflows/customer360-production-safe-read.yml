@@ -75,11 +75,25 @@ jobs:
             return {text,data};
           }
           const {text:healthText,data:health}=await get('/health');
-          for(const k of ['customer360','customer360_profile_enrichment','customer360_line_profile_extraction','customer360_profile_write_guard','customer360_combined_detail']){
+          for(const k of [
+            'customer360_family_marketing_foundation',
+            'customer360_profile_enrichment',
+            'customer360_line_profile_extraction',
+            'referrer_customer_id_exact_existing_customer_only',
+            'customer360_profile_composed_into_detail',
+            'customer360_profile_enrichment_schema_available',
+            'customer360_family_metadata_available',
+            'customer360_field_evidence_available',
+            'customer360_notes_history_available'
+          ]){
             if(health[k]!==true)throw new Error(`HEALTH_MARKER:${k}`);
           }
+          if(health.customer360_profile_initial_extra_request!==false)throw new Error('COMBINED_DETAIL_EXTRA_PROFILE_REQUEST_NOT_FALSE');
           if(health.customer_id_generation!==false)throw new Error('CUSTOMER_ID_GENERATION_NOT_FALSE');
           if(health.customer_line_auto_apply!==false||health.line_profile_auto_apply!==false)throw new Error('AUTO_APPLY_NOT_FALSE');
+          if(health.customer_line_extraction_mode!=='candidate-only')throw new Error('CANDIDATE_ONLY_MODE_MISSING');
+          if(health.customer360_identity_fallback!==false)throw new Error('IDENTITY_FALLBACK_NOT_FALSE');
+          if(health.customer360_paid_ai_provider_active!==false)throw new Error('PAID_AI_PROVIDER_NOT_FALSE');
           if(health.line_event_direction!=='incoming'||health.line_event_receive_status!=='received')throw new Error('LINE_CANONICAL_EVENT_CONTRACT');
           const list=(await get('/api/customer360/customers?page=1&page_size=1')).data;
           if(!list.ok||!Array.isArray(list.items))throw new Error('CUSTOMER_LIST_NOT_OK');
@@ -99,11 +113,13 @@ jobs:
             if(secret&&healthText.includes(secret))throw new Error('HEALTH_SECRET_EXPOSURE');
           }
           console.log('PRODUCTION_HEALTH=PASS');
+          console.log('PRODUCTION_PROFILE_SCHEMA_HEALTH=PASS');
           console.log('PRODUCTION_CUSTOMER_LIST_SAFE_READ=PASS');
           console.log('PRODUCTION_COMBINED_DETAIL_SAFE_READ='+(first?'PASS':'NO_CUSTOMER_AVAILABLE'));
           console.log('PRODUCTION_TEST_CUSTOMER_WRITES=0');
           console.log('CUSTOMER_ID_GENERATION=0');
           console.log('LINE_SENDS=0');
+          console.log('PAID_AI_ACTIVATION=0');
           console.log('BROWSER_SECRET_EXPOSURE=0');
           NODE
 
@@ -161,6 +177,8 @@ jobs:
               for(const label of ['基本情報','家族','撮影履歴','売上','集客・紹介','満足度・許可','LINEから見つかった情報','備考・対応メモ']){
                 if(!(await page.getByText(label,{exact:false}).first().isVisible()))throw new Error('MISSING_SECTION_'+label);
               }
+              const edit=page.getByRole('button',{name:'編集'}).first();
+              if(!(await edit.isVisible()))throw new Error('EDIT_BUTTON_NOT_VISIBLE');
               if(detailGets<1)throw new Error('COMBINED_DETAIL_GET_MISSING');
               if(profileGets!==0)throw new Error('EXTRA_INITIAL_PROFILE_GET_'+profileGets);
             }
