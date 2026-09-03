@@ -1,0 +1,182 @@
+name: Customer360 Production safe-read verification
+
+on:
+  workflow_run:
+    workflows:
+      - Deploy customer-crm to Cloudflare
+    types:
+      - completed
+
+permissions:
+  contents: read
+
+concurrency:
+  group: customer360-production-safe-read
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'workflow_dispatch' &&
+      github.event.workflow_run.head_branch == 'main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      BASE_URL: https://customer-crm-api.ohw3rz5578d277e.workers.dev
+      CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+      CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+      ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}
+      DEPLOYED_SHA: ${{ github.event.workflow_run.head_sha }}
+
+    steps:
+      - name: Checkout deployed exact SHA
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Assert deploy source is still current main
+        shell: bash
+        run: |
+          set -euo pipefail
+          actual="$(git rev-parse HEAD)"
+          remote="$(git ls-remote origin refs/heads/main | awk '{print $1}')"
+          test "$actual" = "$DEPLOYED_SHA"
+          test "$remote" = "$DEPLOYED_SHA"
+          echo "PRODUCTION_VERIFY_SHA=$actual"
+          echo 'CURRENT_MAIN_MATCH=PASS'
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+
+      - name: Production health and combined Customer360 safe read
+        shell: bash
+        run: |
+          set -euo pipefail
+          for v in CF_ACCESS_CLIENT_ID CF_ACCESS_CLIENT_SECRET ADMIN_TOKEN; do
+            test -n "${!v}" || { echo "::error::$v missing"; exit 1; }
+          done
+          node <<'NODE'
+          const base=process.env.BASE_URL;
+          const headers={
+            'CF-Access-Client-Id':process.env.CF_ACCESS_CLIENT_ID,
+            'CF-Access-Client-Secret':process.env.CF_ACCESS_CLIENT_SECRET,
+            'x-admin-token':process.env.ADMIN_TOKEN,
+            accept:'application/json'
+          };
+          async function get(path){
+            const r=await fetch(base+path,{headers,redirect:'manual'});
+            const text=await r.text();
+            if(r.status!==200)throw new Error(`${path} status=${r.status}`);
+            let data;try{data=JSON.parse(text)}catch{throw new Error(`${path} invalid_json`)}
+            return {text,data};
+          }
+          const {text:healthText,data:health}=await get('/health');
+          for(const k of ['customer360','customer360_profile_enrichment','customer360_line_profile_extraction','customer360_profile_write_guard','customer360_combined_detail']){
+            if(health[k]!==true)throw new Error(`HEALTH_MARKER:${k}`);
+          }
+          if(health.customer_id_generation!==false)throw new Error('CUSTOMER_ID_GENERATION_NOT_FALSE');
+          if(health.customer_line_auto_apply!==false||health.line_profile_auto_apply!==false)throw new Error('AUTO_APPLY_NOT_FALSE');
+          if(health.line_event_direction!=='incoming'||health.line_event_receive_status!=='received')throw new Error('LINE_CANONICAL_EVENT_CONTRACT');
+          const list=(await get('/api/customer360/customers?page=1&page_size=1')).data;
+          if(!list.ok||!Array.isArray(list.items))throw new Error('CUSTOMER_LIST_NOT_OK');
+          const first=list.items.find(x=>/^\d{8}$/.test(String(x.customer_id||'')));
+          if(first){
+            const detail=(await get('/api/customer360/customer/'+first.customer_id)).data;
+            if(!detail.ok||!detail.customer)throw new Error('CUSTOMER_DETAIL_NOT_OK');
+            const profile=detail.customer.profile;
+            if(!profile)throw new Error('COMBINED_PROFILE_MISSING');
+            for(const key of ['customer_id','core','family','metrics','attribution','lifecycle','referral','experience','notes','line_candidates','meta']){
+              if(!(key in profile))throw new Error(`PROFILE_FIELD_MISSING:${key}`);
+            }
+            if(profile.customer_id!==String(first.customer_id))throw new Error('COMBINED_PROFILE_ID_MISMATCH');
+            if(profile.meta?.customer_id_generation!==false||profile.meta?.auto_apply!==false||profile.meta?.candidate_only!==true)throw new Error('PROFILE_SAFETY_META_INVALID');
+          }
+          for(const secret of [process.env.CF_ACCESS_CLIENT_ID,process.env.CF_ACCESS_CLIENT_SECRET,process.env.ADMIN_TOKEN]){
+            if(secret&&healthText.includes(secret))throw new Error('HEALTH_SECRET_EXPOSURE');
+          }
+          console.log('PRODUCTION_HEALTH=PASS');
+          console.log('PRODUCTION_CUSTOMER_LIST_SAFE_READ=PASS');
+          console.log('PRODUCTION_COMBINED_DETAIL_SAFE_READ='+(first?'PASS':'NO_CUSTOMER_AVAILABLE'));
+          console.log('PRODUCTION_TEST_CUSTOMER_WRITES=0');
+          console.log('CUSTOMER_ID_GENERATION=0');
+          console.log('LINE_SENDS=0');
+          console.log('BROWSER_SECRET_EXPOSURE=0');
+          NODE
+
+      - name: Install mobile browser verifier
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --no-save playwright@1.55.0
+          npx playwright install --with-deps chromium
+
+      - name: Production 390px Customer360 mobile read-only verification
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const {chromium}=require('playwright');
+          const base=process.env.BASE_URL;
+          const auth={
+            'CF-Access-Client-Id':process.env.CF_ACCESS_CLIENT_ID,
+            'CF-Access-Client-Secret':process.env.CF_ACCESS_CLIENT_SECRET,
+            'x-admin-token':process.env.ADMIN_TOKEN
+          };
+          const browser=await chromium.launch({headless:true});
+          try{
+            const context=await browser.newContext({viewport:{width:390,height:844},screen:{width:390,height:844},isMobile:true,hasTouch:true,extraHTTPHeaders:auth});
+            const page=await context.newPage();
+            const pageErrors=[],consoleErrors=[],writes=[];
+            let detailGets=0,profileGets=0;
+            page.on('pageerror',e=>pageErrors.push(String(e)));
+            page.on('console',m=>{if(m.type()==='error')consoleErrors.push(m.text())});
+            page.on('request',r=>{
+              const u=new URL(r.url()),p=u.pathname;
+              if(r.method()!=='GET'&&r.method()!=='HEAD')writes.push(`${r.method()} ${p}`);
+              if(r.method()==='GET'&&/^\/api\/customer360\/customer\/\d{8}$/.test(p))detailGets++;
+              if(r.method()==='GET'&&/^\/api\/customer360\/profile\/\d{8}$/.test(p))profileGets++;
+            });
+            const response=await page.goto(base+'/admin',{waitUntil:'domcontentloaded',timeout:45000});
+            if(!response||response.status()!==200)throw new Error('ADMIN_STATUS_'+(response?.status()||0));
+            const html=await page.content();
+            for(const secret of [process.env.CF_ACCESS_CLIENT_ID,process.env.CF_ACCESS_CLIENT_SECRET,process.env.ADMIN_TOKEN]){
+              if(secret&&html.includes(secret))throw new Error('BROWSER_SECRET_VALUE_EXPOSED');
+            }
+            await page.waitForFunction(()=>window.__crmOwnerView&&document.querySelector('#crmOwnerNavCustomers'),null,{timeout:20000});
+            await page.locator('#crmOwnerNavCustomers').click();
+            await page.locator('#crmMktList.open').waitFor({timeout:15000});
+            const buttons=page.locator('[data-open]:visible');
+            const count=await buttons.count();
+            if(count){
+              const button=buttons.first();
+              const id=await button.getAttribute('data-open');
+              if(!/^\d{8}$/.test(id||''))throw new Error('VISIBLE_CUSTOMER_WITHOUT_CANONICAL_ID');
+              await button.click();
+              await page.locator('#crmMktDetail.open').waitFor({timeout:15000});
+              await page.getByRole('heading',{name:'顧客プロフィール'}).waitFor({timeout:15000});
+              for(const label of ['基本情報','家族','撮影履歴','売上','集客・紹介','満足度・許可','LINEから見つかった情報','備考・対応メモ']){
+                if(!(await page.getByText(label,{exact:false}).first().isVisible()))throw new Error('MISSING_SECTION_'+label);
+              }
+              if(detailGets<1)throw new Error('COMBINED_DETAIL_GET_MISSING');
+              if(profileGets!==0)throw new Error('EXTRA_INITIAL_PROFILE_GET_'+profileGets);
+            }
+            const overflow=await page.evaluate(()=>Math.max(document.documentElement.scrollWidth-document.documentElement.clientWidth,document.body.scrollWidth-document.body.clientWidth));
+            if(overflow>1)throw new Error('HORIZONTAL_OVERFLOW_'+overflow);
+            if(writes.length)throw new Error('PRODUCTION_BROWSER_WRITE:'+writes.join(','));
+            if(pageErrors.length)throw new Error('PAGE_ERRORS:'+pageErrors.join(' | '));
+            const notFound=consoleErrors.filter(x=>/404|not found/i.test(x));
+            if(notFound.length)throw new Error('CONSOLE_404:'+notFound.join(' | '));
+            console.log('PRODUCTION_MOBILE_CUSTOMER360=PASS');
+            console.log(`PRODUCTION_DETAIL_GET=${detailGets}`);
+            console.log(`PRODUCTION_EXTRA_INITIAL_PROFILE_GET=${profileGets}`);
+            console.log('PRODUCTION_CONSOLE_404=0');
+            console.log('PRODUCTION_BROWSER_WRITES=0');
+            console.log('PRODUCTION_HORIZONTAL_OVERFLOW='+overflow);
+          } finally {
+            await browser.close();
+          }
+          NODE
