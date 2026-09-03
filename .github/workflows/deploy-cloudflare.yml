@@ -6,7 +6,12 @@ on:
       - main
     paths:
       - '.github/workflows/deploy-cloudflare.yml'
+      - '.github/workflows/dispatch-production-deploy-from-issue.yml'
+      - '.github/workflows/customer360-production-safe-read.yml'
+      - 'src/crm-customer360-*.mjs'
+      - 'src/production-index-crm-customer360-entry.js'
       - 'tests/deploy-*.mjs'
+      - 'tests/customer360-*.mjs'
       - 'migrations_managed/20260828_customer360_family_marketing_foundation.sql'
       - 'migrations_managed/20260903_customer360_profile_auto_enrichment.sql'
       - 'wrangler.jsonc'
@@ -74,6 +79,7 @@ jobs:
           node tests/deploy-managed-migration-guard.mjs
           node tests/deploy-identity-sequence-monotonic-guard.test.mjs
           node tests/deploy-identity-sequence-workflow-contract.test.mjs
+          node tests/deploy-expected-sha-normalization.test.mjs
 
       - name: Enumerate and run all local static mocked read-only tests
         shell: bash
@@ -202,6 +208,7 @@ jobs:
           node tests/deploy-managed-migration-guard.mjs
           node tests/deploy-identity-sequence-monotonic-guard.test.mjs
           node tests/deploy-identity-sequence-workflow-contract.test.mjs
+          node tests/deploy-expected-sha-normalization.test.mjs
 
       - name: Current-main full local regression
         shell: bash
@@ -240,18 +247,6 @@ jobs:
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           wranglerVersion: '4'
           command: whoami
-
-      - name: Read Production row counts before migration
-        id: counts_before
-        uses: cloudflare/wrangler-action@v4
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          wranglerVersion: '4'
-          command: >-
-            d1 execute customer-crm-db --remote --json --command
-            "SELECT COUNT(*) AS customer_count FROM customers;
-            SELECT COUNT(*) AS family_count FROM customer_family_members;"
 
       - name: List pending managed remote D1 migrations
         id: pending_migrations
@@ -423,7 +418,31 @@ jobs:
           echo 'LINE_SEND=0'
           echo 'CRM_CUSTOMER360_PRODUCTION_PREFLIGHT_PASS'
 
-      - name: Apply explicitly approved managed remote D1 migration sequence
+      - name: Read Production customer count before migration
+        id: customer_count_before
+        if: ${{ inputs.mode == 'deploy' }}
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          wranglerVersion: '4'
+          command: >-
+            d1 execute customer-crm-db --remote --json --command
+            "SELECT COUNT(*) AS customer_count FROM customers;"
+
+      - name: Read Production existing family count before migration
+        id: family_count_before
+        if: ${{ inputs.mode == 'deploy' && steps.classify.outputs.family_table == 'PRESENT' }}
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          wranglerVersion: '4'
+          command: >-
+            d1 execute customer-crm-db --remote --json --command
+            "SELECT COUNT(*) AS family_count FROM customer_family_members;"
+
+      - name: Apply Customer360 managed remote D1 migration sequence
         id: migrate
         if: ${{ inputs.mode == 'deploy' && steps.classify.outputs.classification != 'ALREADY_APPLIED_CONFIRMED' }}
         uses: cloudflare/wrangler-action@v4
@@ -449,6 +468,10 @@ jobs:
             ('20260828_customer360_family_marketing_foundation.sql','20260903_customer360_profile_auto_enrichment.sql') ORDER BY id;
             SELECT name FROM sqlite_master WHERE type='table' AND name IN
             ('customer_profile_enrichment','customer_family_member_metadata','customer_field_evidence','customer_notes_history') ORDER BY name;
+            PRAGMA table_info(customer_profile_enrichment);
+            PRAGMA table_info(customer_family_member_metadata);
+            PRAGMA table_info(customer_field_evidence);
+            PRAGMA table_info(customer_notes_history);
             SELECT name FROM sqlite_master WHERE type='index' AND name IN
             ('idx_customer_profile_enrichment_lead','idx_customer_family_member_metadata_order','idx_customer_field_evidence_dedupe','idx_customer_field_evidence_pending','idx_customer_notes_history_customer') ORDER BY name;"
 
@@ -456,20 +479,33 @@ jobs:
         if: ${{ inputs.mode == 'deploy' }}
         shell: bash
         env:
-          BEFORE_OUTPUT: ${{ steps.counts_before.outputs.command-output }}
+          CUSTOMER_BEFORE_OUTPUT: ${{ steps.customer_count_before.outputs.command-output }}
+          FAMILY_BEFORE_OUTPUT: ${{ steps.family_count_before.outputs.command-output }}
+          FAMILY_WAS_PRESENT: ${{ steps.classify.outputs.family_table }}
           AFTER_OUTPUT: ${{ steps.schema_after.outputs.command-output }}
         run: |
           set -euo pipefail
           node <<'NODE'
-          const before=process.env.BEFORE_OUTPUT||'',after=process.env.AFTER_OUTPUT||'';
+          const customerBefore=process.env.CUSTOMER_BEFORE_OUTPUT||'';
+          const familyBefore=process.env.FAMILY_BEFORE_OUTPUT||'';
+          const familyWasPresent=process.env.FAMILY_WAS_PRESENT==='PRESENT';
+          const after=process.env.AFTER_OUTPUT||'';
           function count(s,key){const m=s.match(new RegExp('"'+key+'"\\s*:\\s*(\\d+)'));if(!m)throw new Error('MISSING_COUNT:'+key);return Number(m[1]);}
-          if(count(before,'customer_count')!==count(after,'customer_count'))throw new Error('CUSTOMER_ROW_COUNT_CHANGED');
-          if(count(before,'family_count')!==count(after,'family_count'))throw new Error('FAMILY_ROW_COUNT_CHANGED');
-          for(const name of ['20260828_customer360_family_marketing_foundation.sql','20260903_customer360_profile_auto_enrichment.sql','customer_profile_enrichment','customer_family_member_metadata','customer_field_evidence','customer_notes_history','idx_customer_profile_enrichment_lead','idx_customer_family_member_metadata_order','idx_customer_field_evidence_dedupe','idx_customer_field_evidence_pending','idx_customer_notes_history_customer'])if(!after.includes(name))throw new Error('MISSING_PRODUCTION_SCHEMA_EVIDENCE:'+name);
+          if(count(customerBefore,'customer_count')!==count(after,'customer_count'))throw new Error('CUSTOMER_ROW_COUNT_CHANGED');
+          const expectedFamily=familyWasPresent?count(familyBefore,'family_count'):0;
+          if(expectedFamily!==count(after,'family_count'))throw new Error('FAMILY_ROW_COUNT_CHANGED');
+          for(const name of [
+            '20260828_customer360_family_marketing_foundation.sql',
+            '20260903_customer360_profile_auto_enrichment.sql',
+            'customer_profile_enrichment','customer_family_member_metadata','customer_field_evidence','customer_notes_history',
+            'customer_id','wedding_anniversary','birth_order','candidate_id','note_id',
+            'idx_customer_profile_enrichment_lead','idx_customer_family_member_metadata_order','idx_customer_field_evidence_dedupe','idx_customer_field_evidence_pending','idx_customer_notes_history_customer'
+          ])if(!after.includes(name))throw new Error('MISSING_PRODUCTION_SCHEMA_EVIDENCE:'+name);
           console.log('PRODUCTION_SCHEMA_READBACK=PASS');
           console.log('EXISTING_CUSTOMERS_PRESERVED=PASS');
           console.log('EXISTING_FAMILY_MEMBERS_PRESERVED=PASS');
           console.log('PRODUCTION_CUSTOMER_DELETES=0');
+          console.log('PRODUCTION_TEST_CUSTOMER_WRITES=0');
           console.log('DESTRUCTIVE_SCHEMA_CHANGES=0');
           NODE
 
@@ -538,12 +574,21 @@ jobs:
           test -s /tmp/customer-crm-health.json
           node <<'NODE'
           const fs=require('fs');const h=JSON.parse(fs.readFileSync('/tmp/customer-crm-health.json','utf8'));
-          for(const k of ['customer360_profile_enrichment','customer360_line_profile_extraction','customer360_profile_write_guard'])if(h[k]!==true)throw new Error('HEALTH_MARKER:'+k);
+          for(const k of [
+            'customer360_family_marketing_foundation','customer360_profile_enrichment','customer360_line_profile_extraction',
+            'referrer_customer_id_exact_existing_customer_only','customer360_profile_composed_into_detail',
+            'customer360_profile_enrichment_schema_available','customer360_family_metadata_available','customer360_field_evidence_available','customer360_notes_history_available'
+          ])if(h[k]!==true)throw new Error('HEALTH_MARKER:'+k);
           if(h.customer_id_generation!==false)throw new Error('CUSTOMER_ID_GENERATION_NOT_FALSE');
           if(h.customer_line_auto_apply!==false||h.line_profile_auto_apply!==false)throw new Error('AUTO_APPLY_NOT_FALSE');
+          if(h.customer_line_extraction_mode!=='candidate-only')throw new Error('CANDIDATE_ONLY_MODE_MISSING');
+          if(h.customer360_identity_fallback!==false)throw new Error('IDENTITY_FALLBACK_NOT_FALSE');
+          if(h.customer360_paid_ai_provider_active!==false)throw new Error('PAID_AI_PROVIDER_NOT_FALSE');
           if(h.line_event_direction!=='incoming'||h.line_event_receive_status!=='received')throw new Error('LINE_CANONICAL_EVENT_CONTRACT');
           console.log('POST_DEPLOY_HTTP_READ_ONLY=PASS');
+          console.log('CUSTOMER360_PROFILE_SCHEMA=PASS');
           console.log('CUSTOMER360_CANDIDATE_ONLY=PASS');
           console.log('CUSTOMER_ID_GENERATION=0');
           console.log('LINE_SEND=0');
+          console.log('PAID_AI_ACTIVATION=0');
           NODE
