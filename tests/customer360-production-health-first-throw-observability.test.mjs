@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
-function attribution({ releaseJob=true, deployReached=true, deployResult='success', sourceSha='a'.repeat(40), triggerSha='a'.repeat(40), deploymentId='11111111-1111-4111-8111-111111111111', currentId='11111111-1111-4111-8111-111111111111' }={}) {
+function attribution({ sourceMode='deploy', releaseJob=true, deployReached=true, deployResult='success', sourceSha='a'.repeat(40), triggerSha='a'.repeat(40), deploymentId='11111111-1111-4111-8111-111111111111', currentId='11111111-1111-4111-8111-111111111111' }={}) {
+  if (sourceMode !== 'deploy') return 'NOT_A_PRODUCTION_DEPLOY';
   if (!releaseJob) return 'NOT_A_PRODUCTION_DEPLOY';
   if (!deployReached) return 'DEPLOY_NOT_REACHED';
   if (deployResult !== 'success') return 'DEPLOY_FAILED';
@@ -13,6 +14,7 @@ function attribution({ releaseJob=true, deployReached=true, deployResult='succes
 }
 
 assert.equal(attribution(), 'EXACT_MATCH');
+assert.equal(attribution({sourceMode:'preflight',deployReached:false}), 'NOT_A_PRODUCTION_DEPLOY');
 assert.equal(attribution({releaseJob:false}), 'NOT_A_PRODUCTION_DEPLOY');
 assert.equal(attribution({deployReached:false}), 'DEPLOY_NOT_REACHED');
 assert.equal(attribution({deployResult:'failure'}), 'DEPLOY_FAILED');
@@ -25,7 +27,7 @@ function classify({ sourceGuard='PASS', curlExit=0, httpStatus=200, contentType=
   const bodyClass = body.length === 0 ? 'EMPTY' : /html/i.test(contentType) || /^\s*</.test(body) ? 'HTML' : /json/i.test(contentType) ? (jsonParseOk ? 'JSON' : 'TEXT') : 'TEXT';
   if (sourceGuard === 'DRIFT_BEFORE_FETCH') return { firstThrow:'SOURCE_SHA_DRIFT_BEFORE_FETCH', errorClass:'SOURCE_DRIFT', bodyClass };
   if (sourceGuard === 'DRIFT_AFTER_FETCH') return { firstThrow:'SOURCE_SHA_DRIFT_AFTER_FETCH', errorClass:'SOURCE_DRIFT', bodyClass };
-  if (curlExit !== 0) return { firstThrow:`CURL_FAILURE_${curlExit}`, errorClass:'CURL_FAILURE', bodyClass };
+  if (curlExit !== 0) return { firstThrow: `CURL_FAILURE_${curlExit}`, errorClass:'CURL_FAILURE', bodyClass };
   if (redirectCount > 0 || (httpStatus >= 300 && httpStatus < 400)) return { firstThrow:`HTTP_STATUS_${httpStatus}`, errorClass:'HTTP_UNEXPECTED', bodyClass };
   if (httpStatus !== 200) return { firstThrow:`HTTP_STATUS_${httpStatus}`, errorClass:'HTTP_UNEXPECTED', bodyClass };
   if (!body.length) return { firstThrow:'EMPTY_BODY', errorClass:'NON_JSON', bodyClass };
@@ -61,12 +63,13 @@ const deploy=fs.readFileSync('.github/workflows/deploy-cloudflare.yml','utf8');
 for (const token of [
   'actions: read','Verify triggering Production deploy provenance',"j.name==='Exact-SHA Production release gate'",
   "s=>s.name==='Deploy customer-crm-api'",'/actions/jobs/$release_job_id/logs','Current Version ID:',
+  'RELEASE_MODE=\\(preflight\\|deploy\\)','SOURCE_MODE=preflight','SOURCE_MODE=deploy','SOURCE_MODE_PREFLIGHT',
   'AUTHORIZED_SHA=','CHECKOUT_SHA=','wrangler@4.33.1 deployments status --name customer-crm-api --json',
   "Number(v.percentage)===100","active[0].version_id",'OBSERVER_ATTRIBUTION_RESULT=NOT_A_PRODUCTION_DEPLOY',
   'OBSERVER_ATTRIBUTION_RESULT=DEPLOY_NOT_REACHED','OBSERVER_ATTRIBUTION_RESULT=DEPLOY_FAILED',
   'OBSERVER_ATTRIBUTION_RESULT=DEPLOYMENT_ID_MISSING','OBSERVER_ATTRIBUTION_RESULT=SOURCE_SHA_MISMATCH',
   'OBSERVER_ATTRIBUTION_RESULT=DEPLOYMENT_SUPERSEDED','OBSERVER_ATTRIBUTION_RESULT=EXACT_MATCH',
-  "steps.provenance.outputs.allowed == 'true'",'SOURCE_MODE=deploy','DEPLOY_STEP_REACHED=true','DEPLOY_RESULT=success',
+  "steps.provenance.outputs.allowed == 'true'",'DEPLOY_STEP_REACHED=true','DEPLOY_RESULT=success',
   'EXPECTED_WORKER_VERSION_ID','CURRENT_PRODUCTION_VERSION_ID','PRODUCTION_HEALTH_FETCH_STAGE','PRODUCTION_HEALTH_SOURCE_GUARD',
   'PRODUCTION_HEALTH_TRIGGER_SHA','PRODUCTION_HEALTH_CURRENT_MAIN_BEFORE','PRODUCTION_HEALTH_CURRENT_MAIN_AFTER',
   'PRODUCTION_HEALTH_CURL_EXIT','PRODUCTION_HEALTH_HTTP_STATUS','PRODUCTION_HEALTH_CONTENT_TYPE','PRODUCTION_HEALTH_REDIRECT_COUNT',
@@ -82,7 +85,7 @@ assert.ok(observer.includes('TRIGGER_RUN_ID: ${{ github.event.workflow_run.id }}
 assert.ok(observer.includes('/actions/runs/$TRIGGER_RUN_ID/jobs?per_page=100'));
 assert.ok(observer.includes('git ls-remote https://github.com/ohw3rz5578d277e-collab/customer-crm.git refs/heads/main'));
 assert.ok(observer.includes('--max-redirs 0'));
-assert.ok(observer.includes("!h || typeof h!=='object' || Array.isArray(h)"));
+assert.ok(observer.includes("!h||typeof h!=='object'||Array.isArray(h)") || observer.includes("!h || typeof h!=='object' || Array.isArray(h)"));
 assert.ok(observer.includes('CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID'));
 assert.ok(observer.includes('CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET'));
 assert.ok(observer.includes('x-admin-token: $ADMIN_TOKEN'));
@@ -104,6 +107,6 @@ for (const contract of canonicalContracts) {
 }
 
 console.log('CUSTOMER360_PRODUCTION_HEALTH_FIRST_THROW_OBSERVABILITY_TEST=PASS');
-console.log('SCENARIOS=ATTRIBUTION_EXACT,PREFLIGHT,DEPLOY_NOT_REACHED,DEPLOY_FAILED,DEPLOYMENT_ID_MISSING,SOURCE_SHA_MISMATCH,SUPERSEDED,CURL,3XX,HTML,INVALID_JSON,CONTRACT,CANONICAL');
+console.log('SCENARIOS=ATTRIBUTION_EXACT,PREFLIGHT_NOT_PRODUCTION,DEPLOY_NOT_REACHED,DEPLOY_FAILED,DEPLOYMENT_ID_MISSING,SOURCE_SHA_MISMATCH,SUPERSEDED,CURL,3XX,HTML,INVALID_JSON,CONTRACT,CANONICAL');
 console.log('SECRET_VALUE_LOGGED=0');
 console.log('VERIFIER_CONTRACT_WEAKENED=0');
