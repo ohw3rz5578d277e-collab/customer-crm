@@ -2,9 +2,18 @@ name: Production Authenticated Browser Smoke
 
 on:
   workflow_dispatch:
+    inputs:
+      expected_sha:
+        description: Exact current main SHA authorized for read-only Production auth smoke
+        required: true
+        type: string
 
 permissions:
   contents: read
+
+concurrency:
+  group: customer-crm-production-deploy
+  cancel-in-progress: false
 
 jobs:
   smoke:
@@ -17,8 +26,46 @@ jobs:
       CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
       BASE_URL: https://customer-crm-api.ohw3rz5578d277e.workers.dev
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - name: Validate exact authorized SHA
+        id: authorized_sha
+        shell: bash
+        env:
+          RAW_EXPECTED_SHA: ${{ inputs.expected_sha }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$RAW_EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo '::error::INVALID_EXPECTED_SHA_FORMAT'
+            exit 1
+          fi
+          echo "sha=$RAW_EXPECTED_SHA" >> "$GITHUB_OUTPUT"
+          echo "EXPECTED_SHA=$RAW_EXPECTED_SHA" >> "$GITHUB_ENV"
+          echo "AUTHORIZED_SHA=$RAW_EXPECTED_SHA"
+
+      - name: Checkout exact authorized SHA
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ steps.authorized_sha.outputs.sha }}
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Exact SHA and current-main gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          actual_sha="$(git rev-parse HEAD)"
+          remote_main="$(git ls-remote origin refs/heads/main | awk '{print $1}')"
+          echo "CHECKOUT_SHA=$actual_sha"
+          echo "CURRENT_MAIN_SHA=$remote_main"
+          if [[ "$actual_sha" != "$EXPECTED_SHA" ]]; then
+            echo "::error::CHECKOUT_SHA_MISMATCH expected=$EXPECTED_SHA actual=$actual_sha"
+            exit 1
+          fi
+          if [[ "$remote_main" != "$EXPECTED_SHA" ]]; then
+            echo "::error::MAIN_DRIFT expected=$EXPECTED_SHA current=$remote_main"
+            exit 1
+          fi
+          echo 'EXPECTED_SHA_GUARD=PASS'
+          echo 'PRODUCTION_AUTH_SMOKE_WRITE=0'
 
       - name: Verify secret presence
         shell: bash
