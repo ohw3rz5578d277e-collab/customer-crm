@@ -11,6 +11,12 @@ function deployState({sourceMode='deploy', jobs=[]}={}) {
   return {kind:'DEPLOY_SUCCESS'};
 }
 
+function observerConcurrency({event,headBranch='main',runId=123}) {
+  return event==='workflow_dispatch' && headBranch==='main'
+    ? 'customer-crm-production-deploy'
+    : `customer360-observer-nondeploy-${runId}`;
+}
+
 const release=(conclusion)=>[{name:'Exact-SHA Production release gate',steps:[{name:'Deploy customer-crm-api',conclusion}]}];
 assert.equal(deployState({sourceMode:'preflight',jobs:release('skipped')}).kind,'NOT_A_PRODUCTION_DEPLOY');
 assert.equal(deployState({sourceMode:'deploy',jobs:[]}).kind,'NOT_A_PRODUCTION_DEPLOY');
@@ -18,13 +24,20 @@ assert.equal(deployState({sourceMode:'deploy',jobs:[{name:'Exact-SHA Production 
 assert.equal(deployState({sourceMode:'deploy',jobs:release('skipped')}).kind,'DEPLOY_NOT_REACHED');
 assert.equal(deployState({sourceMode:'deploy',jobs:release('failure')}).kind,'DEPLOY_FAILED');
 assert.equal(deployState({sourceMode:'deploy',jobs:release('success')}).kind,'DEPLOY_SUCCESS');
+assert.equal(observerConcurrency({event:'workflow_dispatch'}),'customer-crm-production-deploy');
+assert.equal(observerConcurrency({event:'pull_request',runId:456}),'customer360-observer-nondeploy-456');
+assert.notEqual(observerConcurrency({event:'pull_request',runId:456}),'customer-crm-production-deploy');
 
 const observer=fs.readFileSync('.github/workflows/customer360-production-first-throw-observability.yml','utf8');
 const deploy=fs.readFileSync('.github/workflows/deploy-cloudflare.yml','utf8');
 const bridge=fs.readFileSync('.github/workflows/dispatch-production-deploy-from-issue.yml','utf8');
 
 assert.match(deploy,/concurrency:\s*\n\s*group: customer-crm-production-deploy/);
-assert.match(observer,/concurrency:\s*\n\s*group: customer-crm-production-deploy/);
+assert.ok(observer.includes("github.event.workflow_run.event == 'workflow_dispatch'"));
+assert.ok(observer.includes("github.event.workflow_run.head_branch == 'main'"));
+assert.ok(observer.includes("'customer-crm-production-deploy'"));
+assert.ok(observer.includes("format('customer360-observer-nondeploy-{0}', github.event.workflow_run.id)"));
+assert.ok(observer.includes('cancel-in-progress: false'));
 assert.match(bridge,/group: customer-crm-production-dispatch-bridge/);
 assert.ok(!bridge.includes('group: customer-crm-production-deploy'));
 
@@ -63,4 +76,5 @@ assert.ok(!observer.includes('curl -X DELETE'));
 
 console.log('CUSTOMER360_PRODUCTION_OBSERVER_PROVENANCE_REGRESSION=PASS');
 console.log('PR47_EXACT_SHA_BRIDGE_INTEGRATION=PASS');
-console.log('SCENARIOS=PREFLIGHT_NOT_PRODUCTION,DEPLOY_NOT_REACHED,DEPLOY_FAILED,DEPLOY_SUCCESS,SOURCE_SHA_BINDING,SHARED_DEPLOY_LOCK,SUPERSEDED_FAIL_CLOSED');
+console.log('PR_OBSERVER_PRODUCTION_CONCURRENCY_ISOLATION=PASS');
+console.log('SCENARIOS=PREFLIGHT_NOT_PRODUCTION,DEPLOY_NOT_REACHED,DEPLOY_FAILED,DEPLOY_SUCCESS,SOURCE_SHA_BINDING,PRODUCTION_SHARED_LOCK,PR_RUN_UNIQUE_LOCK,SUPERSEDED_FAIL_CLOSED');
