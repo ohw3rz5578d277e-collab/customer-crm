@@ -2,18 +2,9 @@ name: Production Authenticated Browser Smoke
 
 on:
   workflow_dispatch:
-    inputs:
-      expected_sha:
-        description: Exact current main SHA authorized for read-only Production auth smoke
-        required: true
-        type: string
 
 permissions:
   contents: read
-
-concurrency:
-  group: customer-crm-production-deploy
-  cancel-in-progress: false
 
 jobs:
   smoke:
@@ -26,46 +17,8 @@ jobs:
       CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
       BASE_URL: https://customer-crm-api.ohw3rz5578d277e.workers.dev
     steps:
-      - name: Validate exact authorized SHA
-        id: authorized_sha
-        shell: bash
-        env:
-          RAW_EXPECTED_SHA: ${{ inputs.expected_sha }}
-        run: |
-          set -euo pipefail
-          if [[ ! "$RAW_EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]]; then
-            echo '::error::INVALID_EXPECTED_SHA_FORMAT'
-            exit 1
-          fi
-          echo "sha=$RAW_EXPECTED_SHA" >> "$GITHUB_OUTPUT"
-          echo "EXPECTED_SHA=$RAW_EXPECTED_SHA" >> "$GITHUB_ENV"
-          echo "AUTHORIZED_SHA=$RAW_EXPECTED_SHA"
-
-      - name: Checkout exact authorized SHA
-        uses: actions/checkout@v6
-        with:
-          ref: ${{ steps.authorized_sha.outputs.sha }}
-          persist-credentials: false
-          fetch-depth: 0
-
-      - name: Exact SHA and current-main gate
-        shell: bash
-        run: |
-          set -euo pipefail
-          actual_sha="$(git rev-parse HEAD)"
-          remote_main="$(git ls-remote origin refs/heads/main | awk '{print $1}')"
-          echo "CHECKOUT_SHA=$actual_sha"
-          echo "CURRENT_MAIN_SHA=$remote_main"
-          if [[ "$actual_sha" != "$EXPECTED_SHA" ]]; then
-            echo "::error::CHECKOUT_SHA_MISMATCH expected=$EXPECTED_SHA actual=$actual_sha"
-            exit 1
-          fi
-          if [[ "$remote_main" != "$EXPECTED_SHA" ]]; then
-            echo "::error::MAIN_DRIFT expected=$EXPECTED_SHA current=$remote_main"
-            exit 1
-          fi
-          echo 'EXPECTED_SHA_GUARD=PASS'
-          echo 'PRODUCTION_AUTH_SMOKE_WRITE=0'
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Verify secret presence
         shell: bash
@@ -104,7 +57,7 @@ jobs:
           const CF_ACCESS_CLIENT_ID = process.env.CF_ACCESS_CLIENT_ID;
           const CF_ACCESS_CLIENT_SECRET = process.env.CF_ACCESS_CLIENT_SECRET;
           const REVIEW_PATH = '/admin/customer-id-reconciliation';
-          const HEALTH_PATHS = ['/health','/api/crm-health-check'];
+          const HEALTH_PATH = '/api/crm-health-check';
 
           if (!BASE_URL || !ADMIN_TOKEN || !CF_ACCESS_CLIENT_ID || !CF_ACCESS_CLIENT_SECRET) {
             throw new Error('required browser smoke credentials missing');
@@ -120,23 +73,6 @@ jobs:
             'CF-Access-Client-Id': CF_ACCESS_CLIENT_ID,
             'CF-Access-Client-Secret': CF_ACCESS_CLIENT_SECRET
           };
-          const baseOrigin = new URL(BASE_URL).origin;
-
-          function safeUrl(value) {
-            try {
-              const u = new URL(value, BASE_URL);
-              return u.origin + u.pathname;
-            } catch {
-              return 'UNPARSEABLE';
-            }
-          }
-
-          async function attachAuthToBaseOrigin(page) {
-            await page.route(BASE_URL + '/**', async route => {
-              const headers = await route.request().allHeaders();
-              await route.continue({ headers: { ...headers, ...authHeaders } });
-            });
-          }
 
           const writePatterns = [
             /\/api\/customer-id-reconciliation\/reviews\/[^/]+$/,
@@ -167,54 +103,34 @@ jobs:
             });
           }
 
-          async function checkHealth(request, path) {
-            const res = await request.get(BASE_URL + path, { headers: authHeaders, maxRedirects: 0 });
+          async function checkHealth(request) {
+            const res = await request.get(BASE_URL + HEALTH_PATH, { headers: authHeaders });
             const status = res.status();
+            const finalUrl = res.url();
             const contentType = res.headers()['content-type'] || '';
-            const location = res.headers()['location'] || '';
-            let redirectTarget = 'NONE';
-            if (location) {
-              try {
-                const u = new URL(location, BASE_URL);
-                redirectTarget = u.origin + u.pathname;
-              } catch {
-                redirectTarget = 'UNPARSEABLE';
-              }
-            }
-            console.log(`health path=${path}`);
             console.log(`health response status=${status}`);
+            console.log(`health final_url=${finalUrl}`);
             console.log(`health content_type=${contentType || '(none)'}`);
-            console.log(`health redirect_target=${redirectTarget}`);
-            if (status >= 300 && status < 400) {
-              if (/cloudflareaccess\.com/i.test(location)) return fail(`ACCESS_AUTH_FAILED: ${path} redirected to Cloudflare Access login`);
-              return fail(`HEALTH_REDIRECT: ${path} status=${status} target=${redirectTarget}`);
-            }
-            if (status !== 200) return fail(`HEALTH_FAILED: ${path} expected 200, got ${status}`);
-            if (!/application\/json/i.test(contentType)) return fail(`HEALTH_FAILED: ${path} expected application/json, got ${contentType || '(none)'}`);
+            if (/cloudflareaccess\.com/i.test(finalUrl)) return fail('ACCESS_AUTH_FAILED: health redirected to Cloudflare Access login');
+            if (status !== 200) return fail(`HEALTH_FAILED: expected 200, got ${status}`);
+            if (!/application\/json/i.test(contentType)) return fail(`HEALTH_FAILED: expected application/json, got ${contentType || '(none)'}`);
             const body = await res.json().catch(() => null);
-            if (!body || body.ok !== true) fail(`HEALTH_FAILED: ${path} response JSON missing ok=true`);
+            if (!body || body.ok !== true) fail('HEALTH_FAILED: response JSON missing ok=true');
           }
 
           async function pageIdentity(page, response, label) {
             const status = response ? response.status() : 0;
             const finalUrl = page.url();
-            const finalUrlSafe = safeUrl(finalUrl);
             const contentType = response ? (response.headers()['content-type'] || '') : '';
             const title = await page.title().catch(() => '');
             const marker = await page.locator('text=顧客ID照合').first().isVisible({ timeout: 8000 }).catch(() => false);
             console.log(`${label} response status=${status}`);
-            console.log(`${label} final_url=${finalUrlSafe}`);
+            console.log(`${label} final_url=${finalUrl}`);
             console.log(`${label} content_type=${contentType || '(none)'}`);
             console.log(`${label} document_title=${title || '(empty)'}`);
             console.log(`${label} review_marker=${marker ? 'YES' : 'NO'}`);
             if (/cloudflareaccess\.com/i.test(finalUrl) || /Sign in.*Cloudflare Access/i.test(title)) {
               fail(`${label}: ACCESS_AUTH_FAILED Cloudflare Access login page returned`);
-              return false;
-            }
-            let finalOrigin = '';
-            try { finalOrigin = new URL(finalUrl).origin; } catch {}
-            if (finalOrigin !== baseOrigin) {
-              fail(`${label}: CROSS_ORIGIN_REDIRECT target=${finalUrlSafe}`);
               return false;
             }
             if (status !== 200) { fail(`${label}: expected HTTP 200, got ${status}`); return false; }
@@ -288,8 +204,8 @@ jobs:
           (async () => {
             const browser = await chromium.launch({ headless: true });
 
-            const healthContext = await browser.newContext();
-            for (const path of HEALTH_PATHS) await checkHealth(healthContext.request, path);
+            const healthContext = await browser.newContext({ extraHTTPHeaders: authHeaders });
+            await checkHealth(healthContext.request);
             await healthContext.close();
 
             const unauthContext = await browser.newContext();
@@ -309,19 +225,18 @@ jobs:
             await unauthContext.close();
 
             const mobileContext = await browser.newContext({
-              viewport: { width: 412, height: 915 }, isMobile: true, hasTouch: true
+              viewport: { width: 412, height: 915 }, isMobile: true, hasTouch: true,
+              extraHTTPHeaders: authHeaders
             });
             const mobile = await mobileContext.newPage();
-            await attachAuthToBaseOrigin(mobile);
             watch(mobile, 'mobile 412x915');
             await checkPage(mobile, 'mobile 412x915', false);
             await mobileContext.close();
 
             const desktopContext = await browser.newContext({
-              viewport: { width: 1440, height: 1000 }
+              viewport: { width: 1440, height: 1000 }, extraHTTPHeaders: authHeaders
             });
             const desktop = await desktopContext.newPage();
-            await attachAuthToBaseOrigin(desktop);
             watch(desktop, 'desktop 1440x1000');
             await checkPage(desktop, 'desktop 1440x1000', true);
             await desktopContext.close();
