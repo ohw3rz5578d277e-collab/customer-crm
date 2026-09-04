@@ -246,7 +246,6 @@ jobs:
           error_class=NONE
           fetch_stage=COMPLETE
           if [[ "$source_guard" == DRIFT_BEFORE_FETCH ]]; then first_throw=SOURCE_SHA_DRIFT_BEFORE_FETCH; error_class=SOURCE_DRIFT; fetch_stage=SOURCE_GUARD
-          elif [[ "$source_guard" == DRIFT_AFTER_FETCH ]]; then first_throw=SOURCE_SHA_DRIFT_AFTER_FETCH; error_class=SOURCE_DRIFT; fetch_stage=SOURCE_GUARD
           elif [[ "$curl_exit" != 0 ]]; then first_throw="CURL_FAILURE_${curl_exit}"; error_class=CURL_FAILURE; fetch_stage=CURL
           elif [[ "$http_status" =~ ^3 ]] || [[ "$redirect_count" != 0 ]]; then first_throw="HTTP_STATUS_${http_status:-UNKNOWN}"; error_class=HTTP_UNEXPECTED; fetch_stage=HTTP
           elif [[ ! "$http_status" =~ ^2 ]]; then first_throw="HTTP_STATUS_${http_status:-UNKNOWN}"; error_class=HTTP_UNEXPECTED; fetch_stage=HTTP
@@ -276,14 +275,18 @@ jobs:
           fi
 
           attribution_failure=NONE
-          if [[ "$post_identity_result" == UNAVAILABLE ]]; then
+          attribution_error_class=ATTRIBUTION_FAILURE
+          if [[ "$source_guard" == DRIFT_AFTER_FETCH ]]; then
+            attribution_failure=SOURCE_SHA_DRIFT_AFTER_FETCH
+            attribution_error_class=SOURCE_DRIFT
+          elif [[ "$post_identity_result" == UNAVAILABLE ]]; then
             attribution_failure=CURRENT_PRODUCTION_VERSION_ID_UNAVAILABLE_AFTER_HEALTH
           elif [[ "$post_identity_result" == SUPERSEDED ]]; then
             attribution_failure=DEPLOYMENT_SUPERSEDED_DURING_OBSERVATION
           fi
           if [[ "$first_throw" == NONE && "$attribution_failure" != NONE ]]; then
             first_throw="$attribution_failure"
-            error_class=ATTRIBUTION_FAILURE
+            error_class="$attribution_error_class"
             fetch_stage=ATTRIBUTION
           fi
 
@@ -322,7 +325,9 @@ jobs:
           echo "PRODUCTION_HEALTH_ERROR_CLASS=$error_class"
           echo "PRODUCTION_HEALTH_FIRST_THROW=$first_throw"
           echo "PRODUCTION_HEALTH_POST_ATTRIBUTION_FAILURE=$attribution_failure"
-          if [[ "$post_identity_result" == SUPERSEDED ]]; then
+          if [[ "$source_guard" == DRIFT_AFTER_FETCH ]]; then
+            echo 'OBSERVER_ATTRIBUTION_RESULT=SOURCE_SHA_DRIFT_AFTER_FETCH'
+          elif [[ "$post_identity_result" == SUPERSEDED ]]; then
             echo 'OBSERVER_ATTRIBUTION_RESULT=DEPLOYMENT_SUPERSEDED'
           elif [[ "$post_identity_result" == UNAVAILABLE ]]; then
             echo 'OBSERVER_ATTRIBUTION_RESULT=CURRENT_DEPLOYMENT_ID_MISSING'
