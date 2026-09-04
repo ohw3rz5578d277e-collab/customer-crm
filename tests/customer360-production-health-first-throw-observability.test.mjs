@@ -39,6 +39,13 @@ for (const [input, firstThrow, errorClass] of cases) {
 const observer=fs.readFileSync('.github/workflows/customer360-production-first-throw-observability.yml','utf8');
 const deploy=fs.readFileSync('.github/workflows/deploy-cloudflare.yml','utf8');
 for (const token of [
+  'actions: read',
+  'Verify triggering run reached Worker deploy',
+  "j.name==='Exact-SHA Production release gate'",
+  "s.name==='Deploy customer-crm-api' && s.conclusion==='success'",
+  "steps.trigger_deploy.outputs.eligible == 'true'",
+  'TRIGGER_RUN_WORKER_DEPLOY=CONFIRMED',
+  'OBSERVATION_SKIPPED=TRIGGER_RUN_DID_NOT_DEPLOY',
   'PRODUCTION_HEALTH_FETCH_STAGE',
   'PRODUCTION_HEALTH_SOURCE_GUARD',
   'PRODUCTION_HEALTH_TRIGGER_SHA',
@@ -66,6 +73,8 @@ for (const token of [
 assert.ok(observer.includes("github.event.workflow_run.event == 'workflow_dispatch'"));
 assert.ok(observer.includes("github.event.workflow_run.head_branch == 'main'"));
 assert.ok(observer.includes('TRIGGER_SHA: ${{ github.event.workflow_run.head_sha }}'));
+assert.ok(observer.includes('TRIGGER_RUN_ID: ${{ github.event.workflow_run.id }}'));
+assert.ok(observer.includes('/actions/runs/$TRIGGER_RUN_ID/jobs?per_page=100'));
 assert.ok(observer.includes('git ls-remote https://github.com/ohw3rz5578d277e-collab/customer-crm.git refs/heads/main'));
 assert.ok(observer.includes('--max-redirs 0'));
 assert.ok(observer.includes("!h || typeof h!=='object' || Array.isArray(h)"));
@@ -90,6 +99,6 @@ for (const contract of canonicalContracts) {
 }
 
 console.log('CUSTOMER360_PRODUCTION_HEALTH_FIRST_THROW_OBSERVABILITY_TEST=PASS');
-console.log('SCENARIOS=SOURCE_DRIFT_BEFORE,SOURCE_DRIFT_AFTER,A,B,C401,C403,D,E,F,NULL,G,H');
+console.log('SCENARIOS=DEPLOY_REACHED_GUARD,SOURCE_DRIFT_BEFORE,SOURCE_DRIFT_AFTER,A,B,C401,C403,D,E,F,NULL,G,H');
 console.log('SECRET_VALUE_LOGGED=0');
 console.log('VERIFIER_CONTRACT_WEAKENED=0');
