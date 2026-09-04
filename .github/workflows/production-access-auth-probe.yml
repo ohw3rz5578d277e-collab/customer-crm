@@ -1,0 +1,162 @@
+name: Production Access Auth Read-Only Probe
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_sha:
+        description: Exact current main SHA authorized for Production Access auth probe
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: customer-crm-production-deploy
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    name: Exact-SHA Production Access auth probe
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      BASE_URL: https://customer-crm-api.ohw3rz5578d277e.workers.dev
+      CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+      CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+      ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}
+
+    steps:
+      - name: Validate exact authorized SHA
+        id: authorized_sha
+        shell: bash
+        env:
+          RAW_EXPECTED_SHA: ${{ inputs.expected_sha }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$RAW_EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo '::error::INVALID_EXPECTED_SHA_FORMAT'
+            exit 1
+          fi
+          echo "sha=$RAW_EXPECTED_SHA" >> "$GITHUB_OUTPUT"
+          echo "EXPECTED_SHA=$RAW_EXPECTED_SHA" >> "$GITHUB_ENV"
+          echo "AUTHORIZED_SHA=$RAW_EXPECTED_SHA"
+
+      - name: Checkout exact authorized SHA
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ steps.authorized_sha.outputs.sha }}
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Exact SHA and current-main gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          actual_sha="$(git rev-parse HEAD)"
+          remote_main="$(git ls-remote origin refs/heads/main | awk '{print $1}')"
+          echo "CHECKOUT_SHA=$actual_sha"
+          echo "CURRENT_MAIN_SHA=$remote_main"
+          if [[ "$actual_sha" != "$EXPECTED_SHA" ]]; then
+            echo "::error::CHECKOUT_SHA_MISMATCH expected=$EXPECTED_SHA actual=$actual_sha"
+            exit 1
+          fi
+          if [[ "$remote_main" != "$EXPECTED_SHA" ]]; then
+            echo "::error::MAIN_DRIFT expected=$EXPECTED_SHA current=$remote_main"
+            exit 1
+          fi
+          echo 'EXPECTED_SHA_GUARD=PASS'
+
+      - name: Verify auth inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          for v in CF_ACCESS_CLIENT_ID CF_ACCESS_CLIENT_SECRET ADMIN_TOKEN; do
+            if [[ -z "${!v}" ]]; then
+              echo "::error::PRODUCTION_AUTH_INPUT_MISSING:$v"
+              exit 1
+            fi
+            echo "::add-mask::${!v}"
+          done
+          echo 'PRODUCTION_AUTH_INPUTS=PASS'
+
+      - name: Probe Production Access without writes
+        shell: bash
+        run: |
+          set -euo pipefail
+          probe_path='/__crm/access-auth-probe'
+          unauth_body=/tmp/access-probe-unauth.json
+          unauth_headers=/tmp/access-probe-unauth.headers
+          auth_body=/tmp/access-probe-auth.json
+          auth_headers=/tmp/access-probe-auth.headers
+
+          sanitize_location() {
+            node -e '
+              const raw=process.argv[1]||"";
+              if(!raw){console.log("NONE");process.exit(0)}
+              try{const u=new URL(raw,process.env.BASE_URL);console.log(u.origin+u.pathname)}
+              catch{console.log("UNPARSEABLE")}
+            ' "$1"
+          }
+
+          unauth_status="$(curl --silent --show-error --max-time 15             --output "$unauth_body"             --dump-header "$unauth_headers"             --write-out '%{http_code}'             -H 'Accept: application/json'             "$BASE_URL$probe_path")" || {
+              rc=$?
+              echo "::error::UNAUTH_ACCESS_PROBE_CURL_FAILURE:$rc"
+              exit 1
+            }
+          unauth_location="$(awk 'BEGIN{IGNORECASE=1} /^location:/{sub(/^[^:]*:[[:space:]]*/,""); sub(/\r$/,""); print}' "$unauth_headers" | tail -1)"
+          echo "UNAUTH_ACCESS_PROBE_HTTP_STATUS=$unauth_status"
+          echo "UNAUTH_ACCESS_PROBE_REDIRECT_TARGET=$(sanitize_location "$unauth_location")"
+
+          auth_status="$(curl --silent --show-error --max-time 15             --output "$auth_body"             --dump-header "$auth_headers"             --write-out '%{http_code}'             -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID"             -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET"             -H "x-admin-token: $ADMIN_TOKEN"             -H 'Accept: application/json'             "$BASE_URL$probe_path")" || {
+              rc=$?
+              echo "::error::AUTH_ACCESS_PROBE_CURL_FAILURE:$rc"
+              exit 1
+            }
+
+          content_type="$(awk 'BEGIN{IGNORECASE=1} /^content-type:/{sub(/^[^:]*:[[:space:]]*/,""); sub(/\r$/,""); print}' "$auth_headers" | tail -1)"
+          auth_location="$(awk 'BEGIN{IGNORECASE=1} /^location:/{sub(/^[^:]*:[[:space:]]*/,""); sub(/\r$/,""); print}' "$auth_headers" | tail -1)"
+          response_size="$(wc -c < "$auth_body" | tr -d '[:space:]')"
+          echo "AUTH_ACCESS_PROBE_HTTP_STATUS=$auth_status"
+          echo "AUTH_ACCESS_PROBE_CONTENT_TYPE=${content_type:-MISSING}"
+          echo "AUTH_ACCESS_PROBE_RESPONSE_SIZE=$response_size"
+          echo "AUTH_ACCESS_PROBE_REDIRECT_TARGET=$(sanitize_location "$auth_location")"
+
+          case "$auth_status" in
+            2??) ;;
+            3??)
+              echo "::error::ACCESS_SERVICE_TOKEN_REDIRECT:$auth_status"
+              exit 1
+              ;;
+            *)
+              echo "::error::ACCESS_AUTH_PROBE_HTTP_STATUS:$auth_status"
+              exit 1
+              ;;
+          esac
+
+          if [[ ! "$content_type" =~ application/json ]]; then
+            echo "::error::ACCESS_AUTH_PROBE_CONTENT_TYPE:${content_type:-MISSING}"
+            exit 1
+          fi
+
+          node <<'NODE'
+          const fs=require('fs');
+          let data;
+          try{data=JSON.parse(fs.readFileSync('/tmp/access-probe-auth.json','utf8'))}
+          catch{console.error('::error::ACCESS_AUTH_PROBE_INVALID_JSON');process.exit(1)}
+          if(data?.ok!==true)throw new Error('ACCESS_AUTH_PROBE_OK_NOT_TRUE');
+          if(data?.service!=='customer-crm-api')throw new Error('ACCESS_AUTH_PROBE_SERVICE_MISMATCH');
+          if(data?.access_auth_probe!==true)throw new Error('ACCESS_AUTH_PROBE_MARKER_MISSING');
+          if(data?.production_write!==false)throw new Error('ACCESS_AUTH_PROBE_WRITE_FLAG_INVALID');
+          if(data?.customer_id_generation!==false)throw new Error('ACCESS_AUTH_PROBE_CUSTOMER_ID_FLAG_INVALID');
+          if(data?.line_send!==false)throw new Error('ACCESS_AUTH_PROBE_LINE_FLAG_INVALID');
+          console.log('ACCESS_AUTH_PROBE_JSON=PASS');
+          NODE
+
+          echo 'PRODUCTION_ACCESS_AUTH_PROBE=PASS'
+          echo 'PRODUCTION_D1_READ=0'
+          echo 'PRODUCTION_D1_WRITE=0'
+          echo 'PRODUCTION_CUSTOMER_WRITE=0'
+          echo 'CUSTOMER_ID_GENERATION=0'
+          echo 'LINE_SEND=0'
+          echo 'WORKER_DEPLOY=0'
