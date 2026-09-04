@@ -9,10 +9,10 @@ permissions:
   contents: read
   actions: read
 
-# Share the exact Production deploy lock. If deploy B is already ahead of observer A,
-# A's immutable version check fails; if A holds the lock, B cannot supersede it mid-probe.
+# Real canonical Production observers share the deploy lock. Non-deploy workflow_run shells
+# use a run-unique group so skipped PR observers cannot consume the PR release-CI pending slot.
 concurrency:
-  group: customer-crm-production-deploy
+  group: ${{ github.event.workflow_run.event == 'workflow_dispatch' && github.event.workflow_run.head_branch == 'main' && 'customer-crm-production-deploy' || format('customer360-observer-nondeploy-{0}', github.event.workflow_run.id) }}
   cancel-in-progress: false
 
 jobs:
