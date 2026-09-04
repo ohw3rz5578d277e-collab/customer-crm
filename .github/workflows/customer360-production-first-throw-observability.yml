@@ -20,17 +20,27 @@ jobs:
     name: Observe Production health FIRST_THROW (READ ONLY)
     if: ${{ github.event.workflow_run.event == 'workflow_dispatch' && github.event.workflow_run.head_branch == 'main' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 7
     steps:
-      - name: Verify triggering run reached Worker deploy
-        id: trigger_deploy
+      - name: Verify triggering Production deploy provenance
+        id: provenance
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           TRIGGER_RUN_ID: ${{ github.event.workflow_run.id }}
+          TRIGGER_SHA: ${{ github.event.workflow_run.head_sha }}
           REPOSITORY: ${{ github.repository }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           set -euo pipefail
+          for v in GH_TOKEN TRIGGER_RUN_ID TRIGGER_SHA REPOSITORY CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID; do
+            if [[ -z "${!v}" ]]; then
+              echo "::error::PROVENANCE_INPUT_MISSING:$v"
+              exit 1
+            fi
+          done
+
           jobs=/tmp/trigger-run-jobs.json
           curl --fail --silent --show-error \
             -H "Authorization: Bearer $GH_TOKEN" \
@@ -38,25 +48,104 @@ jobs:
             -H 'X-GitHub-Api-Version: 2022-11-28' \
             "https://api.github.com/repos/$REPOSITORY/actions/runs/$TRIGGER_RUN_ID/jobs?per_page=100" \
             -o "$jobs"
-          eligible="$(node - "$jobs" <<'NODE'
+
+          readarray -t provenance_fields < <(node - "$jobs" <<'NODE'
           const fs=require('fs');
           const payload=JSON.parse(fs.readFileSync(process.argv[2],'utf8'));
           const jobs=Array.isArray(payload.jobs)?payload.jobs:[];
           const release=jobs.find(j=>j.name==='Exact-SHA Production release gate');
-          const deployed=release && Array.isArray(release.steps) && release.steps.some(s=>s.name==='Deploy customer-crm-api' && s.conclusion==='success');
-          process.stdout.write(deployed?'true':'false');
+          if(!release){ console.log('MISSING_RELEASE_JOB'); process.exit(0); }
+          const steps=Array.isArray(release.steps)?release.steps:[];
+          const deploy=steps.find(s=>s.name==='Deploy customer-crm-api');
+          console.log(String(release.id||''));
+          console.log(deploy ? String(deploy.conclusion||'') : 'NOT_REACHED');
           NODE
-          )"
-          echo "eligible=$eligible" >> "$GITHUB_OUTPUT"
-          if [[ "$eligible" == "true" ]]; then
-            echo 'TRIGGER_RUN_WORKER_DEPLOY=CONFIRMED'
-          else
-            echo 'TRIGGER_RUN_WORKER_DEPLOY=NOT_REACHED'
-            echo 'OBSERVATION_SKIPPED=TRIGGER_RUN_DID_NOT_DEPLOY' >> "$GITHUB_STEP_SUMMARY"
+          )
+          if [[ "${provenance_fields[0]:-}" == 'MISSING_RELEASE_JOB' || -z "${provenance_fields[0]:-}" ]]; then
+            echo 'OBSERVER_ATTRIBUTION_RESULT=NOT_A_PRODUCTION_DEPLOY'
+            echo '::error::SOURCE_RELEASE_JOB_MISSING'
+            exit 1
+          fi
+          release_job_id="${provenance_fields[0]}"
+          deploy_result="${provenance_fields[1]:-NOT_REACHED}"
+          if [[ "$deploy_result" == 'NOT_REACHED' ]]; then
+            echo 'OBSERVER_ATTRIBUTION_RESULT=DEPLOY_NOT_REACHED'
+            echo '::error::SOURCE_DEPLOY_NOT_REACHED'
+            exit 1
+          fi
+          if [[ "$deploy_result" != 'success' ]]; then
+            echo 'OBSERVER_ATTRIBUTION_RESULT=DEPLOY_FAILED'
+            echo "::error::SOURCE_DEPLOY_RESULT:$deploy_result"
+            exit 1
           fi
 
+          source_log=/tmp/source-release-job.log
+          curl --fail --silent --show-error --location \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/$REPOSITORY/actions/jobs/$release_job_id/logs" \
+            -o "$source_log"
+
+          authorized_sha="$(sed -n 's/.*AUTHORIZED_SHA=\([0-9a-f]\{40\}\).*/\1/p' "$source_log" | tail -1)"
+          checkout_sha="$(sed -n 's/.*CHECKOUT_SHA=\([0-9a-f]\{40\}\).*/\1/p' "$source_log" | tail -1)"
+          expected_version_id="$(sed -n 's/.*Current Version ID: \([0-9a-fA-F-]\{36\}\).*/\1/p' "$source_log" | tr '[:upper:]' '[:lower:]' | tail -1)"
+          if [[ -z "$authorized_sha" || -z "$checkout_sha" || "$authorized_sha" != "$TRIGGER_SHA" || "$checkout_sha" != "$TRIGGER_SHA" ]]; then
+            echo 'OBSERVER_ATTRIBUTION_RESULT=SOURCE_SHA_MISMATCH'
+            echo '::error::SOURCE_SHA_BINDING_MISMATCH'
+            exit 1
+          fi
+          if [[ ! "$expected_version_id" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]]; then
+            echo 'OBSERVER_ATTRIBUTION_RESULT=DEPLOYMENT_ID_MISSING'
+            echo '::error::SOURCE_WORKER_VERSION_ID_MISSING'
+            exit 1
+          fi
+
+          current_json=/tmp/current-production-deployment.json
+          npx --yes wrangler@4.33.1 deployments status --name customer-crm-api --json > "$current_json"
+          current_version_id="$(node - "$current_json" <<'NODE'
+          const fs=require('fs');
+          const value=JSON.parse(fs.readFileSync(process.argv[2],'utf8'));
+          const deployments=Array.isArray(value)?value:[value];
+          const current=deployments[0];
+          const versions=current && Array.isArray(current.versions)?current.versions:[];
+          const active=versions.filter(v=>Number(v.percentage)===100);
+          if(active.length!==1 || typeof active[0].version_id!=='string') process.exit(2);
+          process.stdout.write(active[0].version_id.toLowerCase());
+          NODE
+          )" || {
+            echo 'OBSERVER_ATTRIBUTION_RESULT=CURRENT_DEPLOYMENT_ID_MISSING'
+            echo '::error::CURRENT_PRODUCTION_VERSION_ID_UNAVAILABLE'
+            exit 1
+          }
+          if [[ ! "$current_version_id" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]]; then
+            echo 'OBSERVER_ATTRIBUTION_RESULT=CURRENT_DEPLOYMENT_ID_MISSING'
+            echo '::error::CURRENT_PRODUCTION_VERSION_ID_INVALID'
+            exit 1
+          fi
+          if [[ "$expected_version_id" != "$current_version_id" ]]; then
+            echo 'OBSERVER_ATTRIBUTION_RESULT=DEPLOYMENT_SUPERSEDED'
+            echo "SOURCE_RUN_ID=$TRIGGER_RUN_ID"
+            echo "SOURCE_SHA=$TRIGGER_SHA"
+            echo "EXPECTED_WORKER_VERSION_ID=$expected_version_id"
+            echo "CURRENT_PRODUCTION_VERSION_ID=$current_version_id"
+            echo '::error::PRODUCTION_DEPLOYMENT_IDENTITY_MISMATCH'
+            exit 1
+          fi
+
+          echo 'allowed=true' >> "$GITHUB_OUTPUT"
+          echo "expected_version_id=$expected_version_id" >> "$GITHUB_OUTPUT"
+          echo 'SOURCE_MODE=deploy'
+          echo "SOURCE_RUN_ID=$TRIGGER_RUN_ID"
+          echo "SOURCE_SHA=$TRIGGER_SHA"
+          echo 'DEPLOY_STEP_REACHED=true'
+          echo 'DEPLOY_RESULT=success'
+          echo "EXPECTED_WORKER_VERSION_ID=$expected_version_id"
+          echo "CURRENT_PRODUCTION_VERSION_ID=$current_version_id"
+          echo 'OBSERVER_ATTRIBUTION_RESULT=EXACT_MATCH'
+
       - name: Verify Production auth inputs
-        if: ${{ steps.trigger_deploy.outputs.eligible == 'true' }}
+        if: ${{ steps.provenance.outputs.allowed == 'true' }}
         shell: bash
         env:
           CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
@@ -73,11 +162,12 @@ jobs:
           echo 'PRODUCTION_AUTH_INPUTS=PASS'
 
       - name: Capture Production health FIRST_THROW READ ONLY
-        if: ${{ steps.trigger_deploy.outputs.eligible == 'true' }}
+        if: ${{ steps.provenance.outputs.allowed == 'true' }}
         shell: bash
         env:
           PRODUCTION_BASE_URL: https://customer-crm-api.ohw3rz5578d277e.workers.dev
           TRIGGER_SHA: ${{ github.event.workflow_run.head_sha }}
+          EXPECTED_WORKER_VERSION_ID: ${{ steps.provenance.outputs.expected_version_id }}
           CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
           CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
           ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}
@@ -206,6 +296,7 @@ jobs:
             echo "- PRODUCTION_HEALTH_FETCH_STAGE=$fetch_stage"
             echo "- PRODUCTION_HEALTH_SOURCE_GUARD=$source_guard"
             echo "- PRODUCTION_HEALTH_TRIGGER_SHA=$TRIGGER_SHA"
+            echo "- PRODUCTION_HEALTH_EXPECTED_WORKER_VERSION_ID=$EXPECTED_WORKER_VERSION_ID"
             echo "- PRODUCTION_HEALTH_CURRENT_MAIN_BEFORE=$current_main_before"
             echo "- PRODUCTION_HEALTH_CURRENT_MAIN_AFTER=$current_main_after"
             echo "- PRODUCTION_HEALTH_CURL_EXIT=$curl_exit"
@@ -222,6 +313,7 @@ jobs:
           echo "PRODUCTION_HEALTH_FETCH_STAGE=$fetch_stage"
           echo "PRODUCTION_HEALTH_SOURCE_GUARD=$source_guard"
           echo "PRODUCTION_HEALTH_TRIGGER_SHA=$TRIGGER_SHA"
+          echo "PRODUCTION_HEALTH_EXPECTED_WORKER_VERSION_ID=$EXPECTED_WORKER_VERSION_ID"
           echo "PRODUCTION_HEALTH_CURRENT_MAIN_BEFORE=$current_main_before"
           echo "PRODUCTION_HEALTH_CURRENT_MAIN_AFTER=$current_main_after"
           echo "PRODUCTION_HEALTH_CURL_EXIT=$curl_exit"
