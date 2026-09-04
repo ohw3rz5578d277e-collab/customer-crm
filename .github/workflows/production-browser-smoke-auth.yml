@@ -120,6 +120,23 @@ jobs:
             'CF-Access-Client-Id': CF_ACCESS_CLIENT_ID,
             'CF-Access-Client-Secret': CF_ACCESS_CLIENT_SECRET
           };
+          const baseOrigin = new URL(BASE_URL).origin;
+
+          function safeUrl(value) {
+            try {
+              const u = new URL(value, BASE_URL);
+              return u.origin + u.pathname;
+            } catch {
+              return 'UNPARSEABLE';
+            }
+          }
+
+          async function attachAuthToBaseOrigin(page) {
+            await page.route(BASE_URL + '/**', async route => {
+              const headers = await route.request().allHeaders();
+              await route.continue({ headers: { ...headers, ...authHeaders } });
+            });
+          }
 
           const writePatterns = [
             /\/api\/customer-id-reconciliation\/reviews\/[^/]+$/,
@@ -181,16 +198,23 @@ jobs:
           async function pageIdentity(page, response, label) {
             const status = response ? response.status() : 0;
             const finalUrl = page.url();
+            const finalUrlSafe = safeUrl(finalUrl);
             const contentType = response ? (response.headers()['content-type'] || '') : '';
             const title = await page.title().catch(() => '');
             const marker = await page.locator('text=顧客ID照合').first().isVisible({ timeout: 8000 }).catch(() => false);
             console.log(`${label} response status=${status}`);
-            console.log(`${label} final_url=${finalUrl}`);
+            console.log(`${label} final_url=${finalUrlSafe}`);
             console.log(`${label} content_type=${contentType || '(none)'}`);
             console.log(`${label} document_title=${title || '(empty)'}`);
             console.log(`${label} review_marker=${marker ? 'YES' : 'NO'}`);
             if (/cloudflareaccess\.com/i.test(finalUrl) || /Sign in.*Cloudflare Access/i.test(title)) {
               fail(`${label}: ACCESS_AUTH_FAILED Cloudflare Access login page returned`);
+              return false;
+            }
+            let finalOrigin = '';
+            try { finalOrigin = new URL(finalUrl).origin; } catch {}
+            if (finalOrigin !== baseOrigin) {
+              fail(`${label}: CROSS_ORIGIN_REDIRECT target=${finalUrlSafe}`);
               return false;
             }
             if (status !== 200) { fail(`${label}: expected HTTP 200, got ${status}`); return false; }
@@ -264,7 +288,7 @@ jobs:
           (async () => {
             const browser = await chromium.launch({ headless: true });
 
-            const healthContext = await browser.newContext({ extraHTTPHeaders: authHeaders });
+            const healthContext = await browser.newContext();
             for (const path of HEALTH_PATHS) await checkHealth(healthContext.request, path);
             await healthContext.close();
 
@@ -285,18 +309,19 @@ jobs:
             await unauthContext.close();
 
             const mobileContext = await browser.newContext({
-              viewport: { width: 412, height: 915 }, isMobile: true, hasTouch: true,
-              extraHTTPHeaders: authHeaders
+              viewport: { width: 412, height: 915 }, isMobile: true, hasTouch: true
             });
             const mobile = await mobileContext.newPage();
+            await attachAuthToBaseOrigin(mobile);
             watch(mobile, 'mobile 412x915');
             await checkPage(mobile, 'mobile 412x915', false);
             await mobileContext.close();
 
             const desktopContext = await browser.newContext({
-              viewport: { width: 1440, height: 1000 }, extraHTTPHeaders: authHeaders
+              viewport: { width: 1440, height: 1000 }
             });
             const desktop = await desktopContext.newPage();
+            await attachAuthToBaseOrigin(desktop);
             watch(desktop, 'desktop 1440x1000');
             await checkPage(desktop, 'desktop 1440x1000', true);
             await desktopContext.close();
