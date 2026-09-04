@@ -74,7 +74,10 @@ export async function patchHealth(response,env){
   const raw=await response.text();
   let data={};
   try{data=raw?JSON.parse(raw):{}}catch(_){}
-  if(inheritedNotFound)data={};
+  if(inheritedNotFound){
+    const {ok:_staleOk,message:_staleMessage,error:_staleError,...preservedHealth}=data;
+    data=preservedHealth;
+  }
   const h=headersFrom(response);
   h.set('content-type','application/json; charset=utf-8');
   const schema=await customer360SchemaHealth(env);
