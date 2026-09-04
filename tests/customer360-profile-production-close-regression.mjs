@@ -119,7 +119,7 @@ async function child(payload){return jsonResponse(await handleCustomerProfileEnr
   assert.ok(classifyPos>=0&&familyCountPos>classifyPos&&applyPos>familyCountPos,'family pre-count must be conditional after classification and before migration');
   assert.ok(deploy.includes("steps.classify.outputs.family_table == 'PRESENT'"));
   assert.ok(!/Read Production row counts before migration[\s\S]{0,500}COUNT\(\*\) AS family_count FROM customer_family_members/.test(deploy),'unconditional pre-migration family count must remain removed');
-  for(const token of ["release_mode='preflight'","release_mode='deploy'","'mode':os.environ['RELEASE_MODE']","'expected_sha':os.environ['EXPECTED_SHA']",'CONFIRM_PRODUCTION=true','CONFIRM_PRODUCTION=NOT_REQUIRED_FOR_PREFLIGHT'])assert.ok(bridge.includes(token),`release bridge exact input missing: ${token}`);
+  for(const token of ["release_mode='preflight'","release_mode='deploy'","release_mode='auth-smoke'","inputs={'mode':mode,'expected_sha':sha}","inputs={'expected_sha':sha}","dispatch_workflow='deploy-cloudflare.yml'","dispatch_workflow='production-browser-smoke-auth.yml'",'CONFIRM_PRODUCTION=true','CONFIRM_PRODUCTION=NOT_REQUIRED_FOR_PREFLIGHT','CONFIRM_PRODUCTION=NOT_APPLICABLE_READ_ONLY_AUTH_SMOKE'])assert.ok(bridge.includes(token),`release bridge exact input missing: ${token}`);
   assert.ok(bridge.includes("deploy_re='^/crm-production-deploy confirm_production=true sha=([0-9a-f]{40})$'"),'deploy confirmation syntax must remain exact');
   console.log('PRODUCTION_HEALTH_RELEASE_BRIDGE_CONTRACT=PASS');
 }
