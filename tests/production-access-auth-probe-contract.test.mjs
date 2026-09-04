@@ -73,6 +73,12 @@ assert.ok(probe.includes("probe_path='/__crm/access-auth-probe'"),'workflow must
 assert.ok(probe.includes('CF-Access-Client-Id'),'service token client ID header missing');
 assert.ok(probe.includes('CF-Access-Client-Secret'),'service token client secret header missing');
 assert.ok(probe.includes('x-admin-token: $ADMIN_TOKEN'),'admin token header missing');
+assert.ok(probe.includes('control_status="$(curl'),'Access-negative control request missing');
+assert.ok(probe.includes('CONTROL_ACCESS_PROBE_WORKER_MARKER'),'control request must inspect Worker probe marker');
+assert.ok(probe.includes('ACCESS_CONTROL_REACHED_WORKER_PROBE'),'control request must fail if it reaches Worker');
+assert.ok(probe.includes('ACCESS_CONTROL_NOT_BLOCKED'),'control request must fail on 2xx without Access');
+assert.ok(probe.includes('ACCESS_CONTROL_BLOCK=PASS'),'control request must require Access blocking evidence');
+assert.ok(probe.includes('3??|401|403'),'control request must accept only explicit Access-style block statuses');
 assert.ok(probe.includes('ACCESS_SERVICE_TOKEN_REDIRECT'),'3xx Access response must fail closed');
 assert.ok(probe.includes('u.origin+u.pathname'),'redirect logging must strip query and fragment');
 assert.ok(probe.includes('PRODUCTION_D1_READ=0'),'D1 read zero evidence missing');
@@ -88,6 +94,16 @@ assert.match(bridge,/github\.actor == 'ohw3rz5578d277e-collab'/,'probe bridge mu
 assert.match(bridge,/github\.event\.comment\.user\.login == 'ohw3rz5578d277e-collab'/,'probe bridge comment author must be Owner only');
 assert.ok(bridge.includes("command_re='^/crm-production-auth-probe sha=([0-9a-f]{40})$'"),'probe command must be exact');
 assert.ok(bridge.includes('MAIN_DRIFT expected=$expected_sha current=$current_sha'),'probe bridge must fail closed on main drift');
+assert.ok(bridge.includes('deploy-cloudflare.yml production-access-auth-probe.yml'),'probe bridge must inspect release/probe workflows before dispatch');
+assert.ok(bridge.includes('for status in queued in_progress'),'probe bridge must inspect queued and running Production lock occupants');
+assert.ok(bridge.includes('runs?status=$status&per_page=1'),'probe bridge must query live workflow run occupancy');
+assert.ok(bridge.includes('PRODUCTION_RELEASE_LOCK_OCCUPIED'),'occupied Production release lock must fail closed');
+assert.ok(bridge.includes('PRODUCTION_RELEASE_LOCK=FREE'),'free Production release lock evidence missing');
+assert.ok(
+  bridge.indexOf('Refuse while Production release lock is occupied') <
+  bridge.indexOf('Dispatch read-only Production Access probe'),
+  'lock occupancy check must happen before probe dispatch'
+);
 assert.ok(bridge.includes('actions/workflows/production-access-auth-probe.yml/dispatches'),'bridge must target only dedicated Access probe workflow');
 assert.ok(bridge.includes("inputs':{'expected_sha':os.environ['EXPECTED_SHA']}") || bridge.includes("'inputs':{'expected_sha':os.environ['EXPECTED_SHA']}"),'bridge must forward exact SHA');
 assert.ok(bridge.includes('PRODUCTION_WRITE=0'),'bridge write-zero evidence missing');
@@ -100,5 +116,7 @@ assert.ok(browserSmoke.includes('name: Production Authenticated Browser Smoke'),
 console.log('PRODUCTION_ACCESS_AUTH_PROBE_ROUTE_D1_FREE=PASS');
 console.log('PRODUCTION_ACCESS_AUTH_PROBE_EXACT_SHA=PASS');
 console.log('PRODUCTION_ACCESS_AUTH_PROBE_READ_ONLY=PASS');
+console.log('PRODUCTION_ACCESS_CONTROL_NEGATIVE_PROBE=PASS');
+console.log('PRODUCTION_RELEASE_LOCK_OCCUPANCY_GUARD=PASS');
 console.log('PRODUCTION_ACCESS_AUTH_PROBE_ISSUE_26_OWNER_ONLY=PASS');
 console.log('PRODUCTION_DEPLOY_BRIDGE_UNCHANGED=PASS');
