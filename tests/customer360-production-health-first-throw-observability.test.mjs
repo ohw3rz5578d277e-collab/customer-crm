@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
-function classify({ curlExit=0, httpStatus=200, contentType='application/json', redirectCount=0, body='', jsonParseOk=true, contractOk=true }) {
+function classify({ curlExit=0, httpStatus=200, contentType='application/json', redirectCount=0, body='', jsonParseOk=true, contractOk=true, payloadKind='object' }) {
   const bodyClass = body.length === 0 ? 'EMPTY' : /html/i.test(contentType) || /^\s*</.test(body) ? 'HTML' : /json/i.test(contentType) ? (jsonParseOk ? 'JSON' : 'TEXT') : 'TEXT';
   if (curlExit !== 0) return { firstThrow: `CURL_FAILURE_${curlExit}`, errorClass:'CURL_FAILURE', bodyClass };
   if (redirectCount > 0 || (httpStatus >= 300 && httpStatus < 400)) return { firstThrow:`HTTP_STATUS_${httpStatus}`, errorClass:'HTTP_UNEXPECTED', bodyClass };
@@ -9,6 +9,7 @@ function classify({ curlExit=0, httpStatus=200, contentType='application/json', 
   if (!body.length) return { firstThrow:'EMPTY_BODY', errorClass:'NON_JSON', bodyClass };
   if (!/json/i.test(contentType)) return { firstThrow:'NON_JSON_CONTENT_TYPE', errorClass:'NON_JSON', bodyClass };
   if (!jsonParseOk) return { firstThrow:'JSON_PARSE_FAILURE', errorClass:'JSON_PARSE_FAILURE', bodyClass };
+  if (payloadKind !== 'object') return { firstThrow:'CONTRACT_PAYLOAD_NOT_OBJECT', errorClass:'CONTRACT_FAILURE', bodyClass };
   if (!contractOk) return { firstThrow:'CONTRACT_FAILURE', errorClass:'CONTRACT_FAILURE', bodyClass };
   return { firstThrow:'NONE', errorClass:'NONE', bodyClass:'JSON' };
 }
@@ -21,6 +22,7 @@ const cases = [
   [{httpStatus:500,contentType:'application/json',body:'{}'}, 'HTTP_STATUS_500', 'HTTP_UNEXPECTED'],
   [{httpStatus:200,contentType:'text/html',body:'<html/> '}, 'NON_JSON_CONTENT_TYPE', 'NON_JSON'],
   [{httpStatus:200,contentType:'application/json',body:'{',jsonParseOk:false}, 'JSON_PARSE_FAILURE', 'JSON_PARSE_FAILURE'],
+  [{httpStatus:200,contentType:'application/json',body:'null',payloadKind:'null'}, 'CONTRACT_PAYLOAD_NOT_OBJECT', 'CONTRACT_FAILURE'],
   [{httpStatus:200,contentType:'application/json',body:'{}',contractOk:false}, 'CONTRACT_FAILURE', 'CONTRACT_FAILURE'],
   [{httpStatus:200,contentType:'application/json; charset=utf-8',body:'{"ok":true}',contractOk:true}, 'NONE', 'NONE'],
 ];
@@ -46,12 +48,15 @@ for (const token of [
   'GITHUB_STEP_SUMMARY',
   '::error::PRODUCTION_HEALTH_FIRST_THROW:',
   'error_class=CONTRACT_FAILURE',
-  'fetch_stage=CONTRACT'
+  'fetch_stage=CONTRACT',
+  'CONTRACT_PAYLOAD_NOT_OBJECT',
+  'CONTRACT_EVALUATION_FAILURE'
 ]) assert.ok(observer.includes(token), `missing observer token ${token}`);
 
 assert.ok(observer.includes("github.event.workflow_run.event == 'workflow_dispatch'"));
 assert.ok(observer.includes("github.event.workflow_run.head_branch == 'main'"));
 assert.ok(observer.includes('--max-redirs 0'));
+assert.ok(observer.includes("!h || typeof h!=='object' || Array.isArray(h)"));
 assert.ok(observer.includes('CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID'));
 assert.ok(observer.includes('CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET'));
 assert.ok(observer.includes('x-admin-token: $ADMIN_TOKEN'));
@@ -73,6 +78,6 @@ for (const contract of canonicalContracts) {
 }
 
 console.log('CUSTOMER360_PRODUCTION_HEALTH_FIRST_THROW_OBSERVABILITY_TEST=PASS');
-console.log('SCENARIOS=A,B,C401,C403,D,E,F,G,H');
+console.log('SCENARIOS=A,B,C401,C403,D,E,F,NULL,G,H');
 console.log('SECRET_VALUE_LOGGED=0');
 console.log('VERIFIER_CONTRACT_WEAKENED=0');
