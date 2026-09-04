@@ -110,6 +110,32 @@ jobs:
             fetch_stage=JSON_PARSE
           fi
 
+          if [[ "$first_throw" == "NONE" ]]; then
+            contract_throw="$(node - "$body" <<'NODE'
+          const fs=require('fs');
+          const h=JSON.parse(fs.readFileSync(process.argv[2],'utf8'));
+          const requiredTrue=[
+            'customer360_family_marketing_foundation','customer360_profile_enrichment','customer360_line_profile_extraction',
+            'referrer_customer_id_exact_existing_customer_only','customer360_profile_composed_into_detail',
+            'customer360_profile_enrichment_schema_available','customer360_family_metadata_available','customer360_field_evidence_available','customer360_notes_history_available'
+          ];
+          for(const k of requiredTrue) if(h[k]!==true){ console.log(`HEALTH_MARKER_${k}`); process.exit(0); }
+          if(h.customer_id_generation!==false){ console.log('CUSTOMER_ID_GENERATION_NOT_FALSE'); process.exit(0); }
+          if(h.customer_line_auto_apply!==false||h.line_profile_auto_apply!==false){ console.log('AUTO_APPLY_NOT_FALSE'); process.exit(0); }
+          if(h.customer_line_extraction_mode!=='candidate-only'){ console.log('CANDIDATE_ONLY_MODE_MISSING'); process.exit(0); }
+          if(h.customer360_identity_fallback!==false){ console.log('IDENTITY_FALLBACK_NOT_FALSE'); process.exit(0); }
+          if(h.customer360_paid_ai_provider_active!==false){ console.log('PAID_AI_PROVIDER_NOT_FALSE'); process.exit(0); }
+          if(h.line_event_direction!=='incoming'||h.line_event_receive_status!=='received'){ console.log('LINE_CANONICAL_EVENT_CONTRACT'); process.exit(0); }
+          console.log('NONE');
+          NODE
+            )"
+            if [[ "$contract_throw" != "NONE" ]]; then
+              first_throw="$contract_throw"
+              error_class=CONTRACT_FAILURE
+              fetch_stage=CONTRACT
+            fi
+          fi
+
           {
             echo '## Customer360 Production health FIRST_THROW'
             echo "- PRODUCTION_HEALTH_FETCH_STAGE=$fetch_stage"
