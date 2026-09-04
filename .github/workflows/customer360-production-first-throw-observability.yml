@@ -41,6 +41,7 @@ jobs:
         shell: bash
         env:
           PRODUCTION_BASE_URL: https://customer-crm-api.ohw3rz5578d277e.workers.dev
+          TRIGGER_SHA: ${{ github.event.workflow_run.head_sha }}
           CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
           CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
           ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}
@@ -50,19 +51,33 @@ jobs:
           headers=/tmp/customer-crm-health.headers
           rm -f "$body" "$headers"
 
+          current_main_before="$(git ls-remote https://github.com/ohw3rz5578d277e-collab/customer-crm.git refs/heads/main | awk '{print $1}')"
+          source_guard=PASS
           curl_exit=0
-          http_status="$(curl --silent --show-error --max-time 15 --max-redirs 0 \
-            --output "$body" \
-            --dump-header "$headers" \
-            --write-out '%{http_code}' \
-            -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" \
-            -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET" \
-            -H "x-admin-token: $ADMIN_TOKEN" \
-            -H 'Accept: application/json' \
-            "$PRODUCTION_BASE_URL/health")" || curl_exit=$?
+          http_status=NOT_FETCHED
+          if [[ "$current_main_before" != "$TRIGGER_SHA" ]]; then
+            source_guard=DRIFT_BEFORE_FETCH
+            : > "$body"
+            : > "$headers"
+          else
+            http_status="$(curl --silent --show-error --max-time 15 --max-redirs 0 \
+              --output "$body" \
+              --dump-header "$headers" \
+              --write-out '%{http_code}' \
+              -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" \
+              -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET" \
+              -H "x-admin-token: $ADMIN_TOKEN" \
+              -H 'Accept: application/json' \
+              "$PRODUCTION_BASE_URL/health")" || curl_exit=$?
+          fi
 
           [[ -f "$body" ]] || : > "$body"
           [[ -f "$headers" ]] || : > "$headers"
+          current_main_after="$(git ls-remote https://github.com/ohw3rz5578d277e-collab/customer-crm.git refs/heads/main | awk '{print $1}')"
+          if [[ "$source_guard" == "PASS" && "$current_main_after" != "$TRIGGER_SHA" ]]; then
+            source_guard=DRIFT_AFTER_FETCH
+          fi
+
           content_type="$(awk 'BEGIN{IGNORECASE=1} /^content-type:/{sub(/^[^:]*:[[:space:]]*/,""); sub(/\r$/,""); print}' "$headers" | tail -1)"
           body_length="$(wc -c < "$body" | tr -d '[:space:]')"
           redirect_count="$(awk 'BEGIN{IGNORECASE=1;c=0} /^location:/{c++} END{print c}' "$headers")"
@@ -84,7 +99,15 @@ jobs:
           first_throw=NONE
           error_class=NONE
           fetch_stage=COMPLETE
-          if [[ "$curl_exit" != "0" ]]; then
+          if [[ "$source_guard" == "DRIFT_BEFORE_FETCH" ]]; then
+            first_throw=SOURCE_SHA_DRIFT_BEFORE_FETCH
+            error_class=SOURCE_DRIFT
+            fetch_stage=SOURCE_GUARD
+          elif [[ "$source_guard" == "DRIFT_AFTER_FETCH" ]]; then
+            first_throw=SOURCE_SHA_DRIFT_AFTER_FETCH
+            error_class=SOURCE_DRIFT
+            fetch_stage=SOURCE_GUARD
+          elif [[ "$curl_exit" != "0" ]]; then
             first_throw="CURL_FAILURE_${curl_exit}"
             error_class=CURL_FAILURE
             fetch_stage=CURL
@@ -145,6 +168,10 @@ jobs:
           {
             echo '## Customer360 Production health FIRST_THROW'
             echo "- PRODUCTION_HEALTH_FETCH_STAGE=$fetch_stage"
+            echo "- PRODUCTION_HEALTH_SOURCE_GUARD=$source_guard"
+            echo "- PRODUCTION_HEALTH_TRIGGER_SHA=$TRIGGER_SHA"
+            echo "- PRODUCTION_HEALTH_CURRENT_MAIN_BEFORE=$current_main_before"
+            echo "- PRODUCTION_HEALTH_CURRENT_MAIN_AFTER=$current_main_after"
             echo "- PRODUCTION_HEALTH_CURL_EXIT=$curl_exit"
             echo "- PRODUCTION_HEALTH_HTTP_STATUS=${http_status:-UNKNOWN}"
             echo "- PRODUCTION_HEALTH_CONTENT_TYPE=${content_type:-MISSING}"
@@ -157,6 +184,10 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
           echo "PRODUCTION_HEALTH_FETCH_STAGE=$fetch_stage"
+          echo "PRODUCTION_HEALTH_SOURCE_GUARD=$source_guard"
+          echo "PRODUCTION_HEALTH_TRIGGER_SHA=$TRIGGER_SHA"
+          echo "PRODUCTION_HEALTH_CURRENT_MAIN_BEFORE=$current_main_before"
+          echo "PRODUCTION_HEALTH_CURRENT_MAIN_AFTER=$current_main_after"
           echo "PRODUCTION_HEALTH_CURL_EXIT=$curl_exit"
           echo "PRODUCTION_HEALTH_HTTP_STATUS=${http_status:-UNKNOWN}"
           echo "PRODUCTION_HEALTH_CONTENT_TYPE=${content_type:-MISSING}"
