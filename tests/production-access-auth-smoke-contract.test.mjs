@@ -19,6 +19,18 @@ assert.ok(workflow.includes('maxRedirects: 0'),'health probe must not follow red
 assert.ok(workflow.includes("res.headers()['location'] || ''"),'redirect location must be inspected');
 assert.ok(workflow.includes("redirectTarget = u.origin + u.pathname"),'redirect logging must strip query values');
 assert.ok(workflow.includes('ACCESS_AUTH_FAILED'),'Cloudflare Access redirect must be classified');
+assert.ok(workflow.includes('const baseOrigin = new URL(BASE_URL).origin'),'Production origin pin missing');
+assert.ok(workflow.includes('function safeUrl(value)'),'sanitized URL helper missing');
+assert.ok(workflow.includes('return u.origin + u.pathname'),'URL logging must strip query and fragment');
+assert.ok(workflow.includes('async function attachAuthToBaseOrigin(page)'),'origin-scoped auth injector missing');
+assert.ok(workflow.includes("page.route(BASE_URL + '/**'"),'auth headers must be injected only for Production origin routes');
+assert.ok(workflow.includes('await attachAuthToBaseOrigin(mobile)'),'mobile auth must be origin scoped');
+assert.ok(workflow.includes('await attachAuthToBaseOrigin(desktop)'),'desktop auth must be origin scoped');
+assert.ok(workflow.includes('CROSS_ORIGIN_REDIRECT'),'authenticated cross-origin navigation must fail closed');
+assert.ok(workflow.includes('final_url=${finalUrlSafe}'),'authenticated page URL logs must be sanitized');
+assert.ok(!workflow.includes('const healthContext = await browser.newContext({ extraHTTPHeaders: authHeaders });'),'health context must not carry global auth headers');
+assert.ok(!workflow.includes('viewport: { width: 412, height: 915 }, isMobile: true, hasTouch: true,\n              extraHTTPHeaders: authHeaders'),'mobile context must not carry global auth headers');
+assert.ok(!workflow.includes('viewport: { width: 1440, height: 1000 }, extraHTTPHeaders: authHeaders'),'desktop context must not carry global auth headers');
 assert.ok(workflow.includes('CF-Access-Client-Id'),'service-token client id header missing');
 assert.ok(workflow.includes('CF-Access-Client-Secret'),'service-token client secret header missing');
 assert.ok(workflow.includes("'x-admin-token': ADMIN_TOKEN"),'admin auth header missing');
