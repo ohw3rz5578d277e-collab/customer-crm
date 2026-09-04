@@ -18,8 +18,15 @@ jobs:
       - name: Dispatch production browser smoke
         env:
           GH_TOKEN: ${{ github.token }}
+          EXPECTED_SHA: ${{ github.sha }}
         run: |
+          set -euo pipefail
+          if [[ ! "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo '::error::INVALID_EXPECTED_SHA_FORMAT'
+            exit 1
+          fi
           gh api \
             --method POST \
             repos/${{ github.repository }}/actions/workflows/production-browser-smoke-auth.yml/dispatches \
-            -f ref=main
+            -f ref=main \
+            -f "inputs[expected_sha]=$EXPECTED_SHA"
