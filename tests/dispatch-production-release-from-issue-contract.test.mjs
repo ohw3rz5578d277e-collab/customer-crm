@@ -29,7 +29,7 @@ assert.match(source,/deploy_re='\^\/crm-production-deploy confirm_production=tru
 assert.match(source,/release_mode='preflight'/,'preflight must map to preflight mode');
 assert.match(source,/release_mode='deploy'/,'deploy must map to deploy mode');
 assert.match(source,/MAIN_DRIFT expected=\$expected_sha current=\$current_sha/,'fresh current-main exact SHA gate must fail closed');
-assert.match(source,/"current_sha" != "\$expected_sha"/,'authorized SHA must equal fresh main SHA');
+assert.match(source,/if \[\[ "\$current_sha" != "\$expected_sha" \]\]; then/,'authorized SHA must equal fresh main SHA');
 assert.match(source,/actions\/workflows\/deploy-cloudflare\.yml\/dispatches/,'canonical workflow must be the only dispatch target');
 assert.match(source,/['"]mode['"]:os\.environ\['RELEASE_MODE'\]/,'canonical mode must come from validated parser output');
 assert.match(source,/['"]expected_sha['"]:os\.environ\['EXPECTED_SHA'\]/,'validated exact SHA must be passed to canonical workflow');
