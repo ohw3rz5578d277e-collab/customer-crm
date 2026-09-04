@@ -40,7 +40,23 @@ jobs:
           set -euo pipefail
           test "$EVENT_ACTOR" = "$EXPECTED_ACTOR"
 
-          preflight_re='^/crm-production-preflight sha=([0-9a-f]{40})
+          preflight_re='^/crm-production-preflight sha=([0-9a-f]{40})$'
+          deploy_re='^/crm-production-deploy confirm_production=true sha=([0-9a-f]{40})$'
+          auth_smoke_re='^/crm-production-auth-smoke sha=([0-9a-f]{40})$'
+
+          if [[ "$COMMAND_BODY" =~ $preflight_re ]]; then
+            release_mode='preflight'
+            dispatch_workflow='deploy-cloudflare.yml'
+            expected_sha="${BASH_REMATCH[1]}"
+          elif [[ "$COMMAND_BODY" =~ $deploy_re ]]; then
+            release_mode='deploy'
+            dispatch_workflow='deploy-cloudflare.yml'
+            expected_sha="${BASH_REMATCH[1]}"
+          elif [[ "$COMMAND_BODY" =~ $auth_smoke_re ]]; then
+            release_mode='auth-smoke'
+            dispatch_workflow='production-browser-smoke-auth.yml'
+            expected_sha="${BASH_REMATCH[1]}"
+          else
             echo '::error::Invalid production release command format.'
             exit 1
           fi
@@ -77,7 +93,7 @@ jobs:
           fi
           echo 'BRIDGE_PRODUCTION_WRITE=0'
 
-      - name: Dispatch existing canonical Production workflow
+      - name: Dispatch validated workflow
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -116,226 +132,6 @@ jobs:
             exit 1
           fi
           echo "CANONICAL_WORKFLOW=$DISPATCH_WORKFLOW"
-          echo 'CANONICAL_EVENT=workflow_dispatch'
-          echo "CANONICAL_MODE=$RELEASE_MODE"
-          echo "DISPATCH_REQUESTED_FOR_SHA=$EXPECTED_SHA"
-          echo 'BRIDGE_PRODUCTION_WRITE=0'
-
-          deploy_re='^/crm-production-deploy confirm_production=true sha=([0-9a-f]{40})
-            echo '::error::Invalid production release command format.'
-            exit 1
-          fi
-
-          current_sha="$(
-            curl --fail --silent --show-error \
-              -H "Authorization: Bearer $GH_TOKEN" \
-              -H 'Accept: application/vnd.github+json' \
-              -H 'X-GitHub-Api-Version: 2022-11-28' \
-              "https://api.github.com/repos/${GITHUB_REPOSITORY}/commits/main" \
-            | python3 -c 'import json,sys; print(json.load(sys.stdin)["sha"])'
-          )"
-          if [[ "$current_sha" != "$expected_sha" ]]; then
-            echo "::error::MAIN_DRIFT expected=$expected_sha current=$current_sha"
-            exit 1
-          fi
-
-          echo "release_mode=$release_mode" >> "$GITHUB_OUTPUT"
-          echo "expected_sha=$expected_sha" >> "$GITHUB_OUTPUT"
-          echo 'RELEASE_GATE_ISSUE=26'
-          echo "RELEASE_MODE=$release_mode"
-          echo "CURRENT_MAIN_SHA=$current_sha"
-          echo "AUTHORIZED_SHA=$expected_sha"
-          echo 'CANONICAL_WORKFLOW=deploy-cloudflare.yml'
-          echo 'CANONICAL_EVENT=workflow_dispatch'
-          echo "CANONICAL_MODE=$release_mode"
-          if [[ "$release_mode" == 'preflight' ]]; then
-            echo 'CONFIRM_PRODUCTION=NOT_REQUIRED_FOR_PREFLIGHT'
-          else
-            echo 'CONFIRM_PRODUCTION=true'
-          fi
-          echo 'BRIDGE_PRODUCTION_WRITE=0'
-
-      - name: Dispatch existing canonical Production workflow
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          EXPECTED_SHA: ${{ steps.gate.outputs.expected_sha }}
-          RELEASE_MODE: ${{ steps.gate.outputs.release_mode }}
-        run: |
-          set -euo pipefail
-          payload="$(python3 - <<'PY'
-          import json,os
-          print(json.dumps({'ref':'main','inputs':{'mode':os.environ['RELEASE_MODE'],'expected_sha':os.environ['EXPECTED_SHA']}}))
-          PY
-          )"
-          response_code="$(
-            curl --silent --show-error \
-              --output /tmp/dispatch-response.txt \
-              --write-out '%{http_code}' \
-              --request POST \
-              -H "Authorization: Bearer $GH_TOKEN" \
-              -H 'Accept: application/vnd.github+json' \
-              -H 'X-GitHub-Api-Version: 2022-11-28' \
-              "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/deploy-cloudflare.yml/dispatches" \
-              -d "$payload"
-          )"
-          if [[ "$response_code" != '204' ]]; then
-            cat /tmp/dispatch-response.txt >&2 || true
-            echo "::error::Workflow dispatch failed with HTTP $response_code"
-            exit 1
-          fi
-          echo 'CANONICAL_WORKFLOW=deploy-cloudflare.yml'
-          echo 'CANONICAL_EVENT=workflow_dispatch'
-          echo "CANONICAL_MODE=$RELEASE_MODE"
-          echo "DISPATCH_REQUESTED_FOR_SHA=$EXPECTED_SHA"
-          echo 'BRIDGE_PRODUCTION_WRITE=0'
-
-          auth_smoke_re='^/crm-production-auth-smoke sha=([0-9a-f]{40})
-            echo '::error::Invalid production release command format.'
-            exit 1
-          fi
-
-          current_sha="$(
-            curl --fail --silent --show-error \
-              -H "Authorization: Bearer $GH_TOKEN" \
-              -H 'Accept: application/vnd.github+json' \
-              -H 'X-GitHub-Api-Version: 2022-11-28' \
-              "https://api.github.com/repos/${GITHUB_REPOSITORY}/commits/main" \
-            | python3 -c 'import json,sys; print(json.load(sys.stdin)["sha"])'
-          )"
-          if [[ "$current_sha" != "$expected_sha" ]]; then
-            echo "::error::MAIN_DRIFT expected=$expected_sha current=$current_sha"
-            exit 1
-          fi
-
-          echo "release_mode=$release_mode" >> "$GITHUB_OUTPUT"
-          echo "expected_sha=$expected_sha" >> "$GITHUB_OUTPUT"
-          echo 'RELEASE_GATE_ISSUE=26'
-          echo "RELEASE_MODE=$release_mode"
-          echo "CURRENT_MAIN_SHA=$current_sha"
-          echo "AUTHORIZED_SHA=$expected_sha"
-          echo 'CANONICAL_WORKFLOW=deploy-cloudflare.yml'
-          echo 'CANONICAL_EVENT=workflow_dispatch'
-          echo "CANONICAL_MODE=$release_mode"
-          if [[ "$release_mode" == 'preflight' ]]; then
-            echo 'CONFIRM_PRODUCTION=NOT_REQUIRED_FOR_PREFLIGHT'
-          else
-            echo 'CONFIRM_PRODUCTION=true'
-          fi
-          echo 'BRIDGE_PRODUCTION_WRITE=0'
-
-      - name: Dispatch existing canonical Production workflow
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          EXPECTED_SHA: ${{ steps.gate.outputs.expected_sha }}
-          RELEASE_MODE: ${{ steps.gate.outputs.release_mode }}
-        run: |
-          set -euo pipefail
-          payload="$(python3 - <<'PY'
-          import json,os
-          print(json.dumps({'ref':'main','inputs':{'mode':os.environ['RELEASE_MODE'],'expected_sha':os.environ['EXPECTED_SHA']}}))
-          PY
-          )"
-          response_code="$(
-            curl --silent --show-error \
-              --output /tmp/dispatch-response.txt \
-              --write-out '%{http_code}' \
-              --request POST \
-              -H "Authorization: Bearer $GH_TOKEN" \
-              -H 'Accept: application/vnd.github+json' \
-              -H 'X-GitHub-Api-Version: 2022-11-28' \
-              "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/deploy-cloudflare.yml/dispatches" \
-              -d "$payload"
-          )"
-          if [[ "$response_code" != '204' ]]; then
-            cat /tmp/dispatch-response.txt >&2 || true
-            echo "::error::Workflow dispatch failed with HTTP $response_code"
-            exit 1
-          fi
-          echo 'CANONICAL_WORKFLOW=deploy-cloudflare.yml'
-          echo 'CANONICAL_EVENT=workflow_dispatch'
-          echo "CANONICAL_MODE=$RELEASE_MODE"
-          echo "DISPATCH_REQUESTED_FOR_SHA=$EXPECTED_SHA"
-          echo 'BRIDGE_PRODUCTION_WRITE=0'
-
-
-          if [[ "$COMMAND_BODY" =~ $preflight_re ]]; then
-            release_mode='preflight'
-            dispatch_workflow='deploy-cloudflare.yml'
-            expected_sha="${BASH_REMATCH[1]}"
-          elif [[ "$COMMAND_BODY" =~ $deploy_re ]]; then
-            release_mode='deploy'
-            dispatch_workflow='deploy-cloudflare.yml'
-            expected_sha="${BASH_REMATCH[1]}"
-          elif [[ "$COMMAND_BODY" =~ $auth_smoke_re ]]; then
-            release_mode='auth-smoke'
-            dispatch_workflow='production-browser-smoke-auth.yml'
-            expected_sha="${BASH_REMATCH[1]}"
-          else
-            echo '::error::Invalid production release command format.'
-            exit 1
-          fi
-
-          current_sha="$(
-            curl --fail --silent --show-error \
-              -H "Authorization: Bearer $GH_TOKEN" \
-              -H 'Accept: application/vnd.github+json' \
-              -H 'X-GitHub-Api-Version: 2022-11-28' \
-              "https://api.github.com/repos/${GITHUB_REPOSITORY}/commits/main" \
-            | python3 -c 'import json,sys; print(json.load(sys.stdin)["sha"])'
-          )"
-          if [[ "$current_sha" != "$expected_sha" ]]; then
-            echo "::error::MAIN_DRIFT expected=$expected_sha current=$current_sha"
-            exit 1
-          fi
-
-          echo "release_mode=$release_mode" >> "$GITHUB_OUTPUT"
-          echo "expected_sha=$expected_sha" >> "$GITHUB_OUTPUT"
-          echo 'RELEASE_GATE_ISSUE=26'
-          echo "RELEASE_MODE=$release_mode"
-          echo "CURRENT_MAIN_SHA=$current_sha"
-          echo "AUTHORIZED_SHA=$expected_sha"
-          echo 'CANONICAL_WORKFLOW=deploy-cloudflare.yml'
-          echo 'CANONICAL_EVENT=workflow_dispatch'
-          echo "CANONICAL_MODE=$release_mode"
-          if [[ "$release_mode" == 'preflight' ]]; then
-            echo 'CONFIRM_PRODUCTION=NOT_REQUIRED_FOR_PREFLIGHT'
-          else
-            echo 'CONFIRM_PRODUCTION=true'
-          fi
-          echo 'BRIDGE_PRODUCTION_WRITE=0'
-
-      - name: Dispatch existing canonical Production workflow
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          EXPECTED_SHA: ${{ steps.gate.outputs.expected_sha }}
-          RELEASE_MODE: ${{ steps.gate.outputs.release_mode }}
-        run: |
-          set -euo pipefail
-          payload="$(python3 - <<'PY'
-          import json,os
-          print(json.dumps({'ref':'main','inputs':{'mode':os.environ['RELEASE_MODE'],'expected_sha':os.environ['EXPECTED_SHA']}}))
-          PY
-          )"
-          response_code="$(
-            curl --silent --show-error \
-              --output /tmp/dispatch-response.txt \
-              --write-out '%{http_code}' \
-              --request POST \
-              -H "Authorization: Bearer $GH_TOKEN" \
-              -H 'Accept: application/vnd.github+json' \
-              -H 'X-GitHub-Api-Version: 2022-11-28' \
-              "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/deploy-cloudflare.yml/dispatches" \
-              -d "$payload"
-          )"
-          if [[ "$response_code" != '204' ]]; then
-            cat /tmp/dispatch-response.txt >&2 || true
-            echo "::error::Workflow dispatch failed with HTTP $response_code"
-            exit 1
-          fi
-          echo 'CANONICAL_WORKFLOW=deploy-cloudflare.yml'
           echo 'CANONICAL_EVENT=workflow_dispatch'
           echo "CANONICAL_MODE=$RELEASE_MODE"
           echo "DISPATCH_REQUESTED_FOR_SHA=$EXPECTED_SHA"
