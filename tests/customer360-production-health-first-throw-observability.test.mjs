@@ -44,7 +44,9 @@ for (const token of [
   'PRODUCTION_HEALTH_ERROR_CLASS',
   'PRODUCTION_HEALTH_FIRST_THROW',
   'GITHUB_STEP_SUMMARY',
-  '::error::PRODUCTION_HEALTH_FIRST_THROW:'
+  '::error::PRODUCTION_HEALTH_FIRST_THROW:',
+  'error_class=CONTRACT_FAILURE',
+  'fetch_stage=CONTRACT'
 ]) assert.ok(observer.includes(token), `missing observer token ${token}`);
 
 assert.ok(observer.includes("github.event.workflow_run.event == 'workflow_dispatch'"));
@@ -59,14 +61,16 @@ assert.ok(!observer.includes('curl -X POST'));
 assert.ok(!observer.includes('curl -X PATCH'));
 assert.ok(!observer.includes('curl -X DELETE'));
 
-for (const contract of [
-  "if(h.customer_id_generation!==false)",
-  "if(h.customer_line_auto_apply!==false||h.line_profile_auto_apply!==false)",
-  "if(h.customer_line_extraction_mode!=='candidate-only')",
-  "if(h.customer360_identity_fallback!==false)",
-  "if(h.customer360_paid_ai_provider_active!==false)",
-  "if(h.line_event_direction!=='incoming'||h.line_event_receive_status!=='received')"
-]) assert.ok(deploy.includes(contract), `deploy verifier contract changed or missing: ${contract}`);
+const canonicalContracts = [
+  'customer360_family_marketing_foundation','customer360_profile_enrichment','customer360_line_profile_extraction',
+  'referrer_customer_id_exact_existing_customer_only','customer360_profile_composed_into_detail',
+  'customer360_profile_enrichment_schema_available','customer360_family_metadata_available','customer360_field_evidence_available','customer360_notes_history_available',
+  'customer_id_generation','customer_line_auto_apply','line_profile_auto_apply','candidate-only','customer360_identity_fallback','customer360_paid_ai_provider_active','line_event_direction','line_event_receive_status'
+];
+for (const contract of canonicalContracts) {
+  assert.ok(deploy.includes(contract), `deploy verifier contract missing: ${contract}`);
+  assert.ok(observer.includes(contract), `observer contract missing: ${contract}`);
+}
 
 console.log('CUSTOMER360_PRODUCTION_HEALTH_FIRST_THROW_OBSERVABILITY_TEST=PASS');
 console.log('SCENARIOS=A,B,C401,C403,D,E,F,G,H');
