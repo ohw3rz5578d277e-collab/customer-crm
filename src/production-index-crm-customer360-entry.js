@@ -22,6 +22,28 @@ const CUSTOMER360_PROFILE_TABLES=[
   'customer_notes_history'
 ];
 
+export function handleProductionAccessAuthProbe(request,env){
+  const url=new URL(request.url);
+  if(request.method!=='GET'||url.pathname!=='/__crm/access-auth-probe')return null;
+  const expected=String(env?.ADMIN_TOKEN||'');
+  const provided=String(request.headers.get('x-admin-token')||'');
+  const headers={
+    'content-type':'application/json; charset=utf-8',
+    'cache-control':'no-store, no-cache, must-revalidate, max-age=0',
+    'x-crm-access-auth-probe':'read-only'
+  };
+  if(!expected)return new Response(JSON.stringify({ok:false,error:'auth_probe_unavailable'}),{status:503,headers});
+  if(provided!==expected)return new Response(JSON.stringify({ok:false,error:'unauthorized'}),{status:401,headers});
+  return new Response(JSON.stringify({
+    ok:true,
+    service:'customer-crm-api',
+    access_auth_probe:true,
+    production_write:false,
+    customer_id_generation:false,
+    line_send:false
+  }),{status:200,headers});
+}
+
 export function normalizeCustomer360InjectedHtml(html){
   return String(html||'').split(RAW_SCRIPT_CLOSE).join('</script>');
 }
@@ -108,6 +130,9 @@ async function patchHtml(response){
 
 export default {
   async fetch(request,env,ctx){
+    const accessAuthProbe=handleProductionAccessAuthProbe(request,env);
+    if(accessAuthProbe)return accessAuthProbe;
+
     const lineProfileApi=await handleCustomer360LineProfileExtraction(request,env);
     if(lineProfileApi)return lineProfileApi;
     const profileWriteGuard=await guardCustomer360ProfileWrite(request,env);
