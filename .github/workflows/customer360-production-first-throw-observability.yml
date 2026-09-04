@@ -9,6 +9,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: customer360-production-first-throw-observability
@@ -21,7 +22,41 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
+      - name: Verify triggering run reached Worker deploy
+        id: trigger_deploy
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TRIGGER_RUN_ID: ${{ github.event.workflow_run.id }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          jobs=/tmp/trigger-run-jobs.json
+          curl --fail --silent --show-error \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/$REPOSITORY/actions/runs/$TRIGGER_RUN_ID/jobs?per_page=100" \
+            -o "$jobs"
+          eligible="$(node - "$jobs" <<'NODE'
+          const fs=require('fs');
+          const payload=JSON.parse(fs.readFileSync(process.argv[2],'utf8'));
+          const jobs=Array.isArray(payload.jobs)?payload.jobs:[];
+          const release=jobs.find(j=>j.name==='Exact-SHA Production release gate');
+          const deployed=release && Array.isArray(release.steps) && release.steps.some(s=>s.name==='Deploy customer-crm-api' && s.conclusion==='success');
+          process.stdout.write(deployed?'true':'false');
+          NODE
+          )"
+          echo "eligible=$eligible" >> "$GITHUB_OUTPUT"
+          if [[ "$eligible" == "true" ]]; then
+            echo 'TRIGGER_RUN_WORKER_DEPLOY=CONFIRMED'
+          else
+            echo 'TRIGGER_RUN_WORKER_DEPLOY=NOT_REACHED'
+            echo 'OBSERVATION_SKIPPED=TRIGGER_RUN_DID_NOT_DEPLOY' >> "$GITHUB_STEP_SUMMARY"
+          fi
+
       - name: Verify Production auth inputs
+        if: ${{ steps.trigger_deploy.outputs.eligible == 'true' }}
         shell: bash
         env:
           CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
@@ -38,6 +73,7 @@ jobs:
           echo 'PRODUCTION_AUTH_INPUTS=PASS'
 
       - name: Capture Production health FIRST_THROW READ ONLY
+        if: ${{ steps.trigger_deploy.outputs.eligible == 'true' }}
         shell: bash
         env:
           PRODUCTION_BASE_URL: https://customer-crm-api.ohw3rz5578d277e.workers.dev
