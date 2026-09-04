@@ -1,0 +1,142 @@
+name: Customer360 Production first-throw observability
+
+on:
+  workflow_run:
+    workflows:
+      - Deploy customer-crm to Cloudflare
+    types:
+      - completed
+
+permissions:
+  contents: read
+
+concurrency:
+  group: customer360-production-first-throw-observability
+  cancel-in-progress: false
+
+jobs:
+  observe:
+    name: Observe Production health FIRST_THROW (READ ONLY)
+    if: ${{ github.event.workflow_run.event == 'workflow_dispatch' && github.event.workflow_run.head_branch == 'main' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Verify Production auth inputs
+        shell: bash
+        env:
+          CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+          ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}
+        run: |
+          set -euo pipefail
+          for v in CF_ACCESS_CLIENT_ID CF_ACCESS_CLIENT_SECRET ADMIN_TOKEN; do
+            if [[ -z "${!v}" ]]; then
+              echo "::error::PRODUCTION_AUTH_INPUT_MISSING:$v"
+              exit 1
+            fi
+          done
+          echo 'PRODUCTION_AUTH_INPUTS=PASS'
+
+      - name: Capture Production health FIRST_THROW READ ONLY
+        shell: bash
+        env:
+          PRODUCTION_BASE_URL: https://customer-crm-api.ohw3rz5578d277e.workers.dev
+          CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+          ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}
+        run: |
+          set -u
+          body=/tmp/customer-crm-health.body
+          headers=/tmp/customer-crm-health.headers
+          rm -f "$body" "$headers"
+
+          curl_exit=0
+          http_status="$(curl --silent --show-error --max-time 15 --max-redirs 0 \
+            --output "$body" \
+            --dump-header "$headers" \
+            --write-out '%{http_code}' \
+            -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" \
+            -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET" \
+            -H "x-admin-token: $ADMIN_TOKEN" \
+            -H 'Accept: application/json' \
+            "$PRODUCTION_BASE_URL/health")" || curl_exit=$?
+
+          [[ -f "$body" ]] || : > "$body"
+          [[ -f "$headers" ]] || : > "$headers"
+          content_type="$(awk 'BEGIN{IGNORECASE=1} /^content-type:/{sub(/^[^:]*:[[:space:]]*/,""); sub(/\r$/,""); print}' "$headers" | tail -1)"
+          body_length="$(wc -c < "$body" | tr -d '[:space:]')"
+          redirect_count="$(awk 'BEGIN{IGNORECASE=1;c=0} /^location:/{c++} END{print c}' "$headers")"
+          body_class=TEXT
+          json_parse_ok=NO
+          if [[ "$body_length" == "0" ]]; then
+            body_class=EMPTY
+          elif [[ "$content_type" =~ [Jj][Ss][Oo][Nn] ]]; then
+            if node -e "JSON.parse(require('fs').readFileSync(process.argv[1],'utf8'))" "$body" >/dev/null 2>&1; then
+              body_class=JSON
+              json_parse_ok=YES
+            else
+              body_class=TEXT
+            fi
+          elif [[ "$content_type" =~ [Hh][Tt][Mm][Ll] ]] || head -c 64 "$body" | grep -Eiq '^[[:space:]]*<(html|!doctype)'; then
+            body_class=HTML
+          fi
+
+          first_throw=NONE
+          error_class=NONE
+          fetch_stage=COMPLETE
+          if [[ "$curl_exit" != "0" ]]; then
+            first_throw="CURL_FAILURE_${curl_exit}"
+            error_class=CURL_FAILURE
+            fetch_stage=CURL
+          elif [[ "$http_status" =~ ^3[0-9][0-9]$ ]] || [[ "$redirect_count" != "0" ]]; then
+            first_throw="HTTP_STATUS_${http_status:-UNKNOWN}"
+            error_class=HTTP_UNEXPECTED
+            fetch_stage=HTTP
+          elif [[ ! "$http_status" =~ ^2[0-9][0-9]$ ]]; then
+            first_throw="HTTP_STATUS_${http_status:-UNKNOWN}"
+            error_class=HTTP_UNEXPECTED
+            fetch_stage=HTTP
+          elif [[ "$body_length" == "0" ]]; then
+            first_throw=EMPTY_BODY
+            error_class=NON_JSON
+            fetch_stage=BODY
+          elif [[ ! "$content_type" =~ [Jj][Ss][Oo][Nn] ]]; then
+            first_throw=NON_JSON_CONTENT_TYPE
+            error_class=NON_JSON
+            fetch_stage=CONTENT_TYPE
+          elif [[ "$json_parse_ok" != "YES" ]]; then
+            first_throw=JSON_PARSE_FAILURE
+            error_class=JSON_PARSE_FAILURE
+            fetch_stage=JSON_PARSE
+          fi
+
+          {
+            echo '## Customer360 Production health FIRST_THROW'
+            echo "- PRODUCTION_HEALTH_FETCH_STAGE=$fetch_stage"
+            echo "- PRODUCTION_HEALTH_CURL_EXIT=$curl_exit"
+            echo "- PRODUCTION_HEALTH_HTTP_STATUS=${http_status:-UNKNOWN}"
+            echo "- PRODUCTION_HEALTH_CONTENT_TYPE=${content_type:-MISSING}"
+            echo "- PRODUCTION_HEALTH_REDIRECT_COUNT=$redirect_count"
+            echo "- PRODUCTION_HEALTH_BODY_CLASS=$body_class"
+            echo "- PRODUCTION_HEALTH_BODY_LENGTH=$body_length"
+            echo "- PRODUCTION_HEALTH_JSON_PARSE_OK=$json_parse_ok"
+            echo "- PRODUCTION_HEALTH_ERROR_CLASS=$error_class"
+            echo "- PRODUCTION_HEALTH_FIRST_THROW=$first_throw"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          echo "PRODUCTION_HEALTH_FETCH_STAGE=$fetch_stage"
+          echo "PRODUCTION_HEALTH_CURL_EXIT=$curl_exit"
+          echo "PRODUCTION_HEALTH_HTTP_STATUS=${http_status:-UNKNOWN}"
+          echo "PRODUCTION_HEALTH_CONTENT_TYPE=${content_type:-MISSING}"
+          echo "PRODUCTION_HEALTH_REDIRECT_COUNT=$redirect_count"
+          echo "PRODUCTION_HEALTH_BODY_CLASS=$body_class"
+          echo "PRODUCTION_HEALTH_BODY_LENGTH=$body_length"
+          echo "PRODUCTION_HEALTH_JSON_PARSE_OK=$json_parse_ok"
+          echo "PRODUCTION_HEALTH_ERROR_CLASS=$error_class"
+          echo "PRODUCTION_HEALTH_FIRST_THROW=$first_throw"
+
+          if [[ "$first_throw" != "NONE" ]]; then
+            echo "::error::PRODUCTION_HEALTH_FIRST_THROW:$first_throw"
+            exit 1
+          fi
+          echo 'PRODUCTION_HEALTH_OBSERVATION=PASS'
