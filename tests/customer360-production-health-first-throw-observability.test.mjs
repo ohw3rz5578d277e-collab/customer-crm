@@ -6,8 +6,8 @@ function classify({ curlExit=0, httpStatus=200, contentType='application/json', 
   if (curlExit !== 0) return { firstThrow: `CURL_FAILURE_${curlExit}`, errorClass:'CURL_FAILURE', bodyClass };
   if (redirectCount > 0 || (httpStatus >= 300 && httpStatus < 400)) return { firstThrow:`HTTP_STATUS_${httpStatus}`, errorClass:'HTTP_UNEXPECTED', bodyClass };
   if (httpStatus !== 200) return { firstThrow:`HTTP_STATUS_${httpStatus}`, errorClass:'HTTP_UNEXPECTED', bodyClass };
-  if (!/json/i.test(contentType)) return { firstThrow:'NON_JSON_CONTENT_TYPE', errorClass:'NON_JSON', bodyClass };
   if (!body.length) return { firstThrow:'EMPTY_BODY', errorClass:'NON_JSON', bodyClass };
+  if (!/json/i.test(contentType)) return { firstThrow:'NON_JSON_CONTENT_TYPE', errorClass:'NON_JSON', bodyClass };
   if (!jsonParseOk) return { firstThrow:'JSON_PARSE_FAILURE', errorClass:'JSON_PARSE_FAILURE', bodyClass };
   if (!contractOk) return { firstThrow:'CONTRACT_FAILURE', errorClass:'CONTRACT_FAILURE', bodyClass };
   return { firstThrow:'NONE', errorClass:'NONE', bodyClass:'JSON' };
@@ -16,6 +16,7 @@ function classify({ curlExit=0, httpStatus=200, contentType='application/json', 
 const cases = [
   [{curlExit:7}, 'CURL_FAILURE_7', 'CURL_FAILURE'],
   [{httpStatus:302,contentType:'text/html',body:'<html/>',redirectCount:1}, 'HTTP_STATUS_302', 'HTTP_UNEXPECTED'],
+  [{httpStatus:401,contentType:'application/json',body:'{}'}, 'HTTP_STATUS_401', 'HTTP_UNEXPECTED'],
   [{httpStatus:403,contentType:'text/html',body:'<html/> '}, 'HTTP_STATUS_403', 'HTTP_UNEXPECTED'],
   [{httpStatus:500,contentType:'application/json',body:'{}'}, 'HTTP_STATUS_500', 'HTTP_UNEXPECTED'],
   [{httpStatus:200,contentType:'text/html',body:'<html/> '}, 'NON_JSON_CONTENT_TYPE', 'NON_JSON'],
@@ -29,7 +30,8 @@ for (const [input, firstThrow, errorClass] of cases) {
   assert.equal(got.errorClass, errorClass, JSON.stringify(input));
 }
 
-const workflow=fs.readFileSync('.github/workflows/deploy-cloudflare.yml','utf8');
+const observer=fs.readFileSync('.github/workflows/customer360-production-first-throw-observability.yml','utf8');
+const deploy=fs.readFileSync('.github/workflows/deploy-cloudflare.yml','utf8');
 for (const token of [
   'PRODUCTION_HEALTH_FETCH_STAGE',
   'PRODUCTION_HEALTH_CURL_EXIT',
@@ -43,17 +45,30 @@ for (const token of [
   'PRODUCTION_HEALTH_FIRST_THROW',
   'GITHUB_STEP_SUMMARY',
   '::error::PRODUCTION_HEALTH_FIRST_THROW:'
-]) assert.ok(workflow.includes(token), `missing workflow observability token ${token}`);
+]) assert.ok(observer.includes(token), `missing observer token ${token}`);
 
-assert.ok(workflow.includes('CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID'));
-assert.ok(workflow.includes('CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET'));
-assert.ok(workflow.includes('x-admin-token: $ADMIN_TOKEN'));
-assert.ok(workflow.includes("if(h.customer_id_generation!==false)"));
-assert.ok(workflow.includes("if(h.customer_line_auto_apply!==false||h.line_profile_auto_apply!==false)"));
-assert.ok(!workflow.includes('continue-on-error: true'));
-assert.ok(!workflow.includes('PRODUCTION_HEALTH_ALLOW_FAILURE'));
+assert.ok(observer.includes("github.event.workflow_run.event == 'workflow_dispatch'"));
+assert.ok(observer.includes("github.event.workflow_run.head_branch == 'main'"));
+assert.ok(observer.includes('--max-redirs 0'));
+assert.ok(observer.includes('CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID'));
+assert.ok(observer.includes('CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET'));
+assert.ok(observer.includes('x-admin-token: $ADMIN_TOKEN'));
+assert.ok(!observer.includes('continue-on-error: true'));
+assert.ok(!observer.includes('PRODUCTION_HEALTH_ALLOW_FAILURE'));
+assert.ok(!observer.includes('curl -X POST'));
+assert.ok(!observer.includes('curl -X PATCH'));
+assert.ok(!observer.includes('curl -X DELETE'));
+
+for (const contract of [
+  "if(h.customer_id_generation!==false)",
+  "if(h.customer_line_auto_apply!==false||h.line_profile_auto_apply!==false)",
+  "if(h.customer_line_extraction_mode!=='candidate-only')",
+  "if(h.customer360_identity_fallback!==false)",
+  "if(h.customer360_paid_ai_provider_active!==false)",
+  "if(h.line_event_direction!=='incoming'||h.line_event_receive_status!=='received')"
+]) assert.ok(deploy.includes(contract), `deploy verifier contract changed or missing: ${contract}`);
 
 console.log('CUSTOMER360_PRODUCTION_HEALTH_FIRST_THROW_OBSERVABILITY_TEST=PASS');
-console.log('SCENARIOS=A,B,C,D,E,F,G,H');
+console.log('SCENARIOS=A,B,C401,C403,D,E,F,G,H');
 console.log('SECRET_VALUE_LOGGED=0');
 console.log('VERIFIER_CONTRACT_WEAKENED=0');
