@@ -13,7 +13,7 @@ const preAssert=pos('Assert identity sequence monotonic before deploy');
 const deploy=pos('Deploy customer-crm-api');
 const postVerify=pos('Verify identity sequence state (READ ONLY)');
 const postAssert=pos('Assert D1 verification results');
-const http=pos('Verify deployed Worker safety (READ ONLY HTTP)');
+const http=pos('Assert Production Customer360 health contract');
 
 assert.ok(preflightRead<classify,'read-only sequence state must be available before classification');
 assert.ok(classify<preflightStop,'classification must precede successful preflight stop');

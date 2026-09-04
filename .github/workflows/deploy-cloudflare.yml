@@ -562,40 +562,93 @@ jobs:
           printf '%s' "$SEQUENCE_OUTPUT" | node scripts/assert-customer-identity-sequence-monotonic.mjs
           echo 'POST_DEPLOY_IDENTITY_SEQUENCE=PASS'
 
-      - name: Verify deployed Worker safety (READ ONLY HTTP)
+      - name: Verify Production auth inputs
         if: ${{ inputs.mode == 'deploy' }}
         shell: bash
         env:
           PRODUCTION_BASE_URL: https://customer-crm-api.ohw3rz5578d277e.workers.dev
-          DEPLOYMENT_REFERENCE_URL: ${{ steps.deploy_worker.outputs.deployment-url }}
           CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
           CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
           ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}
         run: |
           set -euo pipefail
           for v in PRODUCTION_BASE_URL CF_ACCESS_CLIENT_ID CF_ACCESS_CLIENT_SECRET ADMIN_TOKEN; do
-            test -n "${!v}" || { echo "::error::$v missing"; exit 1; }
+            if [[ -z "${!v}" ]]; then
+              echo "::error::PRODUCTION_AUTH_INPUT_MISSING:$v"
+              exit 1
+            fi
           done
-          curl --fail --silent --show-error --max-time 15 \
+          echo 'PRODUCTION_AUTH_INPUTS=PASS'
+
+      - name: Fetch Production health READ ONLY
+        if: ${{ inputs.mode == 'deploy' }}
+        shell: bash
+        env:
+          PRODUCTION_BASE_URL: https://customer-crm-api.ohw3rz5578d277e.workers.dev
+          CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+          ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}
+        run: |
+          set -euo pipefail
+          body=/tmp/customer-crm-health.json
+          headers=/tmp/customer-crm-health.headers
+          http_code="$(curl --silent --show-error --max-time 15 \
+            --output "$body" \
+            --dump-header "$headers" \
+            --write-out '%{http_code}' \
             -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" \
             -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET" \
             -H "x-admin-token: $ADMIN_TOKEN" \
             -H 'Accept: application/json' \
-            "$PRODUCTION_BASE_URL/health" >/tmp/customer-crm-health.json
-          test -s /tmp/customer-crm-health.json
+            "$PRODUCTION_BASE_URL/health")" || {
+              rc=$?
+              echo "::error::PRODUCTION_HEALTH_CURL_FAILURE:$rc"
+              exit 1
+            }
+          content_type="$(awk 'BEGIN{IGNORECASE=1} /^content-type:/{sub(/^[^:]*:[[:space:]]*/,""); sub(/\r$/,""); print}' "$headers" | tail -1)"
+          response_size="$(wc -c < "$body" | tr -d '[:space:]')"
+          redirect_location="$(awk 'BEGIN{IGNORECASE=1} /^location:/{print "PRESENT"}' "$headers" | tail -1)"
+          echo "PRODUCTION_HEALTH_HTTP_STATUS=$http_code"
+          echo "PRODUCTION_HEALTH_CONTENT_TYPE=${content_type:-MISSING}"
+          echo "PRODUCTION_HEALTH_RESPONSE_SIZE=$response_size"
+          echo "PRODUCTION_HEALTH_REDIRECT=${redirect_location:-NONE}"
+          case "$http_code" in
+            2??) ;;
+            3??) echo "::error::PRODUCTION_HEALTH_REDIRECT:$http_code"; exit 1 ;;
+            *) echo "::error::PRODUCTION_HEALTH_HTTP_STATUS:$http_code"; exit 1 ;;
+          esac
+          if [[ ! -s "$body" ]]; then
+            echo '::error::PRODUCTION_HEALTH_EMPTY_BODY'
+            exit 1
+          fi
+          node <<'NODE'
+          const fs=require('fs');
+          try { JSON.parse(fs.readFileSync('/tmp/customer-crm-health.json','utf8')); }
+          catch { console.error('::error::PRODUCTION_HEALTH_INVALID_JSON'); process.exit(1); }
+          console.log('PRODUCTION_HEALTH_JSON_PARSE=PASS');
+          NODE
+
+      - name: Assert Production Customer360 health contract
+        if: ${{ inputs.mode == 'deploy' }}
+        shell: bash
+        env:
+          PRODUCTION_BASE_URL: https://customer-crm-api.ohw3rz5578d277e.workers.dev
+          DEPLOYMENT_REFERENCE_URL: ${{ steps.deploy_worker.outputs.deployment-url }}
+        run: |
+          set -euo pipefail
           node <<'NODE'
           const fs=require('fs');const h=JSON.parse(fs.readFileSync('/tmp/customer-crm-health.json','utf8'));
           for(const k of [
             'customer360_family_marketing_foundation','customer360_profile_enrichment','customer360_line_profile_extraction',
             'referrer_customer_id_exact_existing_customer_only','customer360_profile_composed_into_detail',
             'customer360_profile_enrichment_schema_available','customer360_family_metadata_available','customer360_field_evidence_available','customer360_notes_history_available'
-          ])if(h[k]!==true)throw new Error('HEALTH_MARKER:'+k);
-          if(h.customer_id_generation!==false)throw new Error('CUSTOMER_ID_GENERATION_NOT_FALSE');
-          if(h.customer_line_auto_apply!==false||h.line_profile_auto_apply!==false)throw new Error('AUTO_APPLY_NOT_FALSE');
-          if(h.customer_line_extraction_mode!=='candidate-only')throw new Error('CANDIDATE_ONLY_MODE_MISSING');
-          if(h.customer360_identity_fallback!==false)throw new Error('IDENTITY_FALLBACK_NOT_FALSE');
-          if(h.customer360_paid_ai_provider_active!==false)throw new Error('PAID_AI_PROVIDER_NOT_FALSE');
-          if(h.line_event_direction!=='incoming'||h.line_event_receive_status!=='received')throw new Error('LINE_CANONICAL_EVENT_CONTRACT');
+          ])if(h[k]!==true)throw new Error(`HEALTH_MARKER:${k}:expected=true:actual=${JSON.stringify(h[k])}`);
+          if(h.customer_id_generation!==false)throw new Error(`CUSTOMER_ID_GENERATION_NOT_FALSE:actual=${JSON.stringify(h.customer_id_generation)}`);
+          if(h.customer_line_auto_apply!==false||h.line_profile_auto_apply!==false)throw new Error(`AUTO_APPLY_NOT_FALSE:customer_line_auto_apply=${JSON.stringify(h.customer_line_auto_apply)}:line_profile_auto_apply=${JSON.stringify(h.line_profile_auto_apply)}`);
+          if(h.customer_line_extraction_mode!=='candidate-only')throw new Error(`CANDIDATE_ONLY_MODE_MISSING:actual=${JSON.stringify(h.customer_line_extraction_mode)}`);
+          if(h.customer360_identity_fallback!==false)throw new Error(`IDENTITY_FALLBACK_NOT_FALSE:actual=${JSON.stringify(h.customer360_identity_fallback)}`);
+          if(h.customer360_paid_ai_provider_active!==false)throw new Error(`PAID_AI_PROVIDER_NOT_FALSE:actual=${JSON.stringify(h.customer360_paid_ai_provider_active)}`);
+          if(h.line_event_direction!=='incoming'||h.line_event_receive_status!=='received')throw new Error(`LINE_CANONICAL_EVENT_CONTRACT:direction=${JSON.stringify(h.line_event_direction)}:receive_status=${JSON.stringify(h.line_event_receive_status)}`);
           console.log('POST_DEPLOY_HTTP_READ_ONLY=PASS');
           console.log('CUSTOMER360_PROFILE_SCHEMA=PASS');
           console.log('CUSTOMER360_CANDIDATE_ONLY=PASS');
