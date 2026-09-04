@@ -26,7 +26,6 @@ assert.equal(attribution({currentId:'22222222-2222-4222-8222-222222222222'}), 'D
 function classify({ sourceGuard='PASS', postIdentity='PASS', curlExit=0, httpStatus=200, contentType='application/json', redirectCount=0, body='', jsonParseOk=true, contractOk=true, payloadKind='object' }) {
   const bodyClass = body.length === 0 ? 'EMPTY' : /html/i.test(contentType) || /^\s*</.test(body) ? 'HTML' : /json/i.test(contentType) ? (jsonParseOk ? 'JSON' : 'TEXT') : 'TEXT';
   if (sourceGuard === 'DRIFT_BEFORE_FETCH') return { firstThrow:'SOURCE_SHA_DRIFT_BEFORE_FETCH', errorClass:'SOURCE_DRIFT', bodyClass };
-  if (sourceGuard === 'DRIFT_AFTER_FETCH') return { firstThrow:'SOURCE_SHA_DRIFT_AFTER_FETCH', errorClass:'SOURCE_DRIFT', bodyClass };
   if (curlExit !== 0) return { firstThrow: `CURL_FAILURE_${curlExit}`, errorClass:'CURL_FAILURE', bodyClass };
   if (redirectCount > 0 || (httpStatus >= 300 && httpStatus < 400)) return { firstThrow:`HTTP_STATUS_${httpStatus}`, errorClass:'HTTP_UNEXPECTED', bodyClass };
   if (httpStatus !== 200) return { firstThrow:`HTTP_STATUS_${httpStatus}`, errorClass:'HTTP_UNEXPECTED', bodyClass };
@@ -35,6 +34,7 @@ function classify({ sourceGuard='PASS', postIdentity='PASS', curlExit=0, httpSta
   if (!jsonParseOk) return { firstThrow:'JSON_PARSE_FAILURE', errorClass:'JSON_PARSE_FAILURE', bodyClass };
   if (payloadKind !== 'object') return { firstThrow:'CONTRACT_PAYLOAD_NOT_OBJECT', errorClass:'CONTRACT_FAILURE', bodyClass };
   if (!contractOk) return { firstThrow:'CONTRACT_FAILURE', errorClass:'CONTRACT_FAILURE', bodyClass };
+  if (sourceGuard === 'DRIFT_AFTER_FETCH') return { firstThrow:'SOURCE_SHA_DRIFT_AFTER_FETCH', errorClass:'SOURCE_DRIFT', bodyClass };
   if (postIdentity === 'UNAVAILABLE') return { firstThrow:'CURRENT_PRODUCTION_VERSION_ID_UNAVAILABLE_AFTER_HEALTH', errorClass:'ATTRIBUTION_FAILURE', bodyClass };
   if (postIdentity === 'SUPERSEDED') return { firstThrow:'DEPLOYMENT_SUPERSEDED_DURING_OBSERVATION', errorClass:'ATTRIBUTION_FAILURE', bodyClass };
   return { firstThrow:'NONE', errorClass:'NONE', bodyClass:'JSON' };
@@ -42,7 +42,9 @@ function classify({ sourceGuard='PASS', postIdentity='PASS', curlExit=0, httpSta
 
 const cases = [
   [{sourceGuard:'DRIFT_BEFORE_FETCH'}, 'SOURCE_SHA_DRIFT_BEFORE_FETCH', 'SOURCE_DRIFT'],
-  [{sourceGuard:'DRIFT_AFTER_FETCH',httpStatus:403}, 'SOURCE_SHA_DRIFT_AFTER_FETCH', 'SOURCE_DRIFT'],
+  [{sourceGuard:'DRIFT_AFTER_FETCH',httpStatus:403,body:'{}'}, 'HTTP_STATUS_403', 'HTTP_UNEXPECTED'],
+  [{sourceGuard:'DRIFT_AFTER_FETCH',curlExit:7,body:'{}'}, 'CURL_FAILURE_7', 'CURL_FAILURE'],
+  [{sourceGuard:'DRIFT_AFTER_FETCH',httpStatus:200,contentType:'application/json',body:'{}',contractOk:true}, 'SOURCE_SHA_DRIFT_AFTER_FETCH', 'SOURCE_DRIFT'],
   [{postIdentity:'UNAVAILABLE',body:'{}'}, 'CURRENT_PRODUCTION_VERSION_ID_UNAVAILABLE_AFTER_HEALTH', 'ATTRIBUTION_FAILURE'],
   [{postIdentity:'SUPERSEDED',body:'{}'}, 'DEPLOYMENT_SUPERSEDED_DURING_OBSERVATION', 'ATTRIBUTION_FAILURE'],
   [{postIdentity:'SUPERSEDED',curlExit:7,body:'{}'}, 'CURL_FAILURE_7', 'CURL_FAILURE'],
@@ -85,12 +87,13 @@ for (const token of [
   'PRODUCTION_HEALTH_BODY_CLASS','PRODUCTION_HEALTH_BODY_LENGTH','PRODUCTION_HEALTH_JSON_PARSE_OK','PRODUCTION_HEALTH_ERROR_CLASS',
   'PRODUCTION_HEALTH_FIRST_THROW','SOURCE_SHA_DRIFT_BEFORE_FETCH','SOURCE_SHA_DRIFT_AFTER_FETCH','GITHUB_STEP_SUMMARY',
   '::error::PRODUCTION_HEALTH_FIRST_THROW:','error_class=CONTRACT_FAILURE','fetch_stage=CONTRACT','CONTRACT_PAYLOAD_NOT_OBJECT','CONTRACT_EVALUATION_FAILURE',
-  'if [[ "$first_throw" == NONE && "$attribution_failure" != NONE ]]'
+  'if [[ "$first_throw" == NONE && "$attribution_failure" != NONE ]]','attribution_error_class=SOURCE_DRIFT'
 ]) assert.ok(observer.includes(token), `missing observer token ${token}`);
 
 const curlPos=observer.indexOf('elif [[ "$curl_exit" != 0 ]]');
+const driftAfterAttributionPos=observer.indexOf('if [[ "$source_guard" == DRIFT_AFTER_FETCH ]]', observer.indexOf('attribution_failure=NONE'));
 const attributionFallbackPos=observer.indexOf('if [[ "$first_throw" == NONE && "$attribution_failure" != NONE ]]');
-assert.ok(curlPos>=0 && attributionFallbackPos>curlPos,'health FIRST_THROW classification must precede attribution-only fallback');
+assert.ok(curlPos>=0 && driftAfterAttributionPos>curlPos && attributionFallbackPos>driftAfterAttributionPos,'post-fetch source drift must be attribution-only after health FIRST_THROW classification');
 
 assert.ok(observer.includes("format('customer360-production-observer-{0}', github.event.workflow_run.id)"));
 assert.ok(!observer.includes('group: customer-crm-production-deploy'));
@@ -124,6 +127,6 @@ for (const contract of canonicalContracts) {
 }
 
 console.log('CUSTOMER360_PRODUCTION_HEALTH_FIRST_THROW_OBSERVABILITY_TEST=PASS');
-console.log('SCENARIOS=ATTRIBUTION_EXACT,PREFLIGHT_NOT_PRODUCTION,DEPLOY_NOT_REACHED,DEPLOY_FAILED,DEPLOYMENT_ID_MISSING,SOURCE_SHA_MISMATCH,SUPERSEDED_BEFORE,SUPERSEDED_DURING,POST_ID_UNAVAILABLE,CURL,3XX,HTML,INVALID_JSON,CONTRACT,COMBINED_CURL_SUPERSEDED,COMBINED_HTTP_UNAVAILABLE,COMBINED_CONTRACT_SUPERSEDED,CANONICAL');
+console.log('SCENARIOS=ATTRIBUTION_EXACT,PREFLIGHT_NOT_PRODUCTION,DEPLOY_NOT_REACHED,DEPLOY_FAILED,DEPLOYMENT_ID_MISSING,SOURCE_SHA_MISMATCH,SUPERSEDED_BEFORE,SUPERSEDED_DURING,POST_ID_UNAVAILABLE,CURL,3XX,HTML,INVALID_JSON,CONTRACT,COMBINED_CURL_SUPERSEDED,COMBINED_HTTP_UNAVAILABLE,COMBINED_CONTRACT_SUPERSEDED,DRIFT_AFTER_HTTP,DRIFT_AFTER_CURL,DRIFT_AFTER_HEALTH_PASS,CANONICAL');
 console.log('SECRET_VALUE_LOGGED=0');
 console.log('VERIFIER_CONTRACT_WEAKENED=0');
