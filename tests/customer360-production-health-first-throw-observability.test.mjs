@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
-function classify({ curlExit=0, httpStatus=200, contentType='application/json', redirectCount=0, body='', jsonParseOk=true, contractOk=true, payloadKind='object' }) {
+function classify({ sourceGuard='PASS', curlExit=0, httpStatus=200, contentType='application/json', redirectCount=0, body='', jsonParseOk=true, contractOk=true, payloadKind='object' }) {
   const bodyClass = body.length === 0 ? 'EMPTY' : /html/i.test(contentType) || /^\s*</.test(body) ? 'HTML' : /json/i.test(contentType) ? (jsonParseOk ? 'JSON' : 'TEXT') : 'TEXT';
+  if (sourceGuard === 'DRIFT_BEFORE_FETCH') return { firstThrow:'SOURCE_SHA_DRIFT_BEFORE_FETCH', errorClass:'SOURCE_DRIFT', bodyClass };
+  if (sourceGuard === 'DRIFT_AFTER_FETCH') return { firstThrow:'SOURCE_SHA_DRIFT_AFTER_FETCH', errorClass:'SOURCE_DRIFT', bodyClass };
   if (curlExit !== 0) return { firstThrow: `CURL_FAILURE_${curlExit}`, errorClass:'CURL_FAILURE', bodyClass };
   if (redirectCount > 0 || (httpStatus >= 300 && httpStatus < 400)) return { firstThrow:`HTTP_STATUS_${httpStatus}`, errorClass:'HTTP_UNEXPECTED', bodyClass };
   if (httpStatus !== 200) return { firstThrow:`HTTP_STATUS_${httpStatus}`, errorClass:'HTTP_UNEXPECTED', bodyClass };
@@ -15,6 +17,8 @@ function classify({ curlExit=0, httpStatus=200, contentType='application/json', 
 }
 
 const cases = [
+  [{sourceGuard:'DRIFT_BEFORE_FETCH'}, 'SOURCE_SHA_DRIFT_BEFORE_FETCH', 'SOURCE_DRIFT'],
+  [{sourceGuard:'DRIFT_AFTER_FETCH',httpStatus:403}, 'SOURCE_SHA_DRIFT_AFTER_FETCH', 'SOURCE_DRIFT'],
   [{curlExit:7}, 'CURL_FAILURE_7', 'CURL_FAILURE'],
   [{httpStatus:302,contentType:'text/html',body:'<html/>',redirectCount:1}, 'HTTP_STATUS_302', 'HTTP_UNEXPECTED'],
   [{httpStatus:401,contentType:'application/json',body:'{}'}, 'HTTP_STATUS_401', 'HTTP_UNEXPECTED'],
@@ -36,6 +40,10 @@ const observer=fs.readFileSync('.github/workflows/customer360-production-first-t
 const deploy=fs.readFileSync('.github/workflows/deploy-cloudflare.yml','utf8');
 for (const token of [
   'PRODUCTION_HEALTH_FETCH_STAGE',
+  'PRODUCTION_HEALTH_SOURCE_GUARD',
+  'PRODUCTION_HEALTH_TRIGGER_SHA',
+  'PRODUCTION_HEALTH_CURRENT_MAIN_BEFORE',
+  'PRODUCTION_HEALTH_CURRENT_MAIN_AFTER',
   'PRODUCTION_HEALTH_CURL_EXIT',
   'PRODUCTION_HEALTH_HTTP_STATUS',
   'PRODUCTION_HEALTH_CONTENT_TYPE',
@@ -45,6 +53,8 @@ for (const token of [
   'PRODUCTION_HEALTH_JSON_PARSE_OK',
   'PRODUCTION_HEALTH_ERROR_CLASS',
   'PRODUCTION_HEALTH_FIRST_THROW',
+  'SOURCE_SHA_DRIFT_BEFORE_FETCH',
+  'SOURCE_SHA_DRIFT_AFTER_FETCH',
   'GITHUB_STEP_SUMMARY',
   '::error::PRODUCTION_HEALTH_FIRST_THROW:',
   'error_class=CONTRACT_FAILURE',
@@ -55,6 +65,8 @@ for (const token of [
 
 assert.ok(observer.includes("github.event.workflow_run.event == 'workflow_dispatch'"));
 assert.ok(observer.includes("github.event.workflow_run.head_branch == 'main'"));
+assert.ok(observer.includes('TRIGGER_SHA: ${{ github.event.workflow_run.head_sha }}'));
+assert.ok(observer.includes('git ls-remote https://github.com/ohw3rz5578d277e-collab/customer-crm.git refs/heads/main'));
 assert.ok(observer.includes('--max-redirs 0'));
 assert.ok(observer.includes("!h || typeof h!=='object' || Array.isArray(h)"));
 assert.ok(observer.includes('CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID'));
@@ -78,6 +90,6 @@ for (const contract of canonicalContracts) {
 }
 
 console.log('CUSTOMER360_PRODUCTION_HEALTH_FIRST_THROW_OBSERVABILITY_TEST=PASS');
-console.log('SCENARIOS=A,B,C401,C403,D,E,F,NULL,G,H');
+console.log('SCENARIOS=SOURCE_DRIFT_BEFORE,SOURCE_DRIFT_AFTER,A,B,C401,C403,D,E,F,NULL,G,H');
 console.log('SECRET_VALUE_LOGGED=0');
 console.log('VERIFIER_CONTRACT_WEAKENED=0');
