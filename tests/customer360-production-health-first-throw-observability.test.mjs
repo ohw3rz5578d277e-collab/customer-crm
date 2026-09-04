@@ -1,11 +1,31 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
+function attribution({ releaseJob=true, deployReached=true, deployResult='success', sourceSha='a'.repeat(40), triggerSha='a'.repeat(40), deploymentId='11111111-1111-4111-8111-111111111111', currentId='11111111-1111-4111-8111-111111111111' }={}) {
+  if (!releaseJob) return 'NOT_A_PRODUCTION_DEPLOY';
+  if (!deployReached) return 'DEPLOY_NOT_REACHED';
+  if (deployResult !== 'success') return 'DEPLOY_FAILED';
+  if (sourceSha !== triggerSha) return 'SOURCE_SHA_MISMATCH';
+  if (!deploymentId) return 'DEPLOYMENT_ID_MISSING';
+  if (!currentId) return 'CURRENT_DEPLOYMENT_ID_MISSING';
+  if (deploymentId !== currentId) return 'DEPLOYMENT_SUPERSEDED';
+  return 'EXACT_MATCH';
+}
+
+assert.equal(attribution(), 'EXACT_MATCH');
+assert.equal(attribution({releaseJob:false}), 'NOT_A_PRODUCTION_DEPLOY');
+assert.equal(attribution({deployReached:false}), 'DEPLOY_NOT_REACHED');
+assert.equal(attribution({deployResult:'failure'}), 'DEPLOY_FAILED');
+assert.equal(attribution({deploymentId:''}), 'DEPLOYMENT_ID_MISSING');
+assert.equal(attribution({sourceSha:'b'.repeat(40)}), 'SOURCE_SHA_MISMATCH');
+assert.equal(attribution({currentId:''}), 'CURRENT_DEPLOYMENT_ID_MISSING');
+assert.equal(attribution({currentId:'22222222-2222-4222-8222-222222222222'}), 'DEPLOYMENT_SUPERSEDED');
+
 function classify({ sourceGuard='PASS', curlExit=0, httpStatus=200, contentType='application/json', redirectCount=0, body='', jsonParseOk=true, contractOk=true, payloadKind='object' }) {
   const bodyClass = body.length === 0 ? 'EMPTY' : /html/i.test(contentType) || /^\s*</.test(body) ? 'HTML' : /json/i.test(contentType) ? (jsonParseOk ? 'JSON' : 'TEXT') : 'TEXT';
   if (sourceGuard === 'DRIFT_BEFORE_FETCH') return { firstThrow:'SOURCE_SHA_DRIFT_BEFORE_FETCH', errorClass:'SOURCE_DRIFT', bodyClass };
   if (sourceGuard === 'DRIFT_AFTER_FETCH') return { firstThrow:'SOURCE_SHA_DRIFT_AFTER_FETCH', errorClass:'SOURCE_DRIFT', bodyClass };
-  if (curlExit !== 0) return { firstThrow: `CURL_FAILURE_${curlExit}`, errorClass:'CURL_FAILURE', bodyClass };
+  if (curlExit !== 0) return { firstThrow:`CURL_FAILURE_${curlExit}`, errorClass:'CURL_FAILURE', bodyClass };
   if (redirectCount > 0 || (httpStatus >= 300 && httpStatus < 400)) return { firstThrow:`HTTP_STATUS_${httpStatus}`, errorClass:'HTTP_UNEXPECTED', bodyClass };
   if (httpStatus !== 200) return { firstThrow:`HTTP_STATUS_${httpStatus}`, errorClass:'HTTP_UNEXPECTED', bodyClass };
   if (!body.length) return { firstThrow:'EMPTY_BODY', errorClass:'NON_JSON', bodyClass };
@@ -39,35 +59,20 @@ for (const [input, firstThrow, errorClass] of cases) {
 const observer=fs.readFileSync('.github/workflows/customer360-production-first-throw-observability.yml','utf8');
 const deploy=fs.readFileSync('.github/workflows/deploy-cloudflare.yml','utf8');
 for (const token of [
-  'actions: read',
-  'Verify triggering run reached Worker deploy',
-  "j.name==='Exact-SHA Production release gate'",
-  "s.name==='Deploy customer-crm-api' && s.conclusion==='success'",
-  "steps.trigger_deploy.outputs.eligible == 'true'",
-  'TRIGGER_RUN_WORKER_DEPLOY=CONFIRMED',
-  'OBSERVATION_SKIPPED=TRIGGER_RUN_DID_NOT_DEPLOY',
-  'PRODUCTION_HEALTH_FETCH_STAGE',
-  'PRODUCTION_HEALTH_SOURCE_GUARD',
-  'PRODUCTION_HEALTH_TRIGGER_SHA',
-  'PRODUCTION_HEALTH_CURRENT_MAIN_BEFORE',
-  'PRODUCTION_HEALTH_CURRENT_MAIN_AFTER',
-  'PRODUCTION_HEALTH_CURL_EXIT',
-  'PRODUCTION_HEALTH_HTTP_STATUS',
-  'PRODUCTION_HEALTH_CONTENT_TYPE',
-  'PRODUCTION_HEALTH_REDIRECT_COUNT',
-  'PRODUCTION_HEALTH_BODY_CLASS',
-  'PRODUCTION_HEALTH_BODY_LENGTH',
-  'PRODUCTION_HEALTH_JSON_PARSE_OK',
-  'PRODUCTION_HEALTH_ERROR_CLASS',
-  'PRODUCTION_HEALTH_FIRST_THROW',
-  'SOURCE_SHA_DRIFT_BEFORE_FETCH',
-  'SOURCE_SHA_DRIFT_AFTER_FETCH',
-  'GITHUB_STEP_SUMMARY',
-  '::error::PRODUCTION_HEALTH_FIRST_THROW:',
-  'error_class=CONTRACT_FAILURE',
-  'fetch_stage=CONTRACT',
-  'CONTRACT_PAYLOAD_NOT_OBJECT',
-  'CONTRACT_EVALUATION_FAILURE'
+  'actions: read','Verify triggering Production deploy provenance',"j.name==='Exact-SHA Production release gate'",
+  "s=>s.name==='Deploy customer-crm-api'",'/actions/jobs/$release_job_id/logs','Current Version ID:',
+  'AUTHORIZED_SHA=','CHECKOUT_SHA=','wrangler@4.33.1 deployments status --name customer-crm-api --json',
+  "Number(v.percentage)===100","active[0].version_id",'OBSERVER_ATTRIBUTION_RESULT=NOT_A_PRODUCTION_DEPLOY',
+  'OBSERVER_ATTRIBUTION_RESULT=DEPLOY_NOT_REACHED','OBSERVER_ATTRIBUTION_RESULT=DEPLOY_FAILED',
+  'OBSERVER_ATTRIBUTION_RESULT=DEPLOYMENT_ID_MISSING','OBSERVER_ATTRIBUTION_RESULT=SOURCE_SHA_MISMATCH',
+  'OBSERVER_ATTRIBUTION_RESULT=DEPLOYMENT_SUPERSEDED','OBSERVER_ATTRIBUTION_RESULT=EXACT_MATCH',
+  "steps.provenance.outputs.allowed == 'true'",'SOURCE_MODE=deploy','DEPLOY_STEP_REACHED=true','DEPLOY_RESULT=success',
+  'EXPECTED_WORKER_VERSION_ID','CURRENT_PRODUCTION_VERSION_ID','PRODUCTION_HEALTH_FETCH_STAGE','PRODUCTION_HEALTH_SOURCE_GUARD',
+  'PRODUCTION_HEALTH_TRIGGER_SHA','PRODUCTION_HEALTH_CURRENT_MAIN_BEFORE','PRODUCTION_HEALTH_CURRENT_MAIN_AFTER',
+  'PRODUCTION_HEALTH_CURL_EXIT','PRODUCTION_HEALTH_HTTP_STATUS','PRODUCTION_HEALTH_CONTENT_TYPE','PRODUCTION_HEALTH_REDIRECT_COUNT',
+  'PRODUCTION_HEALTH_BODY_CLASS','PRODUCTION_HEALTH_BODY_LENGTH','PRODUCTION_HEALTH_JSON_PARSE_OK','PRODUCTION_HEALTH_ERROR_CLASS',
+  'PRODUCTION_HEALTH_FIRST_THROW','SOURCE_SHA_DRIFT_BEFORE_FETCH','SOURCE_SHA_DRIFT_AFTER_FETCH','GITHUB_STEP_SUMMARY',
+  '::error::PRODUCTION_HEALTH_FIRST_THROW:','error_class=CONTRACT_FAILURE','fetch_stage=CONTRACT','CONTRACT_PAYLOAD_NOT_OBJECT','CONTRACT_EVALUATION_FAILURE'
 ]) assert.ok(observer.includes(token), `missing observer token ${token}`);
 
 assert.ok(observer.includes("github.event.workflow_run.event == 'workflow_dispatch'"));
@@ -99,6 +104,6 @@ for (const contract of canonicalContracts) {
 }
 
 console.log('CUSTOMER360_PRODUCTION_HEALTH_FIRST_THROW_OBSERVABILITY_TEST=PASS');
-console.log('SCENARIOS=DEPLOY_REACHED_GUARD,SOURCE_DRIFT_BEFORE,SOURCE_DRIFT_AFTER,A,B,C401,C403,D,E,F,NULL,G,H');
+console.log('SCENARIOS=ATTRIBUTION_EXACT,PREFLIGHT,DEPLOY_NOT_REACHED,DEPLOY_FAILED,DEPLOYMENT_ID_MISSING,SOURCE_SHA_MISMATCH,SUPERSEDED,CURL,3XX,HTML,INVALID_JSON,CONTRACT,CANONICAL');
 console.log('SECRET_VALUE_LOGGED=0');
 console.log('VERIFIER_CONTRACT_WEAKENED=0');
