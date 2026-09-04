@@ -107,7 +107,12 @@ assert.ok(
 assert.ok(bridge.includes('actions/workflows/production-access-auth-probe.yml/dispatches'),'bridge must target only dedicated Access probe workflow');
 assert.ok(bridge.includes("inputs':{'expected_sha':os.environ['EXPECTED_SHA']}") || bridge.includes("'inputs':{'expected_sha':os.environ['EXPECTED_SHA']}"),'bridge must forward exact SHA');
 assert.ok(bridge.includes('PRODUCTION_WRITE=0'),'bridge write-zero evidence missing');
-assert.doesNotMatch(bridge,/deploy-cloudflare\.yml/,'Access probe bridge must not dispatch Production deploy workflow');
+assert.ok(bridge.includes('deploy-cloudflare.yml production-access-auth-probe.yml'),'bridge may reference deploy workflow only for occupancy inspection');
+assert.doesNotMatch(
+  bridge,
+  /actions\/workflows\/deploy-cloudflare\.yml\/dispatches/,
+  'Access probe bridge must not dispatch Production deploy workflow'
+);
 assert.doesNotMatch(bridge,/confirm_production=true/,'Access probe command must not carry deploy confirmation');
 
 assert.ok(releaseBridge.includes('/crm-production-deploy confirm_production=true sha=([0-9a-f]{40})'),'existing deploy confirmation contract must remain unchanged');
