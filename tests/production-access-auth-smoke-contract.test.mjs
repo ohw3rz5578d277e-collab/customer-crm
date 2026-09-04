@@ -3,6 +3,7 @@ import fs from 'node:fs';
 
 const workflow=fs.readFileSync('.github/workflows/production-browser-smoke-auth.yml','utf8');
 const bridge=fs.readFileSync('.github/workflows/dispatch-production-deploy-from-issue.yml','utf8');
+const legacyTrigger=fs.readFileSync('.github/workflows/trigger-production-browser-smoke-temp.yml','utf8');
 
 assert.match(workflow,/workflow_dispatch:\s*\n\s*inputs:\s*\n\s*expected_sha:/,'auth smoke must require expected_sha');
 assert.match(workflow,/required:\s*true/,'expected_sha must be required');
@@ -36,6 +37,10 @@ assert.ok(bridge.includes("release_mode='auth-smoke'"),'bridge must classify aut
 assert.ok(bridge.includes("dispatch_workflow='production-browser-smoke-auth.yml'"),'bridge must target read-only auth smoke workflow');
 assert.ok(bridge.includes("inputs={'expected_sha':sha}"),'auth smoke dispatch must carry exact SHA only');
 assert.ok(!/auth-smoke[\s\S]{0,500}confirm_production=true/.test(bridge),'auth smoke must not inherit deploy confirmation semantics');
+assert.ok(legacyTrigger.includes('EXPECTED_SHA: ${{ github.sha }}'),'legacy trigger must pin the triggering main SHA');
+assert.ok(legacyTrigger.includes('-f "inputs[expected_sha]=$EXPECTED_SHA"'),'legacy trigger must pass expected_sha to auth smoke workflow');
+assert.ok(legacyTrigger.includes('^[[0-9a-f]{40}$')===false,'legacy trigger contract must not use malformed SHA regex text');
+assert.ok(legacyTrigger.includes('^[0-9a-f]{40}$'),'legacy trigger must validate lowercase 40-hex SHA');
 
 console.log('PRODUCTION_ACCESS_AUTH_SMOKE_EXACT_SHA=PASS');
 console.log('PRODUCTION_ACCESS_AUTH_SMOKE_NO_FOLLOW_REDIRECT=PASS');
