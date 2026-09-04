@@ -22,8 +22,7 @@ jobs:
       github.actor == 'ohw3rz5578d277e-collab' &&
       github.event.comment.user.login == 'ohw3rz5578d277e-collab' &&
       (startsWith(github.event.comment.body, '/crm-production-preflight ') ||
-       startsWith(github.event.comment.body, '/crm-production-deploy ') ||
-       startsWith(github.event.comment.body, '/crm-production-auth-smoke '))
+       startsWith(github.event.comment.body, '/crm-production-deploy '))
     runs-on: ubuntu-latest
     timeout-minutes: 5
 
@@ -42,19 +41,12 @@ jobs:
 
           preflight_re='^/crm-production-preflight sha=([0-9a-f]{40})$'
           deploy_re='^/crm-production-deploy confirm_production=true sha=([0-9a-f]{40})$'
-          auth_smoke_re='^/crm-production-auth-smoke sha=([0-9a-f]{40})$'
 
           if [[ "$COMMAND_BODY" =~ $preflight_re ]]; then
             release_mode='preflight'
-            dispatch_workflow='deploy-cloudflare.yml'
             expected_sha="${BASH_REMATCH[1]}"
           elif [[ "$COMMAND_BODY" =~ $deploy_re ]]; then
             release_mode='deploy'
-            dispatch_workflow='deploy-cloudflare.yml'
-            expected_sha="${BASH_REMATCH[1]}"
-          elif [[ "$COMMAND_BODY" =~ $auth_smoke_re ]]; then
-            release_mode='auth-smoke'
-            dispatch_workflow='production-browser-smoke-auth.yml'
             expected_sha="${BASH_REMATCH[1]}"
           else
             echo '::error::Invalid production release command format.'
@@ -75,44 +67,32 @@ jobs:
           fi
 
           echo "release_mode=$release_mode" >> "$GITHUB_OUTPUT"
-          echo "dispatch_workflow=$dispatch_workflow" >> "$GITHUB_OUTPUT"
           echo "expected_sha=$expected_sha" >> "$GITHUB_OUTPUT"
           echo 'RELEASE_GATE_ISSUE=26'
           echo "RELEASE_MODE=$release_mode"
           echo "CURRENT_MAIN_SHA=$current_sha"
           echo "AUTHORIZED_SHA=$expected_sha"
-          echo "CANONICAL_WORKFLOW=$dispatch_workflow"
+          echo 'CANONICAL_WORKFLOW=deploy-cloudflare.yml'
           echo 'CANONICAL_EVENT=workflow_dispatch'
           echo "CANONICAL_MODE=$release_mode"
           if [[ "$release_mode" == 'preflight' ]]; then
             echo 'CONFIRM_PRODUCTION=NOT_REQUIRED_FOR_PREFLIGHT'
-          elif [[ "$release_mode" == 'deploy' ]]; then
-            echo 'CONFIRM_PRODUCTION=true'
           else
-            echo 'CONFIRM_PRODUCTION=NOT_APPLICABLE_READ_ONLY_AUTH_SMOKE'
+            echo 'CONFIRM_PRODUCTION=true'
           fi
           echo 'BRIDGE_PRODUCTION_WRITE=0'
 
-      - name: Dispatch validated workflow
+      - name: Dispatch existing canonical Production workflow
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           EXPECTED_SHA: ${{ steps.gate.outputs.expected_sha }}
           RELEASE_MODE: ${{ steps.gate.outputs.release_mode }}
-          DISPATCH_WORKFLOW: ${{ steps.gate.outputs.dispatch_workflow }}
         run: |
           set -euo pipefail
           payload="$(python3 - <<'PY'
           import json,os
-          mode=os.environ['RELEASE_MODE']
-          sha=os.environ['EXPECTED_SHA']
-          if mode in ('preflight','deploy'):
-              inputs={'mode':mode,'expected_sha':sha}
-          elif mode == 'auth-smoke':
-              inputs={'expected_sha':sha}
-          else:
-              raise SystemExit('invalid validated release mode')
-          print(json.dumps({'ref':'main','inputs':inputs}))
+          print(json.dumps({'ref':'main','inputs':{'mode':os.environ['RELEASE_MODE'],'expected_sha':os.environ['EXPECTED_SHA']}}))
           PY
           )"
           response_code="$(
@@ -123,7 +103,7 @@ jobs:
               -H "Authorization: Bearer $GH_TOKEN" \
               -H 'Accept: application/vnd.github+json' \
               -H 'X-GitHub-Api-Version: 2022-11-28' \
-              "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/${DISPATCH_WORKFLOW}/dispatches" \
+              "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/deploy-cloudflare.yml/dispatches" \
               -d "$payload"
           )"
           if [[ "$response_code" != '204' ]]; then
@@ -131,7 +111,7 @@ jobs:
             echo "::error::Workflow dispatch failed with HTTP $response_code"
             exit 1
           fi
-          echo "CANONICAL_WORKFLOW=$DISPATCH_WORKFLOW"
+          echo 'CANONICAL_WORKFLOW=deploy-cloudflare.yml'
           echo 'CANONICAL_EVENT=workflow_dispatch'
           echo "CANONICAL_MODE=$RELEASE_MODE"
           echo "DISPATCH_REQUESTED_FOR_SHA=$EXPECTED_SHA"
