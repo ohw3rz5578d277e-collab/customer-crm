@@ -79,7 +79,6 @@ jobs:
             echo 'CONFIRM_PRODUCTION=NOT_REQUIRED_FOR_PREFLIGHT'
           else
             echo 'CONFIRM_PRODUCTION=true'
-            echo 'CANONICAL_MODE=deploy'
           fi
           echo 'BRIDGE_PRODUCTION_WRITE=0'
 
@@ -91,7 +90,6 @@ jobs:
           RELEASE_MODE: ${{ steps.gate.outputs.release_mode }}
         run: |
           set -euo pipefail
-          # Canonical deploy compatibility contract remains exactly 'mode':'deploy' after strict command validation.
           payload="$(python3 - <<'PY'
           import json,os
           print(json.dumps({'ref':'main','inputs':{'mode':os.environ['RELEASE_MODE'],'expected_sha':os.environ['EXPECTED_SHA']}}))
