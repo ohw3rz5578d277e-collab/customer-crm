@@ -1,0 +1,337 @@
+name: Customer360 Production first-throw observability
+
+on:
+  workflow_run:
+    workflows: [Deploy customer-crm to Cloudflare]
+    types: [completed]
+
+permissions:
+  contents: read
+  actions: read
+
+# Every observer run is isolated from the canonical Production deploy queue. Immutable
+# Worker Version identity is checked before and after the health observation instead.
+concurrency:
+  group: ${{ format('customer360-production-observer-{0}', github.event.workflow_run.id) }}
+  cancel-in-progress: false
+
+jobs:
+  observe:
+    name: Observe Production health FIRST_THROW (READ ONLY)
+    if: ${{ github.event.workflow_run.event == 'workflow_dispatch' && github.event.workflow_run.head_branch == 'main' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    steps:
+      - name: Verify triggering Production deploy provenance
+        id: provenance
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TRIGGER_RUN_ID: ${{ github.event.workflow_run.id }}
+          TRIGGER_SHA: ${{ github.event.workflow_run.head_sha }}
+          REPOSITORY: ${{ github.repository }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          for v in GH_TOKEN TRIGGER_RUN_ID TRIGGER_SHA REPOSITORY CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID; do
+            [[ -n "${!v}" ]] || { echo "::error::PROVENANCE_INPUT_MISSING:$v"; exit 1; }
+          done
+
+          jobs=/tmp/trigger-run-jobs.json
+          curl --fail --silent --show-error \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/$REPOSITORY/actions/runs/$TRIGGER_RUN_ID/jobs?per_page=100" \
+            -o "$jobs"
+
+          readarray -t fields < <(node - "$jobs" <<'NODE'
+          const fs=require('fs');
+          const p=JSON.parse(fs.readFileSync(process.argv[2],'utf8'));
+          const release=(p.jobs||[]).find(j=>j.name==='Exact-SHA Production release gate');
+          if(!release){ console.log('MISSING_RELEASE_JOB'); process.exit(0); }
+          const deploy=(release.steps||[]).find(s=>s.name==='Deploy customer-crm-api');
+          console.log(String(release.id||''));
+          console.log(!deploy || deploy.conclusion==='skipped' ? 'NOT_REACHED' : String(deploy.conclusion||'NOT_REACHED'));
+          NODE
+          )
+
+          [[ "${fields[0]:-}" != MISSING_RELEASE_JOB && -n "${fields[0]:-}" ]] || {
+            echo 'OBSERVER_ATTRIBUTION_RESULT=NOT_A_PRODUCTION_DEPLOY'
+            echo '::error::SOURCE_RELEASE_JOB_MISSING'
+            exit 1
+          }
+          release_job_id="${fields[0]}"
+          deploy_result="${fields[1]:-NOT_REACHED}"
+
+          source_log=/tmp/source-release-job.log
+          curl --fail --silent --show-error --location \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/$REPOSITORY/actions/jobs/$release_job_id/logs" \
+            -o "$source_log"
+
+          source_mode="$(sed -n 's/.*RELEASE_MODE=\(preflight\|deploy\).*/\1/p' "$source_log" | tail -1)"
+          if [[ "$source_mode" == preflight ]]; then
+            echo 'SOURCE_MODE=preflight'
+            echo 'OBSERVER_ATTRIBUTION_RESULT=NOT_A_PRODUCTION_DEPLOY'
+            echo '::error::SOURCE_MODE_PREFLIGHT'
+            exit 1
+          fi
+          [[ "$source_mode" == deploy ]] || {
+            echo "SOURCE_MODE=${source_mode:-MISSING}"
+            echo 'OBSERVER_ATTRIBUTION_RESULT=NOT_A_PRODUCTION_DEPLOY'
+            echo '::error::SOURCE_MODE_NOT_DEPLOY'
+            exit 1
+          }
+
+          [[ "$deploy_result" != NOT_REACHED ]] || {
+            echo 'SOURCE_MODE=deploy'
+            echo 'OBSERVER_ATTRIBUTION_RESULT=DEPLOY_NOT_REACHED'
+            echo '::error::SOURCE_DEPLOY_NOT_REACHED'
+            exit 1
+          }
+          [[ "$deploy_result" == success ]] || {
+            echo 'SOURCE_MODE=deploy'
+            echo 'OBSERVER_ATTRIBUTION_RESULT=DEPLOY_FAILED'
+            echo "::error::SOURCE_DEPLOY_RESULT:$deploy_result"
+            exit 1
+          }
+
+          authorized_sha="$(sed -n 's/.*AUTHORIZED_SHA=\([0-9a-f]\{40\}\).*/\1/p' "$source_log" | tail -1)"
+          checkout_sha="$(sed -n 's/.*CHECKOUT_SHA=\([0-9a-f]\{40\}\).*/\1/p' "$source_log" | tail -1)"
+          expected_version_id="$(sed -n 's/.*Current Version ID: \([0-9a-fA-F-]\{36\}\).*/\1/p' "$source_log" | tr '[:upper:]' '[:lower:]' | tail -1)"
+
+          [[ -n "$authorized_sha" && -n "$checkout_sha" && "$authorized_sha" == "$TRIGGER_SHA" && "$checkout_sha" == "$TRIGGER_SHA" ]] || {
+            echo 'SOURCE_MODE=deploy'
+            echo 'OBSERVER_ATTRIBUTION_RESULT=SOURCE_SHA_MISMATCH'
+            echo '::error::SOURCE_SHA_BINDING_MISMATCH'
+            exit 1
+          }
+          [[ "$expected_version_id" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] || {
+            echo 'SOURCE_MODE=deploy'
+            echo 'OBSERVER_ATTRIBUTION_RESULT=DEPLOYMENT_ID_MISSING'
+            echo '::error::SOURCE_WORKER_VERSION_ID_MISSING'
+            exit 1
+          }
+
+          npx --yes wrangler@4.33.1 deployments status --name customer-crm-api --json > /tmp/current-production-deployment.json
+          current_version_id="$(node - /tmp/current-production-deployment.json <<'NODE'
+          const fs=require('fs');
+          const v=JSON.parse(fs.readFileSync(process.argv[2],'utf8'));
+          const d=Array.isArray(v)?v[0]:v;
+          const active=(d?.versions||[]).filter(v=>Number(v.percentage)===100);
+          if(active.length!==1||typeof active[0].version_id!=='string')process.exit(2);
+          process.stdout.write(active[0].version_id.toLowerCase());
+          NODE
+          )" || {
+            echo 'SOURCE_MODE=deploy'
+            echo 'OBSERVER_ATTRIBUTION_RESULT=CURRENT_DEPLOYMENT_ID_MISSING'
+            echo '::error::CURRENT_PRODUCTION_VERSION_ID_UNAVAILABLE'
+            exit 1
+          }
+
+          [[ "$current_version_id" == "$expected_version_id" ]] || {
+            echo 'SOURCE_MODE=deploy'
+            echo 'OBSERVER_ATTRIBUTION_RESULT=DEPLOYMENT_SUPERSEDED'
+            echo "SOURCE_RUN_ID=$TRIGGER_RUN_ID"
+            echo "SOURCE_SHA=$TRIGGER_SHA"
+            echo "EXPECTED_WORKER_VERSION_ID=$expected_version_id"
+            echo "CURRENT_PRODUCTION_VERSION_ID=$current_version_id"
+            echo '::error::PRODUCTION_DEPLOYMENT_IDENTITY_MISMATCH'
+            exit 1
+          }
+
+          echo 'allowed=true' >> "$GITHUB_OUTPUT"
+          echo "expected_version_id=$expected_version_id" >> "$GITHUB_OUTPUT"
+          echo 'SOURCE_MODE=deploy'
+          echo "SOURCE_RUN_ID=$TRIGGER_RUN_ID"
+          echo "SOURCE_SHA=$TRIGGER_SHA"
+          echo 'DEPLOY_STEP_REACHED=true'
+          echo 'DEPLOY_RESULT=success'
+          echo "EXPECTED_WORKER_VERSION_ID=$expected_version_id"
+          echo "CURRENT_PRODUCTION_VERSION_ID=$current_version_id"
+          echo 'OBSERVER_ATTRIBUTION_RESULT=EXACT_MATCH_BEFORE_HEALTH'
+
+      - name: Verify Production auth inputs
+        if: ${{ steps.provenance.outputs.allowed == 'true' }}
+        shell: bash
+        env:
+          CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+          ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}
+        run: |
+          set -euo pipefail
+          for v in CF_ACCESS_CLIENT_ID CF_ACCESS_CLIENT_SECRET ADMIN_TOKEN; do
+            [[ -n "${!v}" ]] || { echo "::error::PRODUCTION_AUTH_INPUT_MISSING:$v"; exit 1; }
+          done
+          echo 'PRODUCTION_AUTH_INPUTS=PASS'
+
+      - name: Capture Production health FIRST_THROW READ ONLY
+        if: ${{ steps.provenance.outputs.allowed == 'true' }}
+        shell: bash
+        env:
+          PRODUCTION_BASE_URL: https://customer-crm-api.ohw3rz5578d277e.workers.dev
+          TRIGGER_SHA: ${{ github.event.workflow_run.head_sha }}
+          EXPECTED_WORKER_VERSION_ID: ${{ steps.provenance.outputs.expected_version_id }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+          ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}
+        run: |
+          set -u
+          body=/tmp/customer-crm-health.body
+          headers=/tmp/customer-crm-health.headers
+          rm -f "$body" "$headers"
+          current_main_before="$(git ls-remote https://github.com/ohw3rz5578d277e-collab/customer-crm.git refs/heads/main | awk '{print $1}')"
+          source_guard=PASS
+          curl_exit=0
+          http_status=NOT_FETCHED
+          if [[ "$current_main_before" != "$TRIGGER_SHA" ]]; then
+            source_guard=DRIFT_BEFORE_FETCH
+            : > "$body"
+            : > "$headers"
+          else
+            http_status="$(curl --silent --show-error --max-time 15 --max-redirs 0 \
+              --output "$body" --dump-header "$headers" --write-out '%{http_code}' \
+              -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" \
+              -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET" \
+              -H "x-admin-token: $ADMIN_TOKEN" \
+              -H 'Accept: application/json' \
+              "$PRODUCTION_BASE_URL/health")" || curl_exit=$?
+          fi
+          [[ -f "$body" ]] || : > "$body"
+          [[ -f "$headers" ]] || : > "$headers"
+          current_main_after="$(git ls-remote https://github.com/ohw3rz5578d277e-collab/customer-crm.git refs/heads/main | awk '{print $1}')"
+          [[ "$source_guard" != PASS || "$current_main_after" == "$TRIGGER_SHA" ]] || source_guard=DRIFT_AFTER_FETCH
+
+          post_identity_result=PASS
+          post_version_id=MISSING
+          if [[ "$source_guard" == PASS ]]; then
+            if npx --yes wrangler@4.33.1 deployments status --name customer-crm-api --json > /tmp/current-production-deployment-after-health.json; then
+              post_version_id="$(node - /tmp/current-production-deployment-after-health.json <<'NODE'
+          const fs=require('fs');
+          const v=JSON.parse(fs.readFileSync(process.argv[2],'utf8'));
+          const d=Array.isArray(v)?v[0]:v;
+          const active=(d?.versions||[]).filter(v=>Number(v.percentage)===100);
+          if(active.length!==1||typeof active[0].version_id!=='string')process.exit(2);
+          process.stdout.write(active[0].version_id.toLowerCase());
+          NODE
+              )" || post_identity_result=UNAVAILABLE
+              if [[ "$post_identity_result" == PASS && "$post_version_id" != "$EXPECTED_WORKER_VERSION_ID" ]]; then
+                post_identity_result=SUPERSEDED
+              fi
+            else
+              post_identity_result=UNAVAILABLE
+            fi
+          fi
+
+          content_type="$(awk 'BEGIN{IGNORECASE=1} /^content-type:/{sub(/^[^:]*:[[:space:]]*/,"");sub(/\r$/,"");print}' "$headers" | tail -1)"
+          body_length="$(wc -c < "$body" | tr -d '[:space:]')"
+          redirect_count="$(awk 'BEGIN{IGNORECASE=1;c=0} /^location:/{c++} END{print c}' "$headers")"
+          body_class=TEXT
+          json_parse_ok=NO
+          if [[ "$body_length" == 0 ]]; then
+            body_class=EMPTY
+          elif [[ "$content_type" =~ [Jj][Ss][Oo][Nn] ]]; then
+            if node -e "JSON.parse(require('fs').readFileSync(process.argv[1],'utf8'))" "$body" >/dev/null 2>&1; then body_class=JSON; json_parse_ok=YES; fi
+          elif [[ "$content_type" =~ [Hh][Tt][Mm][Ll] ]] || head -c 64 "$body" | grep -Eiq '^[[:space:]]*<(html|!doctype)'; then
+            body_class=HTML
+          fi
+
+          first_throw=NONE
+          error_class=NONE
+          fetch_stage=COMPLETE
+          if [[ "$source_guard" == DRIFT_BEFORE_FETCH ]]; then first_throw=SOURCE_SHA_DRIFT_BEFORE_FETCH; error_class=SOURCE_DRIFT; fetch_stage=SOURCE_GUARD
+          elif [[ "$curl_exit" != 0 ]]; then first_throw="CURL_FAILURE_${curl_exit}"; error_class=CURL_FAILURE; fetch_stage=CURL
+          elif [[ "$http_status" =~ ^3 ]] || [[ "$redirect_count" != 0 ]]; then first_throw="HTTP_STATUS_${http_status:-UNKNOWN}"; error_class=HTTP_UNEXPECTED; fetch_stage=HTTP
+          elif [[ ! "$http_status" =~ ^2 ]]; then first_throw="HTTP_STATUS_${http_status:-UNKNOWN}"; error_class=HTTP_UNEXPECTED; fetch_stage=HTTP
+          elif [[ "$body_length" == 0 ]]; then first_throw=EMPTY_BODY; error_class=NON_JSON; fetch_stage=BODY
+          elif [[ ! "$content_type" =~ [Jj][Ss][Oo][Nn] ]]; then first_throw=NON_JSON_CONTENT_TYPE; error_class=NON_JSON; fetch_stage=CONTENT_TYPE
+          elif [[ "$json_parse_ok" != YES ]]; then first_throw=JSON_PARSE_FAILURE; error_class=JSON_PARSE_FAILURE; fetch_stage=JSON_PARSE
+          fi
+          if [[ "$first_throw" == NONE ]]; then
+            contract_throw="$(node - "$body" <<'NODE'
+          const fs=require('fs');
+          try{
+            const h=JSON.parse(fs.readFileSync(process.argv[2],'utf8'));
+            if(!h||typeof h!=='object'||Array.isArray(h)){console.log('CONTRACT_PAYLOAD_NOT_OBJECT');process.exit(0)}
+            for(const k of ['customer360_family_marketing_foundation','customer360_profile_enrichment','customer360_line_profile_extraction','referrer_customer_id_exact_existing_customer_only','customer360_profile_composed_into_detail','customer360_profile_enrichment_schema_available','customer360_family_metadata_available','customer360_field_evidence_available','customer360_notes_history_available'])if(h[k]!==true){console.log(`HEALTH_MARKER_${k}`);process.exit(0)}
+            if(h.customer_id_generation!==false){console.log('CUSTOMER_ID_GENERATION_NOT_FALSE');process.exit(0)}
+            if(h.customer_line_auto_apply!==false||h.line_profile_auto_apply!==false){console.log('AUTO_APPLY_NOT_FALSE');process.exit(0)}
+            if(h.customer_line_extraction_mode!=='candidate-only'){console.log('CANDIDATE_ONLY_MODE_MISSING');process.exit(0)}
+            if(h.customer360_identity_fallback!==false){console.log('IDENTITY_FALLBACK_NOT_FALSE');process.exit(0)}
+            if(h.customer360_paid_ai_provider_active!==false){console.log('PAID_AI_PROVIDER_NOT_FALSE');process.exit(0)}
+            if(h.line_event_direction!=='incoming'||h.line_event_receive_status!=='received'){console.log('LINE_CANONICAL_EVENT_CONTRACT');process.exit(0)}
+            console.log('NONE')
+          }catch{console.log('CONTRACT_EVALUATION_FAILURE')}
+          NODE
+            )"
+            [[ -n "$contract_throw" ]] || contract_throw=CONTRACT_EVALUATION_FAILURE
+            [[ "$contract_throw" == NONE ]] || { first_throw="$contract_throw"; error_class=CONTRACT_FAILURE; fetch_stage=CONTRACT; }
+          fi
+
+          attribution_failure=NONE
+          attribution_error_class=ATTRIBUTION_FAILURE
+          if [[ "$source_guard" == DRIFT_AFTER_FETCH ]]; then
+            attribution_failure=SOURCE_SHA_DRIFT_AFTER_FETCH
+            attribution_error_class=SOURCE_DRIFT
+          elif [[ "$post_identity_result" == UNAVAILABLE ]]; then
+            attribution_failure=CURRENT_PRODUCTION_VERSION_ID_UNAVAILABLE_AFTER_HEALTH
+          elif [[ "$post_identity_result" == SUPERSEDED ]]; then
+            attribution_failure=DEPLOYMENT_SUPERSEDED_DURING_OBSERVATION
+          fi
+          if [[ "$first_throw" == NONE && "$attribution_failure" != NONE ]]; then
+            first_throw="$attribution_failure"
+            error_class="$attribution_error_class"
+            fetch_stage=ATTRIBUTION
+          fi
+
+          {
+            echo '## Customer360 Production health FIRST_THROW'
+            echo "- PRODUCTION_HEALTH_FETCH_STAGE=$fetch_stage"
+            echo "- PRODUCTION_HEALTH_SOURCE_GUARD=$source_guard"
+            echo "- PRODUCTION_HEALTH_TRIGGER_SHA=$TRIGGER_SHA"
+            echo "- PRODUCTION_HEALTH_EXPECTED_WORKER_VERSION_ID=$EXPECTED_WORKER_VERSION_ID"
+            echo "- PRODUCTION_HEALTH_POST_WORKER_VERSION_ID=$post_version_id"
+            echo "- PRODUCTION_HEALTH_CURRENT_MAIN_BEFORE=$current_main_before"
+            echo "- PRODUCTION_HEALTH_CURRENT_MAIN_AFTER=$current_main_after"
+            echo "- PRODUCTION_HEALTH_CURL_EXIT=$curl_exit"
+            echo "- PRODUCTION_HEALTH_HTTP_STATUS=${http_status:-UNKNOWN}"
+            echo "- PRODUCTION_HEALTH_CONTENT_TYPE=${content_type:-MISSING}"
+            echo "- PRODUCTION_HEALTH_REDIRECT_COUNT=$redirect_count"
+            echo "- PRODUCTION_HEALTH_BODY_CLASS=$body_class"
+            echo "- PRODUCTION_HEALTH_BODY_LENGTH=$body_length"
+            echo "- PRODUCTION_HEALTH_JSON_PARSE_OK=$json_parse_ok"
+            echo "- PRODUCTION_HEALTH_ERROR_CLASS=$error_class"
+            echo "- PRODUCTION_HEALTH_FIRST_THROW=$first_throw"
+            echo "- PRODUCTION_HEALTH_POST_ATTRIBUTION_FAILURE=$attribution_failure"
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "PRODUCTION_HEALTH_FETCH_STAGE=$fetch_stage"
+          echo "PRODUCTION_HEALTH_SOURCE_GUARD=$source_guard"
+          echo "PRODUCTION_HEALTH_TRIGGER_SHA=$TRIGGER_SHA"
+          echo "PRODUCTION_HEALTH_CURRENT_MAIN_BEFORE=$current_main_before"
+          echo "PRODUCTION_HEALTH_CURRENT_MAIN_AFTER=$current_main_after"
+          echo "PRODUCTION_HEALTH_CURL_EXIT=$curl_exit"
+          echo "PRODUCTION_HEALTH_HTTP_STATUS=${http_status:-UNKNOWN}"
+          echo "PRODUCTION_HEALTH_CONTENT_TYPE=${content_type:-MISSING}"
+          echo "PRODUCTION_HEALTH_REDIRECT_COUNT=$redirect_count"
+          echo "PRODUCTION_HEALTH_BODY_CLASS=$body_class"
+          echo "PRODUCTION_HEALTH_BODY_LENGTH=$body_length"
+          echo "PRODUCTION_HEALTH_JSON_PARSE_OK=$json_parse_ok"
+          echo "PRODUCTION_HEALTH_ERROR_CLASS=$error_class"
+          echo "PRODUCTION_HEALTH_FIRST_THROW=$first_throw"
+          echo "PRODUCTION_HEALTH_POST_ATTRIBUTION_FAILURE=$attribution_failure"
+          if [[ "$source_guard" == DRIFT_AFTER_FETCH ]]; then
+            echo 'OBSERVER_ATTRIBUTION_RESULT=SOURCE_SHA_DRIFT_AFTER_FETCH'
+          elif [[ "$post_identity_result" == SUPERSEDED ]]; then
+            echo 'OBSERVER_ATTRIBUTION_RESULT=DEPLOYMENT_SUPERSEDED'
+          elif [[ "$post_identity_result" == UNAVAILABLE ]]; then
+            echo 'OBSERVER_ATTRIBUTION_RESULT=CURRENT_DEPLOYMENT_ID_MISSING'
+          fi
+          [[ "$first_throw" == NONE ]] || { echo "::error::PRODUCTION_HEALTH_FIRST_THROW:$first_throw"; exit 1; }
+          echo 'OBSERVER_ATTRIBUTION_RESULT=EXACT_MATCH_AFTER_HEALTH'
+          echo 'PRODUCTION_HEALTH_OBSERVATION=PASS'
