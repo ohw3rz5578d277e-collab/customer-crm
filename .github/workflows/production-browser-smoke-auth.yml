@@ -104,7 +104,7 @@ jobs:
           const CF_ACCESS_CLIENT_ID = process.env.CF_ACCESS_CLIENT_ID;
           const CF_ACCESS_CLIENT_SECRET = process.env.CF_ACCESS_CLIENT_SECRET;
           const REVIEW_PATH = '/admin/customer-id-reconciliation';
-          const HEALTH_PATH = '/api/crm-health-check';
+          const HEALTH_PATHS = ['/health','/api/crm-health-check'];
 
           if (!BASE_URL || !ADMIN_TOKEN || !CF_ACCESS_CLIENT_ID || !CF_ACCESS_CLIENT_SECRET) {
             throw new Error('required browser smoke credentials missing');
@@ -150,19 +150,32 @@ jobs:
             });
           }
 
-          async function checkHealth(request) {
-            const res = await request.get(BASE_URL + HEALTH_PATH, { headers: authHeaders });
+          async function checkHealth(request, path) {
+            const res = await request.get(BASE_URL + path, { headers: authHeaders, maxRedirects: 0 });
             const status = res.status();
-            const finalUrl = res.url();
             const contentType = res.headers()['content-type'] || '';
+            const location = res.headers()['location'] || '';
+            let redirectTarget = 'NONE';
+            if (location) {
+              try {
+                const u = new URL(location, BASE_URL);
+                redirectTarget = u.origin + u.pathname;
+              } catch {
+                redirectTarget = 'UNPARSEABLE';
+              }
+            }
+            console.log(`health path=${path}`);
             console.log(`health response status=${status}`);
-            console.log(`health final_url=${finalUrl}`);
             console.log(`health content_type=${contentType || '(none)'}`);
-            if (/cloudflareaccess\.com/i.test(finalUrl)) return fail('ACCESS_AUTH_FAILED: health redirected to Cloudflare Access login');
-            if (status !== 200) return fail(`HEALTH_FAILED: expected 200, got ${status}`);
-            if (!/application\/json/i.test(contentType)) return fail(`HEALTH_FAILED: expected application/json, got ${contentType || '(none)'}`);
+            console.log(`health redirect_target=${redirectTarget}`);
+            if (status >= 300 && status < 400) {
+              if (/cloudflareaccess\.com/i.test(location)) return fail(`ACCESS_AUTH_FAILED: ${path} redirected to Cloudflare Access login`);
+              return fail(`HEALTH_REDIRECT: ${path} status=${status} target=${redirectTarget}`);
+            }
+            if (status !== 200) return fail(`HEALTH_FAILED: ${path} expected 200, got ${status}`);
+            if (!/application\/json/i.test(contentType)) return fail(`HEALTH_FAILED: ${path} expected application/json, got ${contentType || '(none)'}`);
             const body = await res.json().catch(() => null);
-            if (!body || body.ok !== true) fail('HEALTH_FAILED: response JSON missing ok=true');
+            if (!body || body.ok !== true) fail(`HEALTH_FAILED: ${path} response JSON missing ok=true`);
           }
 
           async function pageIdentity(page, response, label) {
@@ -252,7 +265,7 @@ jobs:
             const browser = await chromium.launch({ headless: true });
 
             const healthContext = await browser.newContext({ extraHTTPHeaders: authHeaders });
-            await checkHealth(healthContext.request);
+            for (const path of HEALTH_PATHS) await checkHealth(healthContext.request, path);
             await healthContext.close();
 
             const unauthContext = await browser.newContext();
