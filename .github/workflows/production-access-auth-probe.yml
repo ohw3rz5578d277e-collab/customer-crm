@@ -85,8 +85,8 @@ jobs:
         run: |
           set -euo pipefail
           probe_path='/__crm/access-auth-probe'
-          unauth_body=/tmp/access-probe-unauth.json
-          unauth_headers=/tmp/access-probe-unauth.headers
+          control_body=/tmp/access-probe-control.json
+          control_headers=/tmp/access-probe-control.headers
           auth_body=/tmp/access-probe-auth.json
           auth_headers=/tmp/access-probe-auth.headers
 
@@ -99,14 +99,34 @@ jobs:
             ' "$1"
           }
 
-          unauth_status="$(curl --silent --show-error --max-time 15             --output "$unauth_body"             --dump-header "$unauth_headers"             --write-out '%{http_code}'             -H 'Accept: application/json'             "$BASE_URL$probe_path")" || {
+          control_status="$(curl --silent --show-error --max-time 15             --output "$control_body"             --dump-header "$control_headers"             --write-out '%{http_code}'             -H "x-admin-token: $ADMIN_TOKEN"             -H 'Accept: application/json'             "$BASE_URL$probe_path")" || {
               rc=$?
-              echo "::error::UNAUTH_ACCESS_PROBE_CURL_FAILURE:$rc"
+              echo "::error::CONTROL_ACCESS_PROBE_CURL_FAILURE:$rc"
               exit 1
             }
-          unauth_location="$(awk 'BEGIN{IGNORECASE=1} /^location:/{sub(/^[^:]*:[[:space:]]*/,""); sub(/\r$/,""); print}' "$unauth_headers" | tail -1)"
-          echo "UNAUTH_ACCESS_PROBE_HTTP_STATUS=$unauth_status"
-          echo "UNAUTH_ACCESS_PROBE_REDIRECT_TARGET=$(sanitize_location "$unauth_location")"
+          control_location="$(awk 'BEGIN{IGNORECASE=1} /^location:/{sub(/^[^:]*:[[:space:]]*/,""); sub(/\r$/,""); print}' "$control_headers" | tail -1)"
+          control_marker="$(awk 'BEGIN{IGNORECASE=1} /^x-crm-access-auth-probe:/{sub(/^[^:]*:[[:space:]]*/,""); sub(/\r$/,""); print}' "$control_headers" | tail -1)"
+          echo "CONTROL_ACCESS_PROBE_HTTP_STATUS=$control_status"
+          echo "CONTROL_ACCESS_PROBE_REDIRECT_TARGET=$(sanitize_location "$control_location")"
+          echo "CONTROL_ACCESS_PROBE_WORKER_MARKER=${control_marker:-ABSENT}"
+
+          if [[ -n "$control_marker" ]]; then
+            echo '::error::ACCESS_CONTROL_REACHED_WORKER_PROBE'
+            exit 1
+          fi
+          case "$control_status" in
+            3??|401|403)
+              echo 'ACCESS_CONTROL_BLOCK=PASS'
+              ;;
+            2??)
+              echo "::error::ACCESS_CONTROL_NOT_BLOCKED:$control_status"
+              exit 1
+              ;;
+            *)
+              echo "::error::ACCESS_CONTROL_UNEXPECTED_STATUS:$control_status"
+              exit 1
+              ;;
+          esac
 
           auth_status="$(curl --silent --show-error --max-time 15             --output "$auth_body"             --dump-header "$auth_headers"             --write-out '%{http_code}'             -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID"             -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET"             -H "x-admin-token: $ADMIN_TOKEN"             -H 'Accept: application/json'             "$BASE_URL$probe_path")" || {
               rc=$?
