@@ -12,7 +12,7 @@ import {
 } from './crm-customer360-search.mjs';
 import { assignCanonicalCustomerIdToCustomerRef } from './crm-customer-id-autofill-runtime.mjs';
 import { parsePeriodAnalyticsParams, buildPeriodAnalytics } from './crm-customer360-period-analytics.mjs';
-import { parseApproachQueueParams, buildApproachQueue } from './crm-customer360-approach-queue.mjs';
+import { parseApproachQueueParams, buildApproachQueue, approachContactState } from './crm-customer360-approach-queue.mjs';
 
 const CUSTOMER_ID_RE=/^\d{8}$/;
 const RELATIONS=new Set(['spouse','child','parent','grandparent','other']);
@@ -67,10 +67,17 @@ async function facetData(env,views){
 }
 
 export async function marketingHomeData(env,onDate=jstToday()){
-  const views=await loadCustomerViews(env,onDate);
-  const approach=views.filter(v=>v.recommendation.priority_score>0).sort((a,b)=>b.recommendation.priority_score-a.recommendation.priority_score||(a.next_opportunity?.days??99999)-(b.next_opportunity?.days??99999)||text(a.customer_id).localeCompare(text(b.customer_id)));
+  let views,consentViews=null,contactCandidatesAvailable=true;
+  try{
+    consentViews=await loadCustomerViews(env,onDate,{requireContactPermissions:true});
+    views=consentViews;
+  }catch(_){
+    contactCandidatesAvailable=false;
+    views=await loadCustomerViews(env,onDate);
+  }
+  const approach=(consentViews||[]).filter(v=>v.recommendation.priority_score>0&&approachContactState(v).ready).sort((a,b)=>b.recommendation.priority_score-a.recommendation.priority_score||(a.next_opportunity?.days??99999)-(b.next_opportunity?.days??99999)||text(a.customer_id).localeCompare(text(b.customer_id)));
   const avg=views.length?Math.round(views.reduce((s,v)=>s+v.realized_ltv,0)/views.length):0;
-  return {as_of:onDate,kpis:{customers: views.length,average_realized_ltv:avg,repeat_rate_pct:views.length?Math.round(views.filter(v=>v.shoot_count>=2).length/views.length*100):0,vip_high_ltv:views.filter(v=>v.realized_ltv>=CUSTOMER360_HIGH_LTV_THRESHOLD||v.marketing_classes.includes('VIP')).length,event_90d:views.filter(v=>v.opportunities.some(o=>o.days!=null&&o.days>=0&&o.days<=90)).length,dormant_180:views.filter(v=>num(v.raw.dormant_days)>=180).length,line_link_rate_pct:views.length?Math.round(views.filter(v=>v.line_linked).length/views.length*100):0,approach_this_month:approach.filter(v=>(v.next_opportunity?.days??99999)<=30||v.recommendation.priority_score>=650).length},top_opportunities:approach.slice(0,12).map(listCustomerDto),facets:await facetData(env,views)};
+  return {as_of:onDate,kpis:{customers: views.length,average_realized_ltv:avg,repeat_rate_pct:views.length?Math.round(views.filter(v=>v.shoot_count>=2).length/views.length*100):0,vip_high_ltv:views.filter(v=>v.realized_ltv>=CUSTOMER360_HIGH_LTV_THRESHOLD||v.marketing_classes.includes('VIP')).length,event_90d:views.filter(v=>v.opportunities.some(o=>o.days!=null&&o.days>=0&&o.days<=90)).length,dormant_180:views.filter(v=>num(v.raw.dormant_days)>=180).length,line_link_rate_pct:views.length?Math.round(views.filter(v=>v.line_linked).length/views.length*100):0,approach_this_month:approach.filter(v=>(v.next_opportunity?.days??99999)<=30||v.recommendation.priority_score>=650).length},top_opportunities:approach.slice(0,12).map(listCustomerDto),facets:await facetData(env,views),meta:{contact_candidates_available:contactCandidatesAvailable,contact_candidate_filter:'manual_contact_ready',contact_permission_fail_closed:true}};
 }
 
 export async function approachQueueData(env,searchParams,onDate=jstToday()){
