@@ -11,6 +11,7 @@ import {
   listCustomerDto
 } from './crm-customer360-search.mjs';
 import { assignCanonicalCustomerIdToCustomerRef } from './crm-customer-id-autofill-runtime.mjs';
+import { parsePeriodAnalyticsParams, buildPeriodAnalytics } from './crm-customer360-period-analytics.mjs';
 
 const CUSTOMER_ID_RE=/^\d{8}$/;
 const RELATIONS=new Set(['spouse','child','parent','grandparent','other']);
@@ -56,6 +57,24 @@ export async function marketingHomeData(env,onDate=jstToday()){
   return {as_of:onDate,kpis:{customers: views.length,average_realized_ltv:avg,repeat_rate_pct:views.length?Math.round(views.filter(v=>v.shoot_count>=2).length/views.length*100):0,vip_high_ltv:views.filter(v=>v.realized_ltv>=CUSTOMER360_HIGH_LTV_THRESHOLD||v.marketing_classes.includes('VIP')).length,event_90d:views.filter(v=>v.opportunities.some(o=>o.days!=null&&o.days>=0&&o.days<=90)).length,dormant_180:views.filter(v=>num(v.raw.dormant_days)>=180).length,line_link_rate_pct:views.length?Math.round(views.filter(v=>v.line_linked).length/views.length*100):0,approach_this_month:approach.filter(v=>(v.next_opportunity?.days??99999)<=30||v.recommendation.priority_score>=650).length},top_opportunities:approach.slice(0,12).map(listCustomerDto),facets:await facetData(env,views)};
 }
 
+export async function periodAnalyticsData(env,searchParams,onDate=jstToday()){
+  let period;
+  try{period=parsePeriodAnalyticsParams(searchParams,onDate)}catch(error){return{error:text(error?.message)||'invalid_period'}}
+  if(!(await tableExists(env,'customer_reservations'))){
+    return {
+      available:false,
+      period,
+      current:{from:period.from,to:period.to,revenue:0,completed_shoots:0,unique_customers:0,average_order_value:0,repeat_customers_in_period:0,repeat_rate_pct:0,genres:[],monthly:[]},
+      previous:{from:period.previous.from,to:period.previous.to,revenue:0,completed_shoots:0,unique_customers:0,average_order_value:0,repeat_customers_in_period:0,repeat_rate_pct:0,genres:[],monthly:[]},
+      change_pct:{revenue:null,completed_shoots:null,unique_customers:null,average_order_value:null},
+      meta:{read_only:true,identity_key:'customer_id',customer_id_generation:false,customer_write:false,line_send:false,table_available:false}
+    };
+  }
+  const rows=await safeAll(env,"SELECT customer_id,genre,shoot_date,total_amount,status FROM customer_reservations WHERE COALESCE(deleted_at,'')='' AND substr(COALESCE(shoot_date,''),1,10)>=? AND substr(COALESCE(shoot_date,''),1,10)<=? ORDER BY shoot_date ASC",[period.previous.from,period.to]);
+  const out=buildPeriodAnalytics(rows,period);
+  return {available:true,...out,meta:{...out.meta,table_available:true,rows_read:rows.length}};
+}
+
 export async function customerListData(env,searchParams,onDate=jstToday()){
   const started=Date.now();
   let parsed;
@@ -92,6 +111,7 @@ export async function handleCustomer360Request(request,env){
   const url=new URL(request.url);if(!url.pathname.startsWith('/api/customer360/'))return null;if(!authorized(request,env))return json({ok:false,error:'authentication_required'},401);
   const asOf=text(url.searchParams.get('as_of'))||jstToday();
   if(request.method==='GET'&&url.pathname==='/api/customer360/marketing-home')return json({ok:true,...await marketingHomeData(env,asOf)});
+  if(request.method==='GET'&&url.pathname==='/api/customer360/analytics'){const data=await periodAnalyticsData(env,url.searchParams,asOf);return data.error?json({ok:false,error:data.error},400):json({ok:true,...data})}
   if(request.method==='GET'&&url.pathname==='/api/customer360/customers'){const data=await customerListData(env,url.searchParams,asOf);return data.error?json({ok:false,error:data.error},400):json({ok:true,...data})}
   if(request.method==='POST'&&url.pathname==='/api/customer360/customer-id/allocate'){
     const body=await request.json().catch(()=>null);if(!body)return json({ok:false,error:'invalid_json'},400);
