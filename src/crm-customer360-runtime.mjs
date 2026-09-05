@@ -36,10 +36,16 @@ async function loadCustomerViews(env,onDate){
   const customers=await activeCustomers(env);
   const managedFamily=await tableExists(env,'customer_family_members')?await safeAll(env,"SELECT * FROM customer_family_members WHERE deleted_at IS NULL OR deleted_at='' ORDER BY customer_id,created_at,id"):[];
   const profiles=await tableExists(env,'customer_marketing_profiles')?await safeAll(env,"SELECT * FROM customer_marketing_profiles"):[];
-  const familyByCustomer=new Map(),profileByCustomer=new Map();
+  const contactPermissions=await tableExists(env,'customer_profile_enrichment')?await safeAll(env,"SELECT customer_id,marketing_contact_permission FROM customer_profile_enrichment"):[];
+  const familyByCustomer=new Map(),profileByCustomer=new Map(),contactPermissionByCustomer=new Map();
   for(const m of managedFamily){const id=text(m.customer_id);if(!familyByCustomer.has(id))familyByCustomer.set(id,[]);familyByCustomer.get(id).push(m)}
   for(const p of profiles)profileByCustomer.set(text(p.customer_id),p);
-  return customers.map(c=>buildCustomerMarketingView(c,familyByCustomer.get(text(c.customer_id))||[],profileByCustomer.get(text(c.customer_id))||{},onDate));
+  for(const p of contactPermissions)contactPermissionByCustomer.set(text(p.customer_id),text(p.marketing_contact_permission));
+  return customers.map(c=>{
+    const id=text(c.customer_id),profile={...(profileByCustomer.get(id)||{})};
+    if(contactPermissionByCustomer.get(id)==='denied')profile.marketing_opt_out=1;
+    return buildCustomerMarketingView(c,familyByCustomer.get(id)||[],profile,onDate);
+  });
 }
 
 async function facetData(env,views){
