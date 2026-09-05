@@ -49,6 +49,6 @@ function startBootstrapObserver(){if(bootstrapObserver||maybeFinishBootstrap())r
 function boot(){window.__crmOwnerView=api;startBootstrapObserver();api.showToday({scroll:false})}
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot,{once:true});else boot();
 })();
-<\\/script>`;
+<\/script>`;
   return html.includes('</head>')?html.replace('</head>',style+'</head>').replace('</body>',script+'</body>'):style+html+script;
 }
