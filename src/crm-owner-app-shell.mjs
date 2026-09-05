@@ -20,6 +20,7 @@ body.crm-owner-shell-v2{margin:0!important}
 #crmOwnerWorkspaceContent{min-width:0;padding:18px 24px 36px;box-sizing:border-box}
 #crmOwnerWorkspaceContent>.app,#crmOwnerWorkspaceContent>.crm-final-shell,#crmOwnerWorkspaceContent>main{width:100%!important;max-width:1440px!important;margin:0 auto!important;padding-left:0!important;padding-right:0!important;box-sizing:border-box!important}
 .crm-owner-shell-v2 .app>h1:first-child,.crm-owner-shell-v2 #crmOwnerUtilityBar{display:none!important}
+.crm-owner-shell-v2 #lineOpsOpen,.crm-owner-shell-v2 .crm-lineops-fab,.crm-owner-shell-v2 #crmMobileBar,.crm-owner-shell-v2 #crmPriorityFab,.crm-owner-shell-v2 .crmUxQuickHint,.crm-owner-shell-v2 .crm-mf-bottom,.crm-owner-shell-v2 .crm-mf-fab,.crm-owner-shell-v2 .crm-mf-scrolltop,.crm-owner-shell-v2 .crm-bottom-nav,.crm-owner-shell-v2 .crm-top-menu-btn,.crm-owner-shell-v2 .crm-side-menu,.crm-owner-shell-v2 #crmStableAuditBtn,.crm-owner-shell-v2 .crm-stable-audit-btn,.crm-owner-shell-v2 #crmSettingsMenuBtn,.crm-owner-shell-v2 #crmLogoutMenuBtn,.crm-owner-shell-v2 #crmUxFab{display:none!important;visibility:hidden!important;pointer-events:none!important}
 .crm-owner-shell-v2 #crmMktNav{margin:0 0 14px!important;padding:6px!important;border:1px solid var(--crm-shell-line)!important;border-radius:14px!important;background:#fff!important;box-shadow:none!important}
 .crm-owner-shell-v2 #crmMktNav .crm-mkt-btn{min-height:40px!important;border:0!important;background:transparent!important;color:#526872!important;border-radius:10px!important}.crm-owner-shell-v2 #crmMktNav .crm-mkt-btn.primary{background:var(--crm-shell-accent-soft)!important;color:var(--crm-shell-accent)!important}
 .crm-owner-shell-v2 #crmTodayDashboard,.crm-owner-shell-v2 #crmReservationStatus,.crm-owner-shell-v2 #crmDeliveryDeadlinePanel,.crm-owner-shell-v2 #crmLegacyOperations,.crm-owner-shell-v2 #crmGrowthPanel,.crm-owner-shell-v2 #crmMktList,.crm-owner-shell-v2 #crmMktHome{box-shadow:none!important;border-color:var(--crm-shell-line)!important}
@@ -30,10 +31,14 @@ body.crm-owner-shell-v2{margin:0!important}
  #crmOwnerDesktopSidebar{display:none!important}
  #crmOwnerWorkspaceHeader{top:0;min-height:68px;padding:10px 12px;gap:8px}
  #crmOwnerWorkspaceTitle{font-size:19px}.crm-shell-eyebrow{font-size:9px}#crmOwnerWorkspaceHint{font-size:11px;max-width:60vw;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
- .crm-shell-header-actions{gap:5px}.crm-shell-action{min-height:38px;padding:7px 9px;font-size:11px}.crm-shell-settings-action{display:none}
+ .crm-shell-header-actions{gap:5px;flex-wrap:nowrap}.crm-shell-action{min-height:38px;padding:7px 9px;font-size:11px;white-space:nowrap}
  #crmOwnerWorkspaceContent{padding:10px 10px calc(88px + env(safe-area-inset-bottom))}
  .crm-owner-shell-v2 #crmMktNav{position:sticky;top:69px;z-index:90;display:grid!important;grid-template-columns:1fr 1fr!important;gap:5px!important}
  .crm-owner-shell-v2 #crmMktNav .crm-mkt-btn{width:100%!important;padding:8px 7px!important;font-size:12px!important}
+ .crm-owner-shell-v2 .crm-list-toolbar{grid-template-columns:1fr!important;gap:8px!important}
+ .crm-owner-shell-v2 .crm-list-toolbar>div{display:grid!important;grid-template-columns:minmax(0,1fr) minmax(0,1fr)!important;gap:8px!important;overflow:visible!important}
+ .crm-owner-shell-v2 .crm-list-toolbar select,.crm-owner-shell-v2 .crm-list-toolbar .crm-mkt-btn,.crm-owner-shell-v2 #crmSort{width:100%!important;max-width:none!important;min-width:0!important}
+ .crm-owner-shell-v2 #crmSort{grid-column:1/-1!important}
  .crm-owner-shell-v2 #crmTodayDashboard,.crm-owner-shell-v2 #crmReservationStatus,.crm-owner-shell-v2 #crmDeliveryDeadlinePanel,.crm-owner-shell-v2 #crmLegacyOperations,.crm-owner-shell-v2 #crmGrowthPanel{margin-left:0!important;margin-right:0!important;border-radius:15px!important}
 }
 </style>`;
