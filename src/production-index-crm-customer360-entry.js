@@ -10,7 +10,7 @@ import { injectCustomer360SearchFocus } from './crm-customer360-search-focus.mjs
 import { injectMobileOwnerInteractionRecovery } from './crm-mobile-owner-interaction-recovery.mjs';
 import { injectMobileOwnerCardSummary } from './crm-mobile-owner-card-summary.mjs';
 import { injectCustomer360DirectNavigation } from './crm-customer360-direct-navigation.mjs';
-import { injectOwnerViewState } from './crm-owner-view-state.mjs';
+import { injectOwnerViewState } from './crm-owner-view-state-v2.mjs';
 import { injectCustomer360ProfileUi } from './crm-customer360-profile-ui.mjs';
 import { injectOwnerAppShell } from './crm-owner-app-shell.mjs';
 
