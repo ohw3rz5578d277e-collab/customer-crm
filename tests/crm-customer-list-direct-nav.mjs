@@ -1,7 +1,8 @@
 import fs from 'node:fs';
 
 const direct=fs.readFileSync('src/crm-customer360-direct-navigation.mjs','utf8');
-const owner=fs.readFileSync('src/crm-owner-view-state.mjs','utf8');
+const owner=fs.readFileSync('src/crm-owner-view-state-v2.mjs','utf8');
+const shell=fs.readFileSync('src/crm-owner-app-shell.mjs','utf8');
 const entry=fs.readFileSync('src/production-index-crm-customer360-entry.js','utf8');
 const legacy=fs.readFileSync('src/crm-mobile-owner-interaction-recovery.mjs','utf8');
 
@@ -18,7 +19,7 @@ assert(direct.includes('crm-owner-line-nav-open'),'LINE-to-Customer canonical na
 assert(!direct.includes("querySelector('#crmMktNav [data-view=\"list\"]')"),'direct layer must not click hidden Customer360 nav');
 assert(!direct.includes('clickByText'),'direct layer must not use text routing');
 assert(!direct.includes("new MutationObserver(()=>bindOwnerNav"),'direct layer must not own a competing nav MutationObserver');
-for(const api of ['showToday','showCustomers','showSearch','showLine','getCurrentView'])assert(owner.includes(api),'canonical Owner view API missing '+api);
+for(const api of ['showToday','showCustomers','showSearch','showMarketing','showLine','getCurrentView'])assert(owner.includes(api),'canonical Owner view API missing '+api);
 assert(owner.includes('window.__crmOwnerView=api'),'window.__crmOwnerView stable controller missing');
 assert(owner.includes('document.body.dataset.crmOwnerView=name'),'canonical body Owner state missing');
 assert(owner.includes('[data-crm-owner-host="1"]>:not(#crmMktNav):not(#crmMktList):not(#crmMktHome)'),'exclusive host contract missing');
@@ -33,10 +34,15 @@ assert(!owner.includes(".observe(document.documentElement,{childList:true,subtre
 assert(entry.indexOf('injectCustomer360DirectNavigation')>entry.indexOf('injectMobileOwnerInteractionRecovery'),'direct navigation must remain after mobile recovery');
 assert(entry.indexOf('injectOwnerViewState')>entry.indexOf('injectCustomer360DirectNavigation'),'Owner view controller must be outermost navigation state layer');
 assert(entry.includes('export function composeCustomer360AdminHtml'),'production-faithful composition helper missing');
+assert(entry.includes("from './crm-owner-view-state-v2.mjs'"),'Production entry must use Owner view state v2');
+assert(entry.includes("from './crm-owner-app-shell.mjs'"),'Production entry must include canonical app shell');
+assert(shell.includes('crmOwnerDesktopSidebar')&&shell.includes('crmOwnerWorkspaceContent'),'canonical desktop shell missing');
+assert(shell.includes('分析・アプローチ')&&shell.includes('予約管理アプリ'),'intuitive primary navigation labels missing');
 assert(legacy.includes('clickCustomer360List'),'legacy compatibility path no longer detectable; audit intentionally retained');
 console.log('CUSTOMER_LIST_DIRECT_NAV_CONTRACT=PASS');
 console.log('CANONICAL_OWNER_VIEW_STATE_CONTRACT=PASS');
 console.log('OWNER_NAV_BIND_ONCE_CONTRACT=PASS');
+console.log('OWNER_APP_SHELL_V2=PASS');
 console.log('GROWTH_SUITE_CANONICAL_VISIBILITY=PASS');
 console.log('HIDDEN_BUTTON_PRIMARY_ROUTING=REMOVED_FROM_PRIMARY');
 console.log('LEGACY_COMPATIBILITY_ROUTE=PRESENT_BUT_NOT_STATE_OWNER');
