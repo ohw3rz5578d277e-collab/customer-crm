@@ -52,7 +52,8 @@ async function loadCustomerViews(env,onDate,{requireContactPermissions=false}={}
   for(const p of contactPermissions)contactPermissionByCustomer.set(text(p.customer_id),text(p.marketing_contact_permission));
   return customers.map(c=>{
     const id=text(c.customer_id),profile={...(profileByCustomer.get(id)||{})};
-    if(contactPermissionByCustomer.get(id)==='denied')profile.marketing_opt_out=1;
+    const contactPermission=contactPermissionByCustomer.get(id);
+    if(contactPermission)profile.marketing_contact_permission=contactPermission;
     return buildCustomerMarketingView(c,familyByCustomer.get(id)||[],profile,onDate);
   });
 }
