@@ -16,7 +16,7 @@ body[data-crm-owner-view="customers"] .crm-today-dash,body[data-crm-owner-view="
 body[data-crm-owner-view="customers"] .crm-delivery-panel,body[data-crm-owner-view="search"] .crm-delivery-panel,body[data-crm-owner-view="marketing"] .crm-delivery-panel,
 body[data-crm-owner-view="customers"] [data-crm-owner-today],body[data-crm-owner-view="search"] [data-crm-owner-today],body[data-crm-owner-view="marketing"] [data-crm-owner-today],
 body[data-crm-owner-view="customers"] [data-crm-owner-operational-section],body[data-crm-owner-view="search"] [data-crm-owner-operational-section],body[data-crm-owner-view="marketing"] [data-crm-owner-operational-section]{display:none!important}
-body[data-crm-owner-view="customers"] #crmMktNav,body[data-crm-owner-view="search"] #crmMktNav,body[data-crm-owner-view="marketing"] #crmMktNav{display:flex!important}
+body[data-crm-owner-view="customers"] #crmMktNav,body[data-crm-owner-view="search"] #crmMktNav,body[data-crm-owner-view="marketing"] #crmMktNav{display:flex!important}\nbody[data-crm-owner-view="customers"] #crmOwnerCustomerTitle,body[data-crm-owner-view="search"] #crmOwnerCustomerTitle{display:block!important}
 body[data-crm-owner-view="customers"] #crmMktList,body[data-crm-owner-view="search"] #crmMktList{display:block!important}
 body[data-crm-owner-view="customers"] #crmMktHome,body[data-crm-owner-view="search"] #crmMktHome{display:none!important}
 body[data-crm-owner-view="marketing"] #crmMktList{display:none!important}
