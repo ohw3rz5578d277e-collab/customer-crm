@@ -32,6 +32,8 @@ try{
     assert.equal(await page.locator('#crmOwnerAppShell').count(),1);
     assert.equal(await page.locator('#crmTodayDashboard').isVisible(),true,viewport.width+': today dashboard hidden on initial view');
     assert.equal(await page.locator('#crmMktList').isVisible(),false,viewport.width+': customer list visible on Today');
+    assert.equal(await page.locator('#lineOpsOpen').isVisible(),false,viewport.width+': legacy LINE entry visible under V2');
+    assert.equal(await page.locator('#crmShellSettingsTop').isVisible(),true,viewport.width+': canonical Settings action missing');
     if(viewport.width>900){
       assert.equal(await page.locator('#crmOwnerDesktopSidebar').isVisible(),true,'desktop sidebar missing');
       assert.equal(await page.locator('#crmOwnerMobileNav').isVisible(),false,'mobile nav visible on desktop');
@@ -44,6 +46,12 @@ try{
     await page.waitForFunction(()=>document.body.dataset.crmOwnerView==='customers'&&document.getElementById('crmMktList')?.classList.contains('open'));
     assert.equal(await page.locator('#crmMktList').isVisible(),true,viewport.width+': customer list hidden');
     assert.equal(await page.locator('#crmTodayDashboard').isVisible(),false,viewport.width+': Today leaked into Customer view');
+    if(viewport.width<=900){
+      const toolbar=await page.evaluate(()=>{const box=id=>{const r=document.getElementById(id)?.getBoundingClientRect();return r?{x:r.x,y:r.y,w:r.width,h:r.height}:null};return{saved:box('crmSavedViews'),save:box('crmSaveCurrent'),sort:box('crmSort')}});
+      assert.ok(toolbar.saved?.w>=120&&toolbar.save?.w>=120,'mobile saved-condition controls too narrow '+JSON.stringify(toolbar));
+      assert.ok(toolbar.sort?.w>=300,'mobile sort control must use full row '+JSON.stringify(toolbar));
+      assert.ok(toolbar.sort.y>toolbar.saved.y,'mobile sort control must stack below saved controls '+JSON.stringify(toolbar));
+    }
     if(viewport.width>900)await page.locator('[data-crm-shell-nav="marketing"]').click();
     else await page.locator('#crmMktNav [data-view="home"]').click();
     await page.waitForFunction(()=>document.body.dataset.crmOwnerView==='marketing'&&document.getElementById('crmMktHome')?.classList.contains('open'));
@@ -62,6 +70,9 @@ try{
   console.log('OWNER_APP_SHELL_DESKTOP_SIDEBAR=PASS');
   console.log('OWNER_APP_SHELL_MOBILE_NAV=PASS');
   console.log('OWNER_VIEW_EXCLUSIVE_ROUTING=PASS');
+  console.log('OWNER_LEGACY_ENTRY_DUPLICATION=0');
+  console.log('OWNER_MOBILE_SETTINGS_VISIBLE=PASS');
+  console.log('OWNER_MOBILE_TOOLBAR_STACK=PASS');
   console.log('HTTP_WRITES=0');
 } finally {
   await browser.close();
