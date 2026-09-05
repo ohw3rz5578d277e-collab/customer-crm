@@ -53,6 +53,12 @@ try{
     assert.equal(await page.locator('#crmMktList').isVisible(),false,viewport.width+': customer list visible on Today');
     assert.equal(await page.locator('#lineOpsOpen').isVisible(),false,viewport.width+': legacy LINE entry visible under V2');
     assert.equal(await page.locator('#crmShellSettingsTop').isVisible(),true,viewport.width+': canonical Settings action missing');
+    assert.equal(await page.locator('#crmShellStatusTop').isVisible(),true,viewport.width+': canonical Status action missing');
+    await page.locator('#crmShellStatusTop').click();
+    await page.locator('#crmOwnerStatusSheet.open').waitFor();
+    assert.equal(await page.locator('#crmOwnerStatusSheet').isVisible(),true,viewport.width+': status sheet not visible');
+    await page.locator('#crmOwnerStatusClose').click();
+    await page.waitForFunction(()=>!document.getElementById('crmOwnerStatusSheet')?.classList.contains('open'));
     if(viewport.width>900){
       assert.equal(await page.locator('#crmOwnerDesktopSidebar').isVisible(),true,'desktop sidebar missing');
       assert.equal(await page.locator('#crmOwnerMobileNav').isVisible(),false,'mobile nav visible on desktop');
@@ -91,6 +97,7 @@ try{
   console.log('OWNER_VIEW_EXCLUSIVE_ROUTING=PASS');
   console.log('OWNER_LEGACY_ENTRY_DUPLICATION=0');
   console.log('OWNER_MOBILE_SETTINGS_VISIBLE=PASS');
+  console.log('OWNER_STATUS_PANEL_390_1440_VISIBLE=PASS');
   console.log('OWNER_MOBILE_TOOLBAR_STACK=PASS');
   console.log('OWNER_INITIAL_BACKGROUND_LOAD_NAVIGATION_STABLE=PASS');
   console.log('HTTP_WRITES=0');
