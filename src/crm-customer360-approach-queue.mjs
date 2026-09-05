@@ -89,7 +89,7 @@ export function buildApproachQueue(views,params={horizon_days:90,limit:50,status
       if(params.status==='blocked')return item.contact.code==='blocked_opt_out';
       return true;
     })
-    .sort((a,b)=>b.priority_score-a.priority_score-(0)||((a.next_opportunity?.days??99999)-(b.next_opportunity?.days??99999))||a.customer_id.localeCompare(b.customer_id));
+    .sort((a,b)=>(b.priority_score-a.priority_score)||((a.next_opportunity?.days??99999)-(b.next_opportunity?.days??99999))||a.customer_id.localeCompare(b.customer_id));
 
   const summary={
     total:all.length,
