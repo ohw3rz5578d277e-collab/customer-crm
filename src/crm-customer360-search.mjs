@@ -48,7 +48,7 @@ export function customerMatchesSearch(view,p){
   if(p.event_type.length||p.event_days_max!=null){if(!(view.opportunities||[]).some(o=>(!p.event_type.length||p.event_type.some(t=>eventMatches(o,t)))&&(p.event_days_max==null||(o.days!=null&&o.days>=0&&o.days<=p.event_days_max))))return false}
   if(p.prefecture.length&&!p.prefecture.includes(text(view.address?.prefecture)))return false;if(p.city.length&&!p.city.includes(text(view.address?.city)))return false;
   if(p.line==='linked'&&!view.line_linked)return false;if(p.line==='unlinked'&&view.line_linked)return false;
-  if(p.consent==='unknown'&&view.consent?.status!=='unknown')return false;if(p.consent==='opted_out'&&view.consent?.status!=='opted_out')return false;if(p.consent==='contactable_candidate'&&(view.consent?.status==='opted_out'||!(view.line_linked||text(raw.phone)||text(raw.email))))return false;
+  if(p.consent==='unknown'&&view.consent?.status!=='unknown')return false;if(p.consent==='opted_out'&&view.consent?.status!=='opted_out')return false;if(p.consent==='contactable_candidate'&&(view.consent?.status!=='explicit_allowed'||!(view.line_linked||text(raw.phone)||text(raw.email))))return false;
   if(p.preferred_channel.length&&!p.preferred_channel.includes(text(view.consent?.preferred_contact_channel)))return false;if(p.photo_public&&photoStatus(raw)!==p.photo_public)return false;
   const src=sourceValue(raw),camp=campaignValue(raw),genre=text(raw.genre_history);if(p.source.length&&!p.source.includes(src))return false;if(p.campaign.length&&!p.campaign.includes(camp))return false;if(p.genre.length&&!p.genre.every(x=>genre.includes(x)))return false;if(p.marketing_class.length&&!p.marketing_class.every(x=>(view.marketing_classes||[]).includes(x)))return false;
   return true;
