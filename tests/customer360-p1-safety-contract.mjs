@@ -61,6 +61,16 @@ assert.equal(body.meta.automatic_contact,false);
 assert.ok(!JSON.stringify(body).includes('09000000000'));
 assert.ok(!JSON.stringify(body).includes('blocked@example.com'));
 
+const homeResponse=await handleCustomer360Request(new Request('https://example.test/api/customer360/marketing-home'),env);
+assert.equal(homeResponse.status,200);
+const homeBody=await homeResponse.json();
+assert.equal(homeBody.ok,true);
+assert.equal(homeBody.top_opportunities.length,0,'denied customer must not appear in Marketing HOME recommendations');
+assert.equal(homeBody.kpis.approach_this_month,0,'denied customer must not increment approach KPI');
+assert.equal(homeBody.meta.contact_candidates_available,true);
+assert.equal(homeBody.meta.contact_candidate_filter,'manual_contact_ready');
+assert.equal(homeBody.meta.contact_permission_fail_closed,true);
+
 const failingPermissionEnv={
   CRM_LOCAL_TEST_AUTH:'1',
   DB:{
@@ -94,7 +104,18 @@ assert.equal(failedPermissionBody.ok,false);
 assert.equal(failedPermissionBody.error,'contact_permission_unavailable');
 assert.ok(!('items' in failedPermissionBody),'failed permission read must not return contact candidates');
 
+const failedHomeResponse=await handleCustomer360Request(new Request('https://example.test/api/customer360/marketing-home'),failingPermissionEnv);
+assert.equal(failedHomeResponse.status,200);
+const failedHomeBody=await failedHomeResponse.json();
+assert.equal(failedHomeBody.ok,true);
+assert.equal(failedHomeBody.top_opportunities.length,0,'permission read failure must suppress Marketing HOME candidates');
+assert.equal(failedHomeBody.kpis.approach_this_month,0,'permission read failure must suppress approach KPI');
+assert.equal(failedHomeBody.meta.contact_candidates_available,false);
+assert.equal(failedHomeBody.meta.contact_permission_fail_closed,true);
+
 console.log('CUSTOMER360_PROFILE_MARKETING_DENIAL_BLOCK=PASS');
+console.log('MARKETING_HOME_CONTACT_DENIAL_FILTER=PASS');
+console.log('MARKETING_HOME_PERMISSION_FAILURE_FAIL_CLOSED=PASS');
 console.log('CONTACT_PERMISSION_READ_FAILURE_FAIL_CLOSED=PASS');
 console.log('RESERVATION_DELIVERED_STATUS_ALIGNMENT=PASS');
 console.log('RESERVATION_SHOOT_ENDED_STATUS_ALIGNMENT=PASS');
