@@ -86,6 +86,6 @@ document.addEventListener('crm:owner-view-change',e=>setShellActive(e.detail?.vi
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot,{once:true});else boot();
 window.__crmOwnerAppShellApi={openView,setShellActive,ensureShell};
 })();
-<\\/script>`;
+<\/script>`;
   return html.includes('</head>')?html.replace('</head>',style+'</head>').replace('</body>',script+'</body>'):style+html+script;
 }
