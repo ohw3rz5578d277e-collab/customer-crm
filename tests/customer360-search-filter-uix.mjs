@@ -14,7 +14,7 @@ const managed={
 '26000101':[{id:'m1',customer_id:'26000101',relation:'spouse',name:'山田 太郎',furigana:'ヤマダ タロウ'},{id:'m2',customer_id:'26000101',relation:'child',name:'さくら',furigana:'ヤマダ サクラ',birthdate:'2019-10-29',school_stage:'小1'}],
 '26000103':[{id:'m3',customer_id:'26000103',relation:'child',name:'あかり',furigana:'サトウ アカリ',birthdate:'2025-09-20'}]
 };
-const profiles={'26000101':{prefecture:'大阪府',city:'豊中市',address_line1:'本町1-2-3',marketing_opt_out:0,preferred_contact_channel:'LINE'},'26000103':{prefecture:'兵庫県',city:'西宮市',address_line1:'甲子園1-1',marketing_opt_out:1,preferred_contact_channel:'email'}};
+const profiles={'26000101':{prefecture:'大阪府',city:'豊中市',address_line1:'本町1-2-3',marketing_opt_out:0,preferred_contact_channel:'LINE'},'26000103':{prefecture:'兵庫県',city:'西宮市',address_line1:'甲子園1-1',marketing_opt_out:1,preferred_contact_channel:'email'},'26000105':{marketing_contact_permission:'allowed',preferred_contact_channel:'LINE'}};
 const views=rows.map(r=>buildCustomerMarketingView(r,managed[r.customer_id]||legacyFamilyMembers(r),profiles[r.customer_id]||{},asOf));
 const run=query=>{const p=parseCustomerSearchParams(new URLSearchParams(query));p.on_date=asOf;return searchCustomerViews(views,p)};
 pass('no query returns default list',run('').total===5);
@@ -59,7 +59,9 @@ pass('campaign facet filter',run('campaign=七五三秋').items[0]?.customer_id=
 pass('genre multi filter',run('genre=七五三,家族写真').items[0]?.customer_id==='26000105');
 pass('marketing class filter',run('marketing_class=LOYAL').total>=2);
 pass('consent unknown filter',run('consent=unknown').total===3);
+pass('marketing_opt_out false alone remains unknown',run('consent=unknown').items.some(x=>x.customer_id==='26000101'));
 pass('consent opted out filter',run('consent=opted_out').items[0]?.customer_id==='26000103');
+pass('explicit allowed contactable candidate',run('consent=contactable_candidate').items.some(x=>x.customer_id==='26000105'));
 pass('contactable candidate excludes opt-out',!run('consent=contactable_candidate').items.some(x=>x.customer_id==='26000103'));
 pass('combined AND filters',run('prefecture=大阪府&ltv_min=100000&line=linked').total===1&&run('prefecture=大阪府&ltv_min=100000&line=linked').items[0].customer_id==='26000101');
 pass('filter clear represented by empty params',run('').total===5);
