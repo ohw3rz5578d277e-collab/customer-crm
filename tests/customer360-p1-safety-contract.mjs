@@ -61,7 +61,41 @@ assert.equal(body.meta.automatic_contact,false);
 assert.ok(!JSON.stringify(body).includes('09000000000'));
 assert.ok(!JSON.stringify(body).includes('blocked@example.com'));
 
+const failingPermissionEnv={
+  CRM_LOCAL_TEST_AUTH:'1',
+  DB:{
+    prepare(sql){
+      let args=[];
+      const stmt={
+        bind(...values){args=values;return stmt},
+        async first(){
+          if(sql.includes('sqlite_master')){
+            const name=String(args[0]||'');
+            return ['customer_marketing_profiles','customer_profile_enrichment'].includes(name)?{name}:null;
+          }
+          return null;
+        },
+        async all(){
+          if(sql.includes('SELECT rowid AS __customer_ref,* FROM customers'))return{results:[customer]};
+          if(sql.includes('SELECT * FROM customer_marketing_profiles'))return{results:[marketing]};
+          if(sql.includes('SELECT customer_id,marketing_contact_permission FROM customer_profile_enrichment'))throw new Error('injected_contact_permission_read_failure');
+          return{results:[]};
+        },
+        async run(){throw new Error('read_only_test_write_attempt')}
+      };
+      return stmt;
+    }
+  }
+};
+const failedPermissionResponse=await handleCustomer360Request(new Request('https://example.test/api/customer360/approach-queue?horizon_days=365&status=all'),failingPermissionEnv);
+assert.equal(failedPermissionResponse.status,503);
+const failedPermissionBody=await failedPermissionResponse.json();
+assert.equal(failedPermissionBody.ok,false);
+assert.equal(failedPermissionBody.error,'contact_permission_unavailable');
+assert.ok(!('items' in failedPermissionBody),'failed permission read must not return contact candidates');
+
 console.log('CUSTOMER360_PROFILE_MARKETING_DENIAL_BLOCK=PASS');
+console.log('CONTACT_PERMISSION_READ_FAILURE_FAIL_CLOSED=PASS');
 console.log('RESERVATION_DELIVERED_STATUS_ALIGNMENT=PASS');
 console.log('PRODUCTION_D1_WRITE=0');
 console.log('LINE_SEND=0');
