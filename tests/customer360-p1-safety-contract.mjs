@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { handleCustomer360Request } from '../src/crm-customer360-runtime.mjs';
 import { isCompletedReservationStatus } from '../src/crm-reservation-status-contract.mjs';
 
-for(const status of ['納品済み','納品完了','本納品済み','本納品完了','delivered','completed']){
+for(const status of ['撮影終了','納品済み','納品完了','本納品済み','本納品完了','delivered','completed']){
   assert.equal(isCompletedReservationStatus(status),true,'completed status missing: '+status);
 }
 
@@ -97,5 +97,6 @@ assert.ok(!('items' in failedPermissionBody),'failed permission read must not re
 console.log('CUSTOMER360_PROFILE_MARKETING_DENIAL_BLOCK=PASS');
 console.log('CONTACT_PERMISSION_READ_FAILURE_FAIL_CLOSED=PASS');
 console.log('RESERVATION_DELIVERED_STATUS_ALIGNMENT=PASS');
+console.log('RESERVATION_SHOOT_ENDED_STATUS_ALIGNMENT=PASS');
 console.log('PRODUCTION_D1_WRITE=0');
 console.log('LINE_SEND=0');
