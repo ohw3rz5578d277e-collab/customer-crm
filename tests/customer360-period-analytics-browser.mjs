@@ -21,11 +21,12 @@ try{
   for(const viewport of [{width:390,height:844},{width:1440,height:900}]){
     const context=await browser.newContext({viewport});
     const page=await context.newPage();
+    const analyticsBefore=requests.filter(x=>x.includes('/api/customer360/analytics')).length;
     await page.goto(origin+'/admin',{waitUntil:'domcontentloaded'});
     await page.locator('#crmMktNav [data-view="home"]').click();
     await page.waitForSelector('#crmAnalyticsApply');
     await page.waitForFunction(()=>document.querySelector('#crmMktHome')?.textContent.includes('期間分析'));
-    assert.equal(requests.filter(x=>x.includes('/api/customer360/analytics')).length,0,'analytics must not auto-fetch');
+    assert.equal(requests.filter(x=>x.includes('/api/customer360/analytics')).length,analyticsBefore,'analytics must not auto-fetch');
     assert.equal(await page.locator('#crmAnalyticsFrom').inputValue(),'2026-09-01');
     assert.equal(await page.locator('#crmAnalyticsTo').inputValue(),'2026-09-05');
     await page.locator('#crmAnalyticsApply').click();
