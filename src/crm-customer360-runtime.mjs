@@ -27,16 +27,25 @@ function authorized(request,env){return env?.CRM_LOCAL_TEST_AUTH==='1'||!!access
 async function safeAll(env,sql,params=[]){try{let s=env.DB.prepare(sql);if(params.length)s=s.bind(...params);const r=await s.all();return r.results||[]}catch(_){return[]}}
 async function safeFirst(env,sql,params=[]){try{let s=env.DB.prepare(sql);if(params.length)s=s.bind(...params);return await s.first()}catch(_){return null}}
 async function tableExists(env,name){return !!(await safeFirst(env,"SELECT name FROM sqlite_master WHERE type='table' AND name=? LIMIT 1",[name]))}
+async function strictAll(env,sql,params=[]){let s=env.DB.prepare(sql);if(params.length)s=s.bind(...params);const r=await s.all();return r.results||[]}
+async function strictFirst(env,sql,params=[]){let s=env.DB.prepare(sql);if(params.length)s=s.bind(...params);return await s.first()}
+async function strictTableExists(env,name){return !!(await strictFirst(env,"SELECT name FROM sqlite_master WHERE type='table' AND name=? LIMIT 1",[name]))}
 async function familyRows(env,id){if(!(await tableExists(env,'customer_family_members')))return[];return safeAll(env,"SELECT * FROM customer_family_members WHERE customer_id=? AND (deleted_at IS NULL OR deleted_at='') ORDER BY created_at ASC,id ASC",[id])}
 async function profileRow(env,id){if(!(await tableExists(env,'customer_marketing_profiles')))return{};return (await safeFirst(env,"SELECT * FROM customer_marketing_profiles WHERE customer_id=? LIMIT 1",[id]))||{}}
 async function activeCustomers(env){return (await safeAll(env,"SELECT rowid AS __customer_ref,* FROM customers")).filter(x=>!text(x.deleted_at))}
 async function viewFor(env,c,onDate){return buildCustomerMarketingView(c,await familyRows(env,text(c.customer_id)),await profileRow(env,text(c.customer_id)),onDate)}
 
-async function loadCustomerViews(env,onDate){
+async function loadCustomerViews(env,onDate,{requireContactPermissions=false}={}){
   const customers=await activeCustomers(env);
   const managedFamily=await tableExists(env,'customer_family_members')?await safeAll(env,"SELECT * FROM customer_family_members WHERE deleted_at IS NULL OR deleted_at='' ORDER BY customer_id,created_at,id"):[];
   const profiles=await tableExists(env,'customer_marketing_profiles')?await safeAll(env,"SELECT * FROM customer_marketing_profiles"):[];
-  const contactPermissions=await tableExists(env,'customer_profile_enrichment')?await safeAll(env,"SELECT customer_id,marketing_contact_permission FROM customer_profile_enrichment"):[];
+  let contactPermissions=[];
+  if(requireContactPermissions){
+    if(!(await strictTableExists(env,'customer_profile_enrichment')))throw new Error('contact_permission_unavailable');
+    contactPermissions=await strictAll(env,"SELECT customer_id,marketing_contact_permission FROM customer_profile_enrichment");
+  }else if(await tableExists(env,'customer_profile_enrichment')){
+    contactPermissions=await safeAll(env,"SELECT customer_id,marketing_contact_permission FROM customer_profile_enrichment");
+  }
   const familyByCustomer=new Map(),profileByCustomer=new Map(),contactPermissionByCustomer=new Map();
   for(const m of managedFamily){const id=text(m.customer_id);if(!familyByCustomer.has(id))familyByCustomer.set(id,[]);familyByCustomer.get(id).push(m)}
   for(const p of profiles)profileByCustomer.set(text(p.customer_id),p);
@@ -66,15 +75,20 @@ export async function marketingHomeData(env,onDate=jstToday()){
 
 export async function approachQueueData(env,searchParams,onDate=jstToday()){
   let params;
-  try{params=parseApproachQueueParams(searchParams)}catch(error){return{error:text(error?.message)||'invalid_approach_queue_filter'}}
-  const views=await loadCustomerViews(env,onDate);
+  try{params=parseApproachQueueParams(searchParams)}catch(error){return{error:text(error?.message)||'invalid_approach_queue_filter',status:400}}
+  let views;
+  try{views=await loadCustomerViews(env,onDate,{requireContactPermissions:true})}
+  catch(_){return{error:'contact_permission_unavailable',status:503}}
   return buildApproachQueue(views,params);
 }
 
 export async function periodAnalyticsData(env,searchParams,onDate=jstToday()){
   let period;
   try{period=parsePeriodAnalyticsParams(searchParams,onDate)}catch(error){return{error:text(error?.message)||'invalid_period'}}
-  if(!(await tableExists(env,'customer_reservations'))){
+  let reservationsAvailable;
+  try{reservationsAvailable=await strictTableExists(env,'customer_reservations')}
+  catch(_){return{error:'analytics_read_unavailable',status:503}}
+  if(!reservationsAvailable){
     return {
       available:false,
       period,
@@ -84,7 +98,9 @@ export async function periodAnalyticsData(env,searchParams,onDate=jstToday()){
       meta:{read_only:true,identity_key:'customer_id',customer_id_generation:false,customer_write:false,line_send:false,table_available:false}
     };
   }
-  const rows=await safeAll(env,"SELECT customer_id,genre,shoot_date,total_amount,status FROM customer_reservations WHERE COALESCE(deleted_at,'')='' AND substr(COALESCE(shoot_date,''),1,10)>=? AND substr(COALESCE(shoot_date,''),1,10)<=? ORDER BY shoot_date ASC",[period.previous.from,period.to]);
+  let rows;
+  try{rows=await strictAll(env,"SELECT customer_id,genre,shoot_date,total_amount,status FROM customer_reservations WHERE COALESCE(deleted_at,'')='' AND substr(COALESCE(shoot_date,''),1,10)>=? AND substr(COALESCE(shoot_date,''),1,10)<=? ORDER BY shoot_date ASC",[period.previous.from,period.to])}
+  catch(_){return{error:'analytics_read_unavailable',status:503}}
   const out=buildPeriodAnalytics(rows,period);
   return {available:true,...out,meta:{...out.meta,table_available:true,rows_read:rows.length}};
 }
@@ -125,8 +141,8 @@ export async function handleCustomer360Request(request,env){
   const url=new URL(request.url);if(!url.pathname.startsWith('/api/customer360/'))return null;if(!authorized(request,env))return json({ok:false,error:'authentication_required'},401);
   const asOf=text(url.searchParams.get('as_of'))||jstToday();
   if(request.method==='GET'&&url.pathname==='/api/customer360/marketing-home')return json({ok:true,...await marketingHomeData(env,asOf)});
-  if(request.method==='GET'&&url.pathname==='/api/customer360/analytics'){const data=await periodAnalyticsData(env,url.searchParams,asOf);return data.error?json({ok:false,error:data.error},400):json({ok:true,...data})}
-  if(request.method==='GET'&&url.pathname==='/api/customer360/approach-queue'){const data=await approachQueueData(env,url.searchParams,asOf);return data.error?json({ok:false,error:data.error},400):json({ok:true,...data})}
+  if(request.method==='GET'&&url.pathname==='/api/customer360/analytics'){const data=await periodAnalyticsData(env,url.searchParams,asOf);return data.error?json({ok:false,error:data.error},Number(data.status||400)):json({ok:true,...data})}
+  if(request.method==='GET'&&url.pathname==='/api/customer360/approach-queue'){const data=await approachQueueData(env,url.searchParams,asOf);return data.error?json({ok:false,error:data.error},Number(data.status||400)):json({ok:true,...data})}
   if(request.method==='GET'&&url.pathname==='/api/customer360/customers'){const data=await customerListData(env,url.searchParams,asOf);return data.error?json({ok:false,error:data.error},400):json({ok:true,...data})}
   if(request.method==='POST'&&url.pathname==='/api/customer360/customer-id/allocate'){
     const body=await request.json().catch(()=>null);if(!body)return json({ok:false,error:'invalid_json'},400);
