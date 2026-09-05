@@ -7,13 +7,14 @@ const base='<!doctype html><html><head><meta charset="utf-8"><meta name="viewpor
 const html=composeCustomer360AdminHtml(base);
 const item={customer_id:'26000001',name:'山田 花子',line_linked:true,realized_ltv:50000,shoot_count:2,family_summary:'子1人',last_shoot_date:'2026-08-20',area_summary:'大阪',recommendation:{next_offer:'七五三'},next_opportunity:{label:'七五三',days:20}};
 const facets={prefectures:[],cities:[],genres:[],sources:[],campaigns:[],school_stages:[]};
-const requests=[];
+const requests=[];let delayNextCustomers=false;
 function send(res,status,data,type='application/json; charset=utf-8'){res.writeHead(status,{'content-type':type,'cache-control':'no-store'});res.end(type.startsWith('application/json')?JSON.stringify(data):data)}
-const server=http.createServer((req,res)=>{
+const server=http.createServer(async(req,res)=>{
   const u=new URL(req.url,'http://127.0.0.1');requests.push(req.method+' '+u.pathname+u.search);
   if(u.pathname==='/'||u.pathname==='/admin')return send(res,200,html,'text/html; charset=utf-8');
+  if(u.pathname==='/__fixture/delay-next-customers'){delayNextCustomers=true;return send(res,200,{ok:true})}
   if(u.pathname==='/api/customer360/marketing-home')return send(res,200,{ok:true,kpis:{customers:1,average_realized_ltv:50000,repeat_rate_pct:100,vip_high_ltv:0,event_90d:1,dormant_180:0,line_link_rate_pct:100,approach_this_month:1},top_opportunities:[item],facets});
-  if(u.pathname==='/api/customer360/customers')return send(res,200,{ok:true,total:1,all_total:1,page:1,page_size:50,has_next:false,items:[item],facets,meta:{privacy_safe_list_dto:true}});
+  if(u.pathname==='/api/customer360/customers'){if(delayNextCustomers){delayNextCustomers=false;await new Promise(r=>setTimeout(r,350))}return send(res,200,{ok:true,total:1,all_total:1,page:1,page_size:50,has_next:false,items:[item],facets,meta:{privacy_safe_list_dto:true}})}
   if(u.pathname.startsWith('/api/customer360/customer/'))return send(res,200,{ok:true,customer:{...item,address:{},family:[],opportunities:[],reservations:[],line_history:[],marketing_history:[],marketing_classes:[],consent:{},recommendation:{}}});
   return send(res,404,{ok:false});
 });
@@ -21,6 +22,24 @@ await new Promise(r=>server.listen(0,'127.0.0.1',r));
 const origin='http://127.0.0.1:'+server.address().port;
 const browser=await chromium.launch({headless:true});
 try{
+  {
+    const context=await browser.newContext({viewport:{width:390,height:844},hasTouch:true,isMobile:true});
+    const page=await context.newPage(),errors=[];
+    page.on('pageerror',e=>errors.push('pageerror:'+e.message));
+    page.on('console',m=>{if(m.type()==='error')errors.push('console:'+m.text())});
+    await page.request.get(origin+'/__fixture/delay-next-customers');
+    await page.goto(origin+'/admin',{waitUntil:'domcontentloaded'});
+    await page.waitForFunction(()=>window.__crmOwnerView&&document.getElementById('crmMktHome')?.textContent.includes('期間分析'));
+    await page.evaluate(()=>window.__crmOwnerView.showMarketing());
+    await page.waitForFunction(()=>window.__crmOwnerView.getCurrentView()==='marketing'&&document.getElementById('crmMktHome')?.classList.contains('open'));
+    await page.waitForFunction(()=>document.querySelector('#crmMktList tbody tr'),null,{timeout:1500});
+    await page.waitForTimeout(60);
+    assert.equal(await page.evaluate(()=>window.__crmOwnerView.getCurrentView()),'marketing','background initial list load stole Owner marketing navigation');
+    assert.equal(await page.locator('#crmMktHome').isVisible(),true,'marketing home hidden after background list completion');
+    assert.equal(await page.locator('#crmMktList').isVisible(),false,'customer list surfaced after background list completion');
+    assert.equal(errors.length,0,'initial navigation race: '+errors.join(' | '));
+    await context.close();
+  }
   for(const viewport of [{width:390,height:844},{width:1440,height:900}]){
     const context=await browser.newContext({viewport,hasTouch:viewport.width<=900,isMobile:viewport.width<=430});
     const page=await context.newPage(),errors=[];
@@ -73,6 +92,7 @@ try{
   console.log('OWNER_LEGACY_ENTRY_DUPLICATION=0');
   console.log('OWNER_MOBILE_SETTINGS_VISIBLE=PASS');
   console.log('OWNER_MOBILE_TOOLBAR_STACK=PASS');
+  console.log('OWNER_INITIAL_BACKGROUND_LOAD_NAVIGATION_STABLE=PASS');
   console.log('HTTP_WRITES=0');
 } finally {
   await browser.close();
