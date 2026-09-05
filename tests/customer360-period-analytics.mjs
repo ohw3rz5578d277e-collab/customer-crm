@@ -15,6 +15,7 @@ const rows=[
 ];
 
 assert.equal(isCompletedReservationStatus('撮影完了'),true);
+assert.equal(isCompletedReservationStatus('撮影終了'),true);
 assert.equal(isCompletedReservationStatus('COMPLETED'),true);
 assert.equal(isCancelledReservationStatus('キャンセル'),true);
 assert.equal(isCompletedReservationStatus('予約確定'),false);
@@ -36,6 +37,13 @@ assert.equal(out.current.genres[0].genre,'お宮参り');
 assert.equal(out.meta.customer_id_generation,false);
 assert.equal(out.meta.customer_write,false);
 assert.equal(out.meta.line_send,false);
+
+const endedOnly=buildPeriodAnalytics([
+  {customer_id:'26009999',genre:'ポートレート',shoot_date:'2026-08-18',total_amount:19800,status:'撮影終了'}
+],period);
+assert.equal(endedOnly.current.revenue,19800,'撮影終了 revenue must be included');
+assert.equal(endedOnly.current.completed_shoots,1,'撮影終了 shoot must be completed');
+assert.equal(endedOnly.current.unique_customers,1,'撮影終了 customer must be counted');
 
 const def=parsePeriodAnalyticsParams(new URLSearchParams(),'2026-09-05');
 assert.equal(def.from,'2026-09-01');
@@ -114,6 +122,7 @@ assert.ok(runtime.includes('period.previous.from,period.to'));
 assert.ok(profile.includes("from './crm-reservation-status-contract.mjs'"));
 assert.ok(!profile.includes('const COMPLETED_STATUSES=new Set'));
 console.log('CUSTOMER360_PERIOD_ANALYTICS=PASS');
+console.log('RESERVATION_SHOOT_ENDED_ANALYTICS=PASS');
 console.log('PERIOD_ANALYTICS_READ_FAILURE_SURFACED=PASS');
 console.log('PERIOD_ANALYTICS_PRODUCTION_WRITE=0');
 console.log('PERIOD_ANALYTICS_CUSTOMER_ID_GENERATION=0');
