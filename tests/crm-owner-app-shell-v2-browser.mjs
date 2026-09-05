@@ -12,6 +12,7 @@ function send(res,status,data,type='application/json; charset=utf-8'){res.writeH
 const server=http.createServer(async(req,res)=>{
   const u=new URL(req.url,'http://127.0.0.1');requests.push(req.method+' '+u.pathname+u.search);
   if(u.pathname==='/'||u.pathname==='/admin')return send(res,200,html,'text/html; charset=utf-8');
+  if(u.pathname==='/api/crm-health-check')return send(res,200,{ok:true,bindings:{DB:true,RESERVATION_SERVICE:true,LINE_SERVICE:true},customer360_marketing_foundation:true});
   if(u.pathname==='/__fixture/delay-next-customers'){delayNextCustomers=true;return send(res,200,{ok:true})}
   if(u.pathname==='/api/customer360/marketing-home')return send(res,200,{ok:true,kpis:{customers:1,average_realized_ltv:50000,repeat_rate_pct:100,vip_high_ltv:0,event_90d:1,dormant_180:0,line_link_rate_pct:100,approach_this_month:1},top_opportunities:[item],facets});
   if(u.pathname==='/api/customer360/customers'){if(delayNextCustomers){delayNextCustomers=false;await new Promise(r=>setTimeout(r,350))}return send(res,200,{ok:true,total:1,all_total:1,page:1,page_size:50,has_next:false,items:[item],facets,meta:{privacy_safe_list_dto:true}})}
@@ -57,6 +58,7 @@ try{
     await page.locator('#crmShellStatusTop').click();
     await page.locator('#crmOwnerStatusSheet.open').waitFor();
     assert.equal(await page.locator('#crmOwnerStatusSheet').isVisible(),true,viewport.width+': status sheet not visible');
+    await page.waitForFunction(()=>document.querySelector('#crmOwnerStatusBody')?.textContent.includes('CRM')&&document.querySelector('#crmOwnerStatusBody')?.textContent.includes('正常'));
     await page.locator('#crmOwnerStatusClose').click();
     await page.waitForFunction(()=>!document.getElementById('crmOwnerStatusSheet')?.classList.contains('open'));
     if(viewport.width>900){
