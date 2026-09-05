@@ -77,6 +77,35 @@ assert.ok(reads>=1);
 const bad=await handleCustomer360Request(new Request('https://example.test/api/customer360/analytics?from=bad&to=2026-08-31'),env);
 assert.equal(bad.status,400);
 
+let failedWrites=0;
+const failingAnalyticsEnv={
+  CRM_LOCAL_TEST_AUTH:'1',
+  DB:{
+    prepare(sql){
+      const stmt={
+        bind(){return stmt},
+        async first(){
+          if(sql.includes('sqlite_master'))return{name:'customer_reservations'};
+          return null;
+        },
+        async all(){
+          if(sql.includes('FROM customer_reservations'))throw new Error('injected_analytics_read_failure');
+          return{results:[]};
+        },
+        async run(){failedWrites++;return{success:true}}
+      };
+      return stmt;
+    }
+  }
+};
+const unavailable=await handleCustomer360Request(new Request('https://example.test/api/customer360/analytics?from=2026-08-01&to=2026-08-31'),failingAnalyticsEnv);
+assert.equal(unavailable.status,503);
+const unavailableBody=await unavailable.json();
+assert.equal(unavailableBody.ok,false);
+assert.equal(unavailableBody.error,'analytics_read_unavailable');
+assert.ok(!('current' in unavailableBody),'failed analytics read must not return zeroed metrics');
+assert.equal(failedWrites,0);
+
 const runtime=fs.readFileSync('src/crm-customer360-runtime.mjs','utf8');
 const profile=fs.readFileSync('src/crm-customer360-profile-enrichment.mjs','utf8');
 assert.ok(runtime.includes("url.pathname==='/api/customer360/analytics'"));
@@ -85,6 +114,7 @@ assert.ok(runtime.includes('period.previous.from,period.to'));
 assert.ok(profile.includes("from './crm-reservation-status-contract.mjs'"));
 assert.ok(!profile.includes('const COMPLETED_STATUSES=new Set'));
 console.log('CUSTOMER360_PERIOD_ANALYTICS=PASS');
+console.log('PERIOD_ANALYTICS_READ_FAILURE_SURFACED=PASS');
 console.log('PERIOD_ANALYTICS_PRODUCTION_WRITE=0');
 console.log('PERIOD_ANALYTICS_CUSTOMER_ID_GENERATION=0');
 console.log('PERIOD_ANALYTICS_LINE_SEND=0');
