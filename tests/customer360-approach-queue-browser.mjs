@@ -22,6 +22,7 @@ try{
     await page.goto(origin+'/admin',{waitUntil:'domcontentloaded'});
     await page.locator('#crmMktNav [data-view="home"]').click();
     await page.waitForSelector('#crmApproachLoad');
+    assert.equal(await page.locator('#crmMktHome > table.crm-mkt-table').count(),0,'consent-blind duplicate opportunity table must be removed');
     assert.equal(requests.filter(x=>x.includes('/api/customer360/approach-queue')).length,queueBefore,'approach queue must not auto-fetch');
     await page.locator('#crmApproachLoad').click();
     await page.waitForFunction(()=>document.querySelector('.crm-approach-row')?.textContent.includes('手動連絡候補'));
@@ -42,6 +43,7 @@ try{
   }
   assert.equal(writes.length,0,'HTTP writes '+writes.join(','));
   console.log('CUSTOMER360_APPROACH_QUEUE_BROWSER=PASS');
+  console.log('MARKETING_HOME_DUPLICATE_OPPORTUNITY_TABLE=0');
   console.log('APPROACH_QUEUE_AUTO_FETCH=0');
   console.log('APPROACH_QUEUE_HTTP_WRITES=0');
   console.log('APPROACH_QUEUE_390_1440_OVERFLOW=0');
