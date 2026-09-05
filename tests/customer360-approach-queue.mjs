@@ -52,7 +52,7 @@ assert.equal(buildApproachQueue([ready,review,blocked],{horizon_days:90,limit:50
 
 let writes=0;
 const customerRow={customer_id:'26000011',name:'田中 三郎',line_user_id:'U123',phone:'09099990000',email:'tanaka@example.com',total_revenue:100000,repeat_count:2,dormant_days:0,first_shoot_date:'2026-01-01',last_shoot_date:'2026-06-01',deleted_at:''};
-const env={CRM_LOCAL_TEST_AUTH:'1',DB:{prepare(sql){const stmt={bind(){return stmt},async first(){if(sql.includes('sqlite_master'))return null;return null},async all(){if(sql.includes('SELECT rowid AS __customer_ref,* FROM customers'))return{results:[customerRow]};return{results:[]}},async run(){writes++;return{success:true}}};return stmt}}};
+const env={CRM_LOCAL_TEST_AUTH:'1',DB:{prepare(sql){const stmt={bind(){return stmt},async first(){if(sql.includes('sqlite_master'))return{name:'available'};return null},async all(){if(sql.includes('SELECT rowid AS __customer_ref,* FROM customers'))return{results:[customerRow]};return{results:[]}},async run(){writes++;return{success:true}}};return stmt}}};
 const res=await handleCustomer360Request(new Request('https://example.test/api/customer360/approach-queue?horizon_days=90&limit=50&status=all'),env);
 assert.equal(res.status,200);
 const body=await res.json();
@@ -72,6 +72,7 @@ const initStart=ui.indexOf('async function init()');
 const initEnd=ui.indexOf('init();',initStart);
 assert.ok(initStart>=0&&initEnd>initStart,'Customer360 init contract missing');
 assert.ok(!ui.slice(initStart,initEnd).includes('loadApproachQueue'),'approach queue must remain lazy and never auto-fetch on init');
+assert.ok(ui.slice(initStart,initEnd).includes("if(!window.__crmOwnerView)openView('list')"),'Owner-managed init must not steal navigation after background list load');
 assert.ok(ui.includes("id=\"crmApproachLoad\""),'explicit approach queue load control missing');
 console.log('CUSTOMER360_APPROACH_QUEUE=PASS');
 console.log('APPROACH_QUEUE_PRODUCTION_WRITE=0');
@@ -80,3 +81,4 @@ console.log('APPROACH_QUEUE_LINE_SEND=0');
 console.log('APPROACH_QUEUE_CONTACT_DETAILS_EXPOSED=0');
 console.log('APPROACH_QUEUE_AUTO_FETCH=0');
 console.log('APPROACH_QUEUE_AUTOMATIC_CONTACT=0');
+console.log('OWNER_BACKGROUND_INIT_NAVIGATION_STABLE=PASS');
