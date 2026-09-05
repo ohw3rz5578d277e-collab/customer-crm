@@ -112,6 +112,33 @@ export async function periodAnalyticsData(env,searchParams,onDate=jstToday()){
   return {available:true,...out,meta:{...out.meta,table_available:true,rows_read:rows.length}};
 }
 
+export async function customer360ReadOnlyStatus(env){
+  let dbOk=false;
+  if(env?.DB?.prepare){
+    try{
+      const row=await env.DB.prepare('SELECT 1 AS ok').first();
+      dbOk=Number(row?.ok||0)===1;
+    }catch(_){dbOk=false}
+  }
+  return {
+    ok:true,
+    read_only:true,
+    bindings:{
+      DB:dbOk,
+      RESERVATION_SERVICE:!!env?.RESERVATION_SERVICE,
+      LINE_SERVICE:!!env?.LINE_SERVICE
+    },
+    customer360_marketing_foundation:true,
+    customer360_status_read_only:true,
+    d1_probe:'SELECT 1',
+    d1_write:false,
+    schema_repair:false,
+    customer_write:false,
+    customer_id_generation:false,
+    line_send:false
+  };
+}
+
 export async function customerListData(env,searchParams,onDate=jstToday()){
   const started=Date.now();
   let parsed;
@@ -147,6 +174,7 @@ async function profileWrite(request,env){
 export async function handleCustomer360Request(request,env){
   const url=new URL(request.url);if(!url.pathname.startsWith('/api/customer360/'))return null;if(!authorized(request,env))return json({ok:false,error:'authentication_required'},401);
   const asOf=text(url.searchParams.get('as_of'))||jstToday();
+  if(request.method==='GET'&&url.pathname==='/api/customer360/status')return json(await customer360ReadOnlyStatus(env));
   if(request.method==='GET'&&url.pathname==='/api/customer360/marketing-home')return json({ok:true,...await marketingHomeData(env,asOf)});
   if(request.method==='GET'&&url.pathname==='/api/customer360/analytics'){const data=await periodAnalyticsData(env,url.searchParams,asOf);return data.error?json({ok:false,error:data.error},Number(data.status||400)):json({ok:true,...data})}
   if(request.method==='GET'&&url.pathname==='/api/customer360/approach-queue'){const data=await approachQueueData(env,url.searchParams,asOf);return data.error?json({ok:false,error:data.error},Number(data.status||400)):json({ok:true,...data})}
@@ -162,4 +190,4 @@ export async function handleCustomer360Request(request,env){
   return json({ok:false,error:'not_found'},404);
 }
 
-export function customer360Health(){return{customer360_family_marketing_foundation:true,customer360_search_first:true,customer360_list_privacy_safe:true,customer360_server_filtering:true,customer360_page_size_max:100,family_member_limit:'unlimited',family_identity_source:false,search_identity_source:false,realized_ltv_field:'total_revenue',marketing_line_auto_send:false,marketing_profile_default_opt_in:false,customer360_write_default_enabled:false,customer_id_autofill_owner_authorized:true,customer_id_autofill_customer360_write_flag_required:false}}
+export function customer360Health(){return{customer360_family_marketing_foundation:true,customer360_search_first:true,customer360_list_privacy_safe:true,customer360_server_filtering:true,customer360_page_size_max:100,family_member_limit:'unlimited',family_identity_source:false,search_identity_source:false,realized_ltv_field:'total_revenue',marketing_line_auto_send:false,marketing_profile_default_opt_in:false,customer360_write_default_enabled:false,customer_id_autofill_owner_authorized:true,customer_id_autofill_customer360_write_flag_required:false,customer360_status_read_only:true,customer360_status_schema_repair:false}}
