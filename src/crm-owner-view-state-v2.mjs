@@ -1,6 +1,6 @@
 export function injectOwnerViewState(html){
   if(!html||html.includes('crm-owner-view-state-v2-script'))return html;
-  const style=String.raw\`<style id="crm-owner-view-state-v2-style">
+  const style=String.raw`<style id="crm-owner-view-state-v2-style">
 body[data-crm-owner-view="today"] #crmMktNav,body[data-crm-owner-view="today"] #crmMktList,body[data-crm-owner-view="today"] #crmMktHome{display:none!important}
 body[data-crm-owner-view="customers"] [data-crm-owner-host="1"]>:not(#crmMktNav):not(#crmMktList):not(#crmMktHome),
 body[data-crm-owner-view="search"] [data-crm-owner-host="1"]>:not(#crmMktNav):not(#crmMktList):not(#crmMktHome),
@@ -22,8 +22,8 @@ body[data-crm-owner-view="customers"] #crmMktHome,body[data-crm-owner-view="sear
 body[data-crm-owner-view="marketing"] #crmMktList{display:none!important}
 body[data-crm-owner-view="marketing"] #crmMktHome{display:block!important}
 body[data-crm-owner-view="line"] #crmMktNav,body[data-crm-owner-view="line"] #crmMktList,body[data-crm-owner-view="line"] #crmMktHome{display:none!important}
-</style>\`;
-  const script=String.raw\`<script id="crm-owner-view-state-v2-script">
+</style>`;
+  const script=String.raw`<script id="crm-owner-view-state-v2-script">
 (()=>{
 if(window.__crmOwnerViewStateControllerV2)return;window.__crmOwnerViewStateControllerV2=1;
 const $=id=>document.getElementById(id);
@@ -49,6 +49,6 @@ function startBootstrapObserver(){if(bootstrapObserver||maybeFinishBootstrap())r
 function boot(){window.__crmOwnerView=api;startBootstrapObserver();api.showToday({scroll:false})}
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot,{once:true});else boot();
 })();
-<\\/script>\`;
+<\\/script>`;
   return html.includes('</head>')?html.replace('</head>',style+'</head>').replace('</body>',script+'</body>'):style+html+script;
 }
