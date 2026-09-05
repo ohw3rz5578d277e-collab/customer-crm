@@ -2,7 +2,7 @@ const RESERVATION_ADMIN_URL='https://reservation-app-api.ohw3rz5578d277e.workers
 
 export function injectOwnerAppShell(html){
   if(!html||html.includes('crm-owner-app-shell-script'))return html;
-  const style=String.raw\`<style id="crm-owner-app-shell-style">
+  const style=String.raw`<style id="crm-owner-app-shell-style">
 :root{--crm-shell-bg:#f4f7f8;--crm-shell-card:#fff;--crm-shell-text:#14212b;--crm-shell-muted:#667983;--crm-shell-line:#dfe7ea;--crm-shell-accent:#0b6b55;--crm-shell-accent-soft:#e9f5f1;--crm-shell-danger:#a61b1b}
 html,body{background:var(--crm-shell-bg)!important;color:var(--crm-shell-text)!important}
 body.crm-owner-shell-v2{margin:0!important}
@@ -36,11 +36,11 @@ body.crm-owner-shell-v2{margin:0!important}
  .crm-owner-shell-v2 #crmMktNav .crm-mkt-btn{width:100%!important;padding:8px 7px!important;font-size:12px!important}
  .crm-owner-shell-v2 #crmTodayDashboard,.crm-owner-shell-v2 #crmReservationStatus,.crm-owner-shell-v2 #crmDeliveryDeadlinePanel,.crm-owner-shell-v2 #crmLegacyOperations,.crm-owner-shell-v2 #crmGrowthPanel{margin-left:0!important;margin-right:0!important;border-radius:15px!important}
 }
-</style>\`;
-  const script=String.raw\`<script id="crm-owner-app-shell-script">
+</style>`;
+  const script=String.raw`<script id="crm-owner-app-shell-script">
 (()=>{
 if(window.__crmOwnerAppShell)return;window.__crmOwnerAppShell=1;
-const RES_URL=\${JSON.stringify(RESERVATION_ADMIN_URL)};
+const RES_URL=${JSON.stringify(RESERVATION_ADMIN_URL)};
 const $=id=>document.getElementById(id);
 const META={
  today:{title:'今日やること',hint:'今日の対応・予約状況・納品期限をここで確認します。'},
@@ -86,6 +86,6 @@ document.addEventListener('crm:owner-view-change',e=>setShellActive(e.detail?.vi
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot,{once:true});else boot();
 window.__crmOwnerAppShellApi={openView,setShellActive,ensureShell};
 })();
-<\\/script>\`;
+<\\/script>`;
   return html.includes('</head>')?html.replace('</head>',style+'</head>').replace('</body>',script+'</body>'):style+html+script;
 }
