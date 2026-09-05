@@ -12,7 +12,7 @@ function send(res,status,data,type='application/json; charset=utf-8'){res.writeH
 const server=http.createServer(async(req,res)=>{
   const u=new URL(req.url,'http://127.0.0.1');requests.push(req.method+' '+u.pathname+u.search);
   if(u.pathname==='/'||u.pathname==='/admin')return send(res,200,html,'text/html; charset=utf-8');
-  if(u.pathname==='/api/crm-health-check')return send(res,200,{ok:true,bindings:{DB:true,RESERVATION_SERVICE:true,LINE_SERVICE:true},customer360_marketing_foundation:true});
+  if(u.pathname==='/api/customer360/status')return send(res,200,{ok:true,read_only:true,bindings:{DB:true,RESERVATION_SERVICE:true,LINE_SERVICE:true},customer360_marketing_foundation:true,customer360_status_read_only:true,d1_write:false,schema_repair:false,customer_write:false,customer_id_generation:false,line_send:false});
   if(u.pathname==='/__fixture/delay-next-customers'){delayNextCustomers=true;return send(res,200,{ok:true})}
   if(u.pathname==='/api/customer360/marketing-home')return send(res,200,{ok:true,kpis:{customers:1,average_realized_ltv:50000,repeat_rate_pct:100,vip_high_ltv:0,event_90d:1,dormant_180:0,line_link_rate_pct:100,approach_this_month:1},top_opportunities:[item],facets});
   if(u.pathname==='/api/customer360/customers'){if(delayNextCustomers){delayNextCustomers=false;await new Promise(r=>setTimeout(r,350))}return send(res,200,{ok:true,total:1,all_total:1,page:1,page_size:50,has_next:false,items:[item],facets,meta:{privacy_safe_list_dto:true}})}
@@ -59,6 +59,8 @@ try{
     await page.locator('#crmOwnerStatusSheet.open').waitFor();
     assert.equal(await page.locator('#crmOwnerStatusSheet').isVisible(),true,viewport.width+': status sheet not visible');
     await page.waitForFunction(()=>document.querySelector('#crmOwnerStatusBody')?.textContent.includes('CRM')&&document.querySelector('#crmOwnerStatusBody')?.textContent.includes('正常'));
+    assert.ok(requests.includes('GET /api/customer360/status'),viewport.width+': read-only status endpoint not requested');
+    assert.equal(requests.some(x=>x.includes('/api/crm-health-check')),false,viewport.width+': mutating legacy health endpoint was requested');
     await page.locator('#crmOwnerStatusClose').click();
     await page.waitForFunction(()=>!document.getElementById('crmOwnerStatusSheet')?.classList.contains('open'));
     if(viewport.width>900){
@@ -100,6 +102,8 @@ try{
   console.log('OWNER_LEGACY_ENTRY_DUPLICATION=0');
   console.log('OWNER_MOBILE_SETTINGS_VISIBLE=PASS');
   console.log('OWNER_STATUS_PANEL_390_1440_VISIBLE=PASS');
+  console.log('OWNER_STATUS_READ_ONLY_ENDPOINT=PASS');
+  console.log('LEGACY_MUTATING_HEALTH_REQUEST=0');
   console.log('OWNER_MOBILE_TOOLBAR_STACK=PASS');
   console.log('OWNER_INITIAL_BACKGROUND_LOAD_NAVIGATION_STABLE=PASS');
   console.log('HTTP_WRITES=0');
