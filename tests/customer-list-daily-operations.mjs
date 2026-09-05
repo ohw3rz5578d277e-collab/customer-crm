@@ -24,7 +24,7 @@ pass('missing ID detail is fail-safe instead of broken empty-ID request',daily.i
 pass('search communicates name Customer ID LINE display name and phone',daily.includes('placeholder="名前・顧客ID・LINE表示名・電話で検索"'));
 pass('desktop header is daily-operations ordered',daily.includes('<th>顧客</th><th>関係</th><th>撮影回数</th><th>累計売上</th><th>最終撮影</th><th>LINE</th><th>次の候補</th><th>詳細</th>'));
 pass('mobile action targets remain at least 44px',daily.includes('min-height:44px'));
-pass('Marketing HOME preserves the marketing row path',daily.includes("top.map(marketingRow).join('')")&&daily.includes('data-label="実績LTV"')&&daily.includes('data-label="家族"'));
+pass('daily operations no longer depends on duplicate Marketing HOME table',daily.includes('crm-daily-row')&&!daily.includes("top.map(marketingRow).join('')"));
 pass('adapter is idempotent',injectCustomerListDailyOperations(daily)===daily);
 pass('controlled write contract is limited to missing Customer ID and never LINE send',customerListDailyOperationsContract.read_only===false&&customerListDailyOperationsContract.identity_mutation==='missing_customer_id_only'&&customerListDailyOperationsContract.production_write==='owner_click_only_after_deploy'&&customerListDailyOperationsContract.line_send===false);
 
@@ -32,6 +32,7 @@ const adapterSrc=fs.readFileSync('src/crm-customer-list-daily-operations.mjs','u
 const entrySrc=fs.readFileSync('src/production-index-crm-customer360-entry.js','utf8');
 pass('UI adapter contains no direct customer mutation SQL',!/\b(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+customers\b/i.test(adapterSrc));
 pass('adapter contains no LINE send controls',!/broadcast|multicast|pushMessage|replyMessage/i.test(adapterSrc));
+pass('adapter does not require legacy top opportunity renderer',!adapterSrc.includes('||!out.includes("top.map(row).join')));
 pass('production entry applies adapter immediately after Customer360 marketing UI',entrySrc.includes('const withMarketing=injectCustomer360Marketing(html);\n  const withDailyOperations=injectCustomerListDailyOperations(withMarketing);'));
 pass('production entry keeps Owner exclusive view composition',entrySrc.includes('injectOwnerViewState(withDirectNavigation)'));
 
