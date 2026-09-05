@@ -22,12 +22,14 @@ try{
     const context=await browser.newContext({viewport});
     const page=await context.newPage();
     await page.goto(origin+'/admin',{waitUntil:'domcontentloaded'});
-    await page.waitForSelector('#crmAnalyticsApply');
     await page.locator('#crmMktNav [data-view="home"]').click();
+    await page.waitForSelector('#crmAnalyticsApply');
     await page.waitForFunction(()=>document.querySelector('#crmMktHome')?.textContent.includes('期間分析'));
+    assert.equal(requests.filter(x=>x.includes('/api/customer360/analytics')).length,0,'analytics must not auto-fetch');
     assert.equal(await page.locator('#crmAnalyticsFrom').inputValue(),'2026-09-01');
     assert.equal(await page.locator('#crmAnalyticsTo').inputValue(),'2026-09-05');
-    assert.ok((await page.locator('#crmMktHome').innerText()).includes('¥45,000'));
+    await page.locator('#crmAnalyticsApply').click();
+    await page.waitForFunction(()=>document.querySelector('#crmMktHome')?.textContent.includes('¥45,000'));
     assert.ok((await page.locator('#crmMktHome').innerText()).includes('期間内リピート率'));
     await page.locator('[data-analytics-preset="prev"]').click();
     await page.waitForTimeout(50);
