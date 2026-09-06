@@ -140,13 +140,14 @@ export function recommendationPriority(customer={}, opportunities=[]){
 export function buildCustomerMarketingView(customer={}, family=[], profile={}, onDate=jstToday()){
   const merged=mergeFamilyMembers(customer,family); const opportunities=buildOpportunities(customer,merged,onDate); const rfm=rfmScore(customer); const classes=marketingClasses(customer,opportunities,rfm); const priority=recommendationPriority(customer,opportunities); const address=normalizeAddress(customer,profile);
   const marketingOptOut=profile.marketing_opt_out==null?null:bool(profile.marketing_opt_out);
-  const consent=marketingOptOut===true?'opted_out':marketingOptOut===false?'explicit_not_opted_out':'unknown';
+  const contactPermission=text(profile.marketing_contact_permission).toLowerCase();
+  const consent=(marketingOptOut===true||contactPermission==='denied')?'opted_out':contactPermission==='allowed'?'explicit_allowed':'unknown';
   return {
     customer_id:text(customer.customer_id),name:text(customer.name||customer.line_display_name),customer_rank:text(customer.customer_rank),line_linked:!!text(customer.line_user_id),line_display_name:text(customer.line_display_name),
     realized_ltv:num(customer.total_revenue,0),shoot_count:num(customer.repeat_count,0),avg_order_value:num(customer.avg_order_value||customer.square_avg_payment,0),last_shoot_date:dateOnly(customer.last_shoot_date),first_shoot_date:dateOnly(customer.first_shoot_date),
     family:merged,family_summary:`子${merged.filter(x=>x.relation==='child').length}人`,address,rfm,marketing_classes:classes,opportunities,next_opportunity:opportunities.find(o=>o.days!=null&&o.days>=0)||opportunities[0]||null,
     recommendation:{priority_score:priority.score,priority_reason:priority.reason,next_offer:recommendOffer(opportunities),next_line:buildLineDraft(customer,priority.event||opportunities[0])},
-    consent:{marketing_opt_out:marketingOptOut,preferred_contact_channel:text(profile.preferred_contact_channel),status:consent},raw:customer
+    consent:{marketing_opt_out:marketingOptOut,marketing_contact_permission:contactPermission||'unknown',preferred_contact_channel:text(profile.preferred_contact_channel),status:consent},raw:customer
   };
 }
 

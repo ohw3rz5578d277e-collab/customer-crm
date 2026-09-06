@@ -37,10 +37,10 @@ export function injectCustomerListDailyOperations(html){
   if(rowStart<0||rowEnd<0)return out;
   out=out.slice(0,rowStart)+NEW_ROW+out.slice(rowEnd);
 
-  if(!out.includes(OLD_SEARCH)||!out.includes(OLD_HEADER)||!out.includes("top.map(row).join('')"))return String(html||'');
+  if(!out.includes(OLD_SEARCH)||!out.includes(OLD_HEADER))return String(html||'');
   out=out.replace(OLD_SEARCH,NEW_SEARCH);
   out=out.replace(OLD_HEADER,NEW_HEADER);
-  out=out.replace("top.map(row).join('')","top.map(marketingRow).join('')");
+  if(out.includes("top.map(row).join('')"))out=out.replace("top.map(row).join('')","top.map(marketingRow).join('')");
   out=out.replace('function debounceList(){','window.__crmCustomer360RefreshList=()=>requestList();\nfunction debounceList(){');
 
   if(out.includes('</head>'))out=out.replace('</head>',DAILY_STYLE+'</head>');else out=DAILY_STYLE+out;
