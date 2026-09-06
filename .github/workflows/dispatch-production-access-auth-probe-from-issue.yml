@@ -1,0 +1,118 @@
+name: Dispatch Production Access auth probe from release-gate issue
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  issues: read
+  actions: write
+
+concurrency:
+  group: customer-crm-production-access-auth-probe-dispatch
+  cancel-in-progress: false
+
+jobs:
+  dispatch:
+    name: Validate exact auth-probe command and dispatch read-only workflow
+    if: >-
+      github.event.issue.number == 26 &&
+      github.event.issue.pull_request == null &&
+      github.actor == 'ohw3rz5578d277e-collab' &&
+      github.event.comment.user.login == 'ohw3rz5578d277e-collab' &&
+      startsWith(github.event.comment.body, '/crm-production-auth-probe ')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Validate exact command and current main
+        id: gate
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMMAND_BODY: ${{ github.event.comment.body }}
+        run: |
+          set -euo pipefail
+          command_re='^/crm-production-auth-probe sha=([0-9a-f]{40})$'
+          if [[ ! "$COMMAND_BODY" =~ $command_re ]]; then
+            echo '::error::INVALID_ACCESS_AUTH_PROBE_COMMAND'
+            exit 1
+          fi
+          expected_sha="${BASH_REMATCH[1]}"
+          current_sha="$(
+            curl --fail --silent --show-error \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H 'Accept: application/vnd.github+json' \
+              -H 'X-GitHub-Api-Version: 2022-11-28' \
+              "https://api.github.com/repos/${GITHUB_REPOSITORY}/commits/main" \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin)["sha"])'
+          )"
+          if [[ "$current_sha" != "$expected_sha" ]]; then
+            echo "::error::MAIN_DRIFT expected=$expected_sha current=$current_sha"
+            exit 1
+          fi
+          echo "expected_sha=$expected_sha" >> "$GITHUB_OUTPUT"
+          echo 'RELEASE_GATE_ISSUE=26'
+          echo 'PROBE_MODE=access-auth-read-only'
+          echo "CURRENT_MAIN_SHA=$current_sha"
+          echo "AUTHORIZED_SHA=$expected_sha"
+          echo 'TARGET_WORKFLOW=production-access-auth-probe.yml'
+          echo 'PRODUCTION_WRITE=0'
+
+      - name: Refuse while Production release lock is occupied
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          for workflow in deploy-cloudflare.yml production-access-auth-probe.yml; do
+            for status in queued in_progress; do
+              count="$(
+                curl --fail --silent --show-error \
+                  -H "Authorization: Bearer $GH_TOKEN" \
+                  -H 'Accept: application/vnd.github+json' \
+                  -H 'X-GitHub-Api-Version: 2022-11-28' \
+                  "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/$workflow/runs?status=$status&per_page=1" \
+                | python3 -c 'import json,sys; print(json.load(sys.stdin)["total_count"])'
+              )"
+              if [[ "$count" != '0' ]]; then
+                echo "::error::PRODUCTION_RELEASE_LOCK_OCCUPIED workflow=$workflow status=$status count=$count"
+                exit 1
+              fi
+            done
+          done
+          echo 'PRODUCTION_RELEASE_LOCK=FREE'
+
+      - name: Dispatch read-only Production Access probe
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_SHA: ${{ steps.gate.outputs.expected_sha }}
+        run: |
+          set -euo pipefail
+          payload="$(python3 - <<'PY'
+          import json,os
+          print(json.dumps({'ref':'main','inputs':{'expected_sha':os.environ['EXPECTED_SHA']}}))
+          PY
+          )"
+          response_code="$(
+            curl --silent --show-error \
+              --output /tmp/dispatch-response.txt \
+              --write-out '%{http_code}' \
+              --request POST \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H 'Accept: application/vnd.github+json' \
+              -H 'X-GitHub-Api-Version: 2022-11-28' \
+              "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/production-access-auth-probe.yml/dispatches" \
+              -d "$payload"
+          )"
+          if [[ "$response_code" != '204' ]]; then
+            cat /tmp/dispatch-response.txt >&2 || true
+            echo "::error::ACCESS_AUTH_PROBE_DISPATCH_FAILED_HTTP_$response_code"
+            exit 1
+          fi
+          echo 'TARGET_WORKFLOW=production-access-auth-probe.yml'
+          echo 'TARGET_EVENT=workflow_dispatch'
+          echo "DISPATCH_REQUESTED_FOR_SHA=$EXPECTED_SHA"
+          echo 'PRODUCTION_WRITE=0'

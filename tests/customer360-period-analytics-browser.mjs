@@ -21,6 +21,16 @@ try{
   for(const viewport of [{width:390,height:844},{width:1440,height:900}]){
     const context=await browser.newContext({viewport});
     const page=await context.newPage();
+    await page.addInitScript(() => {
+      const RealDate=Date;
+      const fixedNow=new RealDate('2026-09-05T12:00:00Z').getTime();
+      class FixedDate extends RealDate {
+        constructor(...args){super(...(args.length?args:[fixedNow]))}
+        static now(){return fixedNow}
+      }
+      Object.setPrototypeOf(FixedDate,RealDate);
+      window.Date=FixedDate;
+    });
     const analyticsBefore=requests.filter(x=>x.includes('/api/customer360/analytics')).length;
     await page.goto(origin+'/admin',{waitUntil:'domcontentloaded'});
     await page.locator('#crmMktNav [data-view="home"]').click();
