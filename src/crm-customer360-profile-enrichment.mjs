@@ -1,3 +1,5 @@
+import { isCompletedReservationStatus, isCancelledReservationStatus } from './crm-reservation-status-contract.mjs';
+
 const BUILD='crm-customer360-profile-enrichment-20260903-02';
 const CUSTOMER_ID_RE=/^\d{8}$/;
 const LEAD_STATUS=new Set(['inquiry','scheduling','quoted','booked','completed','lost','cancelled']);
@@ -6,9 +8,6 @@ const PUBLICATION=new Set(['unknown','allowed','partial','denied']);
 const MARKETING_PERMISSION=new Set(['unknown','allowed','denied']);
 const CORE_EDITABLE=new Set(['name','furigana','line_display_name','phone','address','email','memo']);
 const EXT_EDITABLE=new Set(['wedding_anniversary','first_inquiry_at','last_contact_at','lead_status','lost_reason','referrer_customer_id','referrer_name','nps_score','nps_answered_at','nps_comment','publication_permission','marketing_contact_permission','notes']);
-const COMPLETED_STATUSES=new Set(['撮影完了','撮影済み','先行データ待ち','本納品まち','納品済み','completed','complete','done']);
-const CANCEL_STATUSES=new Set(['キャンセル','cancelled','canceled']);
-
 const text=v=>v==null?'':String(v).trim();
 const dateOnly=v=>{const m=text(v).match(/^(\d{4}-\d{2}-\d{2})/);return m?m[1]:''};
 const num=(v,f=0)=>{const n=Number(String(v??'').replace(/[,円¥\s]/g,''));return Number.isFinite(n)?n:f};
@@ -22,8 +21,6 @@ async function first(env,sql,params=[]){let q=env.DB.prepare(sql);if(params.leng
 async function tableExists(env,name){return !!(await first(env,"SELECT name FROM sqlite_master WHERE type='table' AND name=? LIMIT 1",[name]))}
 async function columns(env,name){if(!(await tableExists(env,name)))return new Set();return new Set((await all(env,`PRAGMA table_info(${name})`)).map(x=>text(x.name)))}
 function clipEvidence(v){const s=text(v).replace(/\s+/g,' ');return s.length<=120?s:s.slice(0,117)+'…'}
-function normalizedStatus(v){return text(v).toLowerCase()}
-
 async function exactCustomer(env,id){
   if(!CUSTOMER_ID_RE.test(id))return null;
   const c=await first(env,"SELECT * FROM customers WHERE CAST(customer_id AS TEXT)=? AND COALESCE(deleted_at,'')='' LIMIT 1",[id]);
@@ -47,7 +44,7 @@ async function family(env,id){
 async function reservationMetrics(env,id){
   if(!(await tableExists(env,'customer_reservations')))return{reservation_count:0,completed_shoot_count:0,cancel_count:0,repeat_count:0,customer_repeat_share:0,lifetime_revenue:0,average_shoot_value:0,shoot_genre_history:[],first_shoot_date:'',last_shoot_date:''};
   const rows=await all(env,"SELECT customer_id,genre,shoot_date,total_amount,status FROM customer_reservations WHERE CAST(customer_id AS TEXT)=? AND COALESCE(deleted_at,'')='' ORDER BY COALESCE(shoot_date,'') ASC",[id]);
-  const exact=rows.filter(x=>text(x.customer_id)===id),completed=exact.filter(x=>COMPLETED_STATUSES.has(normalizedStatus(x.status))||COMPLETED_STATUSES.has(text(x.status))),cancelled=exact.filter(x=>CANCEL_STATUSES.has(normalizedStatus(x.status))||CANCEL_STATUSES.has(text(x.status)));
+  const exact=rows.filter(x=>text(x.customer_id)===id),completed=exact.filter(x=>isCompletedReservationStatus(x.status)),cancelled=exact.filter(x=>isCancelledReservationStatus(x.status));
   const revenue=completed.reduce((s,x)=>s+Math.max(0,num(x.total_amount,0)),0),count=completed.length,genres=[...new Set(completed.map(x=>text(x.genre)).filter(Boolean))],dates=completed.map(x=>dateOnly(x.shoot_date)).filter(Boolean).sort();
   return{reservation_count:exact.length,completed_shoot_count:count,cancel_count:cancelled.length,repeat_count:Math.max(count-1,0),customer_repeat_share:count?Math.max(count-1,0)/count:0,lifetime_revenue:revenue,average_shoot_value:count?revenue/count:0,shoot_genre_history:genres,first_shoot_date:dates[0]||'',last_shoot_date:dates[dates.length-1]||''};
 }

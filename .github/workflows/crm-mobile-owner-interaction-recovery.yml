@@ -8,6 +8,8 @@ on:
       - 'src/crm-mobile-owner-interaction-recovery.mjs'
       - 'src/crm-mobile-owner-card-summary.mjs'
       - 'src/crm-owner-view-state.mjs'
+      - 'src/crm-owner-view-state-v2.mjs'
+      - 'src/crm-owner-app-shell.mjs'
       - 'src/crm-customer-list-daily-operations.mjs'
       - 'src/crm-customer360-*.mjs'
       - 'src/customer-identity-resolver.mjs'
@@ -87,6 +89,8 @@ jobs:
           node --check src/crm-mobile-owner-interaction-recovery.mjs
           node --check src/crm-mobile-owner-card-summary.mjs
           node --check src/crm-owner-view-state.mjs
+          node --check src/crm-owner-view-state-v2.mjs
+          node --check src/crm-owner-app-shell.mjs
           node --check src/crm-customer-id-autofill-runtime.mjs
           node --check src/customer-identity-resolver.mjs
           node --check src/crm-customer360-profile-enrichment.mjs

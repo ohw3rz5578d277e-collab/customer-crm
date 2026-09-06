@@ -1,0 +1,123 @@
+import assert from 'node:assert/strict';
+import { handleCustomer360Request } from '../src/crm-customer360-runtime.mjs';
+import { isCompletedReservationStatus } from '../src/crm-reservation-status-contract.mjs';
+
+for(const status of ['撮影終了','納品済み','納品完了','本納品済み','本納品完了','delivered','completed']){
+  assert.equal(isCompletedReservationStatus(status),true,'completed status missing: '+status);
+}
+
+const customer={
+  customer_id:'26000031',
+  name:'案内NG 顧客',
+  line_user_id:'U_BLOCKED',
+  phone:'09000000000',
+  email:'blocked@example.com',
+  total_revenue:50000,
+  repeat_count:1,
+  first_shoot_date:'2026-01-10',
+  last_shoot_date:'2026-01-10',
+  dormant_days:220,
+  deleted_at:''
+};
+const marketing={customer_id:'26000031',marketing_opt_out:0,preferred_contact_channel:'LINE'};
+const enrichment={customer_id:'26000031',marketing_contact_permission:'denied'};
+const existing=new Set(['customer_marketing_profiles','customer_profile_enrichment']);
+
+const env={
+  CRM_LOCAL_TEST_AUTH:'1',
+  DB:{
+    prepare(sql){
+      let args=[];
+      const stmt={
+        bind(...values){args=values;return stmt},
+        async first(){
+          if(sql.includes('sqlite_master'))return existing.has(String(args[0]||''))?{name:String(args[0])}:null;
+          return null;
+        },
+        async all(){
+          if(sql.includes('SELECT rowid AS __customer_ref,* FROM customers'))return{results:[customer]};
+          if(sql.includes('SELECT * FROM customer_marketing_profiles'))return{results:[marketing]};
+          if(sql.includes('SELECT customer_id,marketing_contact_permission FROM customer_profile_enrichment'))return{results:[enrichment]};
+          return{results:[]};
+        },
+        async run(){throw new Error('read_only_test_write_attempt')}
+      };
+      return stmt;
+    }
+  }
+};
+
+const response=await handleCustomer360Request(new Request('https://example.test/api/customer360/approach-queue?horizon_days=365&status=all'),env);
+assert.equal(response.status,200);
+const body=await response.json();
+assert.equal(body.ok,true);
+assert.equal(body.items.length,1);
+assert.equal(body.items[0].customer_id,'26000031');
+assert.equal(body.items[0].contact.code,'blocked_opt_out');
+assert.equal(body.items[0].contact.ready,false);
+assert.equal(body.summary.opted_out,1);
+assert.equal(body.meta.line_send,false);
+assert.equal(body.meta.automatic_contact,false);
+assert.ok(!JSON.stringify(body).includes('09000000000'));
+assert.ok(!JSON.stringify(body).includes('blocked@example.com'));
+
+const homeResponse=await handleCustomer360Request(new Request('https://example.test/api/customer360/marketing-home'),env);
+assert.equal(homeResponse.status,200);
+const homeBody=await homeResponse.json();
+assert.equal(homeBody.ok,true);
+assert.equal(homeBody.top_opportunities.length,0,'denied customer must not appear in Marketing HOME recommendations');
+assert.equal(homeBody.kpis.approach_this_month,0,'denied customer must not increment approach KPI');
+assert.equal(homeBody.meta.contact_candidates_available,true);
+assert.equal(homeBody.meta.contact_candidate_filter,'manual_contact_ready');
+assert.equal(homeBody.meta.contact_permission_fail_closed,true);
+
+const failingPermissionEnv={
+  CRM_LOCAL_TEST_AUTH:'1',
+  DB:{
+    prepare(sql){
+      let args=[];
+      const stmt={
+        bind(...values){args=values;return stmt},
+        async first(){
+          if(sql.includes('sqlite_master')){
+            const name=String(args[0]||'');
+            return ['customer_marketing_profiles','customer_profile_enrichment'].includes(name)?{name}:null;
+          }
+          return null;
+        },
+        async all(){
+          if(sql.includes('SELECT rowid AS __customer_ref,* FROM customers'))return{results:[customer]};
+          if(sql.includes('SELECT * FROM customer_marketing_profiles'))return{results:[marketing]};
+          if(sql.includes('SELECT customer_id,marketing_contact_permission FROM customer_profile_enrichment'))throw new Error('injected_contact_permission_read_failure');
+          return{results:[]};
+        },
+        async run(){throw new Error('read_only_test_write_attempt')}
+      };
+      return stmt;
+    }
+  }
+};
+const failedPermissionResponse=await handleCustomer360Request(new Request('https://example.test/api/customer360/approach-queue?horizon_days=365&status=all'),failingPermissionEnv);
+assert.equal(failedPermissionResponse.status,503);
+const failedPermissionBody=await failedPermissionResponse.json();
+assert.equal(failedPermissionBody.ok,false);
+assert.equal(failedPermissionBody.error,'contact_permission_unavailable');
+assert.ok(!('items' in failedPermissionBody),'failed permission read must not return contact candidates');
+
+const failedHomeResponse=await handleCustomer360Request(new Request('https://example.test/api/customer360/marketing-home'),failingPermissionEnv);
+assert.equal(failedHomeResponse.status,200);
+const failedHomeBody=await failedHomeResponse.json();
+assert.equal(failedHomeBody.ok,true);
+assert.equal(failedHomeBody.top_opportunities.length,0,'permission read failure must suppress Marketing HOME candidates');
+assert.equal(failedHomeBody.kpis.approach_this_month,0,'permission read failure must suppress approach KPI');
+assert.equal(failedHomeBody.meta.contact_candidates_available,false);
+assert.equal(failedHomeBody.meta.contact_permission_fail_closed,true);
+
+console.log('CUSTOMER360_PROFILE_MARKETING_DENIAL_BLOCK=PASS');
+console.log('MARKETING_HOME_CONTACT_DENIAL_FILTER=PASS');
+console.log('MARKETING_HOME_PERMISSION_FAILURE_FAIL_CLOSED=PASS');
+console.log('CONTACT_PERMISSION_READ_FAILURE_FAIL_CLOSED=PASS');
+console.log('RESERVATION_DELIVERED_STATUS_ALIGNMENT=PASS');
+console.log('RESERVATION_SHOOT_ENDED_STATUS_ALIGNMENT=PASS');
+console.log('PRODUCTION_D1_WRITE=0');
+console.log('LINE_SEND=0');
