@@ -107,7 +107,7 @@ const SCRIPT=String.raw`<script id="${SCRIPT_ID}">
 (()=>{
 if(window.__crmProposalCAnalysisApproach)return;window.__crmProposalCAnalysisApproach=1;
 const $=id=>document.getElementById(id);
-const loaded={analytics:false,approach:false};
+const loaded={analytics:false,approach:false};let composerRevision=0;
 function composer(){
  let el=$('crmProposalCComposer');if(el)return el;
  el=document.createElement('aside');el.id='crmProposalCComposer';el.setAttribute('aria-hidden','true');
@@ -118,16 +118,19 @@ function composer(){
  $('crmProposalCLine').onclick=async()=>copyDraft(true);
  return el;
 }
-function closeComposer(){const el=$('crmProposalCComposer');if(!el)return;el.classList.remove('open');el.setAttribute('aria-hidden','true');document.body.classList.remove('crm-owner-sheet-open')}
+function closeComposer(){composerRevision++;const el=$('crmProposalCComposer');if(!el)return;el.classList.remove('open');el.setAttribute('aria-hidden','true');el.dataset.crmProposalCRevision=String(composerRevision);document.body.classList.remove('crm-owner-sheet-open')}
 async function writeClipboard(text){if(!text)return false;try{await navigator.clipboard.writeText(text);return true}catch(_){return false}}
 async function copyDraft(goLine){
- const text=$('crmProposalCText')?.value||'',result=$('crmProposalCResult'),btn=$('crmProposalCLine');
+ const sheet=$('crmProposalCComposer'),text=$('crmProposalCText')?.value||'',result=$('crmProposalCResult'),btn=$('crmProposalCLine');
+ const revision=Number(sheet?.dataset.crmProposalCRevision||-1),lineAllowed=!!btn&&!btn.disabled;
  const copied=await writeClipboard(text);
+ if(!sheet||!sheet.classList.contains('open')||Number(sheet.dataset.crmProposalCRevision||-1)!==revision)return;
  if(result)result.textContent=copied?'文案をコピーしました。':'コピーできませんでした。文案を選択してコピーしてください。';
- if(goLine&&btn&&!btn.disabled){if(copied){window.__crmOwnerView?.showLine?.();closeComposer()}else if(result)result.textContent='コピー後にLINE画面へ進んでください。'}
+ if(goLine&&lineAllowed){if(copied){window.__crmOwnerView?.showLine?.();closeComposer()}else if(result)result.textContent='コピー後にLINE画面へ進んでください。'}
 }
 function openComposer(row){
- const sheet=composer(),name=row?.querySelector('.crm-mkt-name')?.textContent?.trim()||'顧客',sub=[...row?.querySelectorAll('.crm-mkt-sub')||[]].map(x=>x.textContent.trim()),id=(sub.join(' ').match(/Customer ID\s+([0-9]{8})/)||[])[1]||'—';
+ const sheet=composer(),revision=++composerRevision;sheet.dataset.crmProposalCRevision=String(revision);
+ const name=row?.querySelector('.crm-mkt-name')?.textContent?.trim()||'顧客',sub=[...row?.querySelectorAll('.crm-mkt-sub')||[]].map(x=>x.textContent.trim()),id=(sub.join(' ').match(/Customer ID\s+([0-9]{8})/)||[])[1]||'—';
  const draft=row?.querySelector('.crm-approach-draft p')?.textContent?.trim()||'',status=row?.querySelector('.crm-approach-contact .crm-status'),channelText=row?.querySelector('.crm-approach-contact .crm-mkt-sub')?.textContent?.trim()||'候補チャネル —',ready=!!status?.classList.contains('good'),channel=channelText.replace(/^候補チャネル\s*/,'').trim();
  $('crmProposalCName').textContent=name;$('crmProposalCMeta').textContent='Customer ID '+id;
  const permission=$('crmProposalCPermission');permission.textContent=status?.textContent?.trim()||'連絡可否の確認が必要';permission.className='crm-c-compose-chip '+(ready?'ready':'blocked');
