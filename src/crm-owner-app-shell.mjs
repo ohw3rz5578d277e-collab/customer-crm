@@ -1,7 +1,9 @@
+import { injectProposalCAnalysisApproach } from './crm-analysis-approach-proposal-c.mjs';
 const RESERVATION_ADMIN_URL='https://reservation-app-api.ohw3rz5578d277e.workers.dev/admin';
 
 export function injectOwnerAppShell(html){
-  if(!html||html.includes('crm-owner-app-shell-script'))return html;
+  if(!html)return html;
+  if(html.includes('crm-owner-app-shell-script'))return injectProposalCAnalysisApproach(html);
   const style=String.raw`<style id="crm-owner-app-shell-style">
 :root{--crm-shell-bg:#f4f7f8;--crm-shell-card:#fff;--crm-shell-text:#14212b;--crm-shell-muted:#667983;--crm-shell-line:#dfe7ea;--crm-shell-accent:#0b6b55;--crm-shell-accent-soft:#e9f5f1;--crm-shell-danger:#a61b1b}
 html,body{background:var(--crm-shell-bg)!important;color:var(--crm-shell-text)!important}
@@ -97,5 +99,6 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
 window.__crmOwnerAppShellApi={openView,setShellActive,ensureShell};
 })();
 <\/script>`;
-  return html.includes('</head>')?html.replace('</head>',style+'</head>').replace('</body>',script+'</body>'):style+html+script;
+  const out=html.includes('</head>')?html.replace('</head>',style+'</head>').replace('</body>',script+'</body>'):style+html+script;
+  return injectProposalCAnalysisApproach(out);
 }

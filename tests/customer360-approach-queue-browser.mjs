@@ -10,7 +10,14 @@ const customer={customer_id:'26000001',name:'山田 花子',line_linked:true,rea
 const facets={prefectures:[],cities:[],genres:[],sources:[],campaigns:[],school_stages:[]};
 const queueItem={customer_id:'26000001',name:'山田 花子',priority_score:1080,priority_reason:'high_ltv+event',priority_reason_label:'高LTV + 家族イベント',next_offer:'七五三 + 家族写真',next_opportunity:{type:'shichigosan',label:'七五三',days:20,member_name:'太郎'},contact:{code:'manual_contact_ready',label:'手動連絡候補',ready:true,review_required:false,suggested_channel:'LINE',available:{line:true,phone:true,email:false}},draft_text:'山田 花子様、七五三の時期が近づいてきました。',marketing_classes:['VIP'],realized_ltv:150000,shoot_count:3,last_shoot_date:'2026-06-01'};
 function send(res,status,data,type='application/json; charset=utf-8'){res.writeHead(status,{'content-type':type,'cache-control':'no-store'});res.end(type.startsWith('application/json')?JSON.stringify(data):data)}
-const server=http.createServer((req,res)=>{const u=new URL(req.url,'http://127.0.0.1');requests.push(req.method+' '+u.pathname+u.search);if(!['GET','HEAD'].includes(req.method))writes.push(req.method+' '+u.pathname);if(u.pathname==='/'||u.pathname==='/admin')return send(res,200,html,'text/html; charset=utf-8');if(u.pathname==='/api/customer360/marketing-home')return send(res,200,{ok:true,kpis:{customers:1,average_realized_ltv:150000,repeat_rate_pct:100,vip_high_ltv:1,event_90d:1,dormant_180:0,line_link_rate_pct:100,approach_this_month:1},top_opportunities:[customer],facets});if(u.pathname==='/api/customer360/customers')return send(res,200,{ok:true,total:1,all_total:1,page:1,page_size:50,has_next:false,items:[customer],facets,meta:{privacy_safe_list_dto:true}});if(u.pathname==='/api/customer360/approach-queue')return send(res,200,{ok:true,items:[queueItem],total:1,summary:{total:1,ready:1,review_required:0,opted_out:0,no_contact:0},filters:{horizon_days:Number(u.searchParams.get('horizon_days')||90),limit:50,status:u.searchParams.get('status')||'all'},meta:{read_only:true,line_send:false,automatic_contact:false,contact_details_exposed:false}});if(u.pathname.startsWith('/api/customer360/customer/'))return send(res,200,{ok:true,customer:{...customer,address:{},family:[],opportunities:[],reservations:[],line_history:[],marketing_history:[],marketing_classes:[],consent:{},recommendation:{}}});return send(res,404,{ok:false})});
+const server=http.createServer((req,res)=>{const u=new URL(req.url,'http://127.0.0.1');requests.push(req.method+' '+u.pathname+u.search);if(!['GET','HEAD'].includes(req.method))writes.push(req.method+' '+u.pathname);if(u.pathname==='/'||u.pathname==='/admin')return send(res,200,html,'text/html; charset=utf-8');if(u.pathname==='/api/customer360/marketing-home')return send(res,200,{ok:true,kpis:{customers:1,average_realized_ltv:150000,repeat_rate_pct:100,vip_high_ltv:1,event_90d:1,dormant_180:0,line_link_rate_pct:100,approach_this_month:1},top_opportunities:[customer],facets});if(u.pathname==='/api/customer360/customers')return send(res,200,{ok:true,total:1,all_total:1,page:1,page_size:50,has_next:false,items:[customer],facets,meta:{privacy_safe_list_dto:true}});if(u.pathname==='/api/customer360/approach-queue'){
+  const horizon=Number(u.searchParams.get('horizon_days')||90),status=u.searchParams.get('status')||'all';
+  const label=status==='ready'?'READY-LATEST':horizon===30&&status==='all'?'SLOW-ALL':queueItem.priority_reason_label;
+  const data={ok:true,items:[{...queueItem,priority_reason_label:label}],total:1,summary:{total:1,ready:1,review_required:0,opted_out:0,no_contact:0},filters:{horizon_days:horizon,limit:50,status},meta:{read_only:true,line_send:false,automatic_contact:false,contact_details_exposed:false}};
+  const delay=horizon===30&&status==='all'?140:status==='ready'?10:0;
+  if(delay)return setTimeout(()=>send(res,200,data),delay);
+  return send(res,200,data);
+}if(u.pathname.startsWith('/api/customer360/customer/'))return send(res,200,{ok:true,customer:{...customer,address:{},family:[],opportunities:[],reservations:[],line_history:[],marketing_history:[],marketing_classes:[],consent:{},recommendation:{}}});return send(res,404,{ok:false})});
 await new Promise(r=>server.listen(0,'127.0.0.1',r));
 const origin='http://127.0.0.1:'+server.address().port;
 const browser=await chromium.launch({headless:true});
@@ -35,13 +42,21 @@ try{
     await page.locator('.crm-approach-draft summary').click();
     assert.ok((await page.locator('.crm-approach-draft').innerText()).includes('自動送信しません'));
     await page.locator('[data-approach-horizon="30"]').click();
-    await page.waitForTimeout(50);
-    assert.ok(requests.some(x=>x.includes('horizon_days=30')));
+    await page.waitForSelector('[data-approach-status="ready"]');
+    await page.locator('[data-approach-status="ready"]').click();
+    await page.waitForFunction(()=>document.querySelector('.crm-approach-row')?.textContent.includes('READY-LATEST'));
+    await page.waitForTimeout(180);
+    const latestTxt=await page.locator('.crm-approach-queue').innerText();
+    assert.ok(latestTxt.includes('READY-LATEST'),'latest approach filter response missing');
+    assert.ok(!latestTxt.includes('SLOW-ALL'),'stale slow approach response replaced latest filter');
+    assert.ok(requests.some(x=>x.includes('horizon_days=30')&&x.includes('status=all')),'slow approach request missing');
+    assert.ok(requests.some(x=>x.includes('horizon_days=30')&&x.includes('status=ready')),'latest approach request missing');
     const overflow=await page.evaluate(()=>document.documentElement.scrollWidth-document.documentElement.clientWidth);
     assert.ok(overflow<=1,'overflow '+viewport.width+' '+overflow);
     await context.close();
   }
   assert.equal(writes.length,0,'HTTP writes '+writes.join(','));
+  console.log('CUSTOMER360_APPROACH_LATEST_REQUEST_WINS=PASS');
   console.log('CUSTOMER360_APPROACH_QUEUE_BROWSER=PASS');
   console.log('MARKETING_HOME_DUPLICATE_OPPORTUNITY_TABLE=0');
   console.log('APPROACH_QUEUE_AUTO_FETCH=0');
