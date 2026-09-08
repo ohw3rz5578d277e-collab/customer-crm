@@ -139,6 +139,7 @@ function openComposer(row){
 function loadReadOnlyMarketingData(){
  if(document.body.dataset.crmOwnerView!=='marketing')return;
  requestAnimationFrame(()=>{
+   if(document.body.dataset.crmOwnerView!=='marketing')return;
    const analytics=$('crmAnalyticsApply');if(!loaded.analytics&&analytics){loaded.analytics=true;analytics.click()}
    const approach=$('crmApproachLoad');if(!loaded.approach&&approach){loaded.approach=true;approach.click()}
  });
