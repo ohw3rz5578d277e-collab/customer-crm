@@ -150,7 +150,7 @@ function refreshCopy(){
  const qs=document.querySelector('#crmMktHome .crm-approach-queue .crm-mkt-sub');if(qs)qs.textContent='優先度・タイミング・連絡許可を確認し、送信前の判断までをここで行います。';
 }
 document.addEventListener('crm:owner-view-change',e=>{if(e.detail?.view==='marketing'){refreshCopy();loadReadOnlyMarketingData()}else closeComposer()});
-document.addEventListener('crm:marketing-home-rendered',()=>{if(document.body.dataset.crmOwnerView==='marketing')refreshCopy()});
+document.addEventListener('crm:marketing-home-rendered',()=>{if(document.body.dataset.crmOwnerView==='marketing'){refreshCopy();loadReadOnlyMarketingData()}});
 document.addEventListener('click',e=>{
  const summary=e.target.closest?.('.crm-approach-draft summary');if(summary){e.preventDefault();e.stopPropagation();openComposer(summary.closest('.crm-approach-row'));return}
  if(e.target.closest?.('#crmProposalCComposer'))return;
