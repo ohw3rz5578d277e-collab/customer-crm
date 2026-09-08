@@ -1,4 +1,5 @@
 import app from './production-index-crm-browser-root-entry.js';
+import { patchBrowserRootHealth } from './production-index-crm-browser-root-entry.js';
 import { handleCustomer360Request, customer360Health } from './crm-customer360-runtime.mjs';
 import { handleCustomerProfileEnrichmentRequest, customerProfileEnrichmentHealth } from './crm-customer360-profile-enrichment.mjs';
 import { handleCustomer360LineProfileExtraction, customer360LineProfileExtractionHealth } from './crm-customer360-line-profile-extraction.mjs';
@@ -13,6 +14,7 @@ import { injectCustomer360DirectNavigation } from './crm-customer360-direct-navi
 import { injectOwnerViewState } from './crm-owner-view-state-v2.mjs';
 import { injectCustomer360ProfileUi } from './crm-customer360-profile-ui.mjs';
 import { injectOwnerAppShell } from './crm-owner-app-shell.mjs';
+import { patchReconciliationHealth } from './crm-reconciliation-review.mjs';
 
 const BUILD='customer-crm-customer360-profile-enrichment-20260903-05';
 const RAW_SCRIPT_CLOSE='<'+String.fromCharCode(92)+'/script>';
@@ -122,6 +124,18 @@ export async function patchHealth(response,env){
   },null,2),{status,headers:h});
 }
 
+export async function handleProductionHealthRequest(request,env){
+  const url=new URL(request.url);
+  if(request.method!=='GET'||url.pathname!=='/health')return null;
+  let response=new Response(JSON.stringify({ok:false,error:'route_not_found',message:'Not Found'}),{
+    status:404,
+    headers:{'content-type':'application/json; charset=utf-8'}
+  });
+  response=await patchBrowserRootHealth(response,env);
+  response=await patchReconciliationHealth(response);
+  return patchHealth(response,env);
+}
+
 async function patchHtml(response){
   const ct=response.headers.get('content-type')||'';
   if(response.status!==200||!ct.includes('text/html'))return response;
@@ -134,6 +148,8 @@ export default {
   async fetch(request,env,ctx){
     const accessAuthProbe=handleProductionAccessAuthProbe(request,env);
     if(accessAuthProbe)return accessAuthProbe;
+    const ownedHealth=await handleProductionHealthRequest(request,env);
+    if(ownedHealth)return ownedHealth;
 
     const lineProfileApi=await handleCustomer360LineProfileExtraction(request,env);
     if(lineProfileApi)return lineProfileApi;
@@ -148,7 +164,7 @@ export default {
 
     const url=new URL(request.url);
     let response=await app.fetch(request,env,ctx);
-    if(request.method==='GET'&&(url.pathname==='/health'||url.pathname==='/api/crm-health-check'))return patchHealth(response,env);
+    if(request.method==='GET'&&url.pathname==='/api/crm-health-check')return patchHealth(response,env);
     if(request.method==='GET'&&url.pathname==='/admin')return patchHtml(response);
     return response;
   }
