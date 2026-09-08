@@ -56,10 +56,20 @@ const base=`<!doctype html><html><head><meta charset="utf-8"></head><body data-c
 </div>
 <script>
 window.__calls={analytics:0,approach:0,line:0,copied:''};
-document.getElementById('crmAnalyticsApply').onclick=()=>window.__calls.analytics++;
-document.getElementById('crmApproachLoad').onclick=()=>window.__calls.approach++;
+const analyticsBtn=document.getElementById('crmAnalyticsApply'),approachBtn=document.getElementById('crmApproachLoad');
+analyticsBtn.onclick=()=>window.__calls.analytics++;
+approachBtn.onclick=()=>window.__calls.approach++;
+analyticsBtn.remove();approachBtn.remove();
 window.__crmOwnerView={showLine(){window.__calls.line++;document.body.dataset.crmOwnerView='line';return true}};
-setTimeout(()=>{document.body.dataset.crmOwnerView='marketing';document.dispatchEvent(new CustomEvent('crm:owner-view-change',{detail:{view:'marketing'}}));},0);
+setTimeout(()=>{
+  document.body.dataset.crmOwnerView='marketing';
+  document.dispatchEvent(new CustomEvent('crm:owner-view-change',{detail:{view:'marketing'}}));
+  setTimeout(()=>{
+    document.querySelector('.crm-period-analytics').appendChild(analyticsBtn);
+    document.querySelector('.crm-approach-queue').appendChild(approachBtn);
+    document.dispatchEvent(new CustomEvent('crm:marketing-home-rendered'));
+  },20);
+},0);
 </script>
 </body></html>`;
 
@@ -90,6 +100,8 @@ try{
     page.on('console',m=>{if(m.type()==='error')errors.push(m.text())});
     await page.goto(origin,{waitUntil:'domcontentloaded'});
     await page.waitForFunction(()=>document.body.classList.contains('crm-proposal-c')&&window.__calls.analytics===1&&window.__calls.approach===1);
+    assert.equal(await page.evaluate(()=>window.__calls.analytics),1,viewport.width+': cold analytics auto-load duplicated');
+    assert.equal(await page.evaluate(()=>window.__calls.approach),1,viewport.width+': cold approach auto-load duplicated');
 
     const hero=await page.locator('.crm-mkt-focus p').textContent();
     assert(hero.includes('今、連絡すべきお客様'),viewport.width+': Proposal C hero copy missing');
