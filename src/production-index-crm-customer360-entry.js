@@ -122,6 +122,16 @@ export async function patchHealth(response,env){
   },null,2),{status,headers:h});
 }
 
+export async function handleProductionHealthRequest(request,env){
+  const url=new URL(request.url);
+  if(request.method!=='GET'||url.pathname!=='/health')return null;
+  const synthetic=new Response(JSON.stringify({ok:false,error:'route_not_found',message:'Not Found'}),{
+    status:404,
+    headers:{'content-type':'application/json; charset=utf-8'}
+  });
+  return patchHealth(synthetic,env);
+}
+
 async function patchHtml(response){
   const ct=response.headers.get('content-type')||'';
   if(response.status!==200||!ct.includes('text/html'))return response;
@@ -134,6 +144,8 @@ export default {
   async fetch(request,env,ctx){
     const accessAuthProbe=handleProductionAccessAuthProbe(request,env);
     if(accessAuthProbe)return accessAuthProbe;
+    const ownedHealth=await handleProductionHealthRequest(request,env);
+    if(ownedHealth)return ownedHealth;
 
     const lineProfileApi=await handleCustomer360LineProfileExtraction(request,env);
     if(lineProfileApi)return lineProfileApi;
@@ -148,7 +160,7 @@ export default {
 
     const url=new URL(request.url);
     let response=await app.fetch(request,env,ctx);
-    if(request.method==='GET'&&(url.pathname==='/health'||url.pathname==='/api/crm-health-check'))return patchHealth(response,env);
+    if(request.method==='GET'&&url.pathname==='/api/crm-health-check')return patchHealth(response,env);
     if(request.method==='GET'&&url.pathname==='/admin')return patchHtml(response);
     return response;
   }
