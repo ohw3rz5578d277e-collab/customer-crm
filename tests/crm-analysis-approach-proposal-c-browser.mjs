@@ -126,8 +126,9 @@ try{
   for(const viewport of [{width:390,height:844},{width:1440,height:900}]){
     const context=await browser.newContext({viewport});
     await context.addInitScript(()=>{
-      window.__clipboardDelay=false;window.__clipboardPending=[];
+      window.__clipboardDelay=false;window.__clipboardPending=[];window.__clipboardWrites=[];
       Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:text=>{
+        window.__clipboardWrites.push(text);
         if(!window.__clipboardDelay){window.__calls.copied=text;return Promise.resolve()}
         return new Promise(resolve=>window.__clipboardPending.push(()=>{window.__calls.copied=text;resolve()}))
       }}});
@@ -154,25 +155,36 @@ try{
     assert.equal(await page.locator('#crmProposalCLine').isDisabled(),false);
     assert((await page.locator('#crmProposalCText').inputValue()).includes('いつもありがとうございます'));
 
-    await page.evaluate(()=>{window.__clipboardDelay=true});
-    await page.locator('#crmProposalCLine').click();
-    await page.locator('.crm-c-compose-close').click();
-    await page.locator('.crm-approach-row').nth(2).locator('summary').click();
-    await page.waitForFunction(()=>document.getElementById('crmProposalCComposer').classList.contains('open')&&document.getElementById('crmProposalCName').textContent.includes('高橋'));
-    await page.evaluate(()=>{window.__clipboardDelay=false;const done=window.__clipboardPending.shift();if(done)done()});
-    await page.waitForTimeout(40);
-    assert.equal(await page.evaluate(()=>window.__calls.line),0,viewport.width+': stale clipboard completion navigated to LINE');
-    assert.equal((await page.locator('#crmProposalCName').textContent()).trim(),'高橋 次郎',viewport.width+': stale completion replaced active customer context');
-    assert.equal(await page.locator('#crmProposalCComposer').isVisible(),true,viewport.width+': stale completion closed active composer');
-    await page.locator('.crm-c-compose-close').click();
+    await page.evaluate(()=>document.dispatchEvent(new CustomEvent('crm:marketing-home-rendered')));
+    await page.waitForFunction(()=>!document.getElementById('crmProposalCComposer').classList.contains('open'));
+    assert.equal(await page.locator('#crmProposalCComposer').isVisible(),false,viewport.width+': queue rerender did not invalidate open composer');
+    assert.equal(await page.evaluate(()=>window.__calls.analytics),1,viewport.width+': rerender duplicated analytics auto-load');
+    assert.equal(await page.evaluate(()=>window.__calls.approach),1,viewport.width+': rerender duplicated approach auto-load');
 
     await page.locator('.crm-approach-row').first().locator('summary').click();
     await page.waitForFunction(()=>document.getElementById('crmProposalCComposer').classList.contains('open'));
+    await page.evaluate(()=>{window.__clipboardDelay=true});
     await page.locator('#crmProposalCLine').click();
+    await page.waitForFunction(()=>window.__clipboardWrites.length===1&&window.__clipboardPending.length===1);
+
+    await page.locator('.crm-c-compose-close').click();
+    await page.locator('.crm-approach-row').nth(2).locator('summary').click();
+    await page.waitForFunction(()=>document.getElementById('crmProposalCComposer').classList.contains('open')&&document.getElementById('crmProposalCName').textContent.includes('高橋'));
+    await page.locator('#crmProposalCLine').click();
+    assert.equal(await page.evaluate(()=>window.__clipboardWrites.length),1,viewport.width+': second clipboard write started before first completed');
+
+    await page.evaluate(()=>{const done=window.__clipboardPending.shift();if(done)done()});
+    await page.waitForFunction(()=>window.__clipboardWrites.length===2&&window.__clipboardPending.length===1);
+    assert.equal(await page.evaluate(()=>window.__calls.line),0,viewport.width+': stale first clipboard completion navigated to LINE');
+    assert.equal((await page.locator('#crmProposalCName').textContent()).trim(),'高橋 次郎',viewport.width+': stale completion replaced active customer context');
+    assert.equal(await page.locator('#crmProposalCComposer').isVisible(),true,viewport.width+': stale completion closed active composer');
+
+    await page.evaluate(()=>{window.__clipboardDelay=false;const done=window.__clipboardPending.shift();if(done)done()});
     await page.waitForFunction(()=>window.__calls.line===1);
-    const copied=await page.evaluate(()=>window.__calls.copied);
-    assert(copied.includes('山田 花子さん'),viewport.width+': draft was not copied');
-    assert.equal(await page.locator('#crmProposalCComposer').isVisible(),false,viewport.width+': composer remained open after LINE handoff');
+    const clipboardState=await page.evaluate(()=>({copied:window.__calls.copied,writes:[...window.__clipboardWrites]}));
+    assert(clipboardState.copied.includes('高橋 次郎さん'),viewport.width+': final clipboard does not match active customer');
+    assert(clipboardState.writes[0].includes('山田 花子さん')&&clipboardState.writes[1].includes('高橋 次郎さん'),viewport.width+': clipboard writes were not serialized in customer order');
+    assert.equal(await page.locator('#crmProposalCComposer').isVisible(),false,viewport.width+': active composer remained open after LINE handoff');
 
     await page.evaluate(()=>{document.body.dataset.crmOwnerView='marketing';document.dispatchEvent(new CustomEvent('crm:owner-view-change',{detail:{view:'marketing'}}))});
     await page.locator('.crm-approach-row').nth(1).locator('summary').click();
@@ -190,6 +202,8 @@ try{
   await new Promise(resolve=>server.close(resolve));
 }
 
+console.log('PROPOSAL_C_CLIPBOARD_SERIALIZATION=PASS');
+console.log('PROPOSAL_C_RERENDER_INVALIDATES_COMPOSER=PASS');
 console.log('PROPOSAL_C_STALE_LINE_HANDOFF_CANCEL=PASS');
 console.log('PROPOSAL_C_DEFERRED_VIEW_SCOPE=PASS');
 console.log('PROPOSAL_C_ANALYSIS_APPROACH_UI=PASS');
