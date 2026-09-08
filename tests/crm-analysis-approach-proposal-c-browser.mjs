@@ -173,17 +173,22 @@ try{
     await page.locator('#crmProposalCLine').click();
     assert.equal(await page.evaluate(()=>window.__clipboardWrites.length),1,viewport.width+': second clipboard write started before first completed');
 
+    await page.locator('.crm-c-compose-close').click();
     await page.evaluate(()=>{const done=window.__clipboardPending.shift();if(done)done()});
-    await page.waitForFunction(()=>window.__clipboardWrites.length===2&&window.__clipboardPending.length===1);
-    assert.equal(await page.evaluate(()=>window.__calls.line),0,viewport.width+': stale first clipboard completion navigated to LINE');
-    assert.equal((await page.locator('#crmProposalCName').textContent()).trim(),'高橋 次郎',viewport.width+': stale completion replaced active customer context');
-    assert.equal(await page.locator('#crmProposalCComposer').isVisible(),true,viewport.width+': stale completion closed active composer');
+    await page.waitForTimeout(60);
+    assert.equal(await page.evaluate(()=>window.__clipboardWrites.length),1,viewport.width+': invalidated queued clipboard job still wrote');
+    assert.equal(await page.evaluate(()=>window.__calls.line),0,viewport.width+': stale clipboard completion navigated to LINE');
+    assert((await page.evaluate(()=>window.__calls.copied)).includes('山田 花子さん'),viewport.width+': first clipboard write did not complete as expected');
 
-    await page.evaluate(()=>{window.__clipboardDelay=false;const done=window.__clipboardPending.shift();if(done)done()});
+    await page.evaluate(()=>{window.__clipboardDelay=false});
+    await page.locator('.crm-approach-row').nth(2).locator('summary').click();
+    await page.waitForFunction(()=>document.getElementById('crmProposalCComposer').classList.contains('open')&&document.getElementById('crmProposalCName').textContent.includes('高橋'));
+    await page.locator('#crmProposalCLine').click();
     await page.waitForFunction(()=>window.__calls.line===1);
     const clipboardState=await page.evaluate(()=>({copied:window.__calls.copied,writes:[...window.__clipboardWrites]}));
     assert(clipboardState.copied.includes('高橋 次郎さん'),viewport.width+': final clipboard does not match active customer');
-    assert(clipboardState.writes[0].includes('山田 花子さん')&&clipboardState.writes[1].includes('高橋 次郎さん'),viewport.width+': clipboard writes were not serialized in customer order');
+    assert.equal(clipboardState.writes.length,2,viewport.width+': cancelled queued clipboard job was not skipped');
+    assert(clipboardState.writes[0].includes('山田 花子さん')&&clipboardState.writes[1].includes('高橋 次郎さん'),viewport.width+': serialized clipboard order wrong');
     assert.equal(await page.locator('#crmProposalCComposer').isVisible(),false,viewport.width+': active composer remained open after LINE handoff');
 
     await page.evaluate(()=>{document.body.dataset.crmOwnerView='marketing';document.dispatchEvent(new CustomEvent('crm:owner-view-change',{detail:{view:'marketing'}}))});
@@ -202,6 +207,7 @@ try{
   await new Promise(resolve=>server.close(resolve));
 }
 
+console.log('PROPOSAL_C_INVALIDATED_CLIPBOARD_JOB_SKIPPED=PASS');
 console.log('PROPOSAL_C_CLIPBOARD_SERIALIZATION=PASS');
 console.log('PROPOSAL_C_RERENDER_INVALIDATES_COMPOSER=PASS');
 console.log('PROPOSAL_C_STALE_LINE_HANDOFF_CANCEL=PASS');
