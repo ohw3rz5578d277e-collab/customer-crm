@@ -5,6 +5,7 @@ import { handleCustomer360LineProfileExtraction, customer360LineProfileExtractio
 import { guardCustomer360ProfileWrite, customer360ProfileWriteGuardHealth } from './crm-customer360-profile-write-guard.mjs';
 import { handleCustomer360CombinedDetail, customer360CombinedDetailHealth } from './crm-customer360-combined-detail.mjs';
 import { handleCustomer360MediaRequest, customer360MediaHealth } from './crm-customer360-media.mjs';
+import { injectCustomer360MediaUi, customer360MediaUiHealth } from './crm-customer360-media-ui.mjs';
 import { injectCustomer360Marketing } from './crm-customer360-ui.mjs';
 import { injectCustomerListDailyOperations } from './crm-customer-list-daily-operations.mjs';
 import { injectCustomer360SearchFocus } from './crm-customer360-search-focus.mjs';
@@ -15,7 +16,7 @@ import { injectOwnerViewState } from './crm-owner-view-state-v2.mjs';
 import { injectCustomer360ProfileUi } from './crm-customer360-profile-ui.mjs';
 import { injectOwnerAppShell } from './crm-owner-app-shell.mjs';
 
-const BUILD='customer-crm-customer360-media-foundation-20260908-01';
+const BUILD='customer-crm-customer360-media-foundation-20260908-02';
 const RAW_SCRIPT_CLOSE='<'+String.fromCharCode(92)+'/script>';
 const CUSTOMER360_PROFILE_TABLES=[
   'customer_profile_enrichment',
@@ -61,7 +62,8 @@ export function composeCustomer360AdminHtml(html){
   const withDirectNavigation=injectCustomer360DirectNavigation(withRecovery);
   const withOwnerViewState=injectOwnerViewState(withDirectNavigation);
   const withProfile=injectCustomer360ProfileUi(withOwnerViewState);
-  const withAppShell=injectOwnerAppShell(withProfile);
+  const withMedia=injectCustomer360MediaUi(withProfile);
+  const withAppShell=injectOwnerAppShell(withMedia);
   return normalizeCustomer360InjectedHtml(withAppShell);
 }
 
@@ -123,6 +125,7 @@ export async function patchHealth(response,env){
     ...customer360ProfileWriteGuardHealth(),
     ...customer360CombinedDetailHealth(),
     ...customer360MediaHealth(),
+    ...customer360MediaUiHealth(),
     ...schema,
     customer360_identity_fallback:false,
     customer360_paid_ai_provider_active:false,
