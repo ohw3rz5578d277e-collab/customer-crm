@@ -25,7 +25,7 @@ function isBrowserNavigation(request){
   return accept.includes("text/html") || mode === "navigate" || dest === "document";
 }
 
-async function patchHealth(response, env){
+export async function patchBrowserRootHealth(response, env){
   const raw = await response.text();
   let data = {};
   try { data = raw ? JSON.parse(raw) : {}; } catch (_) {}
@@ -182,7 +182,7 @@ export default {
 
     let response = await app.fetch(request, env, ctx);
     if(request.method === "GET" && (url.pathname === "/health" || url.pathname === "/api/crm-health-check")){
-      response = await patchHealth(response, env);
+      response = await patchBrowserRootHealth(response, env);
       return patchReconciliationHealth(response);
     }
     if(request.method === "GET" && url.pathname === "/admin") return patchAdminForReservationHandoff(response,request,url,env);
