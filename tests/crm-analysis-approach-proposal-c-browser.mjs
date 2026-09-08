@@ -93,6 +93,8 @@ try{
 
     const hero=await page.locator('.crm-mkt-focus p').textContent();
     assert(hero.includes('今、連絡すべきお客様'),viewport.width+': Proposal C hero copy missing');
+    await page.evaluate(()=>{document.querySelector('.crm-mkt-focus p').textContent='old rerender copy';document.dispatchEvent(new CustomEvent('crm:marketing-home-rendered'))});
+    assert((await page.locator('.crm-mkt-focus p').textContent()).includes('今、連絡すべきお客様'),viewport.width+': Proposal C copy not reapplied after marketing rerender');
     assert.equal(await page.locator('#crmProposalCComposer').count(),1,viewport.width+': composer missing');
 
     await page.locator('.crm-approach-row').first().locator('summary').click();
