@@ -63,10 +63,12 @@ setTimeout(()=>{document.body.dataset.crmOwnerView='marketing';document.dispatch
 </script>
 </body></html>`;
 
-const html=injectProposalCAnalysisApproach(base);
-assert(html.includes('crm-proposal-c-analysis-approach-style'));
-assert(html.includes('crm-proposal-c-analysis-approach-script'));
-assert.equal(injectProposalCAnalysisApproach(html),html,'injector must be idempotent');
+const injected=injectProposalCAnalysisApproach(base);
+assert(injected.includes('crm-proposal-c-analysis-approach-style'));
+assert(injected.includes('crm-proposal-c-analysis-approach-script'));
+assert.equal(injectProposalCAnalysisApproach(injected),injected,'injector must be idempotent');
+// Production Customer360 normalizes raw injected script-close markers after the injection chain.
+const html=injected.split('<\\/script>').join('</script>');
 
 const server=http.createServer((req,res)=>{
   res.writeHead(200,{'content-type':'text/html; charset=utf-8','cache-control':'no-store'});
