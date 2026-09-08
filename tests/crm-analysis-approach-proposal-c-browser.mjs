@@ -80,15 +80,40 @@ assert.equal(injectProposalCAnalysisApproach(injected),injected,'injector must b
 // Production Customer360 normalizes raw injected script-close markers after the injection chain.
 const html=injected.split('<\\/script>').join('</script>');
 
+const raceBase=`<!doctype html><html><head><meta charset="utf-8"></head><body data-crm-owner-view="today">
+<div id="crmMktHome"><section class="crm-period-analytics"><button id="crmAnalyticsApply">分析</button></section><section class="crm-approach-queue"><button id="crmApproachLoad">候補</button></section></div>
+<script>
+window.__raceCalls={analytics:0,approach:0};
+document.getElementById('crmAnalyticsApply').onclick=()=>window.__raceCalls.analytics++;
+document.getElementById('crmApproachLoad').onclick=()=>window.__raceCalls.approach++;
+setTimeout(()=>{
+  document.body.dataset.crmOwnerView='marketing';
+  document.dispatchEvent(new CustomEvent('crm:owner-view-change',{detail:{view:'marketing'}}));
+  document.body.dataset.crmOwnerView='today';
+  document.dispatchEvent(new CustomEvent('crm:owner-view-change',{detail:{view:'today'}}));
+},0);
+</script></body></html>`;
+const raceHtml=injectProposalCAnalysisApproach(raceBase).split('<\\/script>').join('</script>');
+
 const server=http.createServer((req,res)=>{
   res.writeHead(200,{'content-type':'text/html; charset=utf-8','cache-control':'no-store'});
-  res.end(html);
+  res.end(req.url==='/race'?raceHtml:html);
 });
 await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
 const origin='http://127.0.0.1:'+server.address().port;
 const browser=await chromium.launch({headless:true});
 
 try{
+  {
+    const context=await browser.newContext({viewport:{width:390,height:844}});
+    const page=await context.newPage();
+    await page.goto(origin+'/race',{waitUntil:'domcontentloaded'});
+    await page.waitForTimeout(80);
+    assert.equal(await page.evaluate(()=>document.body.dataset.crmOwnerView),'today','rapid navigation did not leave marketing');
+    assert.equal(await page.evaluate(()=>window.__raceCalls.analytics),0,'deferred analytics load escaped marketing view');
+    assert.equal(await page.evaluate(()=>window.__raceCalls.approach),0,'deferred approach load escaped marketing view');
+    await context.close();
+  }
   for(const viewport of [{width:390,height:844},{width:1440,height:900}]){
     const context=await browser.newContext({viewport});
     await context.addInitScript(()=>{
@@ -138,6 +163,7 @@ try{
   await new Promise(resolve=>server.close(resolve));
 }
 
+console.log('PROPOSAL_C_DEFERRED_VIEW_SCOPE=PASS');
 console.log('PROPOSAL_C_ANALYSIS_APPROACH_UI=PASS');
 console.log('PROPOSAL_C_OWNER_REVIEW_COMPOSER=PASS');
 console.log('PROPOSAL_C_CONTACT_PERMISSION_FAIL_CLOSED=PASS');
