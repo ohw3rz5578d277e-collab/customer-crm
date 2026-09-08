@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { patchHealth } from '../src/production-index-crm-customer360-entry.js';
+import { patchHealth, handleProductionHealthRequest } from '../src/production-index-crm-customer360-entry.js';
 
 const source=fs.readFileSync(new URL('../src/production-index-crm-customer360-entry.js',import.meta.url),'utf8');
-assert.match(source,/url\.pathname==='\/health'\|\|url\.pathname==='\/api\/crm-health-check'/,'Production entry must own the canonical health routes');
+assert.match(source,/handleProductionHealthRequest\(request,env\)/,'Production entry must own /health before downstream app.fetch');
+assert.match(source,/url\.pathname==='\/api\/crm-health-check'/,'Production entry must still own the legacy CRM health route');
+assert.ok(source.indexOf('const ownedHealth=await handleProductionHealthRequest(request,env)')<source.indexOf('let response=await app.fetch(request,env,ctx)'),'Production /health fast path must execute before downstream app.fetch');
 assert.doesNotMatch(source,/if\(inheritedNotFound\)data=\{\};/,'Inherited 404 must not discard accumulated lower health markers');
 
 async function run(status,payload){
@@ -11,6 +13,41 @@ async function run(status,payload){
   const patched=await patchHealth(response,{});
   return {status:patched.status,data:await patched.json()};
 }
+
+const readSql=[];
+const readOnlyEnv={DB:{prepare(sql){readSql.push(sql);return{bind(){return{all:async()=>({results:[
+  {name:'customer_profile_enrichment'},
+  {name:'customer_family_member_metadata'},
+  {name:'customer_field_evidence'},
+  {name:'customer_notes_history'}
+]})}}}}}}};
+const owned=await handleProductionHealthRequest(new Request('https://customer-crm-api.example/health'),readOnlyEnv);
+assert.equal(owned.status,200);
+const ownedData=await owned.json();
+for(const key of [
+  'customer360_family_marketing_foundation',
+  'customer360_profile_enrichment',
+  'customer360_line_profile_extraction',
+  'referrer_customer_id_exact_existing_customer_only',
+  'customer360_profile_composed_into_detail',
+  'customer360_profile_enrichment_schema_available',
+  'customer360_family_metadata_available',
+  'customer360_field_evidence_available',
+  'customer360_notes_history_available'
+])assert.equal(ownedData[key],true,`owned health marker missing: ${key}`);
+assert.equal(ownedData.customer360_profile_initial_extra_request,false);
+assert.equal(ownedData.customer_id_generation,false);
+assert.equal(ownedData.customer_line_auto_apply,false);
+assert.equal(ownedData.line_profile_auto_apply,false);
+assert.equal(ownedData.customer_line_extraction_mode,'candidate-only');
+assert.equal(ownedData.customer360_identity_fallback,false);
+assert.equal(ownedData.customer360_paid_ai_provider_active,false);
+assert.equal(ownedData.line_event_direction,'incoming');
+assert.equal(ownedData.line_event_receive_status,'received');
+assert.equal(readSql.length,1);
+assert.match(readSql[0],/^SELECT /);
+assert.doesNotMatch(readSql[0],/CREATE|ALTER|INSERT|UPDATE|DELETE/i);
+assert.equal(await handleProductionHealthRequest(new Request('https://customer-crm-api.example/api/crm-health-check'),readOnlyEnv),null);
 
 const lowerMarkers={
   customer360_browser_marketing:true,
@@ -61,3 +98,5 @@ console.log('CUSTOMER360_PRODUCTION_HEALTH_TOP_LEVEL_MARKERS_PRESENT=PASS');
 console.log('CUSTOMER360_PRODUCTION_HEALTH_401_403_429_500_503_PRESERVED=PASS');
 console.log('CUSTOMER360_PRODUCTION_HEALTH_NORMAL_SUCCESS_PRESERVED=PASS');
 console.log('CUSTOMER360_PRODUCTION_HEALTH_SERVICE_MARKER=PASS');
+
+console.log('CUSTOMER360_PRODUCTION_HEALTH_READ_ONLY_FAST_PATH=PASS');
