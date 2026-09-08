@@ -119,12 +119,12 @@ function composer(){
  return el;
 }
 function closeComposer(){composerRevision++;const el=$('crmProposalCComposer');if(!el)return;el.classList.remove('open');el.setAttribute('aria-hidden','true');el.dataset.crmProposalCRevision=String(composerRevision);document.body.classList.remove('crm-owner-sheet-open')}
-function writeClipboard(text){if(!text)return Promise.resolve(false);const op=clipboardSerial.then(async()=>{try{await navigator.clipboard.writeText(text);return true}catch(_){return false}});clipboardSerial=op.then(()=>undefined,()=>undefined);return op}
+function composerOperationActive(sheet,revision){return!!sheet&&sheet.classList.contains('open')&&Number(sheet.dataset.crmProposalCRevision||-1)===revision}function writeClipboard(text,isCurrent){if(!text)return Promise.resolve(false);const op=clipboardSerial.then(async()=>{if(isCurrent&&!isCurrent())return false;try{await navigator.clipboard.writeText(text);return true}catch(_){return false}});clipboardSerial=op.then(()=>undefined,()=>undefined);return op}
 async function copyDraft(goLine){
  const sheet=$('crmProposalCComposer'),text=$('crmProposalCText')?.value||'',result=$('crmProposalCResult'),btn=$('crmProposalCLine');
- const revision=Number(sheet?.dataset.crmProposalCRevision||-1),lineAllowed=!!btn&&!btn.disabled;
- const copied=await writeClipboard(text);
- if(!sheet||!sheet.classList.contains('open')||Number(sheet.dataset.crmProposalCRevision||-1)!==revision)return;
+ const revision=Number(sheet?.dataset.crmProposalCRevision||-1),lineAllowed=!!btn&&!btn.disabled,isCurrent=()=>composerOperationActive(sheet,revision);
+ const copied=await writeClipboard(text,isCurrent);
+ if(!isCurrent())return;
  if(result)result.textContent=copied?'文案をコピーしました。':'コピーできませんでした。文案を選択してコピーしてください。';
  if(goLine&&lineAllowed){if(copied){window.__crmOwnerView?.showLine?.();closeComposer()}else if(result)result.textContent='コピー後にLINE画面へ進んでください。'}
 }
