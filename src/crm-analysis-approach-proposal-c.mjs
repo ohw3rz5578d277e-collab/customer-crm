@@ -107,7 +107,7 @@ const SCRIPT=String.raw`<script id="${SCRIPT_ID}">
 (()=>{
 if(window.__crmProposalCAnalysisApproach)return;window.__crmProposalCAnalysisApproach=1;
 const $=id=>document.getElementById(id);
-const loaded={analytics:false,approach:false};let composerRevision=0;
+const loaded={analytics:false,approach:false};let composerRevision=0;let clipboardSerial=Promise.resolve();
 function composer(){
  let el=$('crmProposalCComposer');if(el)return el;
  el=document.createElement('aside');el.id='crmProposalCComposer';el.setAttribute('aria-hidden','true');
@@ -119,7 +119,7 @@ function composer(){
  return el;
 }
 function closeComposer(){composerRevision++;const el=$('crmProposalCComposer');if(!el)return;el.classList.remove('open');el.setAttribute('aria-hidden','true');el.dataset.crmProposalCRevision=String(composerRevision);document.body.classList.remove('crm-owner-sheet-open')}
-async function writeClipboard(text){if(!text)return false;try{await navigator.clipboard.writeText(text);return true}catch(_){return false}}
+function writeClipboard(text){if(!text)return Promise.resolve(false);const op=clipboardSerial.then(async()=>{try{await navigator.clipboard.writeText(text);return true}catch(_){return false}});clipboardSerial=op.then(()=>undefined,()=>undefined);return op}
 async function copyDraft(goLine){
  const sheet=$('crmProposalCComposer'),text=$('crmProposalCText')?.value||'',result=$('crmProposalCResult'),btn=$('crmProposalCLine');
  const revision=Number(sheet?.dataset.crmProposalCRevision||-1),lineAllowed=!!btn&&!btn.disabled;
@@ -154,7 +154,7 @@ function refreshCopy(){
  const qs=document.querySelector('#crmMktHome .crm-approach-queue .crm-mkt-sub');if(qs)qs.textContent='優先度・タイミング・連絡許可を確認し、送信前の判断までをここで行います。';
 }
 document.addEventListener('crm:owner-view-change',e=>{if(e.detail?.view==='marketing'){refreshCopy();loadReadOnlyMarketingData()}else closeComposer()});
-document.addEventListener('crm:marketing-home-rendered',()=>{if(document.body.dataset.crmOwnerView==='marketing'){refreshCopy();loadReadOnlyMarketingData()}});
+document.addEventListener('crm:marketing-home-rendered',()=>{const sheet=$('crmProposalCComposer');if(sheet?.classList.contains('open'))closeComposer();if(document.body.dataset.crmOwnerView==='marketing'){refreshCopy();loadReadOnlyMarketingData()}});
 document.addEventListener('click',e=>{
  const summary=e.target.closest?.('.crm-approach-draft summary');if(summary){e.preventDefault();e.stopPropagation();openComposer(summary.closest('.crm-approach-row'));return}
  if(e.target.closest?.('#crmProposalCComposer'))return;
