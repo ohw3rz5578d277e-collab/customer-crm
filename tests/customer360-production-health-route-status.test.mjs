@@ -15,12 +15,25 @@ async function run(status,payload){
 }
 
 const readSql=[];
-const readOnlyEnv={DB:{prepare(sql){readSql.push(sql);return{bind(){return{all:async()=>({results:[
-  {name:'customer_profile_enrichment'},
-  {name:'customer_family_member_metadata'},
-  {name:'customer_field_evidence'},
-  {name:'customer_notes_history'}
-]})}}}}}}};
+const readOnlyEnv={
+  DB:{
+    prepare(sql){
+      readSql.push(sql);
+      return{
+        bind(){
+          return{
+            all:async()=>({results:[
+              {name:'customer_profile_enrichment'},
+              {name:'customer_family_member_metadata'},
+              {name:'customer_field_evidence'},
+              {name:'customer_notes_history'}
+            ]})
+          };
+        }
+      };
+    }
+  }
+};
 const owned=await handleProductionHealthRequest(new Request('https://customer-crm-api.example/health'),readOnlyEnv);
 assert.equal(owned.status,200);
 const ownedData=await owned.json();
