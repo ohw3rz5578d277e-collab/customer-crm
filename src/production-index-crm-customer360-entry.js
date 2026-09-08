@@ -1,4 +1,5 @@
-import app, { patchBrowserRootHealth } from './production-index-crm-browser-root-entry.js';
+import app from './production-index-crm-browser-root-entry.js';
+import { patchBrowserRootHealth } from './production-index-crm-browser-root-entry.js';
 import { handleCustomer360Request, customer360Health } from './crm-customer360-runtime.mjs';
 import { handleCustomerProfileEnrichmentRequest, customerProfileEnrichmentHealth } from './crm-customer360-profile-enrichment.mjs';
 import { handleCustomer360LineProfileExtraction, customer360LineProfileExtractionHealth } from './crm-customer360-line-profile-extraction.mjs';
