@@ -15,22 +15,41 @@ async function run(status,payload){
 }
 
 const readSql=[];
+const lineContextColumns=[
+  'event_id','customer_id','line_user_id','direction','message_type','message_text',
+  'source','send_status','line_message_id','sender_type','occurred_at','created_at'
+];
+const profileTables=[
+  'customer_profile_enrichment','customer_family_member_metadata',
+  'customer_field_evidence','customer_notes_history'
+];
 const readOnlyEnv={
+  CRM_INTERNAL_TOKEN:'configured-for-test',
   DB:{
     prepare(sql){
       readSql.push(sql);
-      return{
-        bind(){
-          return{
-            all:async()=>({results:[
-              {name:'customer_profile_enrichment'},
-              {name:'customer_family_member_metadata'},
-              {name:'customer_field_evidence'},
-              {name:'customer_notes_history'}
-            ]})
-          };
+      const stmt={
+        bind(){return stmt;},
+        async first(){
+          if(/^SELECT name FROM sqlite_master WHERE type='table' AND name=\? LIMIT 1$/.test(sql)){
+            return{name:'customer_line_message_events'};
+          }
+          return null;
+        },
+        async all(){
+          if(sql==='PRAGMA table_info(customer_line_message_events)'){
+            return{results:lineContextColumns.map(name=>({name}))};
+          }
+          if(sql==='PRAGMA index_list(customer_line_message_events)'){
+            return{results:[{name:'idx_customer_line_message_events_line_user_id'}]};
+          }
+          if(sql.startsWith("SELECT name FROM sqlite_master WHERE type='table' AND name IN (")){
+            return{results:profileTables.map(name=>({name}))};
+          }
+          return{results:[]};
         }
       };
+      return stmt;
     }
   }
 };
@@ -57,9 +76,29 @@ assert.equal(ownedData.customer360_identity_fallback,false);
 assert.equal(ownedData.customer360_paid_ai_provider_active,false);
 assert.equal(ownedData.line_event_direction,'incoming');
 assert.equal(ownedData.line_event_receive_status,'received');
-assert.equal(readSql.length,1);
-assert.match(readSql[0],/^SELECT /);
-assert.doesNotMatch(readSql[0],/CREATE|ALTER|INSERT|UPDATE|DELETE/i);
+for(const key of [
+  'line_context_events_enabled',
+  'line_context_events_table_present',
+  'line_context_events_columns_ok',
+  'internal_customer_detail_enabled',
+  'customer_identity_resolver_enabled',
+  'canonical_customer_guard_enabled',
+  'identity_damage_diagnostic_enabled',
+  'reservation_browser_handoff_contract',
+  'customer_id_reconciliation_review',
+  'responsive_admin_hotfix'
+])assert.equal(ownedData[key],true,`lower browser-root health marker missing: ${key}`);
+assert.equal(ownedData.customer_merge,false);
+assert.deepEqual(ownedData.review_decisions,['SAME_PERSON','DIFFERENT_PERSON','DEFERRED']);
+assert.ok(Array.isArray(ownedData.line_context_events_indexes));
+assert.ok(ownedData.line_context_events_indexes.includes('idx_customer_line_message_events_line_user_id'));
+assert.ok(readSql.some(sql=>sql==='PRAGMA table_info(customer_line_message_events)'));
+assert.ok(readSql.some(sql=>sql==='PRAGMA index_list(customer_line_message_events)'));
+assert.ok(readSql.some(sql=>/^SELECT name FROM sqlite_master/.test(sql)));
+for(const sql of readSql){
+  assert.match(sql,/^(SELECT|PRAGMA)\b/i,`health fast path issued non-read SQL: ${sql}`);
+  assert.doesNotMatch(sql,/\b(CREATE|ALTER|INSERT|UPDATE|DELETE|DROP|REPLACE)\b/i,`health fast path issued write/DDL SQL: ${sql}`);
+}
 assert.equal(await handleProductionHealthRequest(new Request('https://customer-crm-api.example/api/crm-health-check'),readOnlyEnv),null);
 
 const lowerMarkers={
@@ -113,3 +152,4 @@ console.log('CUSTOMER360_PRODUCTION_HEALTH_NORMAL_SUCCESS_PRESERVED=PASS');
 console.log('CUSTOMER360_PRODUCTION_HEALTH_SERVICE_MARKER=PASS');
 
 console.log('CUSTOMER360_PRODUCTION_HEALTH_READ_ONLY_FAST_PATH=PASS');
+console.log('CUSTOMER360_PRODUCTION_HEALTH_BROWSER_ROOT_DIAGNOSTICS_PRESERVED=PASS');
