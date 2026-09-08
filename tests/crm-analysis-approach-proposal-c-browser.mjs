@@ -51,6 +51,15 @@ const base=`<!doctype html><html><head><meta charset="utf-8"></head><body data-c
         </div>
         <div class="crm-approach-contact"><span class="crm-status soon">連絡可否の確認が必要</span><div class="crm-mkt-sub">候補チャネル LINE</div></div>
       </article>
+      <article class="crm-approach-row">
+        <div class="crm-approach-score">580</div>
+        <div class="crm-approach-main">
+          <div class="crm-mkt-name">高橋 次郎</div>
+          <div class="crm-mkt-sub">Customer ID 26009999 / 手動連絡候補</div>
+          <details class="crm-approach-draft"><summary>文案を見る</summary><p>高橋 次郎さんへの別文案</p></details>
+        </div>
+        <div class="crm-approach-contact"><span class="crm-status good">手動連絡候補</span><div class="crm-mkt-sub">候補チャネル LINE</div></div>
+      </article>
     </div>
   </section>
 </div>
@@ -117,7 +126,11 @@ try{
   for(const viewport of [{width:390,height:844},{width:1440,height:900}]){
     const context=await browser.newContext({viewport});
     await context.addInitScript(()=>{
-      Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:async text=>{window.__calls.copied=text}}});
+      window.__clipboardDelay=false;window.__clipboardPending=[];
+      Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:text=>{
+        if(!window.__clipboardDelay){window.__calls.copied=text;return Promise.resolve()}
+        return new Promise(resolve=>window.__clipboardPending.push(()=>{window.__calls.copied=text;resolve()}))
+      }}});
     });
     const page=await context.newPage();
     const errors=[];
@@ -141,6 +154,20 @@ try{
     assert.equal(await page.locator('#crmProposalCLine').isDisabled(),false);
     assert((await page.locator('#crmProposalCText').inputValue()).includes('いつもありがとうございます'));
 
+    await page.evaluate(()=>{window.__clipboardDelay=true});
+    await page.locator('#crmProposalCLine').click();
+    await page.locator('.crm-c-compose-close').click();
+    await page.locator('.crm-approach-row').nth(2).locator('summary').click();
+    await page.waitForFunction(()=>document.getElementById('crmProposalCComposer').classList.contains('open')&&document.getElementById('crmProposalCName').textContent.includes('高橋'));
+    await page.evaluate(()=>{window.__clipboardDelay=false;const done=window.__clipboardPending.shift();if(done)done()});
+    await page.waitForTimeout(40);
+    assert.equal(await page.evaluate(()=>window.__calls.line),0,viewport.width+': stale clipboard completion navigated to LINE');
+    assert.equal((await page.locator('#crmProposalCName').textContent()).trim(),'高橋 次郎',viewport.width+': stale completion replaced active customer context');
+    assert.equal(await page.locator('#crmProposalCComposer').isVisible(),true,viewport.width+': stale completion closed active composer');
+    await page.locator('.crm-c-compose-close').click();
+
+    await page.locator('.crm-approach-row').first().locator('summary').click();
+    await page.waitForFunction(()=>document.getElementById('crmProposalCComposer').classList.contains('open'));
     await page.locator('#crmProposalCLine').click();
     await page.waitForFunction(()=>window.__calls.line===1);
     const copied=await page.evaluate(()=>window.__calls.copied);
@@ -163,6 +190,7 @@ try{
   await new Promise(resolve=>server.close(resolve));
 }
 
+console.log('PROPOSAL_C_STALE_LINE_HANDOFF_CANCEL=PASS');
 console.log('PROPOSAL_C_DEFERRED_VIEW_SCOPE=PASS');
 console.log('PROPOSAL_C_ANALYSIS_APPROACH_UI=PASS');
 console.log('PROPOSAL_C_OWNER_REVIEW_COMPOSER=PASS');
