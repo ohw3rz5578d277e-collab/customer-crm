@@ -7,6 +7,7 @@ import { guardCustomer360ProfileWrite, customer360ProfileWriteGuardHealth } from
 import { handleCustomer360CombinedDetail, customer360CombinedDetailHealth } from './crm-customer360-combined-detail.mjs';
 import { handleCustomer360MediaRequest, customer360MediaHealth } from './crm-customer360-media.mjs';
 import { injectCustomer360MediaUi, customer360MediaUiHealth } from './crm-customer360-media-ui.mjs';
+import { injectCustomer360ExactEditHandoff, customer360ExactEditHandoffHealth } from './crm-customer360-exact-edit-handoff.mjs';
 import { injectCustomer360Marketing } from './crm-customer360-ui.mjs';
 import { injectCustomerListDailyOperations } from './crm-customer-list-daily-operations.mjs';
 import { injectCustomer360SearchFocus } from './crm-customer360-search-focus.mjs';
@@ -18,7 +19,7 @@ import { injectCustomer360ProfileUi } from './crm-customer360-profile-ui.mjs';
 import { injectOwnerAppShell } from './crm-owner-app-shell.mjs';
 import { patchReconciliationHealth } from './crm-reconciliation-review.mjs';
 
-const BUILD='customer-crm-customer360-media-foundation-20260909-01';
+const BUILD='customer-crm-customer360-media-foundation-20260909-02';
 const RAW_SCRIPT_CLOSE='<'+String.fromCharCode(92)+'/script>';
 const CUSTOMER360_PROFILE_TABLES=[
   'customer_profile_enrichment',
@@ -65,7 +66,8 @@ export function composeCustomer360AdminHtml(html){
   const withOwnerViewState=injectOwnerViewState(withDirectNavigation);
   const withProfile=injectCustomer360ProfileUi(withOwnerViewState);
   const withMedia=injectCustomer360MediaUi(withProfile);
-  const withAppShell=injectOwnerAppShell(withMedia);
+  const withEditHandoff=injectCustomer360ExactEditHandoff(withMedia);
+  const withAppShell=injectOwnerAppShell(withEditHandoff);
   return normalizeCustomer360InjectedHtml(withAppShell);
 }
 
@@ -128,6 +130,7 @@ export async function patchHealth(response,env){
     ...customer360CombinedDetailHealth(),
     ...customer360MediaHealth(),
     ...customer360MediaUiHealth(),
+    ...customer360ExactEditHandoffHealth(),
     ...schema,
     customer360_identity_fallback:false,
     customer360_paid_ai_provider_active:false,
