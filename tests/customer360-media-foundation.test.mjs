@@ -16,7 +16,7 @@ assert.match(migration,/customer_delivery_links/);
 assert.match(api,/CRM_CUSTOMER360_WRITE_ENABLED/);
 assert.match(api,/MAX_AVATAR_CHARS=96000/);
 assert.match(api,/amazon_photos/);
-assert.match(api,/^const CUSTOMER_ID_RE=\/\^\\d\{8\}\$\//);
+assert.ok(api.includes('const CUSTOMER_ID_RE=/^\\d{8}$/;'));
 assert.match(api,/customer360_media_customer_id_generation:false/);
 assert.match(api,/customer360_media_paid_storage_required:false/);
 assert.match(ui,/crm-customer360-media-ui-20260908-01/);
