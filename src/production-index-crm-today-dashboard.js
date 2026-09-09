@@ -183,29 +183,56 @@ function todayJst() {
 }
 
 function tomorrowJst() {
-  const jst = new Date(Date.now() + 10 * 60 * 60 * 1000 + 24 * 60 * 60 * 1000 - 60 * 60 * 1000);
-  return jst.toISOString().slice(0, 10);
+  return new Date(Date.now() + 9 * 60 * 60 * 1000 + 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
+function nowTimeJst() {
+  return new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().slice(11,16);
+}
+export function chooseNextShoot(shoots, currentTime = nowTimeJst()) {
+  const rows = Array.isArray(shoots) ? shoots : [];
+  const hasTime = (row) => /^\d{2}:\d{2}/.test(text(row?.start_time));
+  const upcoming = rows.filter(hasTime).find((row) => text(row.start_time).slice(0,5) >= currentTime);
+  return upcoming || rows.find((row) => !hasTime(row)) || null;
 }
 
-const REQUIRED_TODAY_READ_TABLES = Object.freeze([
-  "crm_admin_users",
-  "customers",
-  "customer_reservations",
-  "customer_line_draft_logs",
-  "crm_follow_tasks",
-  "crm_reservation_drafts",
-  "crm_reservation_link_alert_checks"
-]);
+const REQUIRED_TODAY_READ_SCHEMA = Object.freeze({
+  crm_admin_users: ["email","role","status"],
+  customers: ["customer_id","customer_name","total_revenue","repeat_count","dormant_days","last_shoot_date","genre_history","line_user_id","deleted_at"],
+  customer_reservations: ["reservation_id","customer_id","customer_name","genre","shoot_date","start_time","end_time","plan_label","place","total_amount","status","deleted_at"],
+  customer_line_draft_logs: ["id","customer_id","customer_name","action_type","action_label","priority","status","created_at","updated_at","message_text"],
+  crm_follow_tasks: ["id","customer_id","customer_name","task_type","title","message_text","due_date","priority","status","created_at","updated_at"],
+  crm_reservation_drafts: ["id","customer_id","customer_name","status","sent_to_reservation_at","reservation_app_reservation_id","reservation_app_created_at","history_synced_at","reservation_app_updated_at","reservation_app_cancelled_at","cancellation_synced_at","updated_at","created_at"],
+  crm_reservation_link_alert_checks: ["draft_id","stage_key","acknowledged_at","acknowledged_by"]
+});
+const REQUIRED_TODAY_READ_TABLES = Object.freeze(Object.keys(REQUIRED_TODAY_READ_SCHEMA));
 
+async function strictAll(env, sql, bindings = []) {
+  let stmt = env.DB.prepare(sql);
+  if (bindings.length) stmt = stmt.bind(...bindings);
+  const res = await stmt.all();
+  return res.results || [];
+}
+async function strictFirst(env, sql, bindings = []) {
+  let stmt = env.DB.prepare(sql);
+  if (bindings.length) stmt = stmt.bind(...bindings);
+  return await stmt.first();
+}
 async function assertTodayReadSchema(env) {
   if (!env.DB) throw new Error("TODAY_DASHBOARD_DB_UNAVAILABLE");
   const placeholders = REQUIRED_TODAY_READ_TABLES.map(() => "?").join(",");
-  const result = await env.DB.prepare(
-    `SELECT name FROM sqlite_master WHERE type='table' AND name IN (${placeholders})`
-  ).bind(...REQUIRED_TODAY_READ_TABLES).all();
-  const present = new Set((result.results || []).map((row) => text(row.name)));
-  const missing = REQUIRED_TODAY_READ_TABLES.filter((name) => !present.has(name));
-  if (missing.length) throw new Error(`TODAY_DASHBOARD_SCHEMA_UNAVAILABLE:${missing.join(",")}`);
+  const result = await strictAll(env,
+    `SELECT name FROM sqlite_master WHERE type='table' AND name IN (${placeholders})`,
+    REQUIRED_TODAY_READ_TABLES
+  );
+  const present = new Set(result.map((row) => text(row.name)));
+  const missingTables = REQUIRED_TODAY_READ_TABLES.filter((name) => !present.has(name));
+  if (missingTables.length) throw new Error(`TODAY_DASHBOARD_SCHEMA_UNAVAILABLE:${missingTables.join(",")}`);
+  for (const [table, requiredColumns] of Object.entries(REQUIRED_TODAY_READ_SCHEMA)) {
+    const columns = await strictAll(env, `PRAGMA table_info(${table})`);
+    const available = new Set(columns.map((row) => text(row.name)));
+    const missingColumns = requiredColumns.filter((name) => !available.has(name));
+    if (missingColumns.length) throw new Error(`TODAY_DASHBOARD_COLUMN_UNAVAILABLE:${table}:${missingColumns.join(",")}`);
+  }
   return true;
 }
 
@@ -228,34 +255,15 @@ function classifyReservationAlert(row) {
   return null;
 }
 
-async function safeAll(env, sql, bindings = []) {
-  try {
-    const stmt = env.DB.prepare(sql);
-    const res = bindings.length ? await stmt.bind(...bindings).all() : await stmt.all();
-    return res.results || [];
-  } catch (_) {
-    return [];
-  }
-}
-
-async function safeFirst(env, sql, bindings = []) {
-  try {
-    const stmt = env.DB.prepare(sql);
-    return bindings.length ? await stmt.bind(...bindings).first() : await stmt.first();
-  } catch (_) {
-    return null;
-  }
-}
-
 async function getReservationAlerts(env, today) {
-  const rows = await safeAll(env, `SELECT * FROM crm_reservation_drafts
+  const rows = await strictAll(env, `SELECT * FROM crm_reservation_drafts
     ORDER BY COALESCE(reservation_app_cancelled_at, reservation_app_updated_at, reservation_app_created_at, sent_to_reservation_at, updated_at, created_at, '') DESC
     LIMIT 1000`);
   const draftIds = rows.map((r) => Number(r.id)).filter((id) => Number.isFinite(id) && id > 0);
   const ackMap = new Map();
   if (draftIds.length) {
     const placeholders = draftIds.map(() => "?").join(",");
-    const acks = await safeAll(env, `SELECT draft_id, stage_key, MAX(acknowledged_at) AS acknowledged_at, acknowledged_by
+    const acks = await strictAll(env, `SELECT draft_id, stage_key, MAX(acknowledged_at) AS acknowledged_at, acknowledged_by
       FROM crm_reservation_link_alert_checks
       WHERE draft_id IN (${placeholders})
       GROUP BY draft_id, stage_key`, draftIds);
@@ -290,12 +298,13 @@ async function getReservationAlerts(env, today) {
 }
 
 async function getScheduledShoots(env, date) {
-  return safeAll(env, `SELECT reservation_id, customer_id, customer_name, genre, shoot_date, start_time, end_time, plan_label, place, total_amount, status
+  return strictAll(env, `SELECT reservation_id, customer_id, customer_name, genre, shoot_date, start_time, end_time, plan_label, place, total_amount, status
     FROM customer_reservations
     WHERE COALESCE(deleted_at,'')=''
       AND substr(COALESCE(shoot_date,''),1,10)=?
       AND lower(COALESCE(status,'')) NOT IN ('cancelled','canceled','cancel','キャンセル')
-    ORDER BY COALESCE(start_time,''), COALESCE(customer_name,''), COALESCE(reservation_id,'')
+    ORDER BY CASE WHEN NULLIF(TRIM(COALESCE(start_time,'')),'') IS NULL THEN 1 ELSE 0 END,
+             COALESCE(start_time,''), COALESCE(customer_name,''), COALESCE(reservation_id,'')
     LIMIT 50`, [date]);
 }
 
@@ -309,14 +318,15 @@ async function getTodayDashboard(env) {
     getScheduledShoots(env, today),
     getScheduledShoots(env, tomorrow)
   ]);
+  const nextShoot = chooseNextShoot(todayShoots);
 
-  const linePending = await safeAll(env, `SELECT id, customer_id, customer_name, action_type, action_label, priority, status, created_at, updated_at, message_text
+  const linePending = await strictAll(env, `SELECT id, customer_id, customer_name, action_type, action_label, priority, status, created_at, updated_at, message_text
     FROM customer_line_draft_logs
     WHERE COALESCE(status,'') NOT IN ('sent','送信済み')
     ORDER BY CASE lower(COALESCE(priority,'')) WHEN 'high' THEN 0 WHEN 'urgent' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END, datetime(COALESCE(updated_at, created_at, '1970-01-01')) DESC
     LIMIT 30`);
 
-  const followTasks = await safeAll(env, `SELECT id, customer_id, customer_name, task_type, title, message_text, due_date, priority, status, created_at, updated_at
+  const followTasks = await strictAll(env, `SELECT id, customer_id, customer_name, task_type, title, message_text, due_date, priority, status, created_at, updated_at
     FROM crm_follow_tasks
     WHERE COALESCE(status,'open') NOT IN ('completed','done','closed')
       AND (due_date IS NULL OR due_date='' OR date(due_date) <= date(?))
@@ -326,7 +336,7 @@ async function getTodayDashboard(env) {
   const overdueTasks = followTasks.filter((t) => text(t.due_date) && text(t.due_date).slice(0, 10) < today);
   const highLinePending = linePending.filter((l) => ["high", "urgent", "高"].includes(text(l.priority).toLowerCase()));
 
-  const sales = await safeFirst(env, `SELECT
+  const sales = await strictFirst(env, `SELECT
       COUNT(*) AS customer_count,
       COALESCE(SUM(CAST(total_revenue AS INTEGER)), 0) AS total_revenue,
       COALESCE(AVG(NULLIF(CAST(total_revenue AS INTEGER), 0)), 0) AS avg_revenue,
@@ -335,7 +345,7 @@ async function getTodayDashboard(env) {
     FROM customers
     WHERE COALESCE(deleted_at,'')=''`) || {};
 
-  const salesFocus = await safeAll(env, `SELECT customer_id, customer_name, total_revenue, repeat_count, dormant_days, last_shoot_date, genre_history, line_user_id
+  const salesFocus = await strictAll(env, `SELECT customer_id, customer_name, total_revenue, repeat_count, dormant_days, last_shoot_date, genre_history, line_user_id
     FROM customers
     WHERE COALESCE(deleted_at,'')=''
       AND (
@@ -379,6 +389,7 @@ async function getTodayDashboard(env) {
     counts,
     today_shoots: todayShoots,
     tomorrow_shoots: tomorrowShoots,
+    next_shoot: nextShoot,
     priority_items: priorityItems.slice(0, 20),
     reservation_alerts: openReservationAlerts.slice(0, 12),
     line_pending: linePending.slice(0, 15),
@@ -457,7 +468,7 @@ export function injectTodayDashboardUi(html) {
   function rowActions(x){var out=customerButton(x.customer_id,'顧客を見る');if(x.type==='line_pending')out+='<button class="crm-today-inline-btn" data-today-line-view="1">LINEを見る</button>';if(x.type==='reservation_alert')out+='<button class="crm-today-inline-btn" data-today-alert-view="1">予約要確認</button>';return out?'<div class="crm-today-row-actions">'+out+'</div>':''}
   function shootRow(x){var time=esc(x.start_time||'時間未設定'),name=esc(x.customer_name||'-'),genre=esc(x.genre||x.plan_label||'撮影'),place=esc(x.place||'場所未設定');return '<div class="crm-today-schedule-row"><div class="crm-today-time">'+time+'</div><div><b>'+name+'</b><div class="crm-today-meta">'+genre+' / '+place+'</div></div>'+customerButton(x.customer_id,'顧客')+'</div>'}
   function openCustomerSearch(id){if(!id)return;window.__crmOwnerView?.showSearch?.();var tries=0;function apply(){var input=document.getElementById('crmGlobalSearch');if(input){input.value=id;input.dispatchEvent(new Event('input',{bubbles:true}));input.dispatchEvent(new Event('change',{bubbles:true}));input.focus({preventScroll:true});return}if(++tries<30)setTimeout(apply,50)}apply()}
-  async function loadToday(){if(!todayActive())return;var requestId=++loadRequestId,k=document.getElementById('crmTodayKpis'),focus=document.getElementById('crmTodayFocus'),next=document.getElementById('crmTodayNextShoot'),nextMeta=document.getElementById('crmTodayNextShootMeta'),todayList=document.getElementById('crmTodayShoots'),tomorrowList=document.getElementById('crmTomorrowShoots'),p=document.getElementById('crmTodayPriority'),fl=document.getElementById('crmTodayFollowLine'),s=document.getElementById('crmTodaySales'),r=document.getElementById('crmTodayReservation');try{var data=await api('/api/today-dashboard');if(requestId!==loadRequestId||!todayActive())return;if(!data.ok)throw new Error(data.message||'load failed');var c=data.counts||{},immediate=Number(c.immediate_total||0),shoots=data.today_shoots||[],tomorrow=data.tomorrow_shoots||[];if(focus){var main=focus.querySelector('.crm-today-focus-main'),value=main?.querySelector('.crm-today-focus-value'),copy=main?.querySelector('.crm-today-focus-copy');if(main)main.classList.toggle('alert',immediate>0);if(value)value.textContent=immediate>0?immediate+'件を先に確認':(shoots.length?'今日の撮影 '+shoots.length+'件':'緊急対応なし');if(copy)copy.textContent=immediate>0?'予約連携・期限超過・高優先LINEから確認してください。':(shoots.length?'撮影予定を確認し、空き時間にフォローを進めます。':'今日のフォローと次回アプローチ候補を確認できます。')}var first=shoots[0];if(next)next.textContent=first?(first.start_time||'時間未設定'):'—';if(nextMeta)nextMeta.textContent=first?((first.customer_name||'-')+' / '+(first.genre||first.plan_label||'撮影')):'今日の撮影予定はありません';if(k)k.innerHTML=[['今日の撮影',c.today_shoots||0,''],['明日の撮影',c.tomorrow_shoots||0,''],['予約要確認',c.reservation_alerts||0,(c.reservation_alerts||0)?'alert':''],['LINE未送信',c.line_pending||0,(c.line_high||0)?'alert':(c.line_pending||0)?'warn':''],['今日フォロー',c.follow_due||0,(c.follow_overdue||0)?'alert':''],['期限超過',c.follow_overdue||0,(c.follow_overdue||0)?'alert':'']].map(function(x){return '<div class="crm-today-kpi '+x[2]+'"><b>'+esc(x[1])+'</b><span>'+esc(x[0])+'</span></div>'}).join('');if(todayList)todayList.innerHTML=shoots.length?shoots.map(shootRow).join(''):'<div class="crm-today-row">今日の撮影予定はありません。</div>';if(tomorrowList)tomorrowList.innerHTML=tomorrow.length?tomorrow.map(shootRow).join(''):'<div class="crm-today-row">明日の撮影予定はありません。</div>';var pri=(data.priority_items||[]).slice(0,10);if(p)p.innerHTML=pri.length?pri.map(function(x){return '<div class="crm-today-row">'+itemBadge(x)+'<b>'+esc(x.customer_name||'-')+'</b><div>'+esc(x.title||'')+'</div><div class="crm-today-meta">'+esc(x.meta||'')+' / 顧客ID '+esc(x.customer_id||'-')+'</div>'+rowActions(x)+'</div>';}).join(''):'<div class="crm-today-row">今すぐ確認する項目はありません。</div>';var lines=[];(data.follow_tasks||[]).slice(0,6).forEach(function(x){lines.push('<div class="crm-today-row"><span class="crm-today-badge '+(String(x.due_date||'').slice(0,10)<data.date_jst?'':'warn')+'">フォロー</span><b>'+esc(x.customer_name||'-')+'</b><div>'+esc(x.title||'')+'</div><div class="crm-today-meta">期限 '+esc(x.due_date||'-')+' / 優先度 '+esc(x.priority||'-')+'</div>'+rowActions({customer_id:x.customer_id})+'</div>')});(data.line_pending||[]).slice(0,5).forEach(function(x){lines.push('<div class="crm-today-row"><span class="crm-today-badge warn">LINE</span><b>'+esc(x.customer_name||'-')+'</b><div>'+esc(x.action_label||x.action_type||'LINE文面')+'</div><div class="crm-today-meta">保存 '+short(x.created_at)+' / 優先度 '+esc(x.priority||'-')+'</div>'+rowActions({customer_id:x.customer_id,type:'line_pending'})+'</div>')});if(fl)fl.innerHTML=lines.length?lines.join(''):'<div class="crm-today-row">今日対応のフォロー・LINEはありません。</div>';var sf=(data.sales_focus||[]).slice(0,8);if(s)s.innerHTML=sf.length?sf.map(function(x){return '<div class="crm-today-row"><span class="crm-today-badge ok">注目</span><b>'+esc(x.customer_name||'-')+'</b><div class="crm-today-meta">売上 '+yen(x.total_revenue)+'円 / 撮影 '+esc(x.repeat_count||0)+'回 / 休眠 '+esc(x.dormant_days||0)+'日</div><div class="crm-today-meta">'+esc(x.genre_history||'')+'</div>'+rowActions({customer_id:x.customer_id})+'</div>';}).join(''):'<div class="crm-today-row">売上・リピート注目顧客はありません。</div>';var rv=[];rv.push('<div class="crm-today-row"><b>今日送信</b> '+esc(c.sent_today||0)+'件</div>');rv.push('<div class="crm-today-row"><b>今日本予約</b> '+esc(c.created_today||0)+'件</div>');rv.push('<div class="crm-today-row"><b>今日キャンセル</b> '+esc(c.cancelled_today||0)+'件</div>');rv.push('<div class="crm-today-row"><b>CRM履歴反映</b> '+esc((data.counts||{}).history_synced_today||0)+'件</div>');if(r)r.innerHTML=rv.join('');}catch(e){if(requestId!==loadRequestId)return;if(k)k.innerHTML='<div class="crm-today-kpi alert"><b>!</b><span>読み込み失敗</span></div>';if(p)p.innerHTML='<div class="crm-today-row">読み込み失敗：'+esc(e.message||e)+'</div>';if(todayList)todayList.innerHTML='<div class="crm-today-row">撮影予定を読み込めません。</div>';if(tomorrowList)tomorrowList.innerHTML='<div class="crm-today-row">撮影予定を読み込めません。</div>';}}
+  async function loadToday(){if(!todayActive())return;var requestId=++loadRequestId,k=document.getElementById('crmTodayKpis'),focus=document.getElementById('crmTodayFocus'),next=document.getElementById('crmTodayNextShoot'),nextMeta=document.getElementById('crmTodayNextShootMeta'),todayList=document.getElementById('crmTodayShoots'),tomorrowList=document.getElementById('crmTomorrowShoots'),p=document.getElementById('crmTodayPriority'),fl=document.getElementById('crmTodayFollowLine'),s=document.getElementById('crmTodaySales'),r=document.getElementById('crmTodayReservation');try{var data=await api('/api/today-dashboard');if(requestId!==loadRequestId||!todayActive())return;if(!data.ok)throw new Error(data.message||'load failed');var c=data.counts||{},immediate=Number(c.immediate_total||0),shoots=data.today_shoots||[],tomorrow=data.tomorrow_shoots||[],first=data.next_shoot||null;if(focus){var main=focus.querySelector('.crm-today-focus-main'),value=main?.querySelector('.crm-today-focus-value'),copy=main?.querySelector('.crm-today-focus-copy');if(main)main.classList.toggle('alert',immediate>0);if(value)value.textContent=immediate>0?immediate+'件を先に確認':(shoots.length?'今日の撮影 '+shoots.length+'件':'緊急対応なし');if(copy)copy.textContent=immediate>0?'予約連携・期限超過・高優先LINEから確認してください。':(shoots.length?'撮影予定を確認し、空き時間にフォローを進めます。':'今日のフォローと次回アプローチ候補を確認できます。')}if(next)next.textContent=first?(first.start_time||'時間未設定'):'—';if(nextMeta)nextMeta.textContent=first?((first.customer_name||'-')+' / '+(first.genre||first.plan_label||'撮影')):'今日の撮影予定はありません';if(k)k.innerHTML=[['今日の撮影',c.today_shoots||0,''],['明日の撮影',c.tomorrow_shoots||0,''],['予約要確認',c.reservation_alerts||0,(c.reservation_alerts||0)?'alert':''],['LINE未送信',c.line_pending||0,(c.line_high||0)?'alert':(c.line_pending||0)?'warn':''],['今日フォロー',c.follow_due||0,(c.follow_overdue||0)?'alert':''],['期限超過',c.follow_overdue||0,(c.follow_overdue||0)?'alert':'']].map(function(x){return '<div class="crm-today-kpi '+x[2]+'"><b>'+esc(x[1])+'</b><span>'+esc(x[0])+'</span></div>'}).join('');if(todayList)todayList.innerHTML=shoots.length?shoots.map(shootRow).join(''):'<div class="crm-today-row">今日の撮影予定はありません。</div>';if(tomorrowList)tomorrowList.innerHTML=tomorrow.length?tomorrow.map(shootRow).join(''):'<div class="crm-today-row">明日の撮影予定はありません。</div>';var pri=(data.priority_items||[]).slice(0,10);if(p)p.innerHTML=pri.length?pri.map(function(x){return '<div class="crm-today-row">'+itemBadge(x)+'<b>'+esc(x.customer_name||'-')+'</b><div>'+esc(x.title||'')+'</div><div class="crm-today-meta">'+esc(x.meta||'')+' / 顧客ID '+esc(x.customer_id||'-')+'</div>'+rowActions(x)+'</div>';}).join(''):'<div class="crm-today-row">今すぐ確認する項目はありません。</div>';var lines=[];(data.follow_tasks||[]).slice(0,6).forEach(function(x){lines.push('<div class="crm-today-row"><span class="crm-today-badge '+(String(x.due_date||'').slice(0,10)<data.date_jst?'':'warn')+'">フォロー</span><b>'+esc(x.customer_name||'-')+'</b><div>'+esc(x.title||'')+'</div><div class="crm-today-meta">期限 '+esc(x.due_date||'-')+' / 優先度 '+esc(x.priority||'-')+'</div>'+rowActions({customer_id:x.customer_id})+'</div>')});(data.line_pending||[]).slice(0,5).forEach(function(x){lines.push('<div class="crm-today-row"><span class="crm-today-badge warn">LINE</span><b>'+esc(x.customer_name||'-')+'</b><div>'+esc(x.action_label||x.action_type||'LINE文面')+'</div><div class="crm-today-meta">保存 '+short(x.created_at)+' / 優先度 '+esc(x.priority||'-')+'</div>'+rowActions({customer_id:x.customer_id,type:'line_pending'})+'</div>')});if(fl)fl.innerHTML=lines.length?lines.join(''):'<div class="crm-today-row">今日対応のフォロー・LINEはありません。</div>';var sf=(data.sales_focus||[]).slice(0,8);if(s)s.innerHTML=sf.length?sf.map(function(x){return '<div class="crm-today-row"><span class="crm-today-badge ok">注目</span><b>'+esc(x.customer_name||'-')+'</b><div class="crm-today-meta">売上 '+yen(x.total_revenue)+'円 / 撮影 '+esc(x.repeat_count||0)+'回 / 休眠 '+esc(x.dormant_days||0)+'日</div><div class="crm-today-meta">'+esc(x.genre_history||'')+'</div>'+rowActions({customer_id:x.customer_id})+'</div>';}).join(''):'<div class="crm-today-row">売上・リピート注目顧客はありません。</div>';var rv=[];rv.push('<div class="crm-today-row"><b>今日送信</b> '+esc(c.sent_today||0)+'件</div>');rv.push('<div class="crm-today-row"><b>今日本予約</b> '+esc(c.created_today||0)+'件</div>');rv.push('<div class="crm-today-row"><b>今日キャンセル</b> '+esc(c.cancelled_today||0)+'件</div>');rv.push('<div class="crm-today-row"><b>CRM履歴反映</b> '+esc((data.counts||{}).history_synced_today||0)+'件</div>');if(r)r.innerHTML=rv.join('');}catch(e){if(requestId!==loadRequestId)return;if(k)k.innerHTML='<div class="crm-today-kpi alert"><b>!</b><span>読み込み失敗</span></div>';if(p)p.innerHTML='<div class="crm-today-row">読み込み失敗：'+esc(e.message||e)+'</div>';if(todayList)todayList.innerHTML='<div class="crm-today-row">撮影予定を読み込めません。</div>';if(tomorrowList)tomorrowList.innerHTML='<div class="crm-today-row">撮影予定を読み込めません。</div>';}}
   document.addEventListener('click',function(e){var x=e.target?.closest?.('button,[data-today-customer]');if(!x)return;if(x.id==='crmTodayReload'){loadToday();toast('更新しました')}else if(x.id==='crmTodayAlerts'||x.dataset.todayAlertView){var b=document.getElementById('crmLinkAlertOpenBtn');if(b)b.click();else toast('アラート画面を開けませんでした')}else if(x.id==='crmTodayLinePending'||x.dataset.todayLineView){window.__crmOwnerView?.showLine?.()}else if(x.id==='crmTodayFollow'){var b=document.getElementById('crmTodayTasksBtn')||document.querySelector('[data-crm-today-tasks]');if(b)b.click();else toast('今日対応画面を開けませんでした')}else if(x.id==='crmTodayCustomers'){window.__crmOwnerView?.showSearch?.()}else if(x.id==='crmTodayMarketing'){window.__crmOwnerView?.showMarketing?.()}else if(x.dataset.todayCustomer){openCustomerSearch(x.dataset.todayCustomer)}});
   document.addEventListener('crm:owner-view-change',function(e){if(e.detail?.view==='today')loadToday();else loadRequestId++});
   document.addEventListener('DOMContentLoaded',install); setTimeout(install,800); setInterval(function(){if(todayActive())loadToday()},120000);
