@@ -434,7 +434,7 @@ async function todayDashboardCsv(request, env) {
   return csv(lines.join("\n"), `crm-today-dashboard-${data.date_jst}.csv`);
 }
 
-function injectTodayDashboardUi(html) {
+export function injectTodayDashboardUi(html) {
   if (!html || html.includes("crmTodayDashboardScript")) return html;
 
   const style = `<style id="crmTodayDashboardStyle">
