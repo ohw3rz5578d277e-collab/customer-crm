@@ -73,6 +73,7 @@ const origin='http://127.0.0.1:'+server.address().port;
 const browser=await chromium.launch({headless:true});
 try{
   for(const viewport of [{width:390,height:844},{width:1440,height:900}]){
+    denied=false;
     const context=await browser.newContext({viewport});
     const page=await context.newPage();
     const errors=[];
