@@ -152,12 +152,17 @@ async function ensureSchema(env) {
 }
 
 async function requireReader(request, env) {
-  await ensureSchema(env);
+  if (!env.DB) return { ok: false, response: json({ ok: false, error: "today_dashboard_db_unavailable", message: "顧客管理データを確認できません。" }, 503) };
   const email = getAccessEmail(request);
   if (!email) return { ok: false, response: json({ ok: false, message: "Login required" }, 401) };
-  const user = await env.DB.prepare(
-    `SELECT email, role, status FROM crm_admin_users WHERE lower(email)=lower(?) AND status='active' LIMIT 1`
-  ).bind(email).first();
+  let user = null;
+  try {
+    user = await env.DB.prepare(
+      `SELECT email, role, status FROM crm_admin_users WHERE lower(email)=lower(?) AND status='active' LIMIT 1`
+    ).bind(email).first();
+  } catch (_) {
+    return { ok: false, response: json({ ok: false, error: "today_dashboard_auth_read_unavailable", message: "顧客管理の認証状態を確認できません。" }, 503) };
+  }
   if (!user) return { ok: false, response: json({ ok: false, message: "User is not allowed" }, 403) };
   if (!READ_ROLES.includes(user.role || "")) return { ok: false, response: json({ ok: false, message: "Permission denied" }, 403) };
   return { ok: true, email, user };
@@ -175,6 +180,33 @@ function jstDate(value) {
 function todayJst() {
   const jst = new Date(Date.now() + 9 * 60 * 60 * 1000);
   return jst.toISOString().slice(0, 10);
+}
+
+function tomorrowJst() {
+  const jst = new Date(Date.now() + 10 * 60 * 60 * 1000 + 24 * 60 * 60 * 1000 - 60 * 60 * 1000);
+  return jst.toISOString().slice(0, 10);
+}
+
+const REQUIRED_TODAY_READ_TABLES = Object.freeze([
+  "crm_admin_users",
+  "customers",
+  "customer_reservations",
+  "customer_line_draft_logs",
+  "crm_follow_tasks",
+  "crm_reservation_drafts",
+  "crm_reservation_link_alert_checks"
+]);
+
+async function assertTodayReadSchema(env) {
+  if (!env.DB) throw new Error("TODAY_DASHBOARD_DB_UNAVAILABLE");
+  const placeholders = REQUIRED_TODAY_READ_TABLES.map(() => "?").join(",");
+  const result = await env.DB.prepare(
+    `SELECT name FROM sqlite_master WHERE type='table' AND name IN (${placeholders})`
+  ).bind(...REQUIRED_TODAY_READ_TABLES).all();
+  const present = new Set((result.results || []).map((row) => text(row.name)));
+  const missing = REQUIRED_TODAY_READ_TABLES.filter((name) => !present.has(name));
+  if (missing.length) throw new Error(`TODAY_DASHBOARD_SCHEMA_UNAVAILABLE:${missing.join(",")}`);
+  return true;
 }
 
 function classifyReservationAlert(row) {
@@ -257,11 +289,26 @@ async function getReservationAlerts(env, today) {
   };
 }
 
+async function getScheduledShoots(env, date) {
+  return safeAll(env, `SELECT reservation_id, customer_id, customer_name, genre, shoot_date, start_time, end_time, plan_label, place, total_amount, status
+    FROM customer_reservations
+    WHERE COALESCE(deleted_at,'')=''
+      AND substr(COALESCE(shoot_date,''),1,10)=?
+      AND lower(COALESCE(status,'')) NOT IN ('cancelled','canceled','cancel','キャンセル')
+    ORDER BY COALESCE(start_time,''), COALESCE(customer_name,''), COALESCE(reservation_id,'')
+    LIMIT 50`, [date]);
+}
+
 async function getTodayDashboard(env) {
-  await ensureSchema(env);
+  await assertTodayReadSchema(env);
   const today = todayJst();
+  const tomorrow = tomorrowJst();
   const reservation = await getReservationAlerts(env, today);
   const openReservationAlerts = reservation.alerts.filter((a) => !a.acknowledged);
+  const [todayShoots, tomorrowShoots] = await Promise.all([
+    getScheduledShoots(env, today),
+    getScheduledShoots(env, tomorrow)
+  ]);
 
   const linePending = await safeAll(env, `SELECT id, customer_id, customer_name, action_type, action_label, priority, status, created_at, updated_at, message_text
     FROM customer_line_draft_logs
@@ -318,14 +365,20 @@ async function getTodayDashboard(env) {
     sales_total: num(sales.total_revenue),
     customer_count: num(sales.customer_count),
     repeat_customers: num(sales.repeat_customers),
-    dormant_customers: num(sales.dormant_customers)
+    dormant_customers: num(sales.dormant_customers),
+    today_shoots: todayShoots.length,
+    tomorrow_shoots: tomorrowShoots.length,
+    immediate_total: openReservationAlerts.filter((a) => a.severity === "danger").length + overdueTasks.length + highLinePending.length
   };
 
   return {
     ok: true,
     build: BUILD,
     date_jst: today,
+    tomorrow_jst: tomorrow,
     counts,
+    today_shoots: todayShoots,
+    tomorrow_shoots: tomorrowShoots,
     priority_items: priorityItems.slice(0, 20),
     reservation_alerts: openReservationAlerts.slice(0, 12),
     line_pending: linePending.slice(0, 15),
@@ -338,18 +391,33 @@ async function getTodayDashboard(env) {
 async function todayDashboardApi(request, env) {
   const auth = await requireReader(request, env);
   if (!auth.ok) return auth.response;
-  return json(await getTodayDashboard(env));
+  try {
+    return json(await getTodayDashboard(env));
+  } catch (error) {
+    return json({ ok: false, error: "today_dashboard_read_unavailable", message: "今日やることを読み込めません。", detail: text(error?.message) }, 503);
+  }
 }
 
 async function todayDashboardCsv(request, env) {
   const auth = await requireReader(request, env);
   if (!auth.ok) return auth.response;
-  const data = await getTodayDashboard(env);
+  let data;
+  try {
+    data = await getTodayDashboard(env);
+  } catch (error) {
+    return json({ ok: false, error: "today_dashboard_read_unavailable", message: "今日やることを読み込めません。", detail: text(error?.message) }, 503);
+  }
   const header = ["区分", "ID", "顧客ID", "顧客名", "内容", "状態/優先度", "メモ", "日付", "予約ID"];
   const lines = [header.map(csvCell).join(",")];
 
   for (const x of data.priority_items || []) {
     lines.push(["優先対応", x.task_id || x.line_log_id || x.draft_id || "", x.customer_id, x.customer_name, x.title, x.label, x.meta, data.date_jst, ""].map(csvCell).join(","));
+  }
+  for (const x of data.today_shoots || []) {
+    lines.push(["今日の撮影", x.reservation_id || "", x.customer_id, x.customer_name, x.genre || x.plan_label || "", x.status || "", [x.start_time, x.place].filter(Boolean).join(" / "), x.shoot_date || data.date_jst, x.reservation_id || ""].map(csvCell).join(","));
+  }
+  for (const x of data.tomorrow_shoots || []) {
+    lines.push(["明日の撮影", x.reservation_id || "", x.customer_id, x.customer_name, x.genre || x.plan_label || "", x.status || "", [x.start_time, x.place].filter(Boolean).join(" / "), x.shoot_date || data.tomorrow_jst, x.reservation_id || ""].map(csvCell).join(","));
   }
   for (const r of data.reservation_alerts || []) {
     lines.push(["予約連携アラート", r.id, r.customer_id, r.customer_name, r.reason, r.stage, r.severity, r.alert_time, r.reservation_app_reservation_id].map(csvCell).join(","));
