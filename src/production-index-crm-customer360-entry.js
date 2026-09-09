@@ -5,6 +5,9 @@ import { handleCustomerProfileEnrichmentRequest, customerProfileEnrichmentHealth
 import { handleCustomer360LineProfileExtraction, customer360LineProfileExtractionHealth } from './crm-customer360-line-profile-extraction.mjs';
 import { guardCustomer360ProfileWrite, customer360ProfileWriteGuardHealth } from './crm-customer360-profile-write-guard.mjs';
 import { handleCustomer360CombinedDetail, customer360CombinedDetailHealth } from './crm-customer360-combined-detail.mjs';
+import { handleCustomer360MediaRequest, customer360MediaHealth } from './crm-customer360-media.mjs';
+import { injectCustomer360MediaUi, customer360MediaUiHealth } from './crm-customer360-media-ui.mjs';
+import { injectCustomer360ExactEditHandoff, customer360ExactEditHandoffHealth } from './crm-customer360-exact-edit-handoff.mjs';
 import { injectCustomer360Marketing } from './crm-customer360-ui.mjs';
 import { injectCustomerListDailyOperations } from './crm-customer-list-daily-operations.mjs';
 import { injectCustomer360SearchFocus } from './crm-customer360-search-focus.mjs';
@@ -16,13 +19,15 @@ import { injectCustomer360ProfileUi } from './crm-customer360-profile-ui.mjs';
 import { injectOwnerAppShell } from './crm-owner-app-shell.mjs';
 import { patchReconciliationHealth } from './crm-reconciliation-review.mjs';
 
-const BUILD='customer-crm-customer360-profile-enrichment-20260903-05';
+const BUILD='customer-crm-customer360-media-foundation-20260909-02';
 const RAW_SCRIPT_CLOSE='<'+String.fromCharCode(92)+'/script>';
 const CUSTOMER360_PROFILE_TABLES=[
   'customer_profile_enrichment',
   'customer_family_member_metadata',
   'customer_field_evidence',
-  'customer_notes_history'
+  'customer_notes_history',
+  'customer_profile_media',
+  'customer_delivery_links'
 ];
 
 export function handleProductionAccessAuthProbe(request,env){
@@ -60,7 +65,9 @@ export function composeCustomer360AdminHtml(html){
   const withDirectNavigation=injectCustomer360DirectNavigation(withRecovery);
   const withOwnerViewState=injectOwnerViewState(withDirectNavigation);
   const withProfile=injectCustomer360ProfileUi(withOwnerViewState);
-  const withAppShell=injectOwnerAppShell(withProfile);
+  const withMedia=injectCustomer360MediaUi(withProfile);
+  const withEditHandoff=injectCustomer360ExactEditHandoff(withMedia);
+  const withAppShell=injectOwnerAppShell(withEditHandoff);
   return normalizeCustomer360InjectedHtml(withAppShell);
 }
 
@@ -77,7 +84,9 @@ async function customer360SchemaHealth(env){
     customer360_profile_enrichment_schema_available:false,
     customer360_family_metadata_available:false,
     customer360_field_evidence_available:false,
-    customer360_notes_history_available:false
+    customer360_notes_history_available:false,
+    customer360_profile_media_schema_available:false,
+    customer360_delivery_links_schema_available:false
   };
   if(!env?.DB?.prepare)return fallback;
   try{
@@ -88,7 +97,9 @@ async function customer360SchemaHealth(env){
       customer360_profile_enrichment_schema_available:names.has('customer_profile_enrichment'),
       customer360_family_metadata_available:names.has('customer_family_member_metadata'),
       customer360_field_evidence_available:names.has('customer_field_evidence'),
-      customer360_notes_history_available:names.has('customer_notes_history')
+      customer360_notes_history_available:names.has('customer_notes_history'),
+      customer360_profile_media_schema_available:names.has('customer_profile_media'),
+      customer360_delivery_links_schema_available:names.has('customer_delivery_links')
     };
   }catch(_){
     return fallback;
@@ -117,6 +128,9 @@ export async function patchHealth(response,env){
     ...customer360LineProfileExtractionHealth(),
     ...customer360ProfileWriteGuardHealth(),
     ...customer360CombinedDetailHealth(),
+    ...customer360MediaHealth(),
+    ...customer360MediaUiHealth(),
+    ...customer360ExactEditHandoffHealth(),
     ...schema,
     customer360_identity_fallback:false,
     customer360_paid_ai_provider_active:false,
@@ -151,6 +165,8 @@ export default {
     const ownedHealth=await handleProductionHealthRequest(request,env);
     if(ownedHealth)return ownedHealth;
 
+    const mediaApi=await handleCustomer360MediaRequest(request,env);
+    if(mediaApi)return mediaApi;
     const lineProfileApi=await handleCustomer360LineProfileExtraction(request,env);
     if(lineProfileApi)return lineProfileApi;
     const profileWriteGuard=await guardCustomer360ProfileWrite(request,env);
