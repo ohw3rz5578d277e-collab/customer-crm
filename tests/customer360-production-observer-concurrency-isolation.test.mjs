@@ -4,7 +4,7 @@ import fs from 'node:fs';
 const observer=fs.readFileSync('.github/workflows/customer360-production-first-throw-observability.yml','utf8');
 const deploy=fs.readFileSync('.github/workflows/deploy-cloudflare.yml','utf8');
 
-assert.match(deploy,/concurrency:\s*\n\s*group: customer-crm-production-deploy/,'canonical Production release must keep its serialization lock');
+assert.match(deploy,/concurrency:\s*\n\s*group:\s*\$\{\{\s*github\.event_name\s*==\s*'workflow_dispatch'\s*&&\s*'customer-crm-production-deploy'\s*\|\|\s*format\('customer-crm-release-pr-\{0\}',\s*github\.event\.pull_request\.number\)\s*\}\}/,'canonical Production release must keep its serialization lock while PR CI uses a distinct pending slot');
 assert.ok(observer.includes("format('customer360-production-observer-{0}', github.event.workflow_run.id)"),'each observer must have a run-unique concurrency group');
 assert.ok(!observer.includes('group: customer-crm-production-deploy'),'observer must never occupy the Production deploy concurrency pending slot');
 assert.ok(observer.includes('cancel-in-progress: false'),'observer must not cancel another observer');
