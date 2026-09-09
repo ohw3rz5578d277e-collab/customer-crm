@@ -22,12 +22,13 @@ const customer={
     {reservation_id:'R-2',customer_id:'26000101',shoot_date:'2025-11-03',genre:'七五三',place:'神社',status:'撮影済み',total_amount:43000}
   ],
   line_history:[
-    {created_at:'2026-08-01 10:00',message_text:'次回撮影についてご相談',direction:'incoming'}
+    {created_at:'2026-08-01 10:00',template_name:'七五三フォロー',response_status:'replied',memo:'次回撮影についてご相談'}
   ],
   marketing_history:[
     {created_at:'2026-07-02',summary:'納品後フォロー候補'}
   ],
-  profile:{marketing_contact_permission:'allowed'},
+  profile:{experience:{marketing_contact_permission:'allowed'}},
+  consent:{marketing_contact_permission:'allowed'},
   raw:{memo:'最初はパパと一緒だと安心。',acquisition_source:'Instagram'}
 };
 const listItem={
@@ -44,7 +45,7 @@ const base=`<!doctype html><html><head><meta charset="utf-8"><meta name="viewpor
 <script>document.getElementById('lineOpsOpen').onclick=()=>document.getElementById('lineOpsPanel').classList.add('open');document.getElementById('lineOpsClose').onclick=()=>document.getElementById('lineOpsPanel').classList.remove('open');</script></body></html>`;
 const html=composeCustomer360AdminHtml(base);
 
-const requests=[],writes=[];
+const requests=[],writes=[];let denied=false;
 function send(res,status,data,type='application/json; charset=utf-8'){
   res.writeHead(status,{'content-type':type,'cache-control':'no-store'});
   res.end(type.startsWith('application/json')?JSON.stringify(data):data);
@@ -58,7 +59,11 @@ const server=http.createServer((req,res)=>{
   if(u.pathname==='/api/customer360/customers')return send(res,200,{ok:true,total:1,all_total:1,page:1,page_size:50,has_next:false,items:[listItem],facets,meta:{privacy_safe_list_dto:true}});
   if(u.pathname==='/api/customer360/analytics')return send(res,200,{ok:true,available:false,period:{from:'2026-09-01',to:'2026-09-09',previous:{from:'2026-08-23',to:'2026-08-31'},span_days:9},current:{revenue:0,completed_shoots:0,unique_customers:0,average_order_value:0,repeat_customers_in_period:0,repeat_rate_pct:0,genres:[],monthly:[]},previous:{revenue:0,completed_shoots:0,unique_customers:0,average_order_value:0},change_pct:{revenue:null,completed_shoots:null,unique_customers:null,average_order_value:null}});
   if(u.pathname==='/api/customer360/approach-queue')return send(res,200,{ok:true,items:[],total:0,summary:{total:0,ready:0,review_required:0,opted_out:0,no_contact:0},filters:{horizon_days:90,status:'all',limit:50},meta:{read_only:true,line_send:false}});
-  if(u.pathname==='/api/customer360/customer/26000101')return send(res,200,{ok:true,customer});
+  if(u.pathname==='/__fixture/deny'){denied=true;return send(res,200,{ok:true})}
+  if(u.pathname==='/api/customer360/customer/26000101'){
+    const current=denied?{...customer,profile:{experience:{marketing_contact_permission:'denied'}},consent:{marketing_contact_permission:'denied'}}:customer;
+    return send(res,200,{ok:true,customer:current});
+  }
   if(u.pathname==='/api/customer360/status')return send(res,200,{ok:true,read_only:true,bindings:{DB:true,LINE_SERVICE:true,RESERVATION_SERVICE:true}});
   return send(res,404,{ok:false,error:'not_found'});
 });
@@ -92,7 +97,9 @@ try{
     assert(detailText.includes('七五三'),viewport.width+': next offer missing');
     assert(detailText.includes('R-1')===false,'reservation internal ID should not be required in visible copy');
     assert(detailText.includes('Birthday'),viewport.width+': reservation history missing');
-    assert(detailText.includes('次回撮影についてご相談'),viewport.width+': LINE history missing');
+    assert(detailText.includes('七五三フォロー'),viewport.width+': LINE template context missing');
+    assert(detailText.includes('次回撮影についてご相談'),viewport.width+': LINE memo context missing');
+    assert(detailText.includes('replied'),viewport.width+': LINE response status missing');
     assert(detailText.includes('この画面からLINEは自動送信されません。'),viewport.width+': LINE safety note missing');
 
     assert.equal(await page.locator('.crm-360-profile-hero').count(),1);
@@ -102,6 +109,18 @@ try{
     assert.equal(await page.locator('#crmDetailReservation').count(),1);
     assert.equal(await page.locator('#crmDetailMarketing').count(),1);
 
+    await page.evaluate(()=>window.__crmOwnerView.showMarketing());
+    await page.waitForFunction(()=>document.body.dataset.crmOwnerView==='marketing');
+    await page.evaluate(()=>window.__crmCustomer360UI.showList());
+    await page.waitForFunction(()=>document.body.dataset.crmOwnerView==='marketing');
+    await page.locator('#crmMktList [data-open],#crmMktList [data-direct-customer]').first().click();
+    await page.waitForFunction(()=>document.getElementById('crmMktDetail')?.classList.contains('open'));
+    await page.locator('#crmDetailBack').click();
+    await page.waitForFunction(()=>document.body.dataset.crmOwnerView==='customers'&&document.getElementById('crmMktList')?.classList.contains('open'));
+    assert.equal(await page.locator('#crmMktList').isVisible(),true,viewport.width+': back action did not return to customer list');
+
+    await page.locator('#crmMktList [data-open],#crmMktList [data-direct-customer]').first().click();
+    await page.waitForFunction(()=>document.getElementById('crmMktDetail')?.classList.contains('open'));
     await page.locator('#crmDetailReservation').click();
     assert((await page.evaluate(()=>window.__openedReservation)).includes('reservation-app-api'),viewport.width+': reservation app shortcut missing');
 
@@ -114,6 +133,16 @@ try{
     await page.waitForFunction(()=>document.getElementById('crmMktDetail')?.classList.contains('open'));
     await page.locator('#crmDetailMarketing').click();
     await page.waitForFunction(()=>document.body.dataset.crmOwnerView==='marketing');
+
+    await page.request.get(origin+'/__fixture/deny');
+    await page.evaluate(()=>window.__crmOwnerView.showCustomers());
+    await page.waitForFunction(()=>document.body.dataset.crmOwnerView==='customers');
+    await page.locator('#crmMktList [data-open],#crmMktList [data-direct-customer]').first().click();
+    await page.waitForFunction(()=>document.getElementById('crmMktDetail')?.classList.contains('open'));
+    const deniedText=await page.locator('#crmMktDetail').innerText();
+    assert(deniedText.includes('連絡拒否'),viewport.width+': explicit denied permission not shown');
+    assert(!deniedText.includes('連絡許可あり'),viewport.width+': denied permission rendered as allowed');
+    await page.locator('#crmDetailBack').click();
 
     const overflow=await page.evaluate(()=>Math.max(
       document.documentElement.scrollWidth-document.documentElement.clientWidth,
@@ -133,6 +162,9 @@ assert(requests.some(x=>x==='GET /api/customer360/customer/26000101'),'detail GE
 
 console.log('CUSTOMER360_ONE_SCREEN_DETAIL=PASS');
 console.log('CUSTOMER360_DETAIL_CONTACT_PERMISSION_EXPLICIT=PASS');
+console.log('CUSTOMER360_DETAIL_CONTACT_DENIED_FAIL_CLOSED=PASS');
+console.log('CUSTOMER360_DETAIL_BACK_TO_LIST=PASS');
+console.log('CUSTOMER360_DETAIL_LINE_RESPONSE_CONTEXT=PASS');
 console.log('CUSTOMER360_DETAIL_RESERVATION_HISTORY=PASS');
 console.log('CUSTOMER360_DETAIL_LINE_HISTORY=PASS');
 console.log('CUSTOMER360_DETAIL_MOBILE_390=PASS');
