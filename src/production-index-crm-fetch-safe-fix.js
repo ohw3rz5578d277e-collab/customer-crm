@@ -227,7 +227,7 @@ async function safeFallbackResponse(path){
   return null;
 }
 
-function injectFetchSafeUi(html){
+export function injectFetchSafeUi(html){
   if(!html || html.includes("crm-fetch-safe-fix-script")) return html;
 
   const style = `<style id="crm-fetch-safe-fix-style">
