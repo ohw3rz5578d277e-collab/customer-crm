@@ -23,6 +23,7 @@ assert.ok(workflow.includes('d1 migrations list customer-crm-db --remote'),'remo
 assert.ok(workflow.includes('20260828_customer360_family_marketing_foundation.sql'),'family migration allowlist missing');
 assert.ok(workflow.includes('20260903_customer360_profile_auto_enrichment.sql'),'profile migration allowlist missing');
 assert.ok(workflow.includes('20260908_customer_media_delivery_links.sql'),'media migration allowlist missing');
+assert.ok(workflow.includes("- 'migrations_managed/20260908_customer_media_delivery_links.sql'"),'media migration PR path trigger missing');
 assert.ok(workflow.indexOf('20260828_customer360_family_marketing_foundation.sql')<workflow.indexOf('20260903_customer360_profile_auto_enrichment.sql'),'profile migration must follow family migration');
 assert.ok(workflow.indexOf('20260903_customer360_profile_auto_enrichment.sql')<workflow.indexOf('20260908_customer_media_delivery_links.sql'),'media migration must follow profile migration');
 assert.ok(workflow.includes('CUSTOMER360_MEDIA_MIGRATION_ONLY_PENDING'),'media-only pending classification missing');

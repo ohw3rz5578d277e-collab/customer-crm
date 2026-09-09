@@ -17,6 +17,7 @@ on:
       - 'tests/crm-owner-app-shell-*.mjs'
       - 'migrations_managed/20260828_customer360_family_marketing_foundation.sql'
       - 'migrations_managed/20260903_customer360_profile_auto_enrichment.sql'
+      - 'migrations_managed/20260908_customer_media_delivery_links.sql'
       - 'wrangler.jsonc'
   workflow_dispatch:
     inputs:
