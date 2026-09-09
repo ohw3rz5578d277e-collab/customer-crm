@@ -1,10 +1,19 @@
 import assert from 'node:assert/strict';
-import app from '../src/production-index-crm-today-dashboard.js';
+import app, { chooseNextShoot } from '../src/production-index-crm-today-dashboard.js';
 
 const requiredTables=[
   'crm_admin_users','customers','customer_reservations','customer_line_draft_logs',
   'crm_follow_tasks','crm_reservation_drafts','crm_reservation_link_alert_checks'
 ];
+const requiredColumns={
+  crm_admin_users:['email','role','status'],
+  customers:['customer_id','customer_name','total_revenue','repeat_count','dormant_days','last_shoot_date','genre_history','line_user_id','deleted_at'],
+  customer_reservations:['reservation_id','customer_id','customer_name','genre','shoot_date','start_time','end_time','plan_label','place','total_amount','status','deleted_at'],
+  customer_line_draft_logs:['id','customer_id','customer_name','action_type','action_label','priority','status','created_at','updated_at','message_text'],
+  crm_follow_tasks:['id','customer_id','customer_name','task_type','title','message_text','due_date','priority','status','created_at','updated_at'],
+  crm_reservation_drafts:['id','customer_id','customer_name','status','sent_to_reservation_at','reservation_app_reservation_id','reservation_app_created_at','history_synced_at','reservation_app_updated_at','reservation_app_cancelled_at','cancellation_synced_at','updated_at','created_at'],
+  crm_reservation_link_alert_checks:['draft_id','stage_key','acknowledged_at','acknowledged_by']
+};
 
 let writeCount=0;
 let scheduleReadCount=0;
@@ -22,6 +31,7 @@ function stmt(sql){
     },
     async all(){
       if(/SELECT name FROM sqlite_master/.test(sql))return{results:requiredTables.map(name=>({name}))};
+      if(/^PRAGMA table_info\(/.test(sql)){const table=(sql.match(/^PRAGMA table_info\(([^)]+)\)/)||[])[1];return{results:(requiredColumns[table]||[]).map(name=>({name}))}}
       if(/SELECT \* FROM crm_reservation_drafts/.test(sql))return{results:[
         {id:7,customer_id:'26000123',customer_name:'山田 花子',status:'created',reservation_app_reservation_id:'R-7',reservation_app_created_at:'2026-09-09T01:00:00Z',history_synced_at:'',created_at:'2026-09-09T00:00:00Z'}
       ]};
@@ -82,9 +92,41 @@ assert.match(csvText,/明日の撮影/);
 assert.equal(writeCount,0,'CSV read path must not execute/prepare write SQL');
 
 assert(sqlSeen.some(sql=>/sqlite_master/.test(sql)),'read-only schema guard missing');
+assert(sqlSeen.some(sql=>/^PRAGMA table_info\(customer_reservations\)/.test(sql)),'column-level schema guard missing');
 assert(sqlSeen.every(sql=>!(/\b(CREATE|ALTER|INSERT|UPDATE|DELETE|DROP|REPLACE)\b/i.test(sql))),'write/DDL SQL observed');
 
+const selected=chooseNextShoot([
+  {reservation_id:'PAST',start_time:'10:00'},
+  {reservation_id:'FUTURE',start_time:'16:00'},
+  {reservation_id:'UNTIMED',start_time:''}
+],'14:30');
+assert.equal(selected?.reservation_id,'FUTURE','NEXT SHOOT must choose an upcoming timed reservation');
+assert.equal(chooseNextShoot([{reservation_id:'PAST',start_time:'10:00'},{reservation_id:'UNTIMED',start_time:''}],'14:30')?.reservation_id,'UNTIMED','untimed shoot should follow passed timed shoots');
+assert.equal(chooseNextShoot([{reservation_id:'PAST',start_time:'10:00'}],'14:30'),null,'passed-only day should have no next shoot');
+
+const failingEnv={DB:{prepare(sql){
+  if(/FROM crm_follow_tasks/.test(sql))throw new Error('TRANSIENT_FOLLOW_READ_FAILURE');
+  return env.DB.prepare(sql);
+}}};
+const failed=await app.fetch(new Request('https://crm.example/api/today-dashboard',{headers}),failingEnv,{});
+assert.equal(failed.status,503,'operational read failure must fail closed');
+const failedJson=await failed.json();
+assert.equal(failedJson.error,'today_dashboard_read_unavailable');
+
+const missingColumnEnv={DB:{prepare(sql){
+  if(/^PRAGMA table_info\(customer_reservations\)/.test(sql)){
+    const api={bind(){return api},async all(){return{results:requiredColumns.customer_reservations.filter(x=>x!=='start_time').map(name=>({name}))}},async first(){return null},async run(){throw new Error('write not allowed')}};
+    return api;
+  }
+  return env.DB.prepare(sql);
+}}};
+const missing=await app.fetch(new Request('https://crm.example/api/today-dashboard',{headers}),missingColumnEnv,{});
+assert.equal(missing.status,503,'missing required column must fail closed');
+
 console.log('OWNER_TODAY_READ_ONLY_API=PASS');
+console.log('OWNER_TODAY_OPERATIONAL_READ_FAIL_CLOSED=PASS');
+console.log('OWNER_TODAY_REQUIRED_COLUMNS_FAIL_CLOSED=PASS');
+console.log('OWNER_TODAY_NEXT_UPCOMING_SHOOT=PASS');
 console.log('OWNER_TODAY_SCHEDULE_READ=PASS');
 console.log('OWNER_TODAY_SCHEMA_FAIL_CLOSED_READ=PASS');
 console.log('PRODUCTION_D1_WRITE=0');
