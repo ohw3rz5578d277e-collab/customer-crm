@@ -114,6 +114,17 @@ try{
     assert.equal(propagated.status,503,'browser fetch-safe wrapper must preserve Today 503');
     assert.equal(propagated.ok,false,'browser fetch-safe wrapper converted Today failure to success');
     assert.equal(propagated.body?.error,'today_dashboard_read_unavailable');
+
+    await page.evaluate(()=>{
+      document.body.dataset.crmOwnerView='today';
+      document.body.classList.add('crm-owner-view-today');
+      document.dispatchEvent(new CustomEvent('crm:owner-view-change',{detail:{view:'today'}}));
+    });
+    await page.waitForFunction(()=>document.getElementById('crmHomeCards')?.innerText.includes('読み込み不可'));
+    const legacyHomeText=await page.locator('#crmHomeDash').innerText();
+    assert(legacyHomeText.includes('今日の優先順位を判定できません'),'legacy home did not surface Today outage');
+    assert(!legacyHomeText.includes('今すぐの高優先タスクはありません'),'legacy home converted Today outage to empty success');
+
     failToday=false;
     await context.close();
   }
@@ -184,5 +195,6 @@ console.log('OWNER_DAILY_CONTROL_CENTER_MOBILE_390=PASS');
 console.log('OWNER_DAILY_CONTROL_CENTER_OFF_VIEW_FETCH=0');
 console.log('OWNER_DAILY_CONTROL_CENTER_FULL_COMPOSITION_OFF_VIEW_FETCH=0');
 console.log('OWNER_DAILY_CONTROL_CENTER_BROWSER_503_PRESERVED=PASS');
+console.log('OWNER_DAILY_CONTROL_CENTER_LEGACY_HOME_503_VISIBLE=PASS');
 console.log('OWNER_DAILY_CONTROL_CENTER_CUSTOMER_SHORTCUT=PASS');
 console.log('OWNER_DAILY_CONTROL_CENTER_AUTOMATIC_LINE_SEND=0');
