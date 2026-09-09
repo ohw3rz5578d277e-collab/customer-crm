@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import http from 'node:http';
 import { chromium } from 'playwright';
 import { injectTodayDashboardUi } from '../src/production-index-crm-today-dashboard.js';
+import { injectTodayActionUi } from '../src/production-index-crm-today-actions.js';
+import { injectHomeDashboard } from '../src/production-index-crm-home-dashboard.js';
 import { composeCustomer360AdminHtml } from '../src/production-index-crm-customer360-entry.js';
 
 let todayReads=0;
@@ -52,9 +54,9 @@ document.getElementById('crmGlobalSearch').addEventListener('input',()=>window._
 
 const html=injectTodayDashboardUi(base);
 const composedBase='<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body><button id="lineOpsOpen">LINE</button><section id="lineOpsPanel"></section><main class="app"><h1>顧客管理</h1></main></body></html>';
-const composedHtml=composeCustomer360AdminHtml(composedBase);
+const composedHtml=injectHomeDashboard(injectTodayActionUi(injectTodayDashboardUi(composeCustomer360AdminHtml(composedBase))));
 assert(composedHtml.includes('crmTodayDashboardScript'));
-assert(composedHtml.includes('crmTodayActionPanel')||composedHtml.includes('crmTodayActionPanel'.replace('Panel',''))||composedHtml.includes('crm-today-action-panel'));
+assert(composedHtml.includes('crm-today-action-panel'));
 assert(composedHtml.includes('crm-home-dashboard-script'));
 assert(html.includes('crmTodayDashboardScript'));
 assert(html.includes('OWNER DAILY CONTROL'));
