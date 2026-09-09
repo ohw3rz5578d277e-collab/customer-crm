@@ -123,6 +123,31 @@ const missingColumnEnv={DB:{prepare(sql){
 const missing=await app.fetch(new Request('https://crm.example/api/today-dashboard',{headers}),missingColumnEnv,{});
 assert.equal(missing.status,503,'missing required column must fail closed');
 
+
+const ackBindSizes=[];
+const manyDrafts=Array.from({length:205},(_,i)=>({
+  id:i+1,customer_id:'26000123',customer_name:'Batch Customer',status:'created',
+  reservation_app_reservation_id:'R-'+(i+1),reservation_app_created_at:'2026-09-09T01:00:00Z',
+  history_synced_at:'2026-09-09T02:00:00Z',created_at:'2026-09-09T00:00:00Z'
+}));
+const largeEnv={DB:{prepare(sql){
+  if(sql.includes('SELECT * FROM crm_reservation_drafts')){
+    const api={bind(){return api},async all(){return{results:manyDrafts}},async first(){return null},async run(){throw new Error('write not allowed')}};
+    return api;
+  }
+  if(sql.includes('FROM crm_reservation_link_alert_checks')){
+    const api={bind(...params){ackBindSizes.push(params.length);return api},async all(){return{results:[]}},async first(){return null},async run(){throw new Error('write not allowed')}};
+    return api;
+  }
+  return env.DB.prepare(sql);
+}}};
+const large=await app.fetch(new Request('https://crm.example/api/today-dashboard',{headers}),largeEnv,{});
+assert.equal(large.status,200,'large reservation history must not exceed D1 bind limit');
+assert(ackBindSizes.length>=3,'large acknowledgement lookup should be batched');
+assert(Math.max(...ackBindSizes)<=80,'acknowledgement batch exceeded safe bind size');
+
+console.log('OWNER_TODAY_ACK_BIND_BATCH_MAX_80=PASS');
+
 console.log('OWNER_TODAY_READ_ONLY_API=PASS');
 console.log('OWNER_TODAY_OPERATIONAL_READ_FAIL_CLOSED=PASS');
 console.log('OWNER_TODAY_REQUIRED_COLUMNS_FAIL_CLOSED=PASS');
