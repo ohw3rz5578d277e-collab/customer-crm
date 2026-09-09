@@ -57,6 +57,7 @@ document.getElementById('crmGlobalSearch').addEventListener('input',()=>window._
 const html=injectTodayDashboardUi(base);
 const composedBase='<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body><button id="lineOpsOpen">LINE</button><section id="lineOpsPanel"></section><main class="app"><h1>顧客管理</h1></main></body></html>';
 const composedHtml=injectFetchSafeUi(injectHomeDashboard(injectTodayActionUi(injectTodayDashboardUi(composeCustomer360AdminHtml(composedBase)))));
+const legacyHomeHtml=injectHomeDashboard('<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body data-crm-owner-view="today"><main></main></body></html>');
 assert(composedHtml.includes('crmTodayDashboardScript'));
 assert(composedHtml.includes('crm-today-action-panel'));
 assert(composedHtml.includes('crm-home-dashboard-script'));
@@ -79,6 +80,7 @@ const server=http.createServer((req,res)=>{
     return res.end('ok');
   }
   if(req.url==='/composed'){res.writeHead(200,{'content-type':'text/html; charset=utf-8','cache-control':'no-store'});return res.end(composedHtml)}
+  if(req.url==='/legacy-home'){res.writeHead(200,{'content-type':'text/html; charset=utf-8','cache-control':'no-store'});return res.end(legacyHomeHtml)}
   if(req.url.startsWith('/api/customer360/marketing-home')){res.writeHead(200,{'content-type':'application/json'});return res.end(JSON.stringify({ok:true,kpis:{customers:0,average_realized_ltv:0,repeat_rate_pct:0,vip_high_ltv:0,event_90d:0,dormant_180:0,line_link_rate_pct:0,approach_this_month:0},top_opportunities:[],facets:{prefectures:[],cities:[],genres:[],sources:[],campaigns:[],school_stages:[]}}))}
   if(req.url.startsWith('/api/customer360/customers')){res.writeHead(200,{'content-type':'application/json'});return res.end(JSON.stringify({ok:true,total:0,all_total:0,page:1,page_size:50,has_next:false,items:[],facets:{prefectures:[],cities:[],genres:[],sources:[],campaigns:[],school_stages:[]},meta:{privacy_safe_list_dto:true}}))}
   res.writeHead(200,{'content-type':'text/html; charset=utf-8','cache-control':'no-store'});
@@ -115,16 +117,22 @@ try{
     assert.equal(propagated.ok,false,'browser fetch-safe wrapper converted Today failure to success');
     assert.equal(propagated.body?.error,'today_dashboard_read_unavailable');
 
-    await page.evaluate(()=>{
-      document.body.dataset.crmOwnerView='today';
-      document.body.classList.add('crm-owner-view-today');
-      document.dispatchEvent(new CustomEvent('crm:owner-view-change',{detail:{view:'today'}}));
-    });
+    failToday=false;
+    await context.close();
+  }
+
+  {
+    failToday=true;
+    const context=await browser.newContext({viewport:{width:390,height:844}});
+    const page=await context.newPage();
+    const errors=[];
+    page.on('pageerror',e=>errors.push(String(e)));
+    await page.goto(origin+'/legacy-home',{waitUntil:'domcontentloaded'});
     await page.waitForFunction(()=>document.getElementById('crmHomeCards')?.innerText.includes('読み込み不可'));
     const legacyHomeText=await page.locator('#crmHomeDash').innerText();
     assert(legacyHomeText.includes('今日の優先順位を判定できません'),'legacy home did not surface Today outage');
     assert(!legacyHomeText.includes('今すぐの高優先タスクはありません'),'legacy home converted Today outage to empty success');
-
+    assert.deepEqual(errors,[],'legacy home outage path raised page errors: '+errors.join(' | '));
     failToday=false;
     await context.close();
   }
