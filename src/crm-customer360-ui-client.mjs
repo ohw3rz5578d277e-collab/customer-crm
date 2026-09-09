@@ -48,16 +48,18 @@ function bindApproach(){document.getElementById('crmApproachLoad')?.addEventList
 function renderHome(){const d=state.home;if(!d)return;const top=d.top_opportunities||[],el=document.getElementById('crmMktHome');el.innerHTML='<div class="crm-mkt-hero"><div class="crm-mkt-focus"><div class="crm-mkt-eyebrow">MARKETING CRM</div><h1>分析・アプローチ</h1><p>期間分析と、連絡可否を確認済みの候補を安全に確認します。</p></div><div class="crm-mkt-next"><div class="crm-mkt-eyebrow">NEXT FAMILY EVENT</div><h2>次の家族イベント</h2><p>'+(top[0]?.next_opportunity?esc(top[0].name)+' — '+esc(top[0].next_opportunity.label):'候補なし')+'</p></div></div><div class="crm-mkt-kpis">'+kpi(d.kpis.customers,'顧客数')+kpi(yen(d.kpis.average_realized_ltv),'平均実績LTV')+kpi(d.kpis.repeat_rate_pct+'%','リピート率')+kpi(d.kpis.vip_high_ltv,'VIP / 高LTV')+kpi(d.kpis.event_90d,'90日以内イベント候補')+kpi(d.kpis.dormant_180,'休眠180日')+kpi(d.kpis.line_link_rate_pct+'%','LINE連携率')+kpi(d.kpis.approach_this_month,'今月アプローチ候補')+'</div>'+analyticsHtml()+approachHtml()+'<div class="crm-perf">home payload '+((state.metrics.homeBytes||0)/1024).toFixed(1)+'KB / analytics '+((state.metrics.analyticsBytes||0)/1024).toFixed(1)+'KB / queue '+((state.metrics.approachBytes||0)/1024).toFixed(1)+'KB</div>';el.querySelectorAll('[data-open]').forEach(b=>b.onclick=()=>openCustomer(b.dataset.open));bindAnalytics();bindApproach();document.dispatchEvent(new CustomEvent('crm:marketing-home-rendered'))}
 async function openCustomer(id){try{const x=await api('/api/customer360/customer/'+encodeURIComponent(id));renderDetail(x.j.customer);document.getElementById('crmMktDetail').classList.add('open')}catch(e){state.error=e.message;renderList()}}
 function detailPermission(c){
-  const value=String(
-    c.profile?.experience?.marketing_contact_permission||
-    c.consent?.marketing_contact_permission||
-    c.profile?.marketing_contact_permission||
-    c.raw?.marketing_contact_permission||
-    ''
-  ).trim().toLowerCase();
-  if(value==='allowed')return{code:'allowed',label:'連絡許可あり',className:'good'};
-  if(['denied','blocked','opted_out','disallowed','not_allowed'].includes(value))return{code:value,label:'連絡拒否',className:'blocked'};
-  return{code:value||'unknown',label:'連絡可否を確認',className:'review'};
+  const legacyOptOut=Boolean(c.consent?.marketing_opt_out===true||String(c.consent?.status||'').trim().toLowerCase()==='opted_out'||c.profile?.marketing_opt_out===true||c.raw?.marketing_opt_out===true);
+  if(legacyOptOut)return{code:'opted_out',label:'連絡拒否',className:'blocked'};
+  const values=[
+    c.profile?.experience?.marketing_contact_permission,
+    c.consent?.marketing_contact_permission,
+    c.profile?.marketing_contact_permission,
+    c.raw?.marketing_contact_permission
+  ].map(v=>String(v||'').trim().toLowerCase()).filter(Boolean);
+  const denied=values.find(v=>['denied','blocked','opted_out','disallowed','not_allowed'].includes(v));
+  if(denied)return{code:denied,label:'連絡拒否',className:'blocked'};
+  if(values.includes('allowed'))return{code:'allowed',label:'連絡許可あり',className:'good'};
+  return{code:values[0]||'unknown',label:'連絡可否を確認',className:'review'};
 }
 function closeDetail(){document.getElementById('crmMktDetail')?.classList.remove('open');document.body.classList.remove('crm-owner-sheet-open')}
 function bindDetailActions(c){
