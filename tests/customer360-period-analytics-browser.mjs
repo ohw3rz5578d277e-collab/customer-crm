@@ -11,9 +11,10 @@ const facets={prefectures:[],cities:[],genres:[],sources:[],campaigns:[],school_
 function send(res,status,data,type='application/json; charset=utf-8'){res.writeHead(status,{'content-type':type,'cache-control':'no-store'});res.end(type.startsWith('application/json')?JSON.stringify(data):data)}
 function analytics(u){
   const from=u.searchParams.get('from')||'2026-09-01',to=u.searchParams.get('to')||'2026-09-05';
-  return {ok:true,available:true,period:{from,to,as_of:'2026-09-05',span_days:5,previous:{from:'2026-08-27',to:'2026-08-31'}},current:{from,to,revenue:45000,completed_shoots:3,unique_customers:2,average_order_value:15000,repeat_customers_in_period:1,repeat_rate_pct:50,genres:[{genre:'七五三',shoots:2,revenue:30000,unique_customers:1},{genre:'お宮参り',shoots:1,revenue:15000,unique_customers:1}],monthly:[{month:from.slice(0,7),shoots:3,revenue:45000,unique_customers:2}]},previous:{revenue:30000,completed_shoots:2,unique_customers:2,average_order_value:15000},change_pct:{revenue:50,completed_shoots:50,unique_customers:0,average_order_value:0},meta:{read_only:true,identity_key:'customer_id',customer_id_generation:false,customer_write:false,line_send:false}};
+  const revenue=from==='2026-07-01'?70000:from==='2026-08-01'?80000:45000;
+  return {ok:true,available:true,period:{from,to,as_of:'2026-09-05',span_days:5,previous:{from:'2026-08-27',to:'2026-08-31'}},current:{from,to,revenue,completed_shoots:3,unique_customers:2,average_order_value:Math.round(revenue/3),repeat_customers_in_period:1,repeat_rate_pct:50,genres:[{genre:'七五三',shoots:2,revenue:Math.round(revenue*2/3),unique_customers:1},{genre:'お宮参り',shoots:1,revenue:Math.round(revenue/3),unique_customers:1}],monthly:[{month:from.slice(0,7),shoots:3,revenue,unique_customers:2}]},previous:{revenue:30000,completed_shoots:2,unique_customers:2,average_order_value:15000},change_pct:{revenue:50,completed_shoots:50,unique_customers:0,average_order_value:0},meta:{read_only:true,identity_key:'customer_id',customer_id_generation:false,customer_write:false,line_send:false}};
 }
-const server=http.createServer((req,res)=>{const u=new URL(req.url,'http://127.0.0.1');requests.push(req.method+' '+u.pathname+u.search);if(!['GET','HEAD'].includes(req.method))writes.push(req.method+' '+u.pathname);if(u.pathname==='/'||u.pathname==='/admin')return send(res,200,html,'text/html; charset=utf-8');if(u.pathname==='/api/customer360/marketing-home')return send(res,200,{ok:true,kpis:{customers:1,average_realized_ltv:50000,repeat_rate_pct:100,vip_high_ltv:0,event_90d:1,dormant_180:0,line_link_rate_pct:100,approach_this_month:1},top_opportunities:[item],facets});if(u.pathname==='/api/customer360/analytics')return send(res,200,analytics(u));if(u.pathname==='/api/customer360/customers')return send(res,200,{ok:true,total:1,all_total:1,page:1,page_size:50,has_next:false,items:[item],facets,meta:{privacy_safe_list_dto:true}});if(u.pathname.startsWith('/api/customer360/customer/'))return send(res,200,{ok:true,customer:{...item,address:{},family:[],opportunities:[],reservations:[],line_history:[],marketing_history:[],marketing_classes:[],consent:{},recommendation:{}}});return send(res,404,{ok:false})});
+const server=http.createServer((req,res)=>{const u=new URL(req.url,'http://127.0.0.1');requests.push(req.method+' '+u.pathname+u.search);if(!['GET','HEAD'].includes(req.method))writes.push(req.method+' '+u.pathname);if(u.pathname==='/'||u.pathname==='/admin')return send(res,200,html,'text/html; charset=utf-8');if(u.pathname==='/api/customer360/marketing-home')return send(res,200,{ok:true,kpis:{customers:1,average_realized_ltv:50000,repeat_rate_pct:100,vip_high_ltv:0,event_90d:1,dormant_180:0,line_link_rate_pct:100,approach_this_month:1},top_opportunities:[item],facets});if(u.pathname==='/api/customer360/analytics'){const from=u.searchParams.get('from')||'';const delay=from==='2026-07-01'?140:from==='2026-08-01'?10:0;if(delay)return setTimeout(()=>send(res,200,analytics(u)),delay);return send(res,200,analytics(u));}if(u.pathname==='/api/customer360/customers')return send(res,200,{ok:true,total:1,all_total:1,page:1,page_size:50,has_next:false,items:[item],facets,meta:{privacy_safe_list_dto:true}});if(u.pathname.startsWith('/api/customer360/customer/'))return send(res,200,{ok:true,customer:{...item,address:{},family:[],opportunities:[],reservations:[],line_history:[],marketing_history:[],marketing_classes:[],consent:{},recommendation:{}}});return send(res,404,{ok:false})});
 await new Promise(r=>server.listen(0,'127.0.0.1',r));
 const origin='http://127.0.0.1:'+server.address().port;
 const browser=await chromium.launch({headless:true});
@@ -45,15 +46,25 @@ try{
     await page.locator('[data-analytics-preset="prev"]').click();
     await page.waitForTimeout(50);
     assert.ok(requests.some(x=>x.includes('/api/customer360/analytics?from=')),'preset analytics request missing');
+    await page.locator('#crmAnalyticsFrom').fill('2026-07-01');
+    await page.locator('#crmAnalyticsTo').fill('2026-07-31');
+    await page.locator('#crmAnalyticsApply').click();
+    await page.waitForSelector('#crmAnalyticsApply');
     await page.locator('#crmAnalyticsFrom').fill('2026-08-01');
     await page.locator('#crmAnalyticsTo').fill('2026-08-31');
     await page.locator('#crmAnalyticsApply').click();
-    await page.waitForFunction(()=>document.querySelector('#crmAnalyticsFrom')?.value==='2026-08-01');
+    await page.waitForFunction(()=>document.querySelector('#crmMktHome')?.textContent.includes('¥80,000'));
+    await page.waitForTimeout(180);
+    assert.ok((await page.locator('#crmMktHome').innerText()).includes('¥80,000'),'stale analytics response replaced latest period');
+    assert.ok(!(await page.locator('#crmMktHome').innerText()).includes('¥70,000'),'slow stale analytics result leaked into UI');
+    assert.equal(await page.locator('#crmAnalyticsFrom').inputValue(),'2026-08-01');
+    assert.equal(await page.locator('#crmAnalyticsTo').inputValue(),'2026-08-31');
     const overflow=await page.evaluate(()=>document.documentElement.scrollWidth-document.documentElement.clientWidth);
     assert.ok(overflow<=1,'horizontal overflow '+viewport.width+' '+overflow);
     await context.close();
   }
   assert.equal(writes.length,0,'HTTP writes '+writes.join(','));
+  console.log('CUSTOMER360_ANALYTICS_LATEST_REQUEST_WINS=PASS');
   console.log('CUSTOMER360_PERIOD_ANALYTICS_BROWSER=PASS');
   console.log('PERIOD_ANALYTICS_HTTP_WRITES=0');
   console.log('PERIOD_ANALYTICS_390_1440_OVERFLOW=0');
