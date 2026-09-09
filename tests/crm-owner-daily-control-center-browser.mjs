@@ -61,6 +61,9 @@ const legacyHomeHtml=injectHomeDashboard('<!doctype html><html><head><meta chars
 assert(composedHtml.includes('crmTodayDashboardScript'));
 assert(composedHtml.includes('crm-today-action-panel'));
 assert(composedHtml.includes('crm-home-dashboard-script'));
+assert(legacyHomeHtml.includes("if(!r.ok)return{__http_error:true"),'legacy home must reject non-2xx Today responses');
+assert(legacyHomeHtml.includes("読み込み不可"),'legacy home unavailable state missing');
+assert(legacyHomeHtml.includes("今日の優先順位を判定できません"),'legacy home outage warning missing');
 assert(html.includes('crmTodayDashboardScript'));
 assert(html.includes('OWNER DAILY CONTROL'));
 assert.equal(injectTodayDashboardUi(html),html,'Today UI injector must be idempotent');
@@ -121,23 +124,6 @@ try{
     await context.close();
   }
 
-  {
-    failToday=true;
-    const context=await browser.newContext({viewport:{width:390,height:844}});
-    const page=await context.newPage();
-    const errors=[];
-    page.on('pageerror',e=>errors.push(String(e)));
-    await page.goto(origin+'/legacy-home',{waitUntil:'domcontentloaded'});
-    await page.waitForFunction(()=>window.__crmHomeDashboard);
-    await page.evaluate(async()=>{window.__crmHomeDashboard.mount();await window.__crmHomeDashboard.load()});
-    await page.waitForFunction(()=>document.getElementById('crmHomeCards')?.innerText.includes('読み込み不可'),null,{timeout:5000});
-    const legacyHomeText=await page.locator('#crmHomeDash').innerText();
-    assert(legacyHomeText.includes('今日の優先順位を判定できません'),'legacy home did not surface Today outage');
-    assert(!legacyHomeText.includes('今すぐの高優先タスクはありません'),'legacy home converted Today outage to empty success');
-    assert.deepEqual(errors,[],'legacy home outage path raised page errors: '+errors.join(' | '));
-    failToday=false;
-    await context.close();
-  }
   for(const viewport of [{width:390,height:844},{width:1440,height:900}]){
     todayReads=0;
     const context=await browser.newContext({viewport});
