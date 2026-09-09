@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import http from 'node:http';
 import { chromium } from 'playwright';
 import { injectTodayDashboardUi } from '../src/production-index-crm-today-dashboard.js';
+import { composeCustomer360AdminHtml } from '../src/production-index-crm-customer360-entry.js';
 
 let todayReads=0;
 const payload={
@@ -19,6 +20,7 @@ const payload={
   tomorrow_shoots:[
     {reservation_id:'R-TOMORROW',customer_id:'26000456',customer_name:'佐藤 未来',genre:'Family',shoot_date:'2026-09-10',start_time:'13:00',place:'公園',status:'confirmed'}
   ],
+  next_shoot:{reservation_id:'R-TODAY',customer_id:'26000123',customer_name:'山田 花子',genre:'七五三',shoot_date:'2026-09-09',start_time:'10:00',place:'神社',status:'confirmed'},
   priority_items:[
     {type:'reservation_alert',severity:'danger',label:'CRM履歴未反映',customer_id:'26000123',customer_name:'山田 花子',title:'予約履歴を確認',meta:'予約ID R-TODAY'},
     {type:'line_pending',severity:'warn',label:'LINE未送信',customer_id:'26000456',customer_name:'佐藤 未来',title:'七五三のご案内',meta:'優先度 high'}
@@ -49,6 +51,11 @@ document.getElementById('crmGlobalSearch').addEventListener('input',()=>window._
 <main id="app"></main></body></html>`;
 
 const html=injectTodayDashboardUi(base);
+const composedBase='<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body><button id="lineOpsOpen">LINE</button><section id="lineOpsPanel"></section><main class="app"><h1>顧客管理</h1></main></body></html>';
+const composedHtml=composeCustomer360AdminHtml(composedBase);
+assert(composedHtml.includes('crmTodayDashboardScript'));
+assert(composedHtml.includes('crmTodayActionPanel')||composedHtml.includes('crmTodayActionPanel'.replace('Panel',''))||composedHtml.includes('crm-today-action-panel'));
+assert(composedHtml.includes('crm-home-dashboard-script'));
 assert(html.includes('crmTodayDashboardScript'));
 assert(html.includes('OWNER DAILY CONTROL'));
 assert.equal(injectTodayDashboardUi(html),html,'Today UI injector must be idempotent');
@@ -63,6 +70,9 @@ const server=http.createServer((req,res)=>{
     res.writeHead(200,{'content-type':'text/csv; charset=utf-8'});
     return res.end('ok');
   }
+  if(req.url==='/composed'){res.writeHead(200,{'content-type':'text/html; charset=utf-8','cache-control':'no-store'});return res.end(composedHtml)}
+  if(req.url.startsWith('/api/customer360/marketing-home')){res.writeHead(200,{'content-type':'application/json'});return res.end(JSON.stringify({ok:true,kpis:{customers:0,average_realized_ltv:0,repeat_rate_pct:0,vip_high_ltv:0,event_90d:0,dormant_180:0,line_link_rate_pct:0,approach_this_month:0},top_opportunities:[],facets:{prefectures:[],cities:[],genres:[],sources:[],campaigns:[],school_stages:[]}}))}
+  if(req.url.startsWith('/api/customer360/customers')){res.writeHead(200,{'content-type':'application/json'});return res.end(JSON.stringify({ok:true,total:0,all_total:0,page:1,page_size:50,has_next:false,items:[],facets:{prefectures:[],cities:[],genres:[],sources:[],campaigns:[],school_stages:[]},meta:{privacy_safe_list_dto:true}}))}
   res.writeHead(200,{'content-type':'text/html; charset=utf-8','cache-control':'no-store'});
   res.end(html);
 });
@@ -71,6 +81,27 @@ const origin='http://127.0.0.1:'+server.address().port;
 const browser=await chromium.launch({headless:true});
 
 try{
+  {
+    todayReads=0;
+    const context=await browser.newContext({viewport:{width:390,height:844}});
+    await context.addInitScript(()=>{
+      const real=window.setInterval.bind(window);
+      window.setInterval=(fn,ms,...args)=>real(fn,ms===120000?40:ms,...args);
+    });
+    const page=await context.newPage();
+    await page.goto(origin+'/composed',{waitUntil:'domcontentloaded'});
+    await page.waitForFunction(()=>window.__crmOwnerView&&window.__crmCustomer360UI);
+    await page.evaluate(()=>window.__crmOwnerView.showCustomers());
+    await page.waitForFunction(()=>document.body.dataset.crmOwnerView==='customers');
+    await page.waitForTimeout(80);
+    todayReads=0;
+    await page.waitForTimeout(180);
+    assert.equal(todayReads,0,'full Production composition fetched /api/today-dashboard off-view');
+    await page.evaluate(()=>window.__crmOwnerView.showMarketing());
+    await page.waitForTimeout(140);
+    assert.equal(todayReads,0,'marketing view fetched /api/today-dashboard');
+    await context.close();
+  }
   for(const viewport of [{width:390,height:844},{width:1440,height:900}]){
     todayReads=0;
     const context=await browser.newContext({viewport});
@@ -136,5 +167,6 @@ try{
 console.log('OWNER_DAILY_CONTROL_CENTER_UI=PASS');
 console.log('OWNER_DAILY_CONTROL_CENTER_MOBILE_390=PASS');
 console.log('OWNER_DAILY_CONTROL_CENTER_OFF_VIEW_FETCH=0');
+console.log('OWNER_DAILY_CONTROL_CENTER_FULL_COMPOSITION_OFF_VIEW_FETCH=0');
 console.log('OWNER_DAILY_CONTROL_CENTER_CUSTOMER_SHORTCUT=PASS');
 console.log('OWNER_DAILY_CONTROL_CENTER_AUTOMATIC_LINE_SEND=0');
