@@ -37,8 +37,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: customer-crm-production-deploy
-  cancel-in-progress: false
+  group: ${{ github.event_name == 'workflow_dispatch' && 'customer-crm-production-deploy' || format('customer-crm-release-pr-{0}', github.event.pull_request.number) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   CUSTOMER360_FAMILY_MIGRATION: 20260828_customer360_family_marketing_foundation.sql
