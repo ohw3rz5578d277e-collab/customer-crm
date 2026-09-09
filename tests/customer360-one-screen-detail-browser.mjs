@@ -45,7 +45,7 @@ const base=`<!doctype html><html><head><meta charset="utf-8"><meta name="viewpor
 <script>document.getElementById('lineOpsOpen').onclick=()=>document.getElementById('lineOpsPanel').classList.add('open');document.getElementById('lineOpsClose').onclick=()=>document.getElementById('lineOpsPanel').classList.remove('open');</script></body></html>`;
 const html=composeCustomer360AdminHtml(base);
 
-const requests=[],writes=[];let denied=false;
+const requests=[],writes=[];let permissionMode='allowed';
 function send(res,status,data,type='application/json; charset=utf-8'){
   res.writeHead(status,{'content-type':type,'cache-control':'no-store'});
   res.end(type.startsWith('application/json')?JSON.stringify(data):data);
@@ -59,9 +59,12 @@ const server=http.createServer((req,res)=>{
   if(u.pathname==='/api/customer360/customers')return send(res,200,{ok:true,total:1,all_total:1,page:1,page_size:50,has_next:false,items:[listItem],facets,meta:{privacy_safe_list_dto:true}});
   if(u.pathname==='/api/customer360/analytics')return send(res,200,{ok:true,available:false,period:{from:'2026-09-01',to:'2026-09-09',previous:{from:'2026-08-23',to:'2026-08-31'},span_days:9},current:{revenue:0,completed_shoots:0,unique_customers:0,average_order_value:0,repeat_customers_in_period:0,repeat_rate_pct:0,genres:[],monthly:[]},previous:{revenue:0,completed_shoots:0,unique_customers:0,average_order_value:0},change_pct:{revenue:null,completed_shoots:null,unique_customers:null,average_order_value:null}});
   if(u.pathname==='/api/customer360/approach-queue')return send(res,200,{ok:true,items:[],total:0,summary:{total:0,ready:0,review_required:0,opted_out:0,no_contact:0},filters:{horizon_days:90,status:'all',limit:50},meta:{read_only:true,line_send:false}});
-  if(u.pathname==='/__fixture/deny'){denied=true;return send(res,200,{ok:true})}
+  if(u.pathname==='/__fixture/deny'){permissionMode='denied';return send(res,200,{ok:true})}
+  if(u.pathname==='/__fixture/legacy-optout'){permissionMode='legacy-optout';return send(res,200,{ok:true})}
   if(u.pathname==='/api/customer360/customer/26000101'){
-    const current=denied?{...customer,profile:{experience:{marketing_contact_permission:'denied'}},consent:{marketing_contact_permission:'denied'}}:customer;
+    let current=customer;
+    if(permissionMode==='denied')current={...customer,profile:{experience:{marketing_contact_permission:'denied'}},consent:{marketing_contact_permission:'denied'}};
+    if(permissionMode==='legacy-optout')current={...customer,profile:{experience:{marketing_contact_permission:'unknown'}},consent:{marketing_contact_permission:'unknown',marketing_opt_out:true,status:'opted_out'}};
     return send(res,200,{ok:true,customer:current});
   }
   if(u.pathname==='/api/customer360/status')return send(res,200,{ok:true,read_only:true,bindings:{DB:true,LINE_SERVICE:true,RESERVATION_SERVICE:true}});
@@ -73,7 +76,7 @@ const origin='http://127.0.0.1:'+server.address().port;
 const browser=await chromium.launch({headless:true});
 try{
   for(const viewport of [{width:390,height:844},{width:1440,height:900}]){
-    denied=false;
+    permissionMode='allowed';
     const context=await browser.newContext({viewport});
     const page=await context.newPage();
     const errors=[];
@@ -143,6 +146,14 @@ try{
     assert(!deniedText.includes('連絡許可あり'),viewport.width+': denied permission rendered as allowed');
     await page.locator('#crmDetailBack').click();
 
+    await page.request.get(origin+'/__fixture/legacy-optout');
+    await page.locator('#crmMktList [data-open],#crmMktList [data-direct-customer]').first().click();
+    await page.waitForFunction(()=>document.getElementById('crmMktDetail')?.classList.contains('open'));
+    const optOutText=await page.locator('#crmMktDetail').innerText();
+    assert(optOutText.includes('連絡拒否'),viewport.width+': legacy marketing opt-out must render as denied');
+    assert(!optOutText.includes('連絡許可あり'),viewport.width+': legacy opt-out rendered as allowed');
+    await page.locator('#crmDetailBack').click();
+
     const overflow=await page.evaluate(()=>Math.max(
       document.documentElement.scrollWidth-document.documentElement.clientWidth,
       document.body.scrollWidth-document.body.clientWidth
@@ -162,6 +173,7 @@ assert(requests.some(x=>x==='GET /api/customer360/customer/26000101'),'detail GE
 console.log('CUSTOMER360_ONE_SCREEN_DETAIL=PASS');
 console.log('CUSTOMER360_DETAIL_CONTACT_PERMISSION_EXPLICIT=PASS');
 console.log('CUSTOMER360_DETAIL_CONTACT_DENIED_FAIL_CLOSED=PASS');
+console.log('CUSTOMER360_DETAIL_LEGACY_OPTOUT_DENIED=PASS');
 console.log('CUSTOMER360_DETAIL_BACK_TO_LIST=PASS');
 console.log('CUSTOMER360_DETAIL_LINE_RESPONSE_CONTEXT=PASS');
 console.log('CUSTOMER360_DETAIL_RESERVATION_HISTORY=PASS');
