@@ -1,0 +1,23 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import {injectCustomer360ExactEditHandoff,customer360ExactEditHandoffHealth} from '../src/crm-customer360-exact-edit-handoff.mjs';
+
+const source=fs.readFileSync(new URL('../src/crm-customer360-exact-edit-handoff.mjs',import.meta.url),'utf8');
+const entry=fs.readFileSync(new URL('../src/production-index-crm-customer360-entry.js',import.meta.url),'utf8');
+assert.match(source,/^[\s\S]*\/\^\[0-9\]\{8\}\$\//,'handoff must require exact 8-digit Customer ID');
+assert.match(source,/edit_customer/,'edit intent query missing');
+assert.match(source,/crmGlobalSearch/,'handoff must use existing Customer360 search UI');
+assert.match(source,/crmPeEdit/,'handoff must enter existing Owner profile edit UI');
+assert.doesNotMatch(source,/fetch\([^)]*,\s*\{[^}]*method:/s,'handoff module must not add direct write fetch');
+assert.doesNotMatch(source,/MutationObserver/,'handoff module must not add observer');
+assert.match(entry,/injectCustomer360ExactEditHandoff/,'Production entry must inject handoff once');
+assert.match(entry,/customer360ExactEditHandoffHealth/,'Production health must expose handoff');
+assert.equal((entry.match(/injectCustomer360ExactEditHandoff/g)||[]).length,2,'exact edit handoff import/invocation count drifted');
+const base='<!doctype html><html><head></head><body></body></html>';
+const once=injectCustomer360ExactEditHandoff(base);assert.equal(injectCustomer360ExactEditHandoff(once),once,'handoff injector must be idempotent');
+const health=customer360ExactEditHandoffHealth();
+assert.equal(health.customer360_exact_edit_handoff_customer_id_only,true);
+assert.equal(health.customer360_exact_edit_handoff_owner_ui_only,true);
+assert.equal(health.customer360_exact_edit_handoff_direct_write,false);
+console.log('CUSTOMER360_EXACT_EDIT_HANDOFF=PASS');
+console.log('CUSTOMER360_EXACT_EDIT_HANDOFF_DIRECT_WRITE=0');
