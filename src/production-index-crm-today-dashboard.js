@@ -261,12 +261,14 @@ async function getReservationAlerts(env, today) {
     LIMIT 1000`);
   const draftIds = rows.map((r) => Number(r.id)).filter((id) => Number.isFinite(id) && id > 0);
   const ackMap = new Map();
-  if (draftIds.length) {
-    const placeholders = draftIds.map(() => "?").join(",");
+  const ACK_ID_BATCH_SIZE = 80;
+  for (let offset = 0; offset < draftIds.length; offset += ACK_ID_BATCH_SIZE) {
+    const batch = draftIds.slice(offset, offset + ACK_ID_BATCH_SIZE);
+    const placeholders = batch.map(() => "?").join(",");
     const acks = await strictAll(env, `SELECT draft_id, stage_key, MAX(acknowledged_at) AS acknowledged_at, acknowledged_by
       FROM crm_reservation_link_alert_checks
       WHERE draft_id IN (${placeholders})
-      GROUP BY draft_id, stage_key`, draftIds);
+      GROUP BY draft_id, stage_key`, batch);
     for (const ack of acks) ackMap.set(`${ack.draft_id}:${ack.stage_key}`, ack);
   }
 
