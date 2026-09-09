@@ -124,6 +124,22 @@ try{
     await context.close();
   }
 
+  {
+    failToday=true;
+    const context=await browser.newContext({viewport:{width:390,height:844}});
+    const page=await context.newPage();
+    const errors=[];
+    page.on('pageerror',e=>errors.push(String(e)));
+    await page.goto(origin+'/legacy-home',{waitUntil:'domcontentloaded'});
+    await page.waitForFunction(()=>document.getElementById('crmHomeCards')?.innerText.includes('読み込み不可'),null,{timeout:5000});
+    const legacyHomeText=await page.locator('#crmHomeDash').innerText();
+    assert(legacyHomeText.includes('今日の優先順位を判定できません'),'legacy home did not surface Today outage');
+    assert(!legacyHomeText.includes('今すぐの高優先タスクはありません'),'legacy home converted Today outage to empty success');
+    assert.deepEqual(errors,[],'legacy home mount/outage path raised page errors: '+errors.join(' | '));
+    failToday=false;
+    await context.close();
+  }
+
   for(const viewport of [{width:390,height:844},{width:1440,height:900}]){
     todayReads=0;
     const context=await browser.newContext({viewport});
@@ -192,5 +208,6 @@ console.log('OWNER_DAILY_CONTROL_CENTER_OFF_VIEW_FETCH=0');
 console.log('OWNER_DAILY_CONTROL_CENTER_FULL_COMPOSITION_OFF_VIEW_FETCH=0');
 console.log('OWNER_DAILY_CONTROL_CENTER_BROWSER_503_PRESERVED=PASS');
 console.log('OWNER_DAILY_CONTROL_CENTER_LEGACY_HOME_503_VISIBLE=PASS');
+console.log('OWNER_DAILY_CONTROL_CENTER_LEGACY_HOME_MOUNT=PASS');
 console.log('OWNER_DAILY_CONTROL_CENTER_CUSTOMER_SHORTCUT=PASS');
 console.log('OWNER_DAILY_CONTROL_CENTER_AUTOMATIC_LINE_SEND=0');
