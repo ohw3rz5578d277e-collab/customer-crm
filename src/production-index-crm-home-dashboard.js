@@ -16,7 +16,7 @@ function json(data, status = 200){
   });
 }
 
-function injectHomeDashboard(html){
+export function injectHomeDashboard(html){
   if(!html || html.includes("crm-home-dashboard-script")) return html;
   const style = `<style id="crm-home-dashboard-style">
 :root{--home-green:#028760;--home-dark:#111827;--home-muted:#6b7280;--home-line:#e5e7eb;--home-bg:#f7f8fa;--home-red:#dc2626;--home-orange:#f59e0b;--home-blue:#2563eb;--home-shadow:0 16px 42px rgba(15,23,42,.10)}
