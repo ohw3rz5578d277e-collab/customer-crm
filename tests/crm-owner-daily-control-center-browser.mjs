@@ -131,6 +131,8 @@ try{
     const errors=[];
     page.on('pageerror',e=>errors.push(String(e)));
     await page.goto(origin+'/legacy-home',{waitUntil:'domcontentloaded'});
+    await page.waitForFunction(()=>document.getElementById('crmHomeDash'),null,{timeout:5000});
+    await page.evaluate(()=>document.dispatchEvent(new CustomEvent('crm:owner-view-change',{detail:{view:'today'}})));
     await page.waitForFunction(()=>document.getElementById('crmHomeCards')?.innerText.includes('読み込み不可'),null,{timeout:5000});
     const legacyHomeText=await page.locator('#crmHomeDash').innerText();
     assert(legacyHomeText.includes('今日の優先順位を判定できません'),'legacy home did not surface Today outage');
