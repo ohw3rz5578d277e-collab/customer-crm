@@ -128,7 +128,9 @@ try{
     const errors=[];
     page.on('pageerror',e=>errors.push(String(e)));
     await page.goto(origin+'/legacy-home',{waitUntil:'domcontentloaded'});
-    await page.waitForFunction(()=>document.getElementById('crmHomeCards')?.innerText.includes('読み込み不可'));
+    await page.waitForFunction(()=>window.__crmHomeDashboard);
+    await page.evaluate(async()=>{window.__crmHomeDashboard.mount();await window.__crmHomeDashboard.load()});
+    await page.waitForFunction(()=>document.getElementById('crmHomeCards')?.innerText.includes('読み込み不可'),null,{timeout:5000});
     const legacyHomeText=await page.locator('#crmHomeDash').innerText();
     assert(legacyHomeText.includes('今日の優先順位を判定できません'),'legacy home did not surface Today outage');
     assert(!legacyHomeText.includes('今すぐの高優先タスクはありません'),'legacy home converted Today outage to empty success');
