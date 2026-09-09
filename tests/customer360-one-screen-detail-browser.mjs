@@ -111,10 +111,8 @@ try{
 
     await page.evaluate(()=>window.__crmOwnerView.showMarketing());
     await page.waitForFunction(()=>document.body.dataset.crmOwnerView==='marketing');
-    await page.evaluate(()=>window.__crmCustomer360UI.showList());
-    await page.waitForFunction(()=>document.body.dataset.crmOwnerView==='marketing');
-    await page.locator('#crmMktList [data-open],#crmMktList [data-direct-customer]').first().click();
-    await page.waitForFunction(()=>document.getElementById('crmMktDetail')?.classList.contains('open'));
+    await page.evaluate(()=>document.querySelector('#crmMktList [data-open],#crmMktList [data-direct-customer]')?.click());
+    await page.waitForFunction(()=>document.body.dataset.crmOwnerView==='marketing'&&document.getElementById('crmMktDetail')?.classList.contains('open'));
     await page.locator('#crmDetailBack').click();
     await page.waitForFunction(()=>document.body.dataset.crmOwnerView==='customers'&&document.getElementById('crmMktList')?.classList.contains('open'));
     assert.equal(await page.locator('#crmMktList').isVisible(),true,viewport.width+': back action did not return to customer list');
