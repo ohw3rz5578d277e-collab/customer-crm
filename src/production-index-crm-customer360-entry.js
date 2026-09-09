@@ -1,4 +1,5 @@
 import app from './production-index-crm-browser-root-entry.js';
+import todayReadOnlyApp from './production-index-crm-today-dashboard.js';
 import { patchBrowserRootHealth } from './production-index-crm-browser-root-entry.js';
 import { handleCustomer360Request, customer360Health } from './crm-customer360-runtime.mjs';
 import { handleCustomerProfileEnrichmentRequest, customerProfileEnrichmentHealth } from './crm-customer360-profile-enrichment.mjs';
@@ -148,6 +149,11 @@ export default {
   async fetch(request,env,ctx){
     const accessAuthProbe=handleProductionAccessAuthProbe(request,env);
     if(accessAuthProbe)return accessAuthProbe;
+    const earlyUrl=new URL(request.url);
+    if(request.method==='GET'&&(earlyUrl.pathname==='/api/today-dashboard'||earlyUrl.pathname==='/api/today-dashboard.csv')){
+      // Canonical operational read lane: bypass all legacy schema-repair/fallback wrappers.
+      return todayReadOnlyApp.fetch(request,env,ctx);
+    }
     const ownedHealth=await handleProductionHealthRequest(request,env);
     if(ownedHealth)return ownedHealth;
 
