@@ -4,6 +4,7 @@ import fs from 'node:fs';
 const workflow=fs.readFileSync('.github/workflows/deploy-cloudflare.yml','utf8');
 const familyMigration=fs.readFileSync('migrations_managed/20260828_customer360_family_marketing_foundation.sql','utf8');
 const profileMigration=fs.readFileSync('migrations_managed/20260903_customer360_profile_auto_enrichment.sql','utf8');
+const mediaMigration=fs.readFileSync('migrations_managed/20260908_customer_media_delivery_links.sql','utf8');
 const wrangler=JSON.parse(fs.readFileSync('wrangler.jsonc','utf8'));
 
 assert.equal(wrangler.main,'src/production-index-crm-customer360-entry.js','Customer360 must remain authoritative Worker entry');
@@ -21,14 +22,17 @@ assert.ok(workflow.includes('src/production-index-crm-customer360-entry.js'),'au
 assert.ok(workflow.includes('d1 migrations list customer-crm-db --remote'),'remote pending migration read missing');
 assert.ok(workflow.includes('20260828_customer360_family_marketing_foundation.sql'),'family migration allowlist missing');
 assert.ok(workflow.includes('20260903_customer360_profile_auto_enrichment.sql'),'profile migration allowlist missing');
+assert.ok(workflow.includes('20260908_customer_media_delivery_links.sql'),'media migration allowlist missing');
 assert.ok(workflow.indexOf('20260828_customer360_family_marketing_foundation.sql')<workflow.indexOf('20260903_customer360_profile_auto_enrichment.sql'),'profile migration must follow family migration');
-assert.ok(workflow.includes('CUSTOMER360_PROFILE_MIGRATION_ONLY_PENDING'),'profile-only pending classification missing');
-assert.ok(workflow.includes('CUSTOMER360_MIGRATION_SEQUENCE_PENDING'),'family->profile sequence classification missing');
+assert.ok(workflow.indexOf('20260903_customer360_profile_auto_enrichment.sql')<workflow.indexOf('20260908_customer_media_delivery_links.sql'),'media migration must follow profile migration');
+assert.ok(workflow.includes('CUSTOMER360_MEDIA_MIGRATION_ONLY_PENDING'),'media-only pending classification missing');
+assert.ok(workflow.includes('CUSTOMER360_PROFILE_AND_MEDIA_MIGRATIONS_PENDING'),'profile+media pending classification missing');
+assert.ok(workflow.includes('CUSTOMER360_MIGRATION_SEQUENCE_PENDING'),'family->profile->media sequence classification missing');
 assert.ok(workflow.includes('BLOCKED_PREEXISTING_MANAGED_MIGRATIONS_PENDING'),'preexisting migration blocker missing');
 assert.ok(workflow.includes('BLOCKED_UNEXPECTED_MANAGED_MIGRATION'),'unexpected migration blocker missing');
 assert.ok(workflow.includes('ALREADY_APPLIED_CONFIRMED'),'already-applied classification missing');
 assert.ok(workflow.includes('INCONSISTENT_REMOTE_MIGRATION_STATE'),'inconsistent remote state blocker missing');
-for(const token of ['customer_profile_enrichment','customer_family_member_metadata','customer_field_evidence','customer_notes_history','idx_customer_field_evidence_dedupe','PRODUCTION_SCHEMA_READBACK=PASS','EXISTING_CUSTOMERS_PRESERVED=PASS'])assert.ok(workflow.includes(token),`profile Production readback token missing: ${token}`);
+for(const token of ['customer_profile_enrichment','customer_family_member_metadata','customer_field_evidence','customer_notes_history','customer_profile_media','customer_delivery_links','idx_customer_field_evidence_dedupe','idx_customer_delivery_links_customer_date','idx_customer_delivery_links_reservation','PRODUCTION_SCHEMA_READBACK=PASS','EXISTING_CUSTOMERS_PRESERVED=PASS','EXISTING_CUSTOMER_MEDIA_PRESERVED=PASS'])assert.ok(workflow.includes(token),`Production readback token missing: ${token}`);
 for(const token of ['sqlite_master','d1_migrations_managed','PRAGMA table_info','PRAGMA index_list','canonical_customer_id']) assert.ok(workflow.includes(token),`read-only D1 token missing: ${token}`);
 assert.ok(workflow.includes("inputs.mode == 'preflight'"),'preflight stop gate missing');
 assert.ok(workflow.includes("inputs.mode == 'deploy'"),'deploy-only gate missing');
@@ -38,7 +42,7 @@ assert.ok(!/\npush:\s*(?:\n|$)/.test(workflow),'push trigger must not be enabled
 assert.ok(!workflow.includes('CRM_CUSTOMER360_WRITE_ENABLED=1'),'release workflow must not enable Customer360 writes');
 assert.ok(!/migrations_managed\/\*\.sql/.test(workflow),'migration allowlist must remain explicit, not globbed');
 
-for(const [name,migration] of [['family',familyMigration],['profile',profileMigration]]){
+for(const [name,migration] of [['family',familyMigration],['profile',profileMigration],['media',mediaMigration]]){
   const sql=migration.replace(/--.*$/gm,' ').replace(/\/\*[\s\S]*?\*\//g,' ');
   for(const pattern of [/\bDROP\b/i,/\bDELETE\b/i,/\bALTER\b/i,/\bUPDATE\b/i,/\bINSERT\b/i,/\bREPLACE\b/i,/\bTRUNCATE\b/i]) assert.ok(!pattern.test(sql),`${name} forbidden migration statement: ${pattern}`);
   const statements=sql.split(';').map(x=>x.trim()).filter(Boolean);
@@ -47,5 +51,7 @@ for(const [name,migration] of [['family',familyMigration],['profile',profileMigr
 }
 for(const token of ['customer_profile_enrichment','customer_family_member_metadata','customer_field_evidence','customer_notes_history'])assert.ok(profileMigration.includes(token),`required profile migration object missing: ${token}`);
 assert.ok(!/customer_identity_(sequence|registry)/i.test(profileMigration),'profile migration must not mutate identity registry/sequence');
+for(const token of ['customer_profile_media','customer_delivery_links','idx_customer_delivery_links_customer_date','idx_customer_delivery_links_reservation'])assert.ok(mediaMigration.includes(token),`required media migration object missing: ${token}`);
+assert.ok(!/customer_identity_(sequence|registry)/i.test(mediaMigration),'media migration must not mutate identity registry/sequence');
 
 console.log('CUSTOMER360_PRODUCTION_RELEASE_GATE_CONTRACT=PASS');
