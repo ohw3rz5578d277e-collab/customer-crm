@@ -228,7 +228,7 @@ async function actionLogsApi(request, env) {
   return json({ ok: true, build: BUILD, logs: rows.results || [] });
 }
 
-function injectTodayActionUi(html) {
+export function injectTodayActionUi(html) {
   if (!html || html.includes("crmTodayActionScript")) return html;
 
   const style = `<style id="crmTodayActionStyle">
