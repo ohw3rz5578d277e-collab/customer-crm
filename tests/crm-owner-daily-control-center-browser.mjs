@@ -4,9 +4,11 @@ import { chromium } from 'playwright';
 import { injectTodayDashboardUi } from '../src/production-index-crm-today-dashboard.js';
 import { injectTodayActionUi } from '../src/production-index-crm-today-actions.js';
 import { injectHomeDashboard } from '../src/production-index-crm-home-dashboard.js';
+import { injectFetchSafeUi } from '../src/production-index-crm-fetch-safe-fix.js';
 import { composeCustomer360AdminHtml } from '../src/production-index-crm-customer360-entry.js';
 
 let todayReads=0;
+let failToday=false;
 const payload={
   ok:true,
   date_jst:'2026-09-09',
@@ -54,7 +56,7 @@ document.getElementById('crmGlobalSearch').addEventListener('input',()=>window._
 
 const html=injectTodayDashboardUi(base);
 const composedBase='<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body><button id="lineOpsOpen">LINE</button><section id="lineOpsPanel"></section><main class="app"><h1>顧客管理</h1></main></body></html>';
-const composedHtml=injectHomeDashboard(injectTodayActionUi(injectTodayDashboardUi(composeCustomer360AdminHtml(composedBase))));
+const composedHtml=injectFetchSafeUi(injectHomeDashboard(injectTodayActionUi(injectTodayDashboardUi(composeCustomer360AdminHtml(composedBase)))));
 assert(composedHtml.includes('crmTodayDashboardScript'));
 assert(composedHtml.includes('crm-today-action-panel'));
 assert(composedHtml.includes('crm-home-dashboard-script'));
@@ -65,6 +67,10 @@ assert.equal(injectTodayDashboardUi(html),html,'Today UI injector must be idempo
 const server=http.createServer((req,res)=>{
   if(req.url==='/api/today-dashboard'){
     todayReads++;
+    if(failToday){
+      res.writeHead(503,{'content-type':'application/json; charset=utf-8','cache-control':'no-store'});
+      return res.end(JSON.stringify({ok:false,error:'today_dashboard_read_unavailable',message:'今日やることを読み込めません。'}));
+    }
     res.writeHead(200,{'content-type':'application/json; charset=utf-8','cache-control':'no-store'});
     return res.end(JSON.stringify(payload));
   }
@@ -102,6 +108,13 @@ try{
     await page.evaluate(()=>window.__crmOwnerView.showMarketing());
     await page.waitForTimeout(140);
     assert.equal(todayReads,0,'marketing view fetched /api/today-dashboard');
+
+    failToday=true;
+    const propagated=await page.evaluate(async()=>{const r=await fetch('/api/today-dashboard');let j={};try{j=await r.json()}catch{}return{status:r.status,ok:r.ok,body:j}});
+    assert.equal(propagated.status,503,'browser fetch-safe wrapper must preserve Today 503');
+    assert.equal(propagated.ok,false,'browser fetch-safe wrapper converted Today failure to success');
+    assert.equal(propagated.body?.error,'today_dashboard_read_unavailable');
+    failToday=false;
     await context.close();
   }
   for(const viewport of [{width:390,height:844},{width:1440,height:900}]){
@@ -170,5 +183,6 @@ console.log('OWNER_DAILY_CONTROL_CENTER_UI=PASS');
 console.log('OWNER_DAILY_CONTROL_CENTER_MOBILE_390=PASS');
 console.log('OWNER_DAILY_CONTROL_CENTER_OFF_VIEW_FETCH=0');
 console.log('OWNER_DAILY_CONTROL_CENTER_FULL_COMPOSITION_OFF_VIEW_FETCH=0');
+console.log('OWNER_DAILY_CONTROL_CENTER_BROWSER_503_PRESERVED=PASS');
 console.log('OWNER_DAILY_CONTROL_CENTER_CUSTOMER_SHORTCUT=PASS');
 console.log('OWNER_DAILY_CONTROL_CENTER_AUTOMATIC_LINE_SEND=0');
