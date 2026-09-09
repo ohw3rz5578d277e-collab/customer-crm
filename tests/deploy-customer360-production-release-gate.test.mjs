@@ -24,6 +24,8 @@ assert.ok(workflow.includes('20260828_customer360_family_marketing_foundation.sq
 assert.ok(workflow.includes('20260903_customer360_profile_auto_enrichment.sql'),'profile migration allowlist missing');
 assert.ok(workflow.includes('20260908_customer_media_delivery_links.sql'),'media migration allowlist missing');
 assert.ok(workflow.includes("- 'migrations_managed/20260908_customer_media_delivery_links.sql'"),'media migration PR path trigger missing');
+const preflightMediaReadback=workflow.slice(workflow.indexOf('id: remote_tables'),workflow.indexOf('id: remote_columns'));
+for(const token of ['customer_profile_media','customer_delivery_links','20260908_customer_media_delivery_links.sql']) assert.ok(preflightMediaReadback.includes(token),`media preflight readback missing: ${token}`);
 assert.ok(workflow.indexOf('20260828_customer360_family_marketing_foundation.sql')<workflow.indexOf('20260903_customer360_profile_auto_enrichment.sql'),'profile migration must follow family migration');
 assert.ok(workflow.indexOf('20260903_customer360_profile_auto_enrichment.sql')<workflow.indexOf('20260908_customer_media_delivery_links.sql'),'media migration must follow profile migration');
 assert.ok(workflow.includes('CUSTOMER360_MEDIA_MIGRATION_ONLY_PENDING'),'media-only pending classification missing');

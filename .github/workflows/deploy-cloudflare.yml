@@ -274,7 +274,8 @@ jobs:
             "SELECT name FROM sqlite_master WHERE type='table' AND name IN
             ('d1_migrations_managed','customer_line_message_events','customer_identity_registry',
             'customer_identity_sequence','customer_family_members','customer_marketing_profiles',
-            'customer_profile_enrichment','customer_family_member_metadata','customer_field_evidence','customer_notes_history')
+            'customer_profile_enrichment','customer_family_member_metadata','customer_field_evidence','customer_notes_history',
+            'customer_profile_media','customer_delivery_links')
             ORDER BY name;"
 
       - name: Read managed migration tracking
@@ -291,7 +292,8 @@ jobs:
             '20260818_customer_identity_registry.sql',
             '20260818_customer_identity_sequence.sql',
             '20260828_customer360_family_marketing_foundation.sql',
-            '20260903_customer360_profile_auto_enrichment.sql') ORDER BY id;"
+            '20260903_customer360_profile_auto_enrichment.sql',
+            '20260908_customer_media_delivery_links.sql') ORDER BY id;"
 
       - name: Read Production D1 columns
         id: remote_columns
