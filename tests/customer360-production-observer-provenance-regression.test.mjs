@@ -36,7 +36,7 @@ const observer=fs.readFileSync('.github/workflows/customer360-production-first-t
 const deploy=fs.readFileSync('.github/workflows/deploy-cloudflare.yml','utf8');
 const bridge=fs.readFileSync('.github/workflows/dispatch-production-deploy-from-issue.yml','utf8');
 
-assert.match(deploy,/concurrency:\s*\n\s*group: customer-crm-production-deploy/);
+assert.match(deploy,/concurrency:\s*\n\s*group:\s*\$\{\{\s*github\.event_name\s*==\s*'workflow_dispatch'\s*&&\s*'customer-crm-production-deploy'\s*\|\|\s*format\('customer-crm-release-pr-\{0\}',\s*github\.event\.pull_request\.number\)\s*\}\}/);
 assert.ok(observer.includes("format('customer360-production-observer-{0}', github.event.workflow_run.id)"));
 assert.ok(!observer.includes("group: customer-crm-production-deploy"));
 assert.ok(observer.includes('cancel-in-progress: false'));
