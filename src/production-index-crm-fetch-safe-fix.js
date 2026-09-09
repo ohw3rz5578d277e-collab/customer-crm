@@ -9,6 +9,10 @@
 import app from "./production-index-crm-stability-ux-fix.js";
 
 const BUILD = "customer-crm-api-fetch-safe-fix-20260614-01";
+const TODAY_READ_ONLY_PATHS = new Set(["/api/today-dashboard", "/api/today-dashboard.csv"]);
+function isTodayReadOnlyRequest(request, url){
+  return request.method === "GET" && TODAY_READ_ONLY_PATHS.has(url.pathname);
+}
 
 function json(data, status = 200){
   return new Response(JSON.stringify(data, null, 2), {
@@ -214,7 +218,7 @@ function emptyAlerts(){
 }
 
 async function safeFallbackResponse(path){
-  if(path === "/api/today-dashboard") return json(emptyTodayDashboard());
+  if(path === "/api/today-dashboard") return null;
   if(path === "/api/today-dashboard/action-queue") return json(emptyQueue());
   if(path === "/api/reservation-link-alerts") return json(emptyAlerts());
   if(path === "/api/reservation-link-monitor") return json({ ok:true, build:BUILD, degraded:true, rows:[], alerts:[], counts:{ total:0 }, message:"予約連携監視データはまだありません。" });
@@ -235,10 +239,9 @@ function injectFetchSafeUi(html){
   const script = `<script id="crm-fetch-safe-fix-script">
 (()=>{if(window.__crmFetchSafeFix)return;window.__crmFetchSafeFix=1;
 const originalFetch=window.fetch.bind(window);
-const safePaths=['/api/today-dashboard','/api/today-dashboard/action-queue','/api/reservation-link-alerts','/api/reservation-link-monitor','/api/delivery-dashboard','/api/marketing-candidates'];
+const safePaths=['/api/today-dashboard/action-queue','/api/reservation-link-alerts','/api/reservation-link-monitor','/api/delivery-dashboard','/api/marketing-candidates'];
 function fallback(path){
  const today=new Date(Date.now()+9*60*60*1000).toISOString().slice(0,10);
- if(path==='/api/today-dashboard')return {ok:true,degraded:true,message:'一部データを読み込めませんでした。空データで表示しています。',date_jst:today,counts:{reservation_alerts:0,reservation_danger:0,line_pending:0,line_high:0,follow_due:0,follow_overdue:0,sent_today:0,created_today:0,cancelled_today:0,sales_total:0,customer_count:0,repeat_customers:0,dormant_customers:0},priority_items:[],reservation_alerts:[],line_pending:[],follow_tasks:[],sales_focus:[],checked_at:new Date().toISOString()};
  if(path==='/api/today-dashboard/action-queue')return {ok:true,degraded:true,items:[],counts:{total:0,open:0,completed:0},message:'今日の操作はまだありません。'};
  if(path==='/api/reservation-link-alerts')return {ok:true,degraded:true,alerts:[],counts:{total:0,danger:0,warn:0},message:'予約連携アラートはありません。'};
  if(path==='/api/reservation-link-monitor')return {ok:true,degraded:true,rows:[],alerts:[],counts:{total:0},message:'予約連携監視データはまだありません。'};
@@ -266,13 +269,15 @@ setInterval(cleanupFailedFetchText,800);cleanupFailedFetchText();
 export default {
   async fetch(request, env, ctx){
     const url = new URL(request.url);
+    const todayReadOnly = isTodayReadOnlyRequest(request, url);
     try{
-      await ensureCoreCrmSchema(env);
+      // Today/CSV are operational read paths. Never run runtime schema repair before them.
+      if(!todayReadOnly) await ensureCoreCrmSchema(env);
       const res = await app.fetch(request, env, ctx);
       const ct = res.headers.get("content-type") || "";
 
-      // Convert failing high-traffic JSON API calls to safe empty responses instead of breaking the UI.
-      if(!res.ok && request.method === "GET"){
+      // Preserve Today reader failures exactly; an outage must never become a successful empty day.
+      if(!todayReadOnly && !res.ok && request.method === "GET"){
         const fallback = await safeFallbackResponse(url.pathname);
         if(fallback) return fallback;
       }
@@ -282,6 +287,15 @@ export default {
       }
       return res;
     }catch(e){
+      if(todayReadOnly){
+        return json({
+          ok:false,
+          build:BUILD,
+          error:"today_dashboard_read_unavailable",
+          message:"今日やることを読み込めません。",
+          detail:String(e && e.message || e)
+        }, 503);
+      }
       const fallback = await safeFallbackResponse(url.pathname);
       if(fallback) return fallback;
       return json({ ok:false, build:BUILD, message:String(e && e.message || e) }, 500);
