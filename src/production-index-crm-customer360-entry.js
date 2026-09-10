@@ -21,7 +21,7 @@ import { injectOwnerAppShell } from './crm-owner-app-shell.mjs';
 import { patchReconciliationHealth } from './crm-reconciliation-review.mjs';
 import { handleOwnerPasswordAuth, withOwnerPasswordPrincipal, handleOwnerPasswordBrowserGate, ownerPasswordRequestAuthenticated, ownerPasswordAuthHealth } from './crm-owner-password-auth.mjs';
 
-const BUILD='customer-crm-owner-password-auth-20260911-03';
+const BUILD='customer-crm-owner-password-auth-20260911-04';
 const RAW_SCRIPT_CLOSE='<'+String.fromCharCode(92)+'/script>';
 const CUSTOMER360_PROFILE_TABLES=[
   'customer_profile_enrichment','customer_family_member_metadata','customer_field_evidence','customer_notes_history','customer_profile_media','customer_delivery_links'
@@ -39,6 +39,12 @@ export function handleProductionAccessAuthProbe(request,env){
 }
 
 export function normalizeCustomer360InjectedHtml(html){return String(html||'').split(RAW_SCRIPT_CLOSE).join('</script>')}
+export function injectOwnerLogoutPostRoute(html){
+  const source=String(html||'');
+  if(!source||source.includes('crm-owner-logout-post-route'))return source;
+  const script=`<script id="crm-owner-logout-post-route">(()=>{if(window.__crmOwnerLogoutPostRoute)return;window.__crmOwnerLogoutPostRoute=1;document.addEventListener('click',e=>{const target=e.target&&e.target.closest?e.target.closest('[data-crm-logout],[data-act="logout"],.crm-logout-btn,button,a'):null;if(!target)return;const text=(target.textContent||'').trim();if(!target.matches('[data-crm-logout],[data-act="logout"],.crm-logout-btn')&&text!=='ログアウト')return;e.preventDefault();e.stopImmediatePropagation();try{localStorage.clear();sessionStorage.clear()}catch(_){}const form=document.createElement('form');form.method='POST';form.action='/__crm/owner-logout';form.style.display='none';document.body.appendChild(form);form.submit()},true)})()<\/script>`;
+  return source.includes('</body>')?source.replace('</body>',script+'</body>'):source+script;
+}
 export function composeCustomer360AdminHtml(html){
   const withMarketing=injectCustomer360Marketing(html);
   const withDailyOperations=injectCustomerListDailyOperations(withMarketing);
@@ -51,7 +57,8 @@ export function composeCustomer360AdminHtml(html){
   const withMedia=injectCustomer360MediaUi(withProfile);
   const withEditHandoff=injectCustomer360ExactEditHandoff(withMedia);
   const withAppShell=injectOwnerAppShell(withEditHandoff);
-  return normalizeCustomer360InjectedHtml(withAppShell);
+  const withLogoutRoute=injectOwnerLogoutPostRoute(withAppShell);
+  return normalizeCustomer360InjectedHtml(withLogoutRoute);
 }
 function headersFrom(response){const h=new Headers(response.headers);h.delete('content-length');h.set('cache-control','no-store, no-cache, must-revalidate, max-age=0');h.set('x-crm-customer360-build',BUILD);return h}
 async function customer360SchemaHealth(env){
