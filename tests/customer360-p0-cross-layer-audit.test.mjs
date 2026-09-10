@@ -21,7 +21,8 @@ assert.ok(entry.indexOf(healthCall)<entry.indexOf(mediaCall),'Production health 
 assert.ok(entry.includes('customer360ExactEditHandoffHealth()'),'exact edit handoff health missing');
 assert.ok(entry.includes('injectOwnerLogoutPostRoute'),'canonical Owner logout UI route missing');
 assert.ok(entry.includes("form.method='POST'"),'Owner logout must use POST');
-assert.ok(entry.includes("form.action='/__crm/owner-logout'"),'Owner logout must target canonical endpoint');
+assert.ok(entry.includes("window.__CRM_BASE_PATH__"),'Owner logout must honor Reservation handoff base');
+assert.ok(entry.includes("form.action=base+'/__crm/owner-logout'"),'Owner logout must target canonical endpoint under direct or handoff base');
 assert.ok(entry.includes("e.stopImmediatePropagation()"),'legacy logout handlers must be suppressed after canonical capture');
 
 assert.ok(edit.includes("edit_customer')==='1"),'edit handoff query gate missing');
@@ -38,4 +39,5 @@ assert.ok(mediaUi.includes('window.__crmCustomerMediaUi20260908'),'media UI sing
 assert.ok(!mediaUi.includes('document.documentElement'),'media UI must not observe document root');
 
 console.log('CUSTOMER360_OWNER_LOGOUT_POST_ROUTE=PASS');
+console.log('CUSTOMER360_OWNER_LOGOUT_RESERVATION_HANDOFF_BASE=PASS');
 console.log('CUSTOMER360_P0_CROSS_LAYER_AUDIT=PASS');
