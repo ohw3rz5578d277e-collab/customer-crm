@@ -19,6 +19,10 @@ assert.ok(entry.indexOf(mediaCall)>=0,'Customer360 media route missing');
 assert.ok(entry.indexOf(principalCall)<entry.indexOf(healthCall),'Owner principal normalization must precede Production health');
 assert.ok(entry.indexOf(healthCall)<entry.indexOf(mediaCall),'Production health must remain ahead of media route');
 assert.ok(entry.includes('customer360ExactEditHandoffHealth()'),'exact edit handoff health missing');
+assert.ok(entry.includes('injectOwnerLogoutPostRoute'),'canonical Owner logout UI route missing');
+assert.ok(entry.includes("form.method='POST'"),'Owner logout must use POST');
+assert.ok(entry.includes("form.action='/__crm/owner-logout'"),'Owner logout must target canonical endpoint');
+assert.ok(entry.includes("e.stopImmediatePropagation()"),'legacy logout handlers must be suppressed after canonical capture');
 
 assert.ok(edit.includes("edit_customer')==='1"),'edit handoff query gate missing');
 assert.ok(edit.includes('/^[0-9]{8}$/'),'exact Customer ID validation missing');
@@ -33,4 +37,5 @@ assert.ok(media.includes('CRM_CUSTOMER360_WRITE_ENABLED'),'media write gate miss
 assert.ok(mediaUi.includes('window.__crmCustomerMediaUi20260908'),'media UI singleton missing');
 assert.ok(!mediaUi.includes('document.documentElement'),'media UI must not observe document root');
 
+console.log('CUSTOMER360_OWNER_LOGOUT_POST_ROUTE=PASS');
 console.log('CUSTOMER360_P0_CROSS_LAYER_AUDIT=PASS');
