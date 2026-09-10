@@ -20,7 +20,7 @@ assert.ok(entry.indexOf(healthCall)<entry.indexOf(mediaCall),'owned /health must
 assert.ok(entry.indexOf(healthCall)<entry.indexOf(downstreamCall),'owned /health must execute before downstream app.fetch');
 assert.match(entry,/customer360MediaHealth\(\)/);
 assert.match(entry,/customer360MediaUiHealth\(\)/);
-assert.match(entry,/ownerPasswordAuthHealth\(\)/);
+assert.match(entry,/ownerPasswordAuthHealth\(env\)/);
 assert.match(entry,/customer360_profile_media_schema_available/);
 assert.match(entry,/customer360_delivery_links_schema_available/);
 assert.match(entry,/url\.pathname==='\/api\/crm-health-check'/);
