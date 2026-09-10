@@ -22,8 +22,11 @@ assert.ok(entry.includes('customer360ExactEditHandoffHealth()'),'exact edit hand
 assert.ok(entry.includes('injectOwnerLogoutPostRoute'),'canonical Owner logout UI route missing');
 assert.ok(entry.includes("form.method='POST'"),'Owner logout must use POST');
 assert.ok(entry.includes("window.__CRM_BASE_PATH__"),'Owner logout must honor Reservation handoff base');
+assert.ok(entry.includes("base.endsWith('/')"),'Owner logout handoff base normalization must avoid template-regex escaping');
 assert.ok(entry.includes("form.action=base+'/__crm/owner-logout'"),'Owner logout must target canonical endpoint under direct or handoff base');
 assert.ok(entry.includes("e.stopImmediatePropagation()"),'legacy logout handlers must be suppressed after canonical capture');
+assert.ok(entry.includes("})();<\\/script>"),'Owner logout injected IIFE must close explicitly before script end');
+assert.doesNotMatch(entry,/replace\(\/\\\\\/\$\//,'Owner logout injection must not use regex escaping that becomes // in generated browser source');
 
 assert.ok(edit.includes("edit_customer')==='1"),'edit handoff query gate missing');
 assert.ok(edit.includes('/^[0-9]{8}$/'),'exact Customer ID validation missing');
@@ -40,4 +43,5 @@ assert.ok(!mediaUi.includes('document.documentElement'),'media UI must not obser
 
 console.log('CUSTOMER360_OWNER_LOGOUT_POST_ROUTE=PASS');
 console.log('CUSTOMER360_OWNER_LOGOUT_RESERVATION_HANDOFF_BASE=PASS');
+console.log('CUSTOMER360_OWNER_LOGOUT_BROWSER_SYNTAX_GUARD=PASS');
 console.log('CUSTOMER360_P0_CROSS_LAYER_AUDIT=PASS');
