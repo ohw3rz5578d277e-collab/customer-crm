@@ -19,9 +19,9 @@ import { injectOwnerViewState } from './crm-owner-view-state-v2.mjs';
 import { injectCustomer360ProfileUi } from './crm-customer360-profile-ui.mjs';
 import { injectOwnerAppShell } from './crm-owner-app-shell.mjs';
 import { patchReconciliationHealth } from './crm-reconciliation-review.mjs';
-import { handleOwnerPasswordAuth, withOwnerPasswordPrincipal, ownerPasswordAuthHealth } from './crm-owner-password-auth.mjs';
+import { handleOwnerPasswordAuth, withOwnerPasswordPrincipal, handleOwnerPasswordBrowserGate, ownerPasswordAuthHealth } from './crm-owner-password-auth.mjs';
 
-const BUILD='customer-crm-owner-password-auth-20260910-01';
+const BUILD='customer-crm-owner-password-auth-20260910-02';
 const RAW_SCRIPT_CLOSE='<'+String.fromCharCode(92)+'/script>';
 const CUSTOMER360_PROFILE_TABLES=[
   'customer_profile_enrichment',
@@ -133,7 +133,7 @@ export async function patchHealth(response,env){
     ...customer360MediaHealth(),
     ...customer360MediaUiHealth(),
     ...customer360ExactEditHandoffHealth(),
-    ...ownerPasswordAuthHealth(),
+    ...ownerPasswordAuthHealth(env),
     ...schema,
     customer360_identity_fallback:false,
     customer360_paid_ai_provider_active:false,
@@ -170,6 +170,9 @@ export default {
     if(ownerAuth)return ownerAuth;
 
     const effectiveRequest=await withOwnerPasswordPrincipal(request,env);
+    const ownerBrowserGate=handleOwnerPasswordBrowserGate(effectiveRequest,env);
+    if(ownerBrowserGate)return ownerBrowserGate;
+
     const earlyUrl=new URL(effectiveRequest.url);
     if(effectiveRequest.method==='GET'&&(earlyUrl.pathname==='/api/today-dashboard'||earlyUrl.pathname==='/api/today-dashboard.csv')){
       // Canonical operational read lane: bypass all legacy schema-repair/fallback wrappers.
