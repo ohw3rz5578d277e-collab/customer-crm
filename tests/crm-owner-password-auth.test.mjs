@@ -66,7 +66,11 @@ test('valid owner session maps only to canonical owner principal',async()=>{
 test('tampered owner session is never elevated',async()=>{
   const login=await handleOwnerPasswordAuth(formRequest(ENV.CRM_OWNER_PASSWORD),ENV);
   const raw=(login.headers.get('set-cookie')||'').split(';')[0];
-  const cookie=raw.slice(0,-1)+(raw.endsWith('A')?'B':'A');
+  const [name,value='']=raw.split('=');
+  const [payload,signature]=value.split('.');
+  assert.ok(payload&&signature,'signed owner session shape required');
+  const tamperedPayload=(payload.startsWith('A')?'B':'A')+payload.slice(1);
+  const cookie=`${name}=${tamperedPayload}.${signature}`;
   const req=new Request('https://crm.example.test/admin',{headers:{cookie}});
   const effective=await withOwnerPasswordPrincipal(req,ENV);
   assert.equal(effective.headers.get('cf-access-authenticated-user-email'),null);
