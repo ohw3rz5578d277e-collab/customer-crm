@@ -1,6 +1,6 @@
 import { reservationInternalUser } from './crm-reservation-browser-handoff.mjs';
 
-const BUILD='crm-owner-password-auth-20260911-05';
+const BUILD='crm-owner-password-auth-20260911-06';
 const COOKIE_NAME='crm_owner_session';
 const SESSION_MAX_AGE_SECONDS=60*60*12;
 const OWNER_EMAIL='ohw3rz5578d277e@gmail.com';
@@ -8,8 +8,9 @@ const encoder=new TextEncoder();
 
 function text(v){return v==null?'':String(v).trim()}
 function authMode(env){
-  const mode=text(env?.CRM_OWNER_AUTH_MODE).toLowerCase();
-  return mode==='hybrid'||mode==='password'?mode:'access';
+  const raw=text(env?.CRM_OWNER_AUTH_MODE).toLowerCase();
+  if(!raw)return 'access';
+  return raw==='access'||raw==='hybrid'||raw==='password'?raw:'invalid';
 }
 function secureHeaders(headers={}){
   const h=new Headers(headers);
@@ -59,7 +60,7 @@ function sessionCookie(token){return `${COOKIE_NAME}=${token}; Path=/; Max-Age=$
 function clearCookie(){return `${COOKIE_NAME}=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Strict`}
 function configured(env){return !!text(env?.CRM_OWNER_PASSWORD)&&!!text(env?.CRM_OWNER_SESSION_SECRET)}
 function rateLimiterConfigured(env){return typeof env?.CRM_OWNER_LOGIN_RATE_LIMITER?.limit==='function'}
-function passwordEnabled(env){return authMode(env)!=='access'&&configured(env)&&(authMode(env)!=='password'||rateLimiterConfigured(env))}
+function passwordEnabled(env){const mode=authMode(env);return (mode==='hybrid'||mode==='password')&&configured(env)&&(mode!=='password'||rateLimiterConfigured(env))}
 function hasAccessPrincipal(request){return !!text(request.headers.get('cf-access-authenticated-user-email')||request.headers.get('Cf-Access-Authenticated-User-Email')||request.headers.get('cf-access-user-email'))}
 async function ownerLoginRateAllowed(request,env){
   if(authMode(env)!=='password')return true;
@@ -102,9 +103,11 @@ function stripSyntheticAuthHeaders(request){
   headers.delete('x-crm-owner-auth');
   return headers;
 }
+function invalidModeResponse(){return html(loginPage('認証モード設定が不正です。管理者設定を確認してください。'),503)}
 export async function handleOwnerPasswordAuth(request,env){
   const url=new URL(request.url),mode=authMode(env);
   if(url.pathname==='/__crm/owner-login'&&request.method==='GET'){
+    if(mode==='invalid')return invalidModeResponse();
     if(mode==='access')return html(loginPage('現在はCloudflare Accessログインが有効です。'),503);
     if(!configured(env))return html(loginPage('パスワードログインはまだ有効化されていません。'),503);
     if(mode==='password'&&!rateLimiterConfigured(env))return html(loginPage('パスワードログインのrate limit設定が不足しています。'),503);
@@ -112,6 +115,7 @@ export async function handleOwnerPasswordAuth(request,env){
     return html(loginPage());
   }
   if(url.pathname==='/__crm/owner-login'&&request.method==='POST'){
+    if(mode==='invalid')return json({ok:false,error:'owner_auth_mode_invalid'},503);
     if(mode==='access'||!configured(env))return json({ok:false,error:'owner_password_auth_not_configured'},503);
     if(mode==='password'&&!rateLimiterConfigured(env))return json({ok:false,error:'owner_password_rate_limit_not_configured'},503);
     if(!sameOrigin(request))return json({ok:false,error:'origin_mismatch'},403);
@@ -129,13 +133,13 @@ export async function handleOwnerPasswordAuth(request,env){
 }
 export async function withOwnerPasswordPrincipal(request,env){
   const mode=authMode(env),headers=stripSyntheticAuthHeaders(request);
-  if(mode==='password'){
+  if(mode==='password'||mode==='invalid'){
     headers.delete('cf-access-authenticated-user-email');
     headers.delete('cf-access-user-email');
     headers.delete('x-user-email');
   }
   const base=new Request(request,{headers});
-  if(mode==='access')return base;
+  if(mode==='invalid'||mode==='access')return base;
   if(mode==='hybrid'&&hasAccessPrincipal(base))return base;
   if(!(await verifySession(base,env)))return base;
   headers.set('cf-access-authenticated-user-email',OWNER_EMAIL);
@@ -143,23 +147,31 @@ export async function withOwnerPasswordPrincipal(request,env){
   return new Request(base,{headers});
 }
 export function handleOwnerPasswordBrowserGate(request,env){
-  if(authMode(env)!=='password')return null;
+  const mode=authMode(env);
   const url=new URL(request.url);
   if(request.method!=='GET'||(url.pathname!=='/'&&url.pathname!=='/admin'))return null;
+  if(mode==='invalid')return invalidModeResponse();
+  if(mode!=='password')return null;
   if(hasAccessPrincipal(request)||reservationInternalUser(request,env))return null;
   if(!configured(env))return html(loginPage('パスワードログインのsecret設定が不足しています。'),503);
   if(!rateLimiterConfigured(env))return html(loginPage('パスワードログインのrate limit設定が不足しています。'),503);
   return new Response(null,{status:302,headers:secureHeaders({location:'/__crm/owner-login'})});
 }
-export function ownerPasswordRequestAuthenticated(request,env){return !!(hasAccessPrincipal(request)||reservationInternalUser(request,env))}
-export function ownerPasswordAuthHealth(env){return{
+export function ownerPasswordRequestAuthenticated(request,env){
+  const mode=authMode(env);
+  if(reservationInternalUser(request,env))return true;
+  if(mode==='invalid')return false;
+  return hasAccessPrincipal(request);
+}
+export function ownerPasswordAuthHealth(env){const mode=authMode(env);return{
   owner_password_auth_supported:true,
-  owner_password_auth_mode:authMode(env),
+  owner_password_auth_mode:mode,
+  owner_password_auth_mode_valid:mode!=='invalid',
   owner_password_auth_configured:configured(env),
   owner_password_auth_enabled:passwordEnabled(env),
   owner_password_auth_fail_closed:true,
   owner_password_auth_header_spoof_protection:true,
-  owner_password_auth_rate_limit_required:authMode(env)==='password',
+  owner_password_auth_rate_limit_required:mode==='password',
   owner_password_auth_rate_limit_configured:rateLimiterConfigured(env),
   owner_password_auth_reservation_internal_preserved:true,
   owner_password_auth_cookie_http_only:true,
