@@ -49,16 +49,37 @@ const env={ADMIN_TOKEN:'probe-admin-token',DB:throwingDb};
 }
 
 assert.ok(entry.includes("url.pathname!=='/__crm/access-auth-probe'"),'pure probe path missing');
-assert.ok(entry.includes('const accessAuthProbe=handleProductionAccessAuthProbe(request,env);'),'probe must be handled in top-level Production entry');
+const probeCall='const accessAuthProbe=handleProductionAccessAuthProbe(request,env);';
+const ownerAuthCall='const ownerAuth=await handleOwnerPasswordAuth(request,env);';
+const principalCall='const effectiveRequest=await withOwnerPasswordPrincipal(request,env);';
+const healthCall='const ownedHealth=await handleProductionHealthRequest(effectiveRequest,env);';
+const lineProfileCall='const lineProfileApi=await handleCustomer360LineProfileExtraction(effectiveRequest,env);';
+const appCall='let response=await app.fetch(effectiveRequest,env,ctx);';
+assert.ok(entry.includes(probeCall),'probe must be handled in top-level Production entry');
+assert.ok(entry.includes(ownerAuthCall),'Owner password auth handler must remain explicit in top-level Production entry');
+assert.ok(entry.includes(principalCall),'Owner principal normalization must remain explicit in top-level Production entry');
+assert.ok(entry.includes(healthCall),'health must use the normalized effective request');
+assert.ok(entry.includes(lineProfileCall),'downstream Customer360 handlers must use the normalized effective request');
+assert.ok(entry.includes(appCall),'lower application chain must use the normalized effective request');
+const probeIndex=entry.indexOf(probeCall);
+for(const [marker,label] of [
+  [ownerAuthCall,'Owner password auth'],
+  [principalCall,'Owner principal normalization'],
+  [healthCall,'health'],
+  [lineProfileCall,'Customer360 downstream'],
+  [appCall,'lower application chain']
+]){
+  assert.ok(probeIndex<entry.indexOf(marker),`probe must run before ${label}`);
+}
 assert.ok(
-  entry.indexOf('const accessAuthProbe=handleProductionAccessAuthProbe(request,env);') <
-  entry.indexOf('const lineProfileApi=await handleCustomer360LineProfileExtraction(request,env);'),
-  'probe must run before downstream handlers'
+  entry.indexOf(ownerAuthCall) < entry.indexOf(principalCall),
+  'Owner login/logout route handling must run before principal normalization'
 );
 assert.ok(
-  entry.indexOf('const accessAuthProbe=handleProductionAccessAuthProbe(request,env);') <
-  entry.indexOf('let response=await app.fetch(request,env,ctx);'),
-  'probe must run before lower application chain'
+  entry.indexOf(principalCall) < entry.indexOf(healthCall) &&
+  entry.indexOf(principalCall) < entry.indexOf(lineProfileCall) &&
+  entry.indexOf(principalCall) < entry.indexOf(appCall),
+  'principal normalization must run before normalized downstream request consumers'
 );
 
 assert.match(probe,/workflow_dispatch:\s*\n\s*inputs:\s*\n\s*expected_sha:/,'probe workflow must require expected_sha');
