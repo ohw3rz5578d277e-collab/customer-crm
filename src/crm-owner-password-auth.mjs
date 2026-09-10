@@ -1,4 +1,4 @@
-const BUILD='crm-owner-password-auth-20260910-02';
+const BUILD='crm-owner-password-auth-20260910-03';
 const COOKIE_NAME='crm_owner_session';
 const SESSION_MAX_AGE_SECONDS=60*60*12;
 const OWNER_EMAIL='ohw3rz5578d277e@gmail.com';
@@ -117,9 +117,10 @@ export async function handleOwnerPasswordAuth(request,env){
 export async function withOwnerPasswordPrincipal(request,env){
   const mode=authMode(env),headers=stripSyntheticAuthHeaders(request);
   if(mode==='password'){
-    // In password-only mode never trust client-supplied Access identity headers.
+    // Password-only mode must not trust any client-supplied legacy or Access identity header.
     headers.delete('cf-access-authenticated-user-email');
     headers.delete('cf-access-user-email');
+    headers.delete('x-user-email');
   }
   const base=new Request(request,{headers});
   if(mode==='access')return base;
