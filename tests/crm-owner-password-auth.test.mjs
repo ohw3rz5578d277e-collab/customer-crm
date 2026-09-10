@@ -79,20 +79,22 @@ test('hybrid mode preserves existing Cloudflare Access principal',async()=>{
   assert.equal(effective.headers.get('x-crm-owner-auth'),null);
 });
 
-test('password-only mode strips spoofed Access identity without a valid session',async()=>{
-  const req=new Request('https://crm.example.test/admin',{headers:{'cf-access-authenticated-user-email':'ohw3rz5578d277e@gmail.com','cf-access-user-email':'ohw3rz5578d277e@gmail.com','x-crm-owner-auth':'password-session'}});
+test('password-only mode strips all spoofed owner identity headers without a valid session',async()=>{
+  const req=new Request('https://crm.example.test/admin',{headers:{'cf-access-authenticated-user-email':'ohw3rz5578d277e@gmail.com','cf-access-user-email':'ohw3rz5578d277e@gmail.com','x-user-email':'ohw3rz5578d277e@gmail.com','x-crm-owner-auth':'password-session'}});
   const effective=await withOwnerPasswordPrincipal(req,PASSWORD_ENV);
   assert.equal(effective.headers.get('cf-access-authenticated-user-email'),null);
   assert.equal(effective.headers.get('cf-access-user-email'),null);
+  assert.equal(effective.headers.get('x-user-email'),null);
   assert.equal(effective.headers.get('x-crm-owner-auth'),null);
 });
 
 test('password-only mode accepts signed session after stripping spoofable headers',async()=>{
   const login=await handleOwnerPasswordAuth(formRequest(PASSWORD_ENV.CRM_OWNER_PASSWORD),PASSWORD_ENV);
   const cookie=(login.headers.get('set-cookie')||'').split(';')[0];
-  const req=new Request('https://crm.example.test/admin',{headers:{cookie,'cf-access-authenticated-user-email':'attacker@example.com'}});
+  const req=new Request('https://crm.example.test/admin',{headers:{cookie,'cf-access-authenticated-user-email':'attacker@example.com','x-user-email':'attacker@example.com'}});
   const effective=await withOwnerPasswordPrincipal(req,PASSWORD_ENV);
   assert.equal(effective.headers.get('cf-access-authenticated-user-email'),'ohw3rz5578d277e@gmail.com');
+  assert.equal(effective.headers.get('x-user-email'),null);
   assert.equal(effective.headers.get('x-crm-owner-auth'),'password-session');
 });
 
