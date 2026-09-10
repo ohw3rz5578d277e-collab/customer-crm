@@ -1,6 +1,6 @@
 import { reservationInternalUser } from './crm-reservation-browser-handoff.mjs';
 
-const BUILD='crm-owner-password-auth-20260911-06';
+const BUILD='crm-owner-password-auth-20260911-07';
 const COOKIE_NAME='crm_owner_session';
 const SESSION_MAX_AGE_SECONDS=60*60*12;
 const OWNER_EMAIL='ohw3rz5578d277e@gmail.com';
@@ -104,6 +104,10 @@ function stripSyntheticAuthHeaders(request){
   return headers;
 }
 function invalidModeResponse(){return html(loginPage('認証モード設定が不正です。管理者設定を確認してください。'),503)}
+function accessLogoutLocation(request){
+  const returnTo=encodeURIComponent(new URL('/admin',request.url).href);
+  return `/cdn-cgi/access/logout?returnTo=${returnTo}`;
+}
 export async function handleOwnerPasswordAuth(request,env){
   const url=new URL(request.url),mode=authMode(env);
   if(url.pathname==='/__crm/owner-login'&&request.method==='GET'){
@@ -127,7 +131,9 @@ export async function handleOwnerPasswordAuth(request,env){
   }
   if(url.pathname==='/__crm/owner-logout'&&request.method==='POST'){
     if(!sameOrigin(request))return json({ok:false,error:'origin_mismatch'},403);
-    return new Response(null,{status:303,headers:secureHeaders({location:'/__crm/owner-login','set-cookie':clearCookie()})});
+    if(mode==='invalid')return new Response(null,{status:303,headers:secureHeaders({location:'/__crm/owner-login','set-cookie':clearCookie()})});
+    const location=(mode==='access'||(mode==='hybrid'&&hasAccessPrincipal(request)))?accessLogoutLocation(request):'/__crm/owner-login';
+    return new Response(null,{status:303,headers:secureHeaders({location,'set-cookie':clearCookie()})});
   }
   return null;
 }
@@ -174,6 +180,8 @@ export function ownerPasswordAuthHealth(env){const mode=authMode(env);return{
   owner_password_auth_rate_limit_required:mode==='password',
   owner_password_auth_rate_limit_configured:rateLimiterConfigured(env),
   owner_password_auth_reservation_internal_preserved:true,
+  owner_password_auth_logout_post_endpoint:true,
+  owner_password_auth_access_logout_preserved:true,
   owner_password_auth_cookie_http_only:true,
   owner_password_auth_cookie_secure:true,
   owner_password_auth_cookie_same_site:'Strict',
