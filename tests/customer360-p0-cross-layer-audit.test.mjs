@@ -10,7 +10,14 @@ const profile=fs.readFileSync('src/crm-customer360-profile-enrichment.mjs','utf8
 assert.equal((entry.match(/injectCustomer360ExactEditHandoff/g)||[]).length,2,'exact edit handoff import/invocation count');
 assert.equal((entry.match(/injectCustomer360MediaUi/g)||[]).length,2,'media UI import/invocation count');
 assert.equal((entry.match(/handleCustomer360MediaRequest/g)||[]).length,2,'media API import/route count');
-assert.ok(entry.indexOf('handleProductionHealthRequest(request,env)') < entry.indexOf('handleCustomer360MediaRequest(request,env)'),'Production health must remain ahead of media route');
+const principalCall='const effectiveRequest=await withOwnerPasswordPrincipal(request,env)';
+const healthCall='handleProductionHealthRequest(effectiveRequest,env)';
+const mediaCall='handleCustomer360MediaRequest(effectiveRequest,env)';
+assert.ok(entry.indexOf(principalCall)>=0,'Owner principal normalization missing');
+assert.ok(entry.indexOf(healthCall)>=0,'Production health route missing');
+assert.ok(entry.indexOf(mediaCall)>=0,'Customer360 media route missing');
+assert.ok(entry.indexOf(principalCall)<entry.indexOf(healthCall),'Owner principal normalization must precede Production health');
+assert.ok(entry.indexOf(healthCall)<entry.indexOf(mediaCall),'Production health must remain ahead of media route');
 assert.ok(entry.includes('customer360ExactEditHandoffHealth()'),'exact edit handoff health missing');
 
 assert.ok(edit.includes("edit_customer')==='1"),'edit handoff query gate missing');
