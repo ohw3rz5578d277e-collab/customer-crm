@@ -1,6 +1,7 @@
 import app from "./production-index-crm-delivery-deadline-alerts-entry.js";
 import { handleLineContextEvents, lineContextHealth } from "./crm-line-context-events.mjs";
 import { handleInternalCustomerDetail, internalCustomerDetailHealth } from "./crm-internal-customer-detail.mjs";
+import { handleInternalCustomerNameBatch, internalCustomerNameBatchHealth } from "./crm-internal-customer-name-batch.mjs";
 import { handleReconciliationReview, patchReconciliationHealth } from "./crm-reconciliation-review.mjs";
 import { handleCustomerIdentityResolver, customerIdentityHealth } from "./customer-identity-resolver.mjs";
 import { handleCanonicalLineFollow, handleGuardedCustomerUpsert, canonicalCustomerGuardHealth } from "./crm-canonical-customer-guards.mjs";
@@ -31,6 +32,7 @@ export async function patchBrowserRootHealth(response, env){
   try { data = raw ? JSON.parse(raw) : {}; } catch (_) {}
   const lineContext = await lineContextHealth(env);
   const customerDetail = internalCustomerDetailHealth(env);
+  const customerNameBatch = internalCustomerNameBatchHealth(env);
   const customerIdentity = customerIdentityHealth(env);
   const canonicalGuard = canonicalCustomerGuardHealth(env);
   const identityDiagnostic = identityDamageDiagnosticHealth(env);
@@ -47,6 +49,7 @@ export async function patchBrowserRootHealth(response, env){
     responsive_desktop_bottom_nav: false,
     ...lineContext,
     ...customerDetail,
+    ...customerNameBatch,
     ...customerIdentity,
     ...canonicalGuard,
     ...identityDiagnostic,
@@ -168,6 +171,9 @@ export default {
 
     const reviewResponse = await handleReconciliationReview(request, env);
     if(reviewResponse) return reviewResponse;
+
+    const customerNameBatchResponse = await handleInternalCustomerNameBatch(request, env);
+    if(customerNameBatchResponse) return customerNameBatchResponse;
 
     const customerDetailResponse = await handleInternalCustomerDetail(request, env);
     if(customerDetailResponse) return customerDetailResponse;
