@@ -1,16 +1,20 @@
-const BUILD='crm-owner-password-auth-20260910-01';
+const BUILD='crm-owner-password-auth-20260910-02';
 const COOKIE_NAME='crm_owner_session';
 const SESSION_MAX_AGE_SECONDS=60*60*12;
 const OWNER_EMAIL='ohw3rz5578d277e@gmail.com';
 const encoder=new TextEncoder();
 
 function text(v){return v==null?'':String(v).trim()}
+function authMode(env){
+  const mode=text(env?.CRM_OWNER_AUTH_MODE).toLowerCase();
+  return mode==='hybrid'||mode==='password'?mode:'access';
+}
 function secureHeaders(headers={}){
   const h=new Headers(headers);
   h.set('cache-control','no-store, no-cache, must-revalidate, max-age=0');
   h.set('pragma','no-cache');
   h.set('expires','0');
-  h.set('x-robots-tag','noindex, nofollow, noarchive');
+  h.set('x-robots-tag','noindex, nofollow,noarchive');
   h.set('x-content-type-options','nosniff');
   h.set('referrer-policy','no-referrer');
   h.set('x-frame-options','DENY');
@@ -52,6 +56,8 @@ function cookieValue(request,name){
 function sessionCookie(token){return `${COOKIE_NAME}=${token}; Path=/; Max-Age=${SESSION_MAX_AGE_SECONDS}; HttpOnly; Secure; SameSite=Strict`}
 function clearCookie(){return `${COOKIE_NAME}=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Strict`}
 function configured(env){return !!text(env?.CRM_OWNER_PASSWORD)&&!!text(env?.CRM_OWNER_SESSION_SECRET)}
+function passwordEnabled(env){return authMode(env)!=='access'&&configured(env)}
+function hasAccessPrincipal(request){return !!text(request.headers.get('cf-access-authenticated-user-email')||request.headers.get('Cf-Access-Authenticated-User-Email')||request.headers.get('cf-access-user-email'))}
 function loginPage(error=''){
   const errorHtml=error?`<div class="error">${error}</div>`:'';
   return `<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow,noarchive"><title>Owner Login</title><style>*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;background:#0b0d10;color:#f5f7fa;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Noto Sans JP',sans-serif;padding:20px}.card{width:min(100%,420px);background:#15181d;border:1px solid #2a2f37;border-radius:24px;padding:28px;box-shadow:0 24px 80px rgba(0,0,0,.35)}h1{font-size:26px;margin:0 0 8px}.sub{font-size:14px;color:#9aa4b2;line-height:1.7;margin-bottom:24px}label{display:block;font-size:13px;color:#c8d0da;margin-bottom:8px}input{width:100%;font-size:18px;padding:15px 16px;border-radius:14px;border:1px solid #343b46;background:#0f1216;color:#fff;outline:none}input:focus{border-color:#8d99aa}button{width:100%;margin-top:16px;border:0;border-radius:14px;padding:15px 16px;font-size:16px;font-weight:700;background:#f5f7fa;color:#111318}.error{background:#32191d;border:1px solid #643038;color:#ffb4bd;border-radius:12px;padding:11px 12px;margin:0 0 16px;font-size:13px}</style></head><body><main class="card"><h1>予約・顧客管理</h1><div class="sub">Ownerパスワードを入力してください。</div>${errorHtml}<form method="post" action="/__crm/owner-login" autocomplete="on"><label for="password">パスワード</label><input id="password" name="password" type="password" autocomplete="current-password" required autofocus><button type="submit">ログイン</button></form></main></body></html>`;
@@ -81,15 +87,21 @@ async function verifySession(request,env){
     return data?.v===1&&data?.sub==='owner'&&data?.email===OWNER_EMAIL&&Number(data?.exp)>Math.floor(Date.now()/1000);
   }catch{return false}
 }
+function stripSyntheticAuthHeaders(request){
+  const headers=new Headers(request.headers);
+  headers.delete('x-crm-owner-auth');
+  return headers;
+}
 export async function handleOwnerPasswordAuth(request,env){
-  const url=new URL(request.url);
+  const url=new URL(request.url),mode=authMode(env);
   if(url.pathname==='/__crm/owner-login'&&request.method==='GET'){
+    if(mode==='access')return html(loginPage('現在はCloudflare Accessログインが有効です。'),503);
     if(!configured(env))return html(loginPage('パスワードログインはまだ有効化されていません。'),503);
     if(await verifySession(request,env))return new Response(null,{status:302,headers:secureHeaders({location:'/admin'})});
     return html(loginPage());
   }
   if(url.pathname==='/__crm/owner-login'&&request.method==='POST'){
-    if(!configured(env))return json({ok:false,error:'owner_password_auth_not_configured'},503);
+    if(mode==='access'||!configured(env))return json({ok:false,error:'owner_password_auth_not_configured'},503);
     if(!sameOrigin(request))return json({ok:false,error:'origin_mismatch'},403);
     const password=await readPassword(request);
     if(!(await passwordMatches(password,text(env.CRM_OWNER_PASSWORD))))return html(loginPage('パスワードが違います。'),401);
@@ -103,14 +115,35 @@ export async function handleOwnerPasswordAuth(request,env){
   return null;
 }
 export async function withOwnerPasswordPrincipal(request,env){
-  if(request.headers.get('cf-access-authenticated-user-email')||request.headers.get('Cf-Access-Authenticated-User-Email')||request.headers.get('cf-access-user-email'))return request;
-  if(!(await verifySession(request,env)))return request;
-  const headers=new Headers(request.headers);headers.set('cf-access-authenticated-user-email',OWNER_EMAIL);headers.set('x-crm-owner-auth','password-session');
+  const mode=authMode(env),headers=stripSyntheticAuthHeaders(request);
+  if(mode==='password'){
+    // In password-only mode never trust client-supplied Access identity headers.
+    headers.delete('cf-access-authenticated-user-email');
+    headers.delete('cf-access-user-email');
+  }
+  const base=new Request(request,{headers});
+  if(mode==='access')return base;
+  if(mode==='hybrid'&&hasAccessPrincipal(base))return base;
+  if(!(await verifySession(base,env)))return base;
+  headers.set('cf-access-authenticated-user-email',OWNER_EMAIL);
+  headers.set('x-crm-owner-auth','password-session');
   return new Request(request,{headers});
 }
-export function ownerPasswordAuthHealth(){return{
+export function handleOwnerPasswordBrowserGate(request,env){
+  if(authMode(env)!=='password')return null;
+  const url=new URL(request.url);
+  if(request.method!=='GET'||(url.pathname!=='/'&&url.pathname!=='/admin'))return null;
+  if(hasAccessPrincipal(request))return null;
+  if(!configured(env))return html(loginPage('パスワードログインのsecret設定が不足しています。'),503);
+  return new Response(null,{status:302,headers:secureHeaders({location:'/__crm/owner-login'})});
+}
+export function ownerPasswordAuthHealth(env){return{
   owner_password_auth_supported:true,
+  owner_password_auth_mode:authMode(env),
+  owner_password_auth_configured:configured(env),
+  owner_password_auth_enabled:passwordEnabled(env),
   owner_password_auth_fail_closed:true,
+  owner_password_auth_header_spoof_protection:true,
   owner_password_auth_cookie_http_only:true,
   owner_password_auth_cookie_secure:true,
   owner_password_auth_cookie_same_site:'Strict',
