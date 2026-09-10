@@ -5,7 +5,8 @@ import { handleOwnerPasswordAuth, withOwnerPasswordPrincipal } from '../src/crm-
 const ENV={
   CRM_OWNER_AUTH_MODE:'password',
   CRM_OWNER_PASSWORD:'correct-horse-battery-staple',
-  CRM_OWNER_SESSION_SECRET:'test-session-secret-32-bytes-minimum-value'
+  CRM_OWNER_SESSION_SECRET:'test-session-secret-32-bytes-minimum-value',
+  CRM_OWNER_LOGIN_RATE_LIMITER:{limit:async()=>({success:true})}
 };
 const ORIGIN='https://crm.example.test';
 
