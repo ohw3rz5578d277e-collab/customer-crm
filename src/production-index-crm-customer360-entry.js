@@ -19,8 +19,9 @@ import { injectOwnerViewState } from './crm-owner-view-state-v2.mjs';
 import { injectCustomer360ProfileUi } from './crm-customer360-profile-ui.mjs';
 import { injectOwnerAppShell } from './crm-owner-app-shell.mjs';
 import { patchReconciliationHealth } from './crm-reconciliation-review.mjs';
+import { handleOwnerPasswordAuth, withOwnerPasswordPrincipal, ownerPasswordAuthHealth } from './crm-owner-password-auth.mjs';
 
-const BUILD='customer-crm-customer360-media-foundation-20260909-02';
+const BUILD='customer-crm-owner-password-auth-20260910-01';
 const RAW_SCRIPT_CLOSE='<'+String.fromCharCode(92)+'/script>';
 const CUSTOMER360_PROFILE_TABLES=[
   'customer_profile_enrichment',
@@ -132,6 +133,7 @@ export async function patchHealth(response,env){
     ...customer360MediaHealth(),
     ...customer360MediaUiHealth(),
     ...customer360ExactEditHandoffHealth(),
+    ...ownerPasswordAuthHealth(),
     ...schema,
     customer360_identity_fallback:false,
     customer360_paid_ai_provider_active:false,
@@ -163,31 +165,36 @@ export default {
   async fetch(request,env,ctx){
     const accessAuthProbe=handleProductionAccessAuthProbe(request,env);
     if(accessAuthProbe)return accessAuthProbe;
-    const earlyUrl=new URL(request.url);
-    if(request.method==='GET'&&(earlyUrl.pathname==='/api/today-dashboard'||earlyUrl.pathname==='/api/today-dashboard.csv')){
+
+    const ownerAuth=await handleOwnerPasswordAuth(request,env);
+    if(ownerAuth)return ownerAuth;
+
+    const effectiveRequest=await withOwnerPasswordPrincipal(request,env);
+    const earlyUrl=new URL(effectiveRequest.url);
+    if(effectiveRequest.method==='GET'&&(earlyUrl.pathname==='/api/today-dashboard'||earlyUrl.pathname==='/api/today-dashboard.csv')){
       // Canonical operational read lane: bypass all legacy schema-repair/fallback wrappers.
-      return todayReadOnlyApp.fetch(request,env,ctx);
+      return todayReadOnlyApp.fetch(effectiveRequest,env,ctx);
     }
-    const ownedHealth=await handleProductionHealthRequest(request,env);
+    const ownedHealth=await handleProductionHealthRequest(effectiveRequest,env);
     if(ownedHealth)return ownedHealth;
 
-    const mediaApi=await handleCustomer360MediaRequest(request,env);
+    const mediaApi=await handleCustomer360MediaRequest(effectiveRequest,env);
     if(mediaApi)return mediaApi;
-    const lineProfileApi=await handleCustomer360LineProfileExtraction(request,env);
+    const lineProfileApi=await handleCustomer360LineProfileExtraction(effectiveRequest,env);
     if(lineProfileApi)return lineProfileApi;
-    const profileWriteGuard=await guardCustomer360ProfileWrite(request,env);
+    const profileWriteGuard=await guardCustomer360ProfileWrite(effectiveRequest,env);
     if(profileWriteGuard)return profileWriteGuard;
-    const profileApi=await handleCustomerProfileEnrichmentRequest(request,env);
+    const profileApi=await handleCustomerProfileEnrichmentRequest(effectiveRequest,env);
     if(profileApi)return profileApi;
-    const combinedDetail=await handleCustomer360CombinedDetail(request,env);
+    const combinedDetail=await handleCustomer360CombinedDetail(effectiveRequest,env);
     if(combinedDetail)return combinedDetail;
-    const api=await handleCustomer360Request(request,env);
+    const api=await handleCustomer360Request(effectiveRequest,env);
     if(api)return api;
 
-    const url=new URL(request.url);
-    let response=await app.fetch(request,env,ctx);
-    if(request.method==='GET'&&url.pathname==='/api/crm-health-check')return patchHealth(response,env);
-    if(request.method==='GET'&&url.pathname==='/admin')return patchHtml(response);
+    const url=new URL(effectiveRequest.url);
+    let response=await app.fetch(effectiveRequest,env,ctx);
+    if(effectiveRequest.method==='GET'&&url.pathname==='/api/crm-health-check')return patchHealth(response,env);
+    if(effectiveRequest.method==='GET'&&url.pathname==='/admin')return patchHtml(response);
     return response;
   }
 };
