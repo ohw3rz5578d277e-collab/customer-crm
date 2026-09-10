@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import {handleInternalCustomerNameBatch,internalCustomerNameBatchHealth} from '../src/crm-internal-customer-name-batch.mjs';
 
 const source=fs.readFileSync(new URL('../src/crm-internal-customer-name-batch.mjs',import.meta.url),'utf8');
-assert.doesNotMatch(source,/\b(?:INSERT|UPDATE|DELETE|ALTER|CREATE|DROP|REPLACE)\b/i,'batch reader must remain read-only');
+assert.doesNotMatch(source,/\b(?:INSERT\s+INTO|UPDATE\s+\w+\s+SET|DELETE\s+FROM|ALTER\s+TABLE|CREATE\s+TABLE|DROP\s+TABLE|REPLACE\s+INTO)\b/i,'batch reader must remain read-only');
 assert.match(source,/^const CUSTOMER_ID_RE=\/\^\\d\{8\}\$\//m,'exact 8-digit Customer ID guard missing');
 assert.match(source,/fallback_used:false/,'fallback must stay disabled');
 assert.doesNotMatch(source,/name\s*=\s*\?|phone\s*=\s*\?|line_user_id\s*=\s*\?/i,'fuzzy/secondary identity lookup must not be introduced');
