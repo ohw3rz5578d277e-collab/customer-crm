@@ -1,4 +1,4 @@
-const BUILD='crm-owner-password-auth-20260910-03';
+const BUILD='crm-owner-password-auth-20260910-04';
 const COOKIE_NAME='crm_owner_session';
 const SESSION_MAX_AGE_SECONDS=60*60*12;
 const OWNER_EMAIL='ohw3rz5578d277e@gmail.com';
@@ -128,7 +128,7 @@ export async function withOwnerPasswordPrincipal(request,env){
   if(!(await verifySession(base,env)))return base;
   headers.set('cf-access-authenticated-user-email',OWNER_EMAIL);
   headers.set('x-crm-owner-auth','password-session');
-  return new Request(request,{headers});
+  return new Request(base,{headers});
 }
 export function handleOwnerPasswordBrowserGate(request,env){
   if(authMode(env)!=='password')return null;
