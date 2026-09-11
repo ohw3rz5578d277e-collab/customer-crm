@@ -20,8 +20,10 @@ import { injectCustomer360ProfileUi } from './crm-customer360-profile-ui.mjs';
 import { injectOwnerAppShell } from './crm-owner-app-shell.mjs';
 import { patchReconciliationHealth } from './crm-reconciliation-review.mjs';
 import { handleOwnerPasswordAuth, withOwnerPasswordPrincipal, handleOwnerPasswordBrowserGate, ownerPasswordRequestAuthenticated, ownerPasswordAuthHealth } from './crm-owner-password-auth.mjs';
+import { reservationInternalUser } from './crm-reservation-browser-handoff.mjs';
 
-const BUILD='customer-crm-owner-password-auth-20260911-05';
+const BUILD='customer-crm-owner-password-auth-20260911-06';
+const OWNER_EMAIL='ohw3rz5578d277e@gmail.com';
 const RAW_SCRIPT_CLOSE='<'+String.fromCharCode(92)+'/script>';
 const CUSTOMER360_PROFILE_TABLES=[
   'customer_profile_enrichment','customer_family_member_metadata','customer_field_evidence','customer_notes_history','customer_profile_media','customer_delivery_links'
@@ -36,6 +38,14 @@ export function handleProductionAccessAuthProbe(request,env){
   if(!expected)return new Response(JSON.stringify({ok:false,error:'auth_probe_unavailable'}),{status:503,headers});
   if(provided!==expected)return new Response(JSON.stringify({ok:false,error:'unauthorized'}),{status:401,headers});
   return new Response(JSON.stringify({ok:true,service:'customer-crm-api',access_auth_probe:true,production_write:false,customer_id_generation:false,line_send:false}),{status:200,headers});
+}
+
+export function withReservationOwnerReadPrincipal(request,env){
+  if(request.method!=='GET'||!reservationInternalUser(request,env))return request;
+  const headers=new Headers(request.headers);
+  headers.set('cf-access-authenticated-user-email',OWNER_EMAIL);
+  headers.set('x-crm-owner-auth','reservation-internal-read');
+  return new Request(request,{headers});
 }
 
 export function normalizeCustomer360InjectedHtml(html){return String(html||'').split(RAW_SCRIPT_CLOSE).join('</script>')}
@@ -90,8 +100,9 @@ export default {
     const ownerAuth=await handleOwnerPasswordAuth(request,env);if(ownerAuth)return ownerAuth;
     const effectiveRequest=await withOwnerPasswordPrincipal(request,env);
     const ownerBrowserGate=handleOwnerPasswordBrowserGate(effectiveRequest,env);if(ownerBrowserGate)return ownerBrowserGate;
+    const earlyReadRequest=withReservationOwnerReadPrincipal(effectiveRequest,env);
     const earlyUrl=new URL(effectiveRequest.url);
-    if(effectiveRequest.method==='GET'&&(earlyUrl.pathname==='/api/today-dashboard'||earlyUrl.pathname==='/api/today-dashboard.csv'))return todayReadOnlyApp.fetch(effectiveRequest,env,ctx);
+    if(effectiveRequest.method==='GET'&&(earlyUrl.pathname==='/api/today-dashboard'||earlyUrl.pathname==='/api/today-dashboard.csv'))return todayReadOnlyApp.fetch(earlyReadRequest,env,ctx);
     const ownedHealth=await handleProductionHealthRequest(effectiveRequest,env);if(ownedHealth)return ownedHealth;
     const mediaApi=await handleCustomer360MediaRequest(effectiveRequest,env);if(mediaApi)return mediaApi;
     const lineProfileApi=await handleCustomer360LineProfileExtraction(effectiveRequest,env);if(lineProfileApi)return lineProfileApi;
@@ -99,8 +110,8 @@ export default {
       const profileWriteGuard=await guardCustomer360ProfileWrite(effectiveRequest,env);if(profileWriteGuard)return profileWriteGuard;
     }
     const profileApi=await handleCustomerProfileEnrichmentRequest(effectiveRequest,env);if(profileApi)return profileApi;
-    const combinedDetail=await handleCustomer360CombinedDetail(effectiveRequest,env);if(combinedDetail)return combinedDetail;
-    const api=await handleCustomer360Request(effectiveRequest,env);if(api)return api;
+    const combinedDetail=await handleCustomer360CombinedDetail(earlyReadRequest,env);if(combinedDetail)return combinedDetail;
+    const api=await handleCustomer360Request(earlyReadRequest,env);if(api)return api;
     const url=new URL(effectiveRequest.url);let response=await app.fetch(effectiveRequest,env,ctx);
     if(effectiveRequest.method==='GET'&&url.pathname==='/api/crm-health-check')return patchHealth(response,env);
     if(effectiveRequest.method==='GET'&&url.pathname==='/admin')return patchHtml(response);
