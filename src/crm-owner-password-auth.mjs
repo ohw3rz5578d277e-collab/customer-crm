@@ -1,6 +1,6 @@
-import { reservationInternalUser } from './crm-reservation-browser-handoff.mjs';
+import { reservationInternalUser, reservationHandoffBasePath } from './crm-reservation-browser-handoff.mjs';
 
-const BUILD='crm-owner-password-auth-20260911-07';
+const BUILD='crm-owner-password-auth-20260911-08';
 const COOKIE_NAME='crm_owner_session';
 const SESSION_MAX_AGE_SECONDS=60*60*12;
 const OWNER_EMAIL='ohw3rz5578d277e@gmail.com';
@@ -12,6 +12,7 @@ function authMode(env){
   if(!raw)return 'access';
   return raw==='access'||raw==='hybrid'||raw==='password'?raw:'invalid';
 }
+function passwordMode(mode){return mode==='hybrid'||mode==='password'}
 function secureHeaders(headers={}){
   const h=new Headers(headers);
   h.set('cache-control','no-store, no-cache, must-revalidate, max-age=0');
@@ -60,10 +61,10 @@ function sessionCookie(token){return `${COOKIE_NAME}=${token}; Path=/; Max-Age=$
 function clearCookie(){return `${COOKIE_NAME}=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Strict`}
 function configured(env){return !!text(env?.CRM_OWNER_PASSWORD)&&!!text(env?.CRM_OWNER_SESSION_SECRET)}
 function rateLimiterConfigured(env){return typeof env?.CRM_OWNER_LOGIN_RATE_LIMITER?.limit==='function'}
-function passwordEnabled(env){const mode=authMode(env);return (mode==='hybrid'||mode==='password')&&configured(env)&&(mode!=='password'||rateLimiterConfigured(env))}
+function passwordEnabled(env){const mode=authMode(env);return passwordMode(mode)&&configured(env)&&rateLimiterConfigured(env)}
 function hasAccessPrincipal(request){return !!text(request.headers.get('cf-access-authenticated-user-email')||request.headers.get('Cf-Access-Authenticated-User-Email')||request.headers.get('cf-access-user-email'))}
 async function ownerLoginRateAllowed(request,env){
-  if(authMode(env)!=='password')return true;
+  if(!passwordMode(authMode(env)))return true;
   const limiter=env?.CRM_OWNER_LOGIN_RATE_LIMITER;
   if(!limiter||typeof limiter.limit!=='function')return false;
   const ip=text(request.headers.get('cf-connecting-ip'))||'unknown';
@@ -108,31 +109,33 @@ function accessLogoutLocation(request){
   const returnTo=encodeURIComponent(new URL('/admin',request.url).href);
   return `/cdn-cgi/access/logout?returnTo=${returnTo}`;
 }
+function ownerLoginLocation(request,env){const base=reservationHandoffBasePath(request,env);return `${base}/__crm/owner-login`}
+function ownerAdminLocation(request,env){const base=reservationHandoffBasePath(request,env);return base||'/admin'}
 export async function handleOwnerPasswordAuth(request,env){
   const url=new URL(request.url),mode=authMode(env);
   if(url.pathname==='/__crm/owner-login'&&request.method==='GET'){
     if(mode==='invalid')return invalidModeResponse();
     if(mode==='access')return html(loginPage('現在はCloudflare Accessログインが有効です。'),503);
     if(!configured(env))return html(loginPage('パスワードログインはまだ有効化されていません。'),503);
-    if(mode==='password'&&!rateLimiterConfigured(env))return html(loginPage('パスワードログインのrate limit設定が不足しています。'),503);
-    if(await verifySession(request,env))return new Response(null,{status:302,headers:secureHeaders({location:'/admin'})});
+    if(passwordMode(mode)&&!rateLimiterConfigured(env))return html(loginPage('パスワードログインのrate limit設定が不足しています。'),503);
+    if(await verifySession(request,env))return new Response(null,{status:302,headers:secureHeaders({location:ownerAdminLocation(request,env)})});
     return html(loginPage());
   }
   if(url.pathname==='/__crm/owner-login'&&request.method==='POST'){
     if(mode==='invalid')return json({ok:false,error:'owner_auth_mode_invalid'},503);
     if(mode==='access'||!configured(env))return json({ok:false,error:'owner_password_auth_not_configured'},503);
-    if(mode==='password'&&!rateLimiterConfigured(env))return json({ok:false,error:'owner_password_rate_limit_not_configured'},503);
+    if(passwordMode(mode)&&!rateLimiterConfigured(env))return json({ok:false,error:'owner_password_rate_limit_not_configured'},503);
     if(!sameOrigin(request))return json({ok:false,error:'origin_mismatch'},403);
     if(!(await ownerLoginRateAllowed(request,env)))return json({ok:false,error:'rate_limited'},429,{'retry-after':'60'});
     const password=await readPassword(request);
     if(!(await passwordMatches(password,text(env.CRM_OWNER_PASSWORD))))return html(loginPage('パスワードが違います。'),401);
     const token=await issueSession(env);
-    return new Response(null,{status:303,headers:secureHeaders({location:'/admin','set-cookie':sessionCookie(token)})});
+    return new Response(null,{status:303,headers:secureHeaders({location:ownerAdminLocation(request,env),'set-cookie':sessionCookie(token)})});
   }
   if(url.pathname==='/__crm/owner-logout'&&request.method==='POST'){
     if(!sameOrigin(request))return json({ok:false,error:'origin_mismatch'},403);
-    if(mode==='invalid')return new Response(null,{status:303,headers:secureHeaders({location:'/__crm/owner-login','set-cookie':clearCookie()})});
-    const location=(mode==='access'||(mode==='hybrid'&&hasAccessPrincipal(request)))?accessLogoutLocation(request):'/__crm/owner-login';
+    if(mode==='invalid')return new Response(null,{status:303,headers:secureHeaders({location:ownerLoginLocation(request,env),'set-cookie':clearCookie()})});
+    const location=(mode==='access'||(mode==='hybrid'&&hasAccessPrincipal(request)))?accessLogoutLocation(request):ownerLoginLocation(request,env);
     return new Response(null,{status:303,headers:secureHeaders({location,'set-cookie':clearCookie()})});
   }
   return null;
@@ -161,7 +164,7 @@ export function handleOwnerPasswordBrowserGate(request,env){
   if(hasAccessPrincipal(request)||reservationInternalUser(request,env))return null;
   if(!configured(env))return html(loginPage('パスワードログインのsecret設定が不足しています。'),503);
   if(!rateLimiterConfigured(env))return html(loginPage('パスワードログインのrate limit設定が不足しています。'),503);
-  return new Response(null,{status:302,headers:secureHeaders({location:'/__crm/owner-login'})});
+  return new Response(null,{status:302,headers:secureHeaders({location:ownerLoginLocation(request,env)})});
 }
 export function ownerPasswordRequestAuthenticated(request,env){
   const mode=authMode(env);
@@ -177,7 +180,7 @@ export function ownerPasswordAuthHealth(env){const mode=authMode(env);return{
   owner_password_auth_enabled:passwordEnabled(env),
   owner_password_auth_fail_closed:true,
   owner_password_auth_header_spoof_protection:true,
-  owner_password_auth_rate_limit_required:mode==='password',
+  owner_password_auth_rate_limit_required:passwordMode(mode),
   owner_password_auth_rate_limit_configured:rateLimiterConfigured(env),
   owner_password_auth_reservation_internal_preserved:true,
   owner_password_auth_logout_post_endpoint:true,
