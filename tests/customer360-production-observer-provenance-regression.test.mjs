@@ -69,7 +69,7 @@ assert.ok(observer.includes('/actions/jobs/$release_job_id/logs'));
 assert.ok(observer.includes('AUTHORIZED_SHA='));
 assert.ok(observer.includes('CHECKOUT_SHA='));
 assert.ok(observer.includes('Current Version ID:'));
-const statusQuery='wrangler@4.33.1 deployments status --name customer-crm-api --json';
+const statusQuery='wrangler@4.36.0 deployments status --name customer-crm-api --json';
 assert.ok(observer.split(statusQuery).length-1>=2,'must compare Production version before and after health');
 assert.ok(observer.includes('current-production-deployment-after-health.json'));
 assert.ok(observer.includes('post_identity_result=SUPERSEDED'));
