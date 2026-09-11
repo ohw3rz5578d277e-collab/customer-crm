@@ -68,7 +68,7 @@ jobs:
 
       - name: Install local browser/build tooling
         run: |
-          npm install --no-save playwright@1.55.0 wrangler@4.33.1
+          npm install --no-save playwright@1.55.0 wrangler@4.36.0
           npx playwright install --with-deps chromium
 
       - name: Responsive browser regression
