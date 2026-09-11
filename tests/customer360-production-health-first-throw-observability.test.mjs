@@ -73,7 +73,7 @@ for (const token of [
   'actions: read','Verify triggering Production deploy provenance',"j.name==='Exact-SHA Production release gate'",
   "s=>s.name==='Deploy customer-crm-api'",'/actions/jobs/$release_job_id/logs','Current Version ID:',
   'RELEASE_MODE=\\(preflight\\|deploy\\)','SOURCE_MODE=preflight','SOURCE_MODE=deploy','SOURCE_MODE_PREFLIGHT',
-  'AUTHORIZED_SHA=','CHECKOUT_SHA=','wrangler@4.33.1 deployments status --name customer-crm-api --json',
+  'AUTHORIZED_SHA=','CHECKOUT_SHA=','wrangler@4.36.0 deployments status --name customer-crm-api --json',
   "Number(v.percentage)===100","active[0].version_id",'OBSERVER_ATTRIBUTION_RESULT=NOT_A_PRODUCTION_DEPLOY',
   'OBSERVER_ATTRIBUTION_RESULT=DEPLOY_NOT_REACHED','OBSERVER_ATTRIBUTION_RESULT=DEPLOY_FAILED',
   'OBSERVER_ATTRIBUTION_RESULT=DEPLOYMENT_ID_MISSING','OBSERVER_ATTRIBUTION_RESULT=SOURCE_SHA_MISMATCH',
@@ -97,7 +97,7 @@ assert.ok(curlPos>=0 && driftAfterAttributionPos>curlPos && attributionFallbackP
 
 assert.ok(observer.includes("format('customer360-production-observer-{0}', github.event.workflow_run.id)"));
 assert.ok(!observer.includes('group: customer-crm-production-deploy'));
-assert.ok(observer.split('wrangler@4.33.1 deployments status --name customer-crm-api --json').length-1>=2);
+assert.ok(observer.split('wrangler@4.36.0 deployments status --name customer-crm-api --json').length-1>=2);
 assert.ok(observer.includes("github.event.workflow_run.event == 'workflow_dispatch'"));
 assert.ok(observer.includes("github.event.workflow_run.head_branch == 'main'"));
 assert.ok(observer.includes('TRIGGER_SHA: ${{ github.event.workflow_run.head_sha }}'));

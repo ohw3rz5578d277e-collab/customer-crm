@@ -9,7 +9,7 @@ assert.ok(observer.includes("format('customer360-production-observer-{0}', githu
 assert.ok(!observer.includes('group: customer-crm-production-deploy'),'observer must never occupy the Production deploy concurrency pending slot');
 assert.ok(observer.includes('cancel-in-progress: false'),'observer must not cancel another observer');
 assert.ok(observer.includes("if: ${{ github.event.workflow_run.event == 'workflow_dispatch' && github.event.workflow_run.head_branch == 'main' }}"),'health observer job must remain canonical dispatch/main only');
-const statusQuery='wrangler@4.33.1 deployments status --name customer-crm-api --json';
+const statusQuery='wrangler@4.36.0 deployments status --name customer-crm-api --json';
 assert.ok(observer.split(statusQuery).length-1>=2,'immutable Production version must be queried before and after health');
 assert.ok(observer.includes('EXACT_MATCH_BEFORE_HEALTH'));
 assert.ok(observer.includes('current-production-deployment-after-health.json'));
