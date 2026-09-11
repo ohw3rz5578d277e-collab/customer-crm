@@ -27,8 +27,9 @@ function namedStepBlock(workflow,name){
   return workflow.slice(start,next===-1?workflow.length:next);
 }
 
-test('release config declares canonical Owner login Rate Limiting binding',()=>{
+test('release config activates hybrid Owner auth and declares canonical login Rate Limiting binding',()=>{
   const config=JSON.parse(fs.readFileSync('wrangler.jsonc','utf8'));
+  assert.equal(config.vars?.CRM_OWNER_AUTH_MODE,'hybrid','Production Owner auth mode must remain hybrid during staged activation');
   const limiter=(config.ratelimits||[]).find(x=>x.name===BINDING);
   assert.ok(limiter,`${BINDING} must be declared in wrangler.jsonc`);
   assert.match(String(limiter.namespace_id),/^\d+$/);
