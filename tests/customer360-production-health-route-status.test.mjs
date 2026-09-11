@@ -3,9 +3,16 @@ import fs from 'node:fs';
 import { patchHealth, handleProductionHealthRequest } from '../src/production-index-crm-customer360-entry.js';
 
 const source=fs.readFileSync(new URL('../src/production-index-crm-customer360-entry.js',import.meta.url),'utf8');
-assert.match(source,/handleProductionHealthRequest\(request,env\)/,'Production entry must own /health before downstream app.fetch');
+const principalCall='const effectiveRequest=await withOwnerPasswordPrincipal(request,env)';
+const healthCall='const ownedHealth=await handleProductionHealthRequest(effectiveRequest,env)';
+const downstreamCall='let response=await app.fetch(effectiveRequest,env,ctx)';
+assert.match(source,/handleProductionHealthRequest\(effectiveRequest,env\)/,'Production entry must own /health after Owner principal normalization');
 assert.match(source,/url\.pathname==='\/api\/crm-health-check'/,'Production entry must still own the legacy CRM health route');
-assert.ok(source.indexOf('const ownedHealth=await handleProductionHealthRequest(request,env)')<source.indexOf('let response=await app.fetch(request,env,ctx)'),'Production /health fast path must execute before downstream app.fetch');
+assert.ok(source.indexOf(principalCall)>=0,'Owner principal normalization missing');
+assert.ok(source.indexOf(healthCall)>=0,'Production /health fast path missing');
+assert.ok(source.indexOf(downstreamCall)>=0,'downstream app.fetch missing');
+assert.ok(source.indexOf(principalCall)<source.indexOf(healthCall),'Owner principal normalization must execute before Production /health fast path');
+assert.ok(source.indexOf(healthCall)<source.indexOf(downstreamCall),'Production /health fast path must execute before downstream app.fetch');
 assert.doesNotMatch(source,/if\(inheritedNotFound\)data=\{\};/,'Inherited 404 must not discard accumulated lower health markers');
 
 async function run(status,payload){
