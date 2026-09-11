@@ -2,6 +2,9 @@
   "name": "customer-crm-api",
   "main": "src/production-index-crm-customer360-entry.js",
   "compatibility_date": "2026-04-09",
+  "vars": {
+    "CRM_OWNER_AUTH_MODE": "hybrid"
+  },
   "d1_databases": [
     {
       "binding": "DB",
