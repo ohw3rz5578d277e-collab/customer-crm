@@ -74,10 +74,9 @@ test('canonical production deploy step selects Wrangler version that supports Ra
   assert.ok(match,'Deploy customer-crm-api must declare wranglerVersion');
   const selected=match[1].trim();
   if(/^\d+$/.test(selected)){
-    assert.ok(Number(selected)>=5||Number(selected)===4,'Production deploy must remain on a supported Wrangler major line');
     assert.equal(selected,'4','Canonical production deploy currently requires Wrangler v4 line');
   }else{
-    assert.match(selected(/^\d+\.\d+\.\d+$/),true);
+    assert.match(selected,/^\d+\.\d+\.\d+$/);
     assert.ok(versionAtLeast(selected,MIN_WRANGLER),`Deploy Wrangler ${selected} is below ${MIN_WRANGLER}`);
   }
 });
