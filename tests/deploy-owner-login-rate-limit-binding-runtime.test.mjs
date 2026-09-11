@@ -8,6 +8,25 @@ import { spawnSync } from 'node:child_process';
 const MIN_WRANGLER='4.36.0';
 const BINDING='CRM_OWNER_LOGIN_RATE_LIMITER';
 
+function versionAtLeast(actual,minimum){
+  const a=actual.split('.').map(Number);
+  const m=minimum.split('.').map(Number);
+  for(let i=0;i<Math.max(a.length,m.length);i++){
+    const av=a[i]||0,mv=m[i]||0;
+    if(av>mv)return true;
+    if(av<mv)return false;
+  }
+  return true;
+}
+
+function namedStepBlock(workflow,name){
+  const marker=`      - name: ${name}`;
+  const start=workflow.indexOf(marker);
+  assert.notEqual(start,-1,`workflow step not found: ${name}`);
+  const next=workflow.indexOf('\n      - name: ',start+marker.length);
+  return workflow.slice(start,next===-1?workflow.length:next);
+}
+
 test('release config declares canonical Owner login Rate Limiting binding',()=>{
   const config=JSON.parse(fs.readFileSync('wrangler.jsonc','utf8'));
   const limiter=(config.ratelimits||[]).find(x=>x.name===BINDING);
@@ -35,7 +54,7 @@ test(`Wrangler ${MIN_WRANGLER} dry-run recognizes Owner login Rate Limiting bind
     assert.doesNotMatch(output,/Unexpected fields found in top-level field:\s*["']ratelimits["']/i);
     assert.match(output,new RegExp(BINDING),`Wrangler dry-run did not expose ${BINDING}:\n${output}`);
     assert.ok(fs.readdirSync(outdir).length>0,'Wrangler dry-run produced no output artifact');
-    console.log(`OWNER_LOGIN_RATE_LIMIT_BINDING_DRY_RUN=PASS`);
+    console.log('OWNER_LOGIN_RATE_LIMIT_BINDING_DRY_RUN=PASS');
     console.log(`WRANGLER_MINIMUM=${MIN_WRANGLER}`);
     console.log('PRODUCTION_D1_WRITE=0');
     console.log('WORKER_DEPLOY=0');
@@ -46,8 +65,19 @@ test(`Wrangler ${MIN_WRANGLER} dry-run recognizes Owner login Rate Limiting bind
   }
 });
 
-test('canonical production deploy action selects current Wrangler v4 line',()=>{
+test('canonical production deploy step selects Wrangler version that supports Rate Limiting bindings',()=>{
   const workflow=fs.readFileSync('.github/workflows/deploy-cloudflare.yml','utf8');
-  assert.match(workflow,/wranglerVersion:\s*['"]4['"]/);
-  assert.match(workflow,/command:\s*deploy\b/);
+  const deploy=namedStepBlock(workflow,'Deploy customer-crm-api');
+  assert.match(deploy,/uses:\s*cloudflare\/wrangler-action@v4/);
+  assert.match(deploy,/command:\s*deploy\b/);
+  const match=deploy.match(/wranglerVersion:\s*['"]([^'"]+)['"]/);
+  assert.ok(match,'Deploy customer-crm-api must declare wranglerVersion');
+  const selected=match[1].trim();
+  if(/^\d+$/.test(selected)){
+    assert.ok(Number(selected)>=5||Number(selected)===4,'Production deploy must remain on a supported Wrangler major line');
+    assert.equal(selected,'4','Canonical production deploy currently requires Wrangler v4 line');
+  }else{
+    assert.match(selected(/^\d+\.\d+\.\d+$/),true);
+    assert.ok(versionAtLeast(selected,MIN_WRANGLER),`Deploy Wrangler ${selected} is below ${MIN_WRANGLER}`);
+  }
 });
