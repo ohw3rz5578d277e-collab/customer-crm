@@ -1,6 +1,6 @@
 import { reservationInternalUser, reservationHandoffBasePath } from './crm-reservation-browser-handoff.mjs';
 
-const BUILD='crm-owner-password-auth-20260911-09';
+const BUILD='crm-owner-password-auth-20260911-10';
 const COOKIE_NAME='crm_owner_session';
 const SESSION_MAX_AGE_SECONDS=60*60*12;
 const OWNER_EMAIL='ohw3rz5578d277e@gmail.com';
@@ -160,7 +160,7 @@ export function handleOwnerPasswordBrowserGate(request,env){
   const url=new URL(request.url);
   if(request.method!=='GET'||(url.pathname!=='/'&&url.pathname!=='/admin'))return null;
   if(mode==='invalid')return invalidModeResponse(request,env);
-  if(mode!=='password')return null;
+  if(mode==='access')return null;
   if(hasAccessPrincipal(request)||reservationInternalUser(request,env))return null;
   if(!configured(env))return html(loginPage('パスワードログインのsecret設定が不足しています。',ownerLoginLocation(request,env)),503);
   if(!rateLimiterConfigured(env))return html(loginPage('パスワードログインのrate limit設定が不足しています。',ownerLoginLocation(request,env)),503);
