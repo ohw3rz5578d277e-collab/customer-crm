@@ -117,7 +117,7 @@ jobs:
             exit 1
           }
 
-          npx --yes wrangler@4.33.1 deployments status --name customer-crm-api --json > /tmp/current-production-deployment.json
+          npx --yes wrangler@4.36.0 deployments status --name customer-crm-api --json > /tmp/current-production-deployment.json
           current_version_id="$(node - /tmp/current-production-deployment.json <<'NODE'
           const fs=require('fs');
           const v=JSON.parse(fs.readFileSync(process.argv[2],'utf8'));
@@ -211,7 +211,7 @@ jobs:
           post_identity_result=PASS
           post_version_id=MISSING
           if [[ "$source_guard" == PASS ]]; then
-            if npx --yes wrangler@4.33.1 deployments status --name customer-crm-api --json > /tmp/current-production-deployment-after-health.json; then
+            if npx --yes wrangler@4.36.0 deployments status --name customer-crm-api --json > /tmp/current-production-deployment-after-health.json; then
               post_version_id="$(node - /tmp/current-production-deployment-after-health.json <<'NODE'
           const fs=require('fs');
           const v=JSON.parse(fs.readFileSync(process.argv[2],'utf8'));
