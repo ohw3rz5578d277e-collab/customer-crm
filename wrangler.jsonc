@@ -11,6 +11,16 @@
       "migrations_table": "d1_migrations_managed"
     }
   ],
+  "ratelimits": [
+    {
+      "name": "CRM_OWNER_LOGIN_RATE_LIMITER",
+      "namespace_id": "2026091101",
+      "simple": {
+        "limit": 10,
+        "period": 60
+      }
+    }
+  ],
   "services": [
     {
       "binding": "LINE_SERVICE",
