@@ -73,7 +73,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          npm install --no-save playwright@1.55.0 wrangler@4.33.1
+          npm install --no-save playwright@1.55.0 wrangler@4.36.0
           npx playwright install --with-deps chromium
 
       - name: Validate release workflow and managed migration contract
@@ -190,7 +190,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          npm install --no-save playwright@1.55.0 wrangler@4.33.1
+          npm install --no-save playwright@1.55.0 wrangler@4.36.0
           npx playwright install --with-deps chromium
 
       - name: Validate production config and managed migration safety
