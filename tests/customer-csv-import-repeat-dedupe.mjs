@@ -115,6 +115,12 @@ test('health declares exact-only import matching and no fuzzy merge',()=>{
   assert.equal(h.customer_csv_import_fuzzy_match,false);
 });
 
+test('commit dedupes against an existing CRM reservation on the same customer and shoot date',()=>{
+  const src=fs.readFileSync('src/crm-customer-csv-import.mjs','utf8');
+  assert.match(src,/WHERE customer_id=\? AND shoot_date=\? LIMIT 1/);
+  assert.match(src,/deduped_by:'customer_id\+shoot_date'/);
+});
+
 test('import implementation never reduces an existing repeat_count',()=>{
   const src=fs.readFileSync('src/crm-customer-csv-import.mjs','utf8');
   assert.match(src,/const count=Math\.max\(knownCount,dates\.length\)/);
