@@ -232,6 +232,21 @@ await test('soft-deleted customers and reservation mappings are excluded from CS
   assert.match(src,/csv_event_key_soft_deleted_requires_review/);
 });
 
+await test('soft-deleted same-date history from any source fails closed',()=>{
+  const src=fs.readFileSync('src/crm-customer-csv-import.mjs','utf8');
+  assert.match(src,/csv_same_date_soft_deleted_requires_review/);
+  assert.match(src,/WHERE customer_id=\? AND shoot_date=\? AND COALESCE\(deleted_at,''\)<>'' LIMIT 1/);
+});
+
+await test('all soft-delete conflicts are preflighted before first new-customer write',()=>{
+  const src=fs.readFileSync('src/crm-customer-csv-import.mjs','utf8');
+  const preflight=src.indexOf('await preflightGroupSoftDeleteConflicts(env.DB,group,resolved.customer_id);');
+  const create=src.indexOf('resolved=await createCustomerWithFirstShoot(env.DB,group);');
+  assert.ok(preflight>=0&&create>preflight);
+  assert.match(src,/for\(const shoot of group\.shoots\)/);
+  assert.match(src,/csv_event_key_soft_deleted_requires_review/);
+});
+
 await test('explicit mapping is constrained to same-name preview candidates',()=>{
   const src=fs.readFileSync('src/crm-customer-csv-import.mjs','utf8');
   assert.match(src,/mapped_customer_id_not_in_preview_candidates/);
