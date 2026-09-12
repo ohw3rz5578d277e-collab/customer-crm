@@ -4,11 +4,13 @@ const BUILD='crm-customer-csv-import-20260912-01';
 const SOURCE='customer_csv_import';
 const MAX_CSV_BYTES=2_500_000;
 const MAX_ROWS=5000;
+const PREVIEW_RECEIPT_SECONDS=10*60;
 const CUSTOMER_ID_RE=/^\d{8}$/;
+const encoder=new TextEncoder();
 
 function text(v){return v==null?'':String(v).trim()}
 function json(data,status=200){return new Response(JSON.stringify(data,null,2),{status,headers:{'content-type':'application/json; charset=utf-8','cache-control':'no-store, no-cache, must-revalidate, max-age=0'}})}
-function sameOrigin(request){const origin=text(request.headers.get('origin'));if(!origin)return true;try{return new URL(origin).origin===new URL(request.url).origin}catch{return false}}
+function sameOrigin(request){const origin=text(request.headers.get('origin'));if(!origin)return false;try{return new URL(origin).origin===new URL(request.url).origin}catch{return false}}
 function normalizeHeader(v){return text(v).normalize('NFKC').replace(/[\s　\r\n]+/g,'').replace(/[①１]/g,'1').replace(/[②２]/g,'2').replace(/[③３]/g,'3').replace(/[（）()]/g,'').toLowerCase()}
 export function normalizeImportName(v){return text(v).normalize('NFKC').toLowerCase().replace(/[\s　・･.．,，、()（）\[\]［］【】「」『』]/g,'')}
 function displayName(v){return text(v).normalize('NFKC').replace(/[\s　]+/g,' ').trim()}
@@ -131,6 +133,7 @@ export function analyzeCsvImport(csvText){
   const headers=(matrix[headerIndex]||[]).map(text);
   const mappedHeaders=new Set(headers.map(h=>HEADER_KEY.get(normalizeHeader(h))).filter(Boolean));
   if(!mappedHeaders.has('name'))throw new Error('csv_name_column_required');
+  if(!mappedHeaders.has('shoot_date'))throw new Error('csv_shoot_date_column_required');
 
   const groups=new Map(),errors=[],warnings=[];
   let duplicateRows=0,validRows=0;
@@ -140,8 +143,9 @@ export function analyzeCsvImport(csvText){
     const originalDate=text(raw.shoot_date);
     if(!nameKey&&!originalDate)continue;
     if(!nameKey){errors.push({line,error:'customer_name_required'});continue}
+    if(!originalDate){errors.push({line,error:'shoot_date_required'});continue}
     const shootDate=normalizeImportDate(originalDate);
-    if(originalDate&&!shootDate){errors.push({line,error:'invalid_shoot_date',value:originalDate});continue}
+    if(!shootDate){errors.push({line,error:'invalid_shoot_date',value:originalDate});continue}
     const customerId=text(raw.customer_id);
     if(customerId&&!CUSTOMER_ID_RE.test(customerId)){errors.push({line,error:'invalid_customer_id',value:customerId});continue}
 
@@ -156,8 +160,6 @@ export function analyzeCsvImport(csvText){
     if(shootDate){
       if(group.shoots.has(shootDate)){duplicateRows++;group.shoots.set(shootDate,mergeSameShoot(group.shoots.get(shootDate),normalized))}
       else group.shoots.set(shootDate,normalized);
-    }else{
-      group.customer_only_rows.push(normalized);
     }
   }
 
@@ -188,7 +190,7 @@ export function analyzeCsvImport(csvText){
     });
   }
   resultGroups.sort((a,b)=>a.name.localeCompare(b.name,'ja-JP'));
-  if(!mappedHeaders.has('shoot_date'))warnings.push({warning:'shoot_date_column_not_found',message:'撮影日列がないため、リピーター判定は行えません。'});
+
 
   return{
     headers,
@@ -207,7 +209,28 @@ export function analyzeCsvImport(csvText){
 async function all(db,sql,...params){let q=db.prepare(sql);if(params.length)q=q.bind(...params);const r=await q.all();return r?.results||[]}
 async function first(db,sql,...params){let q=db.prepare(sql);if(params.length)q=q.bind(...params);return await q.first()}
 async function run(db,sql,...params){let q=db.prepare(sql);if(params.length)q=q.bind(...params);return await q.run()}
-async function sha256Hex(value){const data=new TextEncoder().encode(String(value));const out=new Uint8Array(await crypto.subtle.digest('SHA-256',data));return [...out].map(x=>x.toString(16).padStart(2,'0')).join('')}
+async function sha256Hex(value){const data=encoder.encode(String(value));const out=new Uint8Array(await crypto.subtle.digest('SHA-256',data));return [...out].map(x=>x.toString(16).padStart(2,'0')).join('')}
+function b64url(bytes){let out='';for(const b of bytes)out+=String.fromCharCode(b);return btoa(out).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'')}
+function fromB64url(value){const raw=String(value||'').replace(/-/g,'+').replace(/_/g,'/');const padded=raw+'='.repeat((4-raw.length%4)%4);try{const s=atob(padded),out=new Uint8Array(s.length);for(let i=0;i<s.length;i++)out[i]=s.charCodeAt(i);return out}catch{return new Uint8Array()}}
+function safeEqual(a,b){if(a.length!==b.length)return false;let diff=0;for(let i=0;i<a.length;i++)diff|=a[i]^b[i];return diff===0}
+async function hmac(value,secret){const key=await crypto.subtle.importKey('raw',encoder.encode(secret),{name:'HMAC',hash:'SHA-256'},false,['sign']);return new Uint8Array(await crypto.subtle.sign('HMAC',key,encoder.encode(value)))}
+async function issuePreviewReceipt(env,csvText){
+  const secret=text(env?.CRM_OWNER_SESSION_SECRET);if(!secret)return'';
+  const payload={v:1,build:BUILD,csv_sha256:await sha256Hex(csvText),exp:Math.floor(Date.now()/1000)+PREVIEW_RECEIPT_SECONDS};
+  const encoded=b64url(encoder.encode(JSON.stringify(payload))),sig=b64url(await hmac(encoded,secret));
+  return encoded+'.'+sig;
+}
+async function verifyPreviewReceipt(env,csvText,receipt){
+  const secret=text(env?.CRM_OWNER_SESSION_SECRET);if(!secret)return false;
+  const parts=text(receipt).split('.');if(parts.length!==2)return false;
+  const [encoded,sig]=parts;
+  const expected=await hmac(encoded,secret);if(!safeEqual(fromB64url(sig),expected))return false;
+  try{
+    const payload=JSON.parse(new TextDecoder().decode(fromB64url(encoded)));
+    if(payload?.v!==1||payload?.build!==BUILD||Number(payload?.exp)<=Math.floor(Date.now()/1000))return false;
+    return payload.csv_sha256===await sha256Hex(csvText);
+  }catch{return false}
+}
 async function importEventKey(nameKey,shootDate){return 'csv:v1:'+await sha256Hex(nameKey+'\n'+shootDate)}
 function changedRows(r){return Number(r?.meta?.changes??r?.changes??r?.rowsAffected??0)}
 
@@ -392,8 +415,12 @@ export async function handleCustomerCsvImport(request,env,{authorized=false}={})
   let analysis;try{analysis=analyzeCsvImport(csvText)}catch(error){return json({ok:false,error:String(error?.message||error)},400)}
   if(url.pathname.endsWith('/preview')){
     const preview=await enrichPreview(env,analysis);
-    return json({ok:preview.errors.length===0,build:BUILD,source:SOURCE,...preview});
+    if(preview.errors.length)return json({ok:false,build:BUILD,source:SOURCE,...preview},400);
+    const previewReceipt=await issuePreviewReceipt(env,csvText);
+    if(!previewReceipt)return json({ok:false,error:'preview_receipt_unavailable'},503);
+    return json({ok:true,build:BUILD,source:SOURCE,preview_receipt:previewReceipt,preview_receipt_expires_in:PREVIEW_RECEIPT_SECONDS,...preview});
   }
+  if(!(await verifyPreviewReceipt(env,csvText,body?.preview_receipt)))return json({ok:false,error:'valid_preview_receipt_required'},409);
   const mappings=body?.mappings&&typeof body.mappings==='object'?body.mappings:{};
   try{
     const result=await commitImport(env,analysis,mappings);
@@ -409,9 +436,12 @@ export function customerCsvImportHealth(){
     customer_csv_import_build:BUILD,
     customer_csv_import_owner_only:true,
     customer_csv_import_preview_before_commit:true,
+    customer_csv_import_preview_receipt_required:true,
+    customer_csv_import_preview_receipt_seconds:PREVIEW_RECEIPT_SECONDS,
     customer_csv_import_name_match:'reservation_csv_normalized_name_exact_grouping',
     customer_csv_import_reservation_csv_compatible:true,
     customer_csv_import_reservation_csv_header_scan_rows:50,
+    customer_csv_import_shoot_date_required:true,
     customer_csv_import_reservation_csv_amount_rules:true,
     customer_csv_import_reservation_csv_genre_rules:true,
     customer_csv_import_same_day_dedupe:true,
@@ -432,21 +462,21 @@ export function injectCustomerCsvImport(html){
 #crmCsvImportOpen{position:fixed;right:16px;bottom:88px;z-index:2147481200;border:0;border-radius:999px;background:#0f172a;color:#fff;padding:11px 15px;font:800 13px/1 -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans JP",sans-serif;box-shadow:0 10px 28px rgba(15,23,42,.24)}
 .crm-csv-sheet{position:fixed;inset:0;z-index:2147483000;display:none;background:rgba(15,23,42,.42);align-items:flex-end;justify-content:center}.crm-csv-sheet.open{display:flex}.crm-csv-panel{width:min(760px,100%);max-height:92dvh;overflow:auto;background:#fff;border-radius:24px 24px 0 0;padding:18px 18px calc(24px + env(safe-area-inset-bottom));font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans JP",sans-serif;color:#0f172a}.crm-csv-head{display:flex;align-items:center;justify-content:space-between;gap:12px}.crm-csv-head h2{margin:0;font-size:21px}.crm-csv-close{border:0;background:#f1f5f9;border-radius:999px;width:40px;height:40px;font-size:20px}.crm-csv-box{margin-top:14px;border:1px solid #e2e8f0;border-radius:16px;padding:13px}.crm-csv-file{width:100%;font-size:16px}.crm-csv-encoding{width:100%;min-height:42px;border:1px solid #cbd5e1;border-radius:11px;background:#fff;padding:0 10px;margin-top:9px}.crm-csv-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}.crm-csv-btn{border:0;border-radius:13px;min-height:44px;padding:0 14px;font-weight:850;background:#0f172a;color:#fff}.crm-csv-btn.secondary{background:#eef2f7;color:#0f172a}.crm-csv-btn:disabled{opacity:.45}.crm-csv-summary{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:12px}.crm-csv-stat{background:#f8fafc;border-radius:13px;padding:10px}.crm-csv-stat span{display:block;color:#64748b;font-size:11px;font-weight:750}.crm-csv-stat b{font-size:18px}.crm-csv-group{border-top:1px solid #e2e8f0;padding:10px 0}.crm-csv-group:first-child{border-top:0}.crm-csv-name{font-weight:900}.crm-csv-meta{color:#64748b;font-size:12px;margin-top:3px}.crm-csv-select{margin-top:7px;width:100%;min-height:42px;border:1px solid #cbd5e1;border-radius:11px;background:#fff;padding:0 10px}.crm-csv-repeat{color:#047857;font-weight:900}.crm-csv-warn{background:#fffbeb;border:1px solid #fde68a;border-radius:12px;padding:9px;margin-top:8px;color:#92400e;font-size:12px}.crm-csv-error{background:#fff1f2;border:1px solid #fecdd3;border-radius:12px;padding:9px;margin-top:8px;color:#9f1239;font-size:12px}@media(min-width:768px){.crm-csv-sheet{align-items:center;padding:24px}.crm-csv-panel{border-radius:24px;max-height:88vh}.crm-csv-summary{grid-template-columns:repeat(5,minmax(0,1fr))}}</style>`;
   const script=`<script id="crm-customer-csv-import-script">(()=>{if(window.__crmCustomerCsvImport)return;window.__crmCustomerCsvImport=1;
-let csvText='',preview=null,csvBuffer=null;
+let csvText='',preview=null,csvBuffer=null,previewReceipt='';
 function esc(v){return String(v==null?'':v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 function sheet(){return document.getElementById('crmCsvSheet')}
 function status(html){const el=document.getElementById('crmCsvStatus');if(el)el.innerHTML=html}
 function open(){sheet()?.classList.add('open')}function close(){sheet()?.classList.remove('open')}
 function decodeCsv(){if(!csvBuffer)return'';const enc=document.getElementById('crmCsvEncoding')?.value||'utf-8';try{return new TextDecoder(enc).decode(csvBuffer)}catch(_){return new TextDecoder('utf-8').decode(csvBuffer)}}
 async function api(path,body){const r=await fetch(path,{method:'POST',credentials:'same-origin',headers:{'content-type':'application/json'},body:JSON.stringify(body)});const j=await r.json().catch(()=>({ok:false,error:'invalid_response'}));if(!r.ok&&r.status!==207)throw Object.assign(new Error(j.error||'request_failed'),{data:j});return j}
-function renderPreview(p){preview=p;const summary=document.getElementById('crmCsvSummary');summary.innerHTML='<div class="crm-csv-summary">'+[
+function renderPreview(p){preview=p;previewReceipt=p.preview_receipt||'';const summary=document.getElementById('crmCsvSummary');summary.innerHTML='<div class="crm-csv-summary">'+[
 ['CSV行',p.row_count],['顧客',p.customer_count],['同日重複除外',p.duplicate_same_day_rows],['リピーター',p.repeater_count],['エラー',p.errors?.length||0]
 ].map(x=>'<div class="crm-csv-stat"><span>'+x[0]+'</span><b>'+x[1]+'</b></div>').join('')+'</div>';
 const box=document.getElementById('crmCsvGroups');box.innerHTML=(p.groups||[]).map(g=>{const candidates=g.existing_candidates||[];const opts=['<option value="">新規顧客として取り込む</option>'].concat(candidates.map(c=>'<option value="'+esc(c.customer_id)+'">既存：'+esc(c.name)+' / '+esc(c.customer_id)+'</option>')).join('');return '<div class="crm-csv-group" data-name-key="'+esc(g.name_key)+'"><div class="crm-csv-name">'+esc(g.name)+(g.is_repeater?' <span class="crm-csv-repeat">リピーター</span>':'')+'</div><div class="crm-csv-meta">撮影 '+g.shoot_count+'回'+(g.shoot_dates?.length?' / '+g.shoot_dates.map(esc).join('・'):' / 撮影日なし')+(g.duplicate_same_day_rows?' / 同日重複 '+g.duplicate_same_day_rows+'行除外':'')+'</div>'+(g.csv_customer_id?'<div class="crm-csv-meta">CSV Customer ID：'+esc(g.csv_customer_id)+'</div>':(candidates.length?'<select class="crm-csv-select" data-map-key="'+esc(g.name_key)+'">'+opts+'</select>':''))+(g.prior_csv_mapping_ambiguous?'<div class="crm-csv-warn">過去CSV取込のCustomer IDが複数あります。既存顧客を選択してください。</div>':'')+'</div>'}).join('');
 let msg='プレビュー完了。内容を確認してから「取込を確定」を押してください。';if(p.errors?.length)msg='<div class="crm-csv-error">'+p.errors.slice(0,8).map(e=>'行 '+esc(e.line||'-')+'：'+esc(e.error)).join('<br>')+'</div>';status(msg);document.getElementById('crmCsvCommit').disabled=!!(p.errors?.length)}
 async function previewCsv(){csvText=decodeCsv();if(!csvText){status('<div class="crm-csv-warn">CSVファイルを選択してください。</div>');return}status('確認中…');try{renderPreview(await api('/api/customer-csv-import/preview',{csv_text:csvText}))}catch(e){status('<div class="crm-csv-error">'+esc(e.message)+'</div>')}}
-async function commitCsv(){if(!preview||!csvText)return;const mappings={};document.querySelectorAll('[data-map-key]').forEach(el=>{if(el.value)mappings[el.dataset.mapKey]=el.value});const btn=document.getElementById('crmCsvCommit');btn.disabled=true;status('取り込み中…');try{const r=await api('/api/customer-csv-import/commit',{csv_text:csvText,mappings});const failures=(r.results||[]).filter(x=>!x.ok);status((r.ok?'<div class="crm-csv-warn" style="background:#ecfdf5;border-color:#a7f3d0;color:#065f46">取込完了：顧客 '+r.customers_total+'人 / 新規 '+r.customers_created+'人 / 撮影 '+r.shoots_created+'件 / リピーター '+r.repeater_customers+'人</div>':'<div class="crm-csv-error">一部取込に失敗しました：'+failures.map(x=>esc(x.name)+' '+esc(x.error)).join('<br>')+'</div>'));if(r.ok){window.dispatchEvent(new CustomEvent('crm-customers-changed'));setTimeout(()=>location.reload(),900)}}catch(e){status('<div class="crm-csv-error">'+esc(e.message)+'</div>');btn.disabled=false}}
-function boot(){if(document.getElementById('crmCsvSheet'))return;const openBtn=document.createElement('button');openBtn.id='crmCsvImportOpen';openBtn.type='button';openBtn.textContent='予約CSV取込';openBtn.onclick=open;document.body.appendChild(openBtn);const modal=document.createElement('div');modal.id='crmCsvSheet';modal.className='crm-csv-sheet';modal.innerHTML='<div class="crm-csv-panel"><div class="crm-csv-head"><h2>予約CSVから顧客取込</h2><button class="crm-csv-close" type="button">×</button></div><div class="crm-csv-box"><b>CSVファイル</b><div class="crm-csv-meta">予約管理アプリと同じ予約CSVをそのまま選べます。同じ顧客名＋同じ撮影日は重複として1回、撮影日が違えばリピーターとして集計します。</div><input id="crmCsvFile" class="crm-csv-file" type="file" accept=".csv,text/csv"><select id="crmCsvEncoding" class="crm-csv-encoding"><option value="utf-8">UTF-8</option><option value="shift_jis">Shift_JIS（Excel等）</option></select><div class="crm-csv-actions"><button id="crmCsvPreview" class="crm-csv-btn secondary" type="button">内容を確認</button><button id="crmCsvCommit" class="crm-csv-btn" type="button" disabled>取込を確定</button></div><div id="crmCsvStatus" class="crm-csv-meta" style="margin-top:10px"></div><div id="crmCsvSummary"></div><div id="crmCsvGroups" style="margin-top:10px"></div></div></div>';modal.querySelector('.crm-csv-close').onclick=close;modal.addEventListener('click',e=>{if(e.target===modal)close()});document.body.appendChild(modal);document.getElementById('crmCsvFile').addEventListener('change',async e=>{const file=e.target.files?.[0];csvBuffer=file?await file.arrayBuffer():null;csvText='';preview=null;document.getElementById('crmCsvCommit').disabled=true;status(file?'選択：'+esc(file.name):'')});document.getElementById('crmCsvEncoding').addEventListener('change',()=>{if(csvBuffer){csvText=decodeCsv();preview=null;document.getElementById('crmCsvCommit').disabled=true;status('文字コードを変更しました。もう一度「内容を確認」を押してください。')}});document.getElementById('crmCsvPreview').onclick=previewCsv;document.getElementById('crmCsvCommit').onclick=commitCsv}
+async function commitCsv(){if(!preview||!csvText||!previewReceipt)return;const mappings={};document.querySelectorAll('[data-map-key]').forEach(el=>{if(el.value)mappings[el.dataset.mapKey]=el.value});const btn=document.getElementById('crmCsvCommit');btn.disabled=true;status('取り込み中…');try{const r=await api('/api/customer-csv-import/commit',{csv_text:csvText,preview_receipt:previewReceipt,mappings});const failures=(r.results||[]).filter(x=>!x.ok);status((r.ok?'<div class="crm-csv-warn" style="background:#ecfdf5;border-color:#a7f3d0;color:#065f46">取込完了：顧客 '+r.customers_total+'人 / 新規 '+r.customers_created+'人 / 撮影 '+r.shoots_created+'件 / リピーター '+r.repeater_customers+'人</div>':'<div class="crm-csv-error">一部取込に失敗しました：'+failures.map(x=>esc(x.name)+' '+esc(x.error)).join('<br>')+'</div>'));if(r.ok){window.dispatchEvent(new CustomEvent('crm-customers-changed'));setTimeout(()=>location.reload(),900)}}catch(e){status('<div class="crm-csv-error">'+esc(e.message)+'</div>');btn.disabled=false}}
+function boot(){if(document.getElementById('crmCsvSheet'))return;const openBtn=document.createElement('button');openBtn.id='crmCsvImportOpen';openBtn.type='button';openBtn.textContent='予約CSV取込';openBtn.onclick=open;document.body.appendChild(openBtn);const modal=document.createElement('div');modal.id='crmCsvSheet';modal.className='crm-csv-sheet';modal.innerHTML='<div class="crm-csv-panel"><div class="crm-csv-head"><h2>予約CSVから顧客取込</h2><button class="crm-csv-close" type="button">×</button></div><div class="crm-csv-box"><b>CSVファイル</b><div class="crm-csv-meta">予約管理アプリと同じ予約CSVをそのまま選べます。同じ顧客名＋同じ撮影日は重複として1回、撮影日が違えばリピーターとして集計します。</div><input id="crmCsvFile" class="crm-csv-file" type="file" accept=".csv,text/csv"><select id="crmCsvEncoding" class="crm-csv-encoding"><option value="utf-8">UTF-8</option><option value="shift_jis">Shift_JIS（Excel等）</option></select><div class="crm-csv-actions"><button id="crmCsvPreview" class="crm-csv-btn secondary" type="button">内容を確認</button><button id="crmCsvCommit" class="crm-csv-btn" type="button" disabled>取込を確定</button></div><div id="crmCsvStatus" class="crm-csv-meta" style="margin-top:10px"></div><div id="crmCsvSummary"></div><div id="crmCsvGroups" style="margin-top:10px"></div></div></div>';modal.querySelector('.crm-csv-close').onclick=close;modal.addEventListener('click',e=>{if(e.target===modal)close()});document.body.appendChild(modal);document.getElementById('crmCsvFile').addEventListener('change',async e=>{const file=e.target.files?.[0];csvBuffer=file?await file.arrayBuffer():null;csvText='';preview=null;previewReceipt='';document.getElementById('crmCsvCommit').disabled=true;status(file?'選択：'+esc(file.name):'')});document.getElementById('crmCsvEncoding').addEventListener('change',()=>{if(csvBuffer){csvText=decodeCsv();preview=null;previewReceipt='';document.getElementById('crmCsvCommit').disabled=true;status('文字コードを変更しました。もう一度「内容を確認」を押してください。')}});document.getElementById('crmCsvPreview').onclick=previewCsv;document.getElementById('crmCsvCommit').onclick=commitCsv}
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot);else boot();
 })();<\/script>`;
   return source.includes('</head>')?source.replace('</head>',style+'</head>').replace('</body>',script+'</body>'):source+style+script;
