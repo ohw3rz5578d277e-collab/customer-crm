@@ -292,13 +292,28 @@ function pickMetadata(group){
     memo:text(group.memo||firstShoot.memo)
   };
 }
-async function preflightGroupSoftDeleteConflicts(db,group,customerId=''){
+async function preflightGroupReservationConflicts(db,group,customerId=''){
+  const activeCustomerIds=new Set();
   for(const shoot of group.shoots){
     const eventKey=await importEventKey(group.name_key,shoot.shoot_date);
     const deletedEvent=await first(db,`SELECT customer_id FROM customer_reservations
       WHERE event_key=? AND COALESCE(deleted_at,'')<>''
       LIMIT 1`,eventKey);
     if(deletedEvent){const e=new Error('csv_event_key_soft_deleted_requires_review');e.statusCode=409;e.event_key=eventKey;throw e}
+
+    const activeEvent=await first(db,`SELECT customer_id FROM customer_reservations
+      WHERE event_key=? AND COALESCE(deleted_at,'')=''
+      LIMIT 1`,eventKey);
+    if(activeEvent){
+      const ownerId=text(activeEvent.customer_id);
+      if(!ownerId){const e=new Error('csv_event_key_customer_requires_review');e.statusCode=409;e.event_key=eventKey;throw e}
+      activeCustomerIds.add(ownerId);
+      if(customerId&&ownerId!==customerId){
+        const e=new Error('same_name_same_date_already_linked_to_different_customer');
+        e.statusCode=409;e.event_key=eventKey;e.customer_id=ownerId;throw e;
+      }
+    }
+
     if(customerId){
       const deletedSameDate=await first(db,`SELECT event_key,source FROM customer_reservations
         WHERE customer_id=? AND shoot_date=? AND COALESCE(deleted_at,'')<>''
@@ -309,6 +324,15 @@ async function preflightGroupSoftDeleteConflicts(db,group,customerId=''){
       }
     }
   }
+  if(activeCustomerIds.size>1){
+    const e=new Error('csv_event_key_customer_ambiguous');e.statusCode=409;throw e;
+  }
+  const activeCustomerId=[...activeCustomerIds][0]||'';
+  if(!customerId&&activeCustomerId){
+    const activeCustomer=await customerById(db,activeCustomerId);
+    if(!activeCustomer){const e=new Error('csv_event_key_customer_inactive_requires_review');e.statusCode=409;throw e}
+  }
+  return{active_customer_id:activeCustomerId};
 }
 async function createCustomerWithFirstShoot(db,group){
   const firstShoot=group.shoots[0];
@@ -376,19 +400,93 @@ async function fillBlankCustomerMetadata(db,customerId,group){
     m.name,m.furigana||null,m.phone||null,m.email||null,m.address||null,m.memo||null,customerId);
 }
 async function recalcRepeatStats(db,customerId){
-  const [rows,current]=await Promise.all([
-    all(db,`SELECT shoot_date,status FROM customer_reservations WHERE customer_id=? AND shoot_date IS NOT NULL AND trim(shoot_date)<>'' AND COALESCE(deleted_at,'')=''`,customerId),
-    first(db,`SELECT repeat_count,first_shoot_date,last_shoot_date FROM customers WHERE customer_id=? LIMIT 1`,customerId)
-  ]);
-  const dates=[...new Set(rows.filter(r=>!/(?:cancel|キャンセル)/i.test(text(r.status))).map(r=>normalizeImportDate(r.shoot_date)).filter(Boolean))].sort();
+  const row=await first(db,`SELECT
+      COUNT(DISTINCT CASE
+        WHEN shoot_date IS NOT NULL AND trim(shoot_date)<>''
+          AND lower(COALESCE(status,'')) NOT LIKE '%cancel%'
+          AND COALESCE(status,'') NOT LIKE '%キャンセル%'
+        THEN shoot_date END) AS repeat_count,
+      COALESCE(SUM(CASE
+        WHEN lower(COALESCE(status,'')) NOT LIKE '%cancel%'
+          AND COALESCE(status,'') NOT LIKE '%キャンセル%'
+        THEN COALESCE(total_amount,0) ELSE 0 END),0) AS total_revenue,
+      COALESCE(AVG(CASE
+        WHEN lower(COALESCE(status,'')) NOT LIKE '%cancel%'
+          AND COALESCE(status,'') NOT LIKE '%キャンセル%'
+          AND COALESCE(total_amount,0)<>0
+        THEN total_amount END),0) AS avg_order_value,
+      MIN(CASE
+        WHEN lower(COALESCE(status,'')) NOT LIKE '%cancel%'
+          AND COALESCE(status,'') NOT LIKE '%キャンセル%'
+        THEN shoot_date END) AS first_shoot_date,
+      MAX(CASE
+        WHEN lower(COALESCE(status,'')) NOT LIKE '%cancel%'
+          AND COALESCE(status,'') NOT LIKE '%キャンセル%'
+        THEN shoot_date END) AS last_shoot_date,
+      COUNT(DISTINCT CASE
+        WHEN lower(COALESCE(status,'')) NOT LIKE '%cancel%'
+          AND COALESCE(status,'') NOT LIKE '%キャンセル%'
+          AND shoot_date>=date('now','-90 day')
+        THEN shoot_date END) AS repeat_count_90d,
+      COUNT(DISTINCT CASE
+        WHEN lower(COALESCE(status,'')) NOT LIKE '%cancel%'
+          AND COALESCE(status,'') NOT LIKE '%キャンセル%'
+          AND shoot_date>=date('now','-365 day')
+        THEN shoot_date END) AS repeat_count_365d,
+      COUNT(DISTINCT CASE
+        WHEN lower(COALESCE(status,'')) NOT LIKE '%cancel%'
+          AND COALESCE(status,'') NOT LIKE '%キャンセル%'
+          AND shoot_date>=date('now','-730 day')
+        THEN shoot_date END) AS repeat_count_730d,
+      GROUP_CONCAT(DISTINCT CASE
+        WHEN lower(COALESCE(status,'')) NOT LIKE '%cancel%'
+          AND COALESCE(status,'') NOT LIKE '%キャンセル%'
+          AND COALESCE(genre,'')<>''
+        THEN genre END) AS genre_history
+    FROM customer_reservations
+    WHERE customer_id=? AND COALESCE(deleted_at,'')=''`,customerId);
+  const current=await first(db,`SELECT repeat_count,first_shoot_date,last_shoot_date FROM customers WHERE customer_id=? LIMIT 1`,customerId);
   const knownCount=Math.max(0,Number(current?.repeat_count||0)||0);
-  const count=Math.max(knownCount,dates.length);
-  const firstCandidates=[normalizeImportDate(current?.first_shoot_date),dates[0]||''].filter(Boolean).sort();
-  const lastCandidates=[normalizeImportDate(current?.last_shoot_date),dates.at(-1)||''].filter(Boolean).sort();
+  const activeCount=Math.max(0,Number(row?.repeat_count||0)||0);
+  const count=Math.max(knownCount,activeCount);
+  const firstCandidates=[normalizeImportDate(current?.first_shoot_date),normalizeImportDate(row?.first_shoot_date)].filter(Boolean).sort();
+  const lastCandidates=[normalizeImportDate(current?.last_shoot_date),normalizeImportDate(row?.last_shoot_date)].filter(Boolean).sort();
   const firstShoot=firstCandidates[0]||null,lastShoot=lastCandidates.at(-1)||null;
-  await run(db,`UPDATE customers SET repeat_count=?,first_shoot_date=?,last_shoot_date=?,updated_at=CURRENT_TIMESTAMP WHERE customer_id=?`,
-    count,firstShoot,lastShoot,customerId);
-  return{repeat_count:count,is_repeater:count>=2,first_shoot_date:firstShoot||'',last_shoot_date:lastShoot||''};
+  const dormant=await first(db,`SELECT CASE WHEN ? IS NULL OR ?='' THEN 0 ELSE CAST(julianday('now')-julianday(?) AS INTEGER) END AS dormant_days`,lastShoot,lastShoot,lastShoot);
+  await run(db,`UPDATE customers SET
+      repeat_count=?,
+      repeat_count_1y=?,
+      repeat_count_90d=?,
+      repeat_count_365d=?,
+      repeat_count_730d=?,
+      total_revenue=?,
+      avg_order_value=?,
+      first_shoot_date=?,
+      last_shoot_date=?,
+      dormant_days=?,
+      genre_history=COALESCE(NULLIF(?,''),genre_history),
+      updated_at=CURRENT_TIMESTAMP
+    WHERE customer_id=?`,
+    count,
+    Number(row?.repeat_count_365d||0)||0,
+    Number(row?.repeat_count_90d||0)||0,
+    Number(row?.repeat_count_365d||0)||0,
+    Number(row?.repeat_count_730d||0)||0,
+    Number(row?.total_revenue||0)||0,
+    Number(row?.avg_order_value||0)||0,
+    firstShoot,lastShoot,
+    Number(dormant?.dormant_days||0)||0,
+    text(row?.genre_history)||null,
+    customerId);
+  return{
+    repeat_count:count,
+    is_repeater:count>=2,
+    first_shoot_date:firstShoot||'',
+    last_shoot_date:lastShoot||'',
+    total_revenue:Number(row?.total_revenue||0)||0,
+    avg_order_value:Number(row?.avg_order_value||0)||0,
+    genre_history:text(row?.genre_history)
+  };
 }
 async function insertShoot(db,customerId,group,shoot){
   const eventKey=await importEventKey(group.name_key,shoot.shoot_date);
@@ -412,10 +510,24 @@ async function insertShoot(db,customerId,group,shoot){
   const reservationId='CSV-'+(await sha256Hex(group.name_key+'\n'+shoot.shoot_date)).slice(0,20).toUpperCase();
   const rawJson=JSON.stringify({import_build:BUILD,name_key:group.name_key,source_rows:shoot._source_rows||[],dedupe_rule:'same_normalized_name+same_shoot_date',raw:shoot});
   if(existing)return{created:false,event_key:eventKey,deduped_by:'event_key'};
-  await run(db,`INSERT INTO customer_reservations (event_key,reservation_id,customer_id,customer_name,genre,shoot_date,total_amount,status,source,raw_json,created_at,updated_at)
-    VALUES (?,?,?,?,?,?,?,'CSV取込',?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`,
-    eventKey,reservationId,customerId,group.name,text(shoot.genre)||null,shoot.shoot_date,toAmount(shoot.total_amount),SOURCE,rawJson);
-  return{created:true,event_key:eventKey};
+  try{
+    await run(db,`INSERT INTO customer_reservations (event_key,reservation_id,customer_id,customer_name,genre,shoot_date,total_amount,status,source,raw_json,created_at,updated_at)
+      VALUES (?,?,?,?,?,?,?,'CSV取込',?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`,
+      eventKey,reservationId,customerId,group.name,text(shoot.genre)||null,shoot.shoot_date,toAmount(shoot.total_amount),SOURCE,rawJson);
+    return{created:true,event_key:eventKey};
+  }catch(error){
+    const winner=await first(db,`SELECT customer_id,event_key FROM customer_reservations
+      WHERE event_key=? AND COALESCE(deleted_at,'')=''
+      LIMIT 1`,eventKey);
+    if(winner){
+      if(text(winner.customer_id)===customerId){
+        return{created:false,event_key:eventKey,deduped_by:'concurrent_event_key_winner'};
+      }
+      const e=new Error('same_name_same_date_already_linked_to_different_customer');
+      e.statusCode=409;e.event_key=eventKey;e.customer_id=text(winner.customer_id);e.cause=error;throw e;
+    }
+    throw error;
+  }
 }
 async function resolveGroupCustomerId(db,group,mappings,prior,candidates){
   if(group.csv_customer_id){
@@ -449,7 +561,10 @@ async function commitImport(env,analysis,mappings={}){
   for(const group of analysis.groups){
     try{
       let resolved=await resolveGroupCustomerId(env.DB,group,mappings,prior,candidates);
-      await preflightGroupSoftDeleteConflicts(env.DB,group,resolved.customer_id);
+      const preflight=await preflightGroupReservationConflicts(env.DB,group,resolved.customer_id);
+      if(resolved.resolution==='new_customer_pending'&&preflight.active_customer_id){
+        resolved={customer_id:preflight.active_customer_id,resolution:'preflight_csv_event_winner'};
+      }
       if(resolved.resolution==='new_customer_pending'){
         resolved=await createCustomerWithFirstShoot(env.DB,group);
         if(resolved.created){createdCustomers++;createdShoots++}else reusedShoots++;
