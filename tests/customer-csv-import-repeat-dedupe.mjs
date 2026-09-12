@@ -52,6 +52,17 @@ test('accepts the exact Reservation app CSV layout with preamble rows before the
   assert.equal(a.groups[0].shoots[1].total_amount,36500);
 });
 
+
+test('Reservation CSV fallback amount and genre normalization match Reservation importer rules',()=>{
+  const csv=[
+    '名前,撮影日,撮影場所,ジャンル,撮影プラン,単価,交通費,オプション1単価,オプション2単価,Movie,その他費用,追加購入,総額,備考',
+    '佐藤 未来,2026/03/01,大阪,ファミリーフォト,(新) Normal,,2000,1000,0,0,500,0,,'
+  ].join('\n');
+  const a=analyzeCsvImport(csv);
+  assert.equal(a.groups[0].shoots[0].genre,'家族');
+  assert.equal(a.groups[0].shoots[0].total_amount,28300);
+});
+
 test('same normalized name and same shoot date is one shoot, not a repeat',()=>{
   const csv=[
     '顧客名,撮影日,ジャンル,金額',
@@ -130,6 +141,8 @@ test('health declares exact-only import matching and no fuzzy merge',()=>{
   const h=customerCsvImportHealth();
   assert.equal(h.customer_csv_import,true);
   assert.equal(h.customer_csv_import_reservation_csv_compatible,true);
+  assert.equal(h.customer_csv_import_reservation_csv_amount_rules,true);
+  assert.equal(h.customer_csv_import_reservation_csv_genre_rules,true);
   assert.equal(h.customer_csv_import_same_day_dedupe,true);
   assert.equal(h.customer_csv_import_repeat_rule,'same_name_distinct_shoot_dates>=2');
   assert.equal(h.customer_csv_import_existing_customer_auto_name_merge,false);
