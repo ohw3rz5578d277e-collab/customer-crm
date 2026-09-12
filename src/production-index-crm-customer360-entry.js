@@ -21,6 +21,7 @@ import { injectOwnerAppShell } from './crm-owner-app-shell.mjs';
 import { patchReconciliationHealth } from './crm-reconciliation-review.mjs';
 import { handleOwnerPasswordAuth, withOwnerPasswordPrincipal, handleOwnerPasswordBrowserGate, ownerPasswordRequestAuthenticated, ownerPasswordAuthHealth } from './crm-owner-password-auth.mjs';
 import { reservationInternalUser } from './crm-reservation-browser-handoff.mjs';
+import { handleCustomerCsvImport, customerCsvImportHealth, injectCustomerCsvImport } from './crm-customer-csv-import.mjs';
 
 const BUILD='customer-crm-owner-password-auth-20260911-06';
 const OWNER_EMAIL='ohw3rz5578d277e@gmail.com';
@@ -66,7 +67,8 @@ export function composeCustomer360AdminHtml(html){
   const withProfile=injectCustomer360ProfileUi(withOwnerViewState);
   const withMedia=injectCustomer360MediaUi(withProfile);
   const withEditHandoff=injectCustomer360ExactEditHandoff(withMedia);
-  const withAppShell=injectOwnerAppShell(withEditHandoff);
+  const withCsvImport=injectCustomerCsvImport(withEditHandoff);
+  const withAppShell=injectOwnerAppShell(withCsvImport);
   const withLogoutRoute=injectOwnerLogoutPostRoute(withAppShell);
   return normalizeCustomer360InjectedHtml(withLogoutRoute);
 }
@@ -85,7 +87,7 @@ export async function patchHealth(response,env){
   const inheritedNotFound=response.status===404;const raw=await response.text();let data={};try{data=raw?JSON.parse(raw):{}}catch(_){}
   if(inheritedNotFound){const {ok:_staleOk,message:_staleMessage,error:_staleError,...preservedHealth}=data;data=preservedHealth}
   const h=headersFrom(response);h.set('content-type','application/json; charset=utf-8');const schema=await customer360SchemaHealth(env);const status=inheritedNotFound?200:response.status;
-  return new Response(JSON.stringify({...data,...(inheritedNotFound?{ok:true}:{}),service:data.service||'customer-crm-api',...customer360Health(),...customerProfileEnrichmentHealth(),...customer360LineProfileExtractionHealth(),...customer360ProfileWriteGuardHealth(),...customer360CombinedDetailHealth(),...customer360MediaHealth(),...customer360MediaUiHealth(),...customer360ExactEditHandoffHealth(),...ownerPasswordAuthHealth(env),...schema,customer360_identity_fallback:false,customer360_paid_ai_provider_active:false,customer360_build:BUILD},null,2),{status,headers:h});
+  return new Response(JSON.stringify({...data,...(inheritedNotFound?{ok:true}:{}),service:data.service||'customer-crm-api',...customer360Health(),...customerProfileEnrichmentHealth(),...customer360LineProfileExtractionHealth(),...customer360ProfileWriteGuardHealth(),...customer360CombinedDetailHealth(),...customer360MediaHealth(),...customer360MediaUiHealth(),...customer360ExactEditHandoffHealth(),...customerCsvImportHealth(),...ownerPasswordAuthHealth(env),...schema,customer360_identity_fallback:false,customer360_paid_ai_provider_active:false,customer360_build:BUILD},null,2),{status,headers:h});
 }
 export async function handleProductionHealthRequest(request,env){
   const url=new URL(request.url);if(request.method!=='GET'||url.pathname!=='/health')return null;
@@ -100,6 +102,12 @@ export default {
     const ownerAuth=await handleOwnerPasswordAuth(request,env);if(ownerAuth)return ownerAuth;
     const effectiveRequest=await withOwnerPasswordPrincipal(request,env);
     const ownerBrowserGate=handleOwnerPasswordBrowserGate(effectiveRequest,env);if(ownerBrowserGate)return ownerBrowserGate;
+    const csvUrl=new URL(effectiveRequest.url);
+    if(csvUrl.pathname==='/api/customer-csv-import/preview'||csvUrl.pathname==='/api/customer-csv-import/commit'){
+      const ownerEmail=String(effectiveRequest.headers.get('cf-access-authenticated-user-email')||'').trim().toLowerCase();
+      const csvApi=await handleCustomerCsvImport(effectiveRequest,env,{authorized:ownerEmail===OWNER_EMAIL});
+      if(csvApi)return csvApi;
+    }
     const earlyReadRequest=withReservationOwnerReadPrincipal(effectiveRequest,env);
     const earlyUrl=new URL(effectiveRequest.url);
     if(effectiveRequest.method==='GET'&&(earlyUrl.pathname==='/api/today-dashboard'||earlyUrl.pathname==='/api/today-dashboard.csv'))return todayReadOnlyApp.fetch(earlyReadRequest,env,ctx);
