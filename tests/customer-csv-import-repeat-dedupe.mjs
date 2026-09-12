@@ -240,11 +240,43 @@ await test('soft-deleted same-date history from any source fails closed',()=>{
 
 await test('all soft-delete conflicts are preflighted before first new-customer write',()=>{
   const src=fs.readFileSync('src/crm-customer-csv-import.mjs','utf8');
-  const preflight=src.indexOf('await preflightGroupSoftDeleteConflicts(env.DB,group,resolved.customer_id);');
+  const preflight=src.indexOf('const preflight=await preflightGroupReservationConflicts(env.DB,group,resolved.customer_id);');
   const create=src.indexOf('resolved=await createCustomerWithFirstShoot(env.DB,group);');
   assert.ok(preflight>=0&&create>preflight);
   assert.match(src,/for\(const shoot of group\.shoots\)/);
   assert.match(src,/csv_event_key_soft_deleted_requires_review/);
+});
+
+await test('active CSV event ownership conflicts are preflighted before group writes',()=>{
+  const src=fs.readFileSync('src/crm-customer-csv-import.mjs','utf8');
+  assert.match(src,/async function preflightGroupReservationConflicts/);
+  assert.match(src,/WHERE event_key=\? AND COALESCE\(deleted_at,''\)=''/);
+  assert.match(src,/same_name_same_date_already_linked_to_different_customer/);
+  const preflight=src.indexOf('const preflight=await preflightGroupReservationConflicts(env.DB,group,resolved.customer_id);');
+  const metadata=src.indexOf('await fillBlankCustomerMetadata(env.DB,resolved.customer_id,group);');
+  assert.ok(preflight>=0&&metadata>preflight);
+});
+
+await test('CSV import refreshes Customer360 LTV AOV and genre history from active non-cancelled reservations',()=>{
+  const src=fs.readFileSync('src/crm-customer-csv-import.mjs','utf8');
+  assert.match(src,/AS total_revenue/);
+  assert.match(src,/AS avg_order_value/);
+  assert.match(src,/AS genre_history/);
+  assert.match(src,/repeat_count_90d/);
+  assert.match(src,/repeat_count_365d/);
+  assert.match(src,/repeat_count_730d/);
+  assert.match(src,/total_revenue=\?/);
+  assert.match(src,/avg_order_value=\?/);
+  assert.match(src,/genre_history=COALESCE\(NULLIF\(\?,''\),genre_history\)/);
+  assert.match(src,/NOT LIKE '%cancel%'/);
+  assert.match(src,/NOT LIKE '%キャンセル%'/);
+});
+
+await test('later shoot inserts converge on concurrent event-key winner for same customer',()=>{
+  const src=fs.readFileSync('src/crm-customer-csv-import.mjs','utf8');
+  assert.match(src,/deduped_by:'concurrent_event_key_winner'/);
+  assert.match(src,/SELECT customer_id,event_key FROM customer_reservations/);
+  assert.match(src,/if\(text\(winner\.customer_id\)===customerId\)/);
 });
 
 await test('explicit mapping is constrained to same-name preview candidates',()=>{
