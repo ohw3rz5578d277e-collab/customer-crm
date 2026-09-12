@@ -199,7 +199,7 @@ await test('CSV API fails closed when Origin header is missing',async()=>{
   const req=new Request('https://crm.example.test/api/customer-csv-import/preview',{
     method:'POST',
     headers:{'content-type':'application/json'},
-    body:JSON.stringify({csv_text:'名前,撮影日,撮影場所\\n山田花子,2026-01-01,大阪'})
+    body:JSON.stringify({csv_text:['名前,撮影日,撮影場所','山田花子,2026-01-01,大阪'].join('\n')})
   });
   const res=await handleCustomerCsvImport(req,{},{authorized:true});
   assert.equal(res.status,403);
