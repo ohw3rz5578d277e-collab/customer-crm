@@ -67,9 +67,9 @@ export function composeCustomer360AdminHtml(html){
   const withProfile=injectCustomer360ProfileUi(withOwnerViewState);
   const withMedia=injectCustomer360MediaUi(withProfile);
   const withEditHandoff=injectCustomer360ExactEditHandoff(withMedia);
-  const withCsvImport=injectCustomerCsvImport(withEditHandoff);
-  const withAppShell=injectOwnerAppShell(withCsvImport);
-  const withLogoutRoute=injectOwnerLogoutPostRoute(withAppShell);
+  const withAppShell=injectOwnerAppShell(withEditHandoff);
+  const withCsvImport=injectCustomerCsvImport(withAppShell);
+  const withLogoutRoute=injectOwnerLogoutPostRoute(withCsvImport);
   return normalizeCustomer360InjectedHtml(withLogoutRoute);
 }
 function headersFrom(response){const h=new Headers(response.headers);h.delete('content-length');h.set('cache-control','no-store, no-cache, must-revalidate, max-age=0');h.set('x-crm-customer360-build',BUILD);return h}
