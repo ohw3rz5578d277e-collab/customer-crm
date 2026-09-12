@@ -13,6 +13,33 @@ function normalizeHeader(v){return text(v).normalize('NFKC').replace(/[\s　\r\n
 export function normalizeImportName(v){return text(v).normalize('NFKC').toLowerCase().replace(/[\s　・･.．,，、()（）\[\]［］【】「」『』]/g,'')}
 function displayName(v){return text(v).normalize('NFKC').replace(/[\s　]+/g,' ').trim()}
 function toAmount(v){const n=Number(text(v).replace(/[,，円¥￥\s]/g,''));return Number.isFinite(n)?n:0}
+function normalizeReservationGenre(value){
+  const s=text(value);
+  if(/^バースデ[イー]フォト$/.test(s))return'バースデーフォト';
+  if(/^ニューボーンフォト$/.test(s))return'ニューボーン';
+  if(/^マタニティフォト$/.test(s))return'マタニティ';
+  if(/^ファミリーフォト$/.test(s))return'家族';
+  return s;
+}
+function planAmountFromReservationLabel(label,memo){
+  const raw=text(label);
+  const explicit=raw.match(/[¥￥]\s*([\d,]{3,})/);
+  if(explicit)return toAmount(explicit[1]);
+  if(/\(新\).*special|special.*\(新\)/i.test(raw))return 35000;
+  if(/\(新\).*normal|normal.*\(新\)/i.test(raw))return 24800;
+  if(/otameshi|おためし|お試し/i.test(raw))return 15000;
+  if(!raw){
+    const memoAmount=text(memo).match(/^\s*[¥￥]\s*([\d,]{3,})\s*$/m);
+    if(memoAmount)return toAmount(memoAmount[1]);
+  }
+  return 0;
+}
+function reservationCsvTotal(raw){
+  const explicit=toAmount(raw.total_amount);
+  if(explicit)return explicit;
+  const plan=toAmount(raw.plan_amount)||planAmountFromReservationLabel(raw.plan_label,raw.memo);
+  return plan+toAmount(raw.traffic_amount)+toAmount(raw.option1_amount)+toAmount(raw.option2_amount)+toAmount(raw.movie_amount)+toAmount(raw.other_amount)+toAmount(raw.additional_purchase);
+}
 function excelDate(serial){const n=Number(serial);if(!Number.isInteger(n)||n<20000||n>80000)return'';const d=new Date(Date.UTC(1899,11,30)+n*86400000);return d.toISOString().slice(0,10)}
 export function normalizeImportDate(v){
   const raw=text(v).normalize('NFKC');
@@ -125,7 +152,7 @@ export function analyzeCsvImport(csvText){
       groups.set(nameKey,group);
     }
     if(customerId)group.customer_ids.add(customerId);
-    const normalized={...raw,name,shoot_date:shootDate,total_amount:toAmount(raw.total_amount),_source_rows:[line]};
+    const normalized={...raw,name,shoot_date:shootDate,genre:normalizeReservationGenre(raw.genre),total_amount:reservationCsvTotal(raw),_source_rows:[line]};
     if(shootDate){
       if(group.shoots.has(shootDate)){duplicateRows++;group.shoots.set(shootDate,mergeSameShoot(group.shoots.get(shootDate),normalized))}
       else group.shoots.set(shootDate,normalized);
@@ -385,6 +412,8 @@ export function customerCsvImportHealth(){
     customer_csv_import_name_match:'reservation_csv_normalized_name_exact_grouping',
     customer_csv_import_reservation_csv_compatible:true,
     customer_csv_import_reservation_csv_header_scan_rows:50,
+    customer_csv_import_reservation_csv_amount_rules:true,
+    customer_csv_import_reservation_csv_genre_rules:true,
     customer_csv_import_same_day_dedupe:true,
     customer_csv_import_repeat_rule:'same_name_distinct_shoot_dates>=2',
     customer_csv_import_existing_customer_auto_name_merge:false,
