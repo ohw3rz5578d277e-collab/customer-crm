@@ -292,6 +292,24 @@ function pickMetadata(group){
     memo:text(group.memo||firstShoot.memo)
   };
 }
+async function preflightGroupSoftDeleteConflicts(db,group,customerId=''){
+  for(const shoot of group.shoots){
+    const eventKey=await importEventKey(group.name_key,shoot.shoot_date);
+    const deletedEvent=await first(db,`SELECT customer_id FROM customer_reservations
+      WHERE event_key=? AND COALESCE(deleted_at,'')<>''
+      LIMIT 1`,eventKey);
+    if(deletedEvent){const e=new Error('csv_event_key_soft_deleted_requires_review');e.statusCode=409;e.event_key=eventKey;throw e}
+    if(customerId){
+      const deletedSameDate=await first(db,`SELECT event_key,source FROM customer_reservations
+        WHERE customer_id=? AND shoot_date=? AND COALESCE(deleted_at,'')<>''
+        LIMIT 1`,customerId,shoot.shoot_date);
+      if(deletedSameDate){
+        const e=new Error('csv_same_date_soft_deleted_requires_review');
+        e.statusCode=409;e.customer_id=customerId;e.shoot_date=shoot.shoot_date;throw e;
+      }
+    }
+  }
+}
 async function createCustomerWithFirstShoot(db,group){
   const firstShoot=group.shoots[0];
   if(!firstShoot?.shoot_date){const e=new Error('first_shoot_required_for_new_customer');e.statusCode=400;throw e}
@@ -374,6 +392,8 @@ async function recalcRepeatStats(db,customerId){
 }
 async function insertShoot(db,customerId,group,shoot){
   const eventKey=await importEventKey(group.name_key,shoot.shoot_date);
+  const deletedSameDate=await first(db,`SELECT event_key,source FROM customer_reservations WHERE customer_id=? AND shoot_date=? AND COALESCE(deleted_at,'')<>'' LIMIT 1`,customerId,shoot.shoot_date);
+  if(deletedSameDate){const e=new Error('csv_same_date_soft_deleted_requires_review');e.statusCode=409;e.customer_id=customerId;e.shoot_date=shoot.shoot_date;throw e}
   const sameDate=await first(db,`SELECT event_key,source,customer_id FROM customer_reservations WHERE customer_id=? AND shoot_date=? AND COALESCE(deleted_at,'')='' LIMIT 1`,customerId,shoot.shoot_date);
   if(sameDate){
     if(text(sameDate.source)===SOURCE&&text(sameDate.event_key)===eventKey){
@@ -429,6 +449,7 @@ async function commitImport(env,analysis,mappings={}){
   for(const group of analysis.groups){
     try{
       let resolved=await resolveGroupCustomerId(env.DB,group,mappings,prior,candidates);
+      await preflightGroupSoftDeleteConflicts(env.DB,group,resolved.customer_id);
       if(resolved.resolution==='new_customer_pending'){
         resolved=await createCustomerWithFirstShoot(env.DB,group);
         if(resolved.created){createdCustomers++;createdShoots++}else reusedShoots++;
