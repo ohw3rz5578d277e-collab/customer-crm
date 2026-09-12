@@ -7,24 +7,25 @@ import {
   normalizeImportDate,
   findReservationCsvHeaderRow,
   customerCsvImportHealth,
-  injectCustomerCsvImport
+  injectCustomerCsvImport,
+  handleCustomerCsvImport
 } from '../src/crm-customer-csv-import.mjs';
 
 let passed=0;
-function test(name,fn){fn();passed++;console.log('PASS '+passed+': '+name)}
+async function test(name,fn){await fn();passed++;console.log('PASS '+passed+': '+name)}
 
-test('normalizes Japanese customer names with NFKC and whitespace removal',()=>{
+await test('normalizes Japanese customer names with NFKC and whitespace removal',()=>{
   assert.equal(normalizeImportName(' 山田　花子 '),'山田花子');
   assert.equal(normalizeImportName('ﾔﾏﾀﾞ ﾊﾅｺ'),'ヤマダハナコ');
 });
 
-test('normalizes supported shoot dates',()=>{
+await test('normalizes supported shoot dates',()=>{
   assert.equal(normalizeImportDate('2026/1/2'),'2026-01-02');
   assert.equal(normalizeImportDate('2026年5月3日'),'2026-05-03');
   assert.equal(normalizeImportDate('2026-02-30'),'');
 });
 
-test('CSV parser keeps commas and escaped quotes inside quoted fields',()=>{
+await test('CSV parser keeps commas and escaped quotes inside quoted fields',()=>{
   const rows=parseCsvText('顧客名,備考\n"山田 花子","大阪, 北区 ""テスト"""\n');
   assert.equal(rows.length,2);
   assert.equal(rows[1][0],'山田 花子');
@@ -32,7 +33,7 @@ test('CSV parser keeps commas and escaped quotes inside quoted fields',()=>{
 });
 
 
-test('accepts the exact Reservation app CSV layout with preamble rows before the real header',()=>{
+await test('accepts the exact Reservation app CSV layout with preamble rows before the real header',()=>{
   const preamble=Array.from({length:13},(_,i)=>'予約管理情報'+(i+1)+',').join('\n');
   const csv=preamble+'\n'+[
     '名前,撮影日,撮影場所,ジャンル,撮影プラン,単価,交通費,オプション1単価,オプション2単価,Movie,その他費用,追加購入,総額,備考',
@@ -53,7 +54,7 @@ test('accepts the exact Reservation app CSV layout with preamble rows before the
 });
 
 
-test('Reservation CSV fallback amount and genre normalization match Reservation importer rules',()=>{
+await test('Reservation CSV fallback amount and genre normalization match Reservation importer rules',()=>{
   const csv=[
     '名前,撮影日,撮影場所,ジャンル,撮影プラン,単価,交通費,オプション1単価,オプション2単価,Movie,その他費用,追加購入,総額,備考',
     '佐藤 未来,2026/03/01,大阪,ファミリーフォト,(新) Normal,,2000,1000,0,0,500,0,,'
@@ -63,7 +64,7 @@ test('Reservation CSV fallback amount and genre normalization match Reservation 
   assert.equal(a.groups[0].shoots[0].total_amount,28300);
 });
 
-test('same normalized name and same shoot date is one shoot, not a repeat',()=>{
+await test('same normalized name and same shoot date is one shoot, not a repeat',()=>{
   const csv=[
     '顧客名,撮影日,ジャンル,金額',
     '山田 花子,2026/01/10,お宮参り,25000',
@@ -77,7 +78,7 @@ test('same normalized name and same shoot date is one shoot, not a repeat',()=>{
   assert.equal(a.groups[0].is_repeater,false);
 });
 
-test('same normalized name on different shoot dates becomes repeater',()=>{
+await test('same normalized name on different shoot dates becomes repeater',()=>{
   const csv=[
     '顧客名,撮影日,ジャンル',
     '山田 花子,2026/01/10,お宮参り',
@@ -92,7 +93,7 @@ test('same normalized name on different shoot dates becomes repeater',()=>{
   assert.equal(a.groups[0].is_repeater,true);
 });
 
-test('same-day duplicates collapse while different customers remain separate',()=>{
+await test('same-day duplicates collapse while different customers remain separate',()=>{
   const csv=[
     '顧客名,撮影日,料金',
     '山田 花子,2026-01-10,20000',
@@ -109,7 +110,7 @@ test('same-day duplicates collapse while different customers remain separate',()
   assert.equal(yamada.shoots[0].total_amount,25000,'same-day duplicate should not sum revenue');
 });
 
-test('conflicting exact Customer IDs for same normalized name is rejected',()=>{
+await test('conflicting exact Customer IDs for same normalized name is rejected',()=>{
   const csv=[
     '顧客名,撮影日,顧客ID',
     '山田 花子,2026-01-10,26000001',
@@ -119,25 +120,26 @@ test('conflicting exact Customer IDs for same normalized name is rejected',()=>{
   assert.equal(a.errors.some(x=>x.error==='conflicting_customer_ids_for_same_name'),true);
 });
 
-test('invalid Customer ID never silently creates or remaps identity',()=>{
+await test('invalid Customer ID never silently creates or remaps identity',()=>{
   const csv=['顧客名,撮影日,顧客ID','山田花子,2026-01-10,G123'].join('\n');
   const a=analyzeCsvImport(csv);
   assert.equal(a.errors.some(x=>x.error==='invalid_customer_id'),true);
 });
 
-test('name column is mandatory',()=>{
+await test('name column is mandatory',()=>{
   assert.throws(()=>analyzeCsvImport('撮影日,ジャンル\n2026-01-01,七五三'),/csv_name_column_required/);
 });
 
-test('CSV without shoot-date column stays customer-only and does not invent repeats',()=>{
-  const a=analyzeCsvImport('顧客名,電話番号\n山田花子,09012345678\n山田花子,09012345678');
-  assert.equal(a.customer_count,1);
-  assert.equal(a.repeater_count,0);
-  assert.equal(a.groups[0].shoot_count,0);
-  assert.equal(a.warnings.some(x=>x.warning==='shoot_date_column_not_found'),true);
+await test('Reservation CSV requires the shoot-date column',()=>{
+  assert.throws(()=>analyzeCsvImport('顧客名,電話番号\n山田花子,09012345678'),/csv_shoot_date_column_required/);
 });
 
-test('health declares exact-only import matching and no fuzzy merge',()=>{
+await test('Reservation CSV rejects a named row with no shoot date',()=>{
+  const a=analyzeCsvImport('顧客名,撮影日,撮影場所\n山田花子,,大阪');
+  assert.equal(a.errors.some(x=>x.error==='shoot_date_required'),true);
+});
+
+await test('health declares exact-only import matching and no fuzzy merge',()=>{
   const h=customerCsvImportHealth();
   assert.equal(h.customer_csv_import,true);
   assert.equal(h.customer_csv_import_reservation_csv_compatible,true);
@@ -151,18 +153,18 @@ test('health declares exact-only import matching and no fuzzy merge',()=>{
   assert.equal(h.customer_csv_import_fuzzy_match,false);
 });
 
-test('commit dedupes against an existing CRM reservation on the same customer and shoot date',()=>{
+await test('commit dedupes against an existing CRM reservation on the same customer and shoot date',()=>{
   const src=fs.readFileSync('src/crm-customer-csv-import.mjs','utf8');
   assert.match(src,/WHERE customer_id=\? AND shoot_date=\? LIMIT 1/);
   assert.match(src,/deduped_by:'customer_id\+shoot_date'/);
 });
 
-test('import implementation never reduces an existing repeat_count',()=>{
+await test('import implementation never reduces an existing repeat_count',()=>{
   const src=fs.readFileSync('src/crm-customer-csv-import.mjs','utf8');
   assert.match(src,/const count=Math\.max\(knownCount,dates\.length\)/);
 });
 
-test('mobile UI supports UTF-8 and Shift_JIS CSV files',()=>{
+await test('mobile UI supports UTF-8 and Shift_JIS CSV files',()=>{
   const html=injectCustomerCsvImport('<!doctype html><html><head></head><body></body></html>');
   assert.match(html,/UTF-8/);
   assert.match(html,/Shift_JIS/);
@@ -170,7 +172,7 @@ test('mobile UI supports UTF-8 and Shift_JIS CSV files',()=>{
   assert.match(html,/arrayBuffer/);
 });
 
-test('mobile UI explains dedupe/repeat behavior and requires preview before commit',()=>{
+await test('mobile UI explains dedupe/repeat behavior and requires preview before commit',()=>{
   const html=injectCustomerCsvImport('<!doctype html><html><head></head><body></body></html>');
   assert.match(html,/予約CSVから顧客取込/);
   assert.match(html,/予約管理アプリと同じ予約CSVをそのまま選べます/);
@@ -178,11 +180,12 @@ test('mobile UI explains dedupe/repeat behavior and requires preview before comm
   assert.match(html,/同じ顧客名で撮影日が違えばリピーター/);
   assert.match(html,/内容を確認/);
   assert.match(html,/取込を確定/);
+  assert.match(html,/preview_receipt/);
   assert.match(html,/customer-csv-import\/preview/);
   assert.match(html,/customer-csv-import\/commit/);
 });
 
-test('Production entry wires owner-only CSV API and health',()=>{
+await test('Production entry wires owner-only CSV API and health',()=>{
   const entry=fs.readFileSync('src/production-index-crm-customer360-entry.js','utf8');
   assert.match(entry,/handleCustomerCsvImport/);
   assert.match(entry,/customerCsvImportHealth/);
@@ -192,7 +195,35 @@ test('Production entry wires owner-only CSV API and health',()=>{
   assert.match(entry,/\/api\/customer-csv-import\/commit/);
 });
 
-test('CSV module contains no fuzzy matching, LINE send, or Reservation-side Customer ID generation',()=>{
+await test('CSV API fails closed when Origin header is missing',async()=>{
+  const req=new Request('https://crm.example.test/api/customer-csv-import/preview',{
+    method:'POST',
+    headers:{'content-type':'application/json'},
+    body:JSON.stringify({csv_text:'名前,撮影日,撮影場所\\n山田花子,2026-01-01,大阪'})
+  });
+  const res=await handleCustomerCsvImport(req,{},{authorized:true});
+  assert.equal(res.status,403);
+});
+
+await test('CSV commit requires a matching signed preview receipt',async()=>{
+  const req=new Request('https://crm.example.test/api/customer-csv-import/commit',{
+    method:'POST',
+    headers:{'content-type':'application/json','origin':'https://crm.example.test'},
+    body:JSON.stringify({csv_text:'名前,撮影日,撮影場所\\n山田花子,2026-01-01,大阪'})
+  });
+  const res=await handleCustomerCsvImport(req,{DB:{prepare(){throw new Error('DB must not be touched before receipt validation')}}},{authorized:true});
+  assert.equal(res.status,409);
+  const body=await res.json();
+  assert.equal(body.error,'valid_preview_receipt_required');
+});
+
+await test('explicit mapping is constrained to same-name preview candidates',()=>{
+  const src=fs.readFileSync('src/crm-customer-csv-import.mjs','utf8');
+  assert.match(src,/mapped_customer_id_not_in_preview_candidates/);
+  assert.match(src,/candidates\.get\(group\.name_key\)/);
+});
+
+await test('CSV module contains no fuzzy matching, LINE send, or Reservation-side Customer ID generation',()=>{
   const src=fs.readFileSync('src/crm-customer-csv-import.mjs','utf8');
   assert.doesNotMatch(src,/levenshtein|soundex|jaro|similarity\s*\(/i);
   assert.match(src,/customer_csv_import_fuzzy_match:false/);
