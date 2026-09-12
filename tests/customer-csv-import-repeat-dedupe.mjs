@@ -217,6 +217,21 @@ await test('CSV commit requires a matching signed preview receipt',async()=>{
   assert.equal(body.error,'valid_preview_receipt_required');
 });
 
+await test('new customer creation is transactional with the first CSV shoot',()=>{
+  const src=fs.readFileSync('src/crm-customer-csv-import.mjs','utf8');
+  assert.match(src,/typeof db\.batch!=='function'/);
+  assert.match(src,/await db\.batch\(\[customerStmt,reservationStmt\]\)/);
+  assert.match(src,/concurrent_csv_winner/);
+  assert.match(src,/csv_customer_atomic_create_failed/);
+});
+
+await test('soft-deleted customers and reservation mappings are excluded from CSV resolution',()=>{
+  const src=fs.readFileSync('src/crm-customer-csv-import.mjs','utf8');
+  assert.match(src,/COALESCE\(deleted_at,''\)=''/);
+  assert.match(src,/JOIN customers c ON c\.customer_id=r\.customer_id/);
+  assert.match(src,/csv_event_key_soft_deleted_requires_review/);
+});
+
 await test('explicit mapping is constrained to same-name preview candidates',()=>{
   const src=fs.readFileSync('src/crm-customer-csv-import.mjs','utf8');
   assert.match(src,/mapped_customer_id_not_in_preview_candidates/);
