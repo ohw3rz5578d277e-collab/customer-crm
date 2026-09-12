@@ -152,7 +152,7 @@ export function analyzeCsvImport(csvText){
     validRows++;
     let group=groups.get(nameKey);
     if(!group){
-      group={name_key:nameKey,name,customer_ids:new Set(),shoots:new Map(),customer_only_rows:[],first_row:line};
+      group={name_key:nameKey,name,customer_ids:new Set(),shoots:new Map(),first_row:line};
       groups.set(nameKey,group);
     }
     if(customerId)group.customer_ids.add(customerId);
@@ -170,7 +170,7 @@ export function analyzeCsvImport(csvText){
     if(ids.length>1)errors.push({line:group.first_row,error:'conflicting_customer_ids_for_same_name',name:group.name,customer_ids:ids});
     const shoots=[...group.shoots.values()].sort((a,b)=>a.shoot_date.localeCompare(b.shoot_date));
     if(shoots.length>=2)repeaters++;
-    const allRows=[...shoots,...group.customer_only_rows];
+    const allRows=[...shoots];
     const firstValue=key=>text(allRows.find(x=>text(x[key]))?.[key]);
     resultGroups.push({
       name_key:group.name_key,
@@ -185,8 +185,7 @@ export function analyzeCsvImport(csvText){
       email:firstValue('email'),
       address:firstValue('address'),
       memo:firstValue('memo'),
-      shoots,
-      customer_only:shoots.length===0
+      shoots
     });
   }
   resultGroups.sort((a,b)=>a.name.localeCompare(b.name,'ja-JP'));
@@ -343,7 +342,7 @@ async function insertShoot(db,customerId,group,shoot){
     eventKey,reservationId,customerId,group.name,text(shoot.genre)||null,shoot.shoot_date,toAmount(shoot.total_amount),SOURCE,rawJson);
   return{created:true,event_key:eventKey};
 }
-async function resolveGroupCustomerId(db,group,mappings,prior){
+async function resolveGroupCustomerId(db,group,mappings,prior,candidates){
   if(group.csv_customer_id){
     const row=await customerById(db,group.csv_customer_id);
     if(!row){const e=new Error('csv_customer_id_not_found');e.statusCode=409;throw e}
@@ -352,6 +351,8 @@ async function resolveGroupCustomerId(db,group,mappings,prior){
   const mapped=text(mappings?.[group.name_key]);
   if(mapped){
     if(!CUSTOMER_ID_RE.test(mapped)){const e=new Error('mapped_customer_id_invalid');e.statusCode=400;throw e}
+    const allowed=(candidates.get(group.name_key)||[]).some(row=>text(row.customer_id)===mapped);
+    if(!allowed){const e=new Error('mapped_customer_id_not_in_preview_candidates');e.statusCode=409;throw e}
     const row=await customerById(db,mapped);
     if(!row){const e=new Error('mapped_customer_id_not_found');e.statusCode=409;throw e}
     return{customer_id:mapped,resolution:'owner_selected_existing'};
@@ -368,11 +369,11 @@ async function resolveGroupCustomerId(db,group,mappings,prior){
 async function commitImport(env,analysis,mappings={}){
   if(!env?.DB?.prepare)throw new Error('db_binding_missing');
   if(analysis.errors.length){const e=new Error('csv_validation_failed');e.statusCode=400;throw e}
-  const prior=await priorCsvMappings(env.DB);
+  const [prior,candidates]=await Promise.all([priorCsvMappings(env.DB),existingNameCandidates(env.DB)]);
   const results=[];let createdCustomers=0,createdShoots=0,reusedShoots=0;const repeaterIds=new Set();
   for(const group of analysis.groups){
     try{
-      const resolved=await resolveGroupCustomerId(env.DB,group,mappings,prior);
+      const resolved=await resolveGroupCustomerId(env.DB,group,mappings,prior,candidates);
       if(resolved.resolution==='new_customer')createdCustomers++;
       await fillBlankCustomerMetadata(env.DB,resolved.customer_id,group);
       for(const shoot of group.shoots){
