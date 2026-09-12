@@ -234,9 +234,9 @@ async function verifyPreviewReceipt(env,csvText,receipt){
 async function importEventKey(nameKey,shootDate){return 'csv:v1:'+await sha256Hex(nameKey+'\n'+shootDate)}
 function changedRows(r){return Number(r?.meta?.changes??r?.changes??r?.rowsAffected??0)}
 
-async function customerById(db,id){return first(db,`SELECT customer_id,name FROM customers WHERE customer_id=? LIMIT 1`,id)}
+async function customerById(db,id){return first(db,`SELECT customer_id,name FROM customers WHERE customer_id=? AND COALESCE(deleted_at,'')='' LIMIT 1`,id)}
 async function existingNameCandidates(db){
-  const rows=await all(db,`SELECT customer_id,name FROM customers WHERE customer_id IS NOT NULL AND trim(customer_id)<>'' LIMIT 20000`);
+  const rows=await all(db,`SELECT customer_id,name FROM customers WHERE customer_id IS NOT NULL AND trim(customer_id)<>'' AND COALESCE(deleted_at,'')='' LIMIT 20000`);
   const map=new Map();
   for(const row of rows){
     const key=normalizeImportName(row.name);if(!key)continue;
@@ -246,7 +246,15 @@ async function existingNameCandidates(db){
   return map;
 }
 async function priorCsvMappings(db){
-  const rows=await all(db,`SELECT customer_id,customer_name FROM customer_reservations WHERE source=? AND customer_id IS NOT NULL AND trim(customer_id)<>'' LIMIT 20000`,SOURCE);
+  const rows=await all(db,`SELECT r.customer_id,r.customer_name
+    FROM customer_reservations r
+    JOIN customers c ON c.customer_id=r.customer_id
+    WHERE r.source=?
+      AND r.customer_id IS NOT NULL
+      AND trim(r.customer_id)<>''
+      AND COALESCE(r.deleted_at,'')=''
+      AND COALESCE(c.deleted_at,'')=''
+    LIMIT 20000`,SOURCE);
   const map=new Map();
   for(const row of rows){
     const key=normalizeImportName(row.customer_name);if(!key)continue;
@@ -284,13 +292,57 @@ function pickMetadata(group){
     memo:text(group.memo||firstShoot.memo)
   };
 }
-async function createCustomer(db,group){
+async function createCustomerWithFirstShoot(db,group){
+  const firstShoot=group.shoots[0];
+  if(!firstShoot?.shoot_date){const e=new Error('first_shoot_required_for_new_customer');e.statusCode=400;throw e}
+  const eventKey=await importEventKey(group.name_key,firstShoot.shoot_date);
+  const existingActive=await first(db,`SELECT r.customer_id
+    FROM customer_reservations r
+    JOIN customers c ON c.customer_id=r.customer_id
+    WHERE r.event_key=?
+      AND r.source=?
+      AND COALESCE(r.deleted_at,'')=''
+      AND COALESCE(c.deleted_at,'')=''
+    LIMIT 1`,eventKey,SOURCE);
+  if(existingActive?.customer_id){
+    return{customer_id:text(existingActive.customer_id),resolution:'concurrent_or_prior_csv_winner',created:false,claimed_shoot_date:firstShoot.shoot_date};
+  }
+  const deletedConflict=await first(db,`SELECT customer_id FROM customer_reservations WHERE event_key=? AND COALESCE(deleted_at,'')<>'' LIMIT 1`,eventKey);
+  if(deletedConflict){const e=new Error('csv_event_key_soft_deleted_requires_review');e.statusCode=409;throw e}
+
   const allocation=await allocateCustomerId(db,jstYear());
   if(!allocation?.ok){const e=new Error(allocation?.error||'customer_id_allocation_failed');e.statusCode=allocation?.statusCode||409;throw e}
   const id=allocation.customer_id,meta=pickMetadata(group);
-  await run(db,`INSERT INTO customers (customer_id,name,furigana,phone,address,email,memo,repeat_count,created_at,updated_at) VALUES (?,?,?,?,?,?,?,0,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`,
-    id,meta.name,meta.furigana||null,meta.phone||null,meta.address||null,meta.email||null,meta.memo||null);
-  return id;
+  const reservationId='CSV-'+(await sha256Hex(group.name_key+'\n'+firstShoot.shoot_date)).slice(0,20).toUpperCase();
+  const rawJson=JSON.stringify({import_build:BUILD,name_key:group.name_key,source_rows:firstShoot._source_rows||[],dedupe_rule:'same_normalized_name+same_shoot_date',raw:firstShoot});
+
+  if(typeof db.batch!=='function'){const e=new Error('d1_transactional_batch_required');e.statusCode=500;throw e}
+  const customerStmt=db.prepare(`INSERT INTO customers (customer_id,name,furigana,phone,address,email,memo,repeat_count,created_at,updated_at)
+    VALUES (?,?,?,?,?,?,?,0,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`).bind(
+      id,meta.name,meta.furigana||null,meta.phone||null,meta.address||null,meta.email||null,meta.memo||null
+    );
+  const reservationStmt=db.prepare(`INSERT INTO customer_reservations
+    (event_key,reservation_id,customer_id,customer_name,genre,shoot_date,total_amount,status,source,raw_json,created_at,updated_at)
+    VALUES (?,?,?,?,?,?,?,'CSV取込',?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`).bind(
+      eventKey,reservationId,id,group.name,text(firstShoot.genre)||null,firstShoot.shoot_date,toAmount(firstShoot.total_amount),SOURCE,rawJson
+    );
+  try{
+    await db.batch([customerStmt,reservationStmt]);
+    return{customer_id:id,resolution:'new_customer',created:true,claimed_shoot_date:firstShoot.shoot_date};
+  }catch(error){
+    const winner=await first(db,`SELECT r.customer_id
+      FROM customer_reservations r
+      JOIN customers c ON c.customer_id=r.customer_id
+      WHERE r.event_key=?
+        AND r.source=?
+        AND COALESCE(r.deleted_at,'')=''
+        AND COALESCE(c.deleted_at,'')=''
+      LIMIT 1`,eventKey,SOURCE);
+    if(winner?.customer_id){
+      return{customer_id:text(winner.customer_id),resolution:'concurrent_csv_winner',created:false,claimed_shoot_date:firstShoot.shoot_date};
+    }
+    const e=new Error('csv_customer_atomic_create_failed');e.statusCode=409;e.cause=error;throw e;
+  }
 }
 async function fillBlankCustomerMetadata(db,customerId,group){
   const m=pickMetadata(group);
@@ -307,7 +359,7 @@ async function fillBlankCustomerMetadata(db,customerId,group){
 }
 async function recalcRepeatStats(db,customerId){
   const [rows,current]=await Promise.all([
-    all(db,`SELECT shoot_date,status FROM customer_reservations WHERE customer_id=? AND shoot_date IS NOT NULL AND trim(shoot_date)<>''`,customerId),
+    all(db,`SELECT shoot_date,status FROM customer_reservations WHERE customer_id=? AND shoot_date IS NOT NULL AND trim(shoot_date)<>'' AND COALESCE(deleted_at,'')=''`,customerId),
     first(db,`SELECT repeat_count,first_shoot_date,last_shoot_date FROM customers WHERE customer_id=? LIMIT 1`,customerId)
   ]);
   const dates=[...new Set(rows.filter(r=>!/(?:cancel|キャンセル)/i.test(text(r.status))).map(r=>normalizeImportDate(r.shoot_date)).filter(Boolean))].sort();
@@ -322,7 +374,7 @@ async function recalcRepeatStats(db,customerId){
 }
 async function insertShoot(db,customerId,group,shoot){
   const eventKey=await importEventKey(group.name_key,shoot.shoot_date);
-  const sameDate=await first(db,`SELECT event_key,source,customer_id FROM customer_reservations WHERE customer_id=? AND shoot_date=? LIMIT 1`,customerId,shoot.shoot_date);
+  const sameDate=await first(db,`SELECT event_key,source,customer_id FROM customer_reservations WHERE customer_id=? AND shoot_date=? AND COALESCE(deleted_at,'')='' LIMIT 1`,customerId,shoot.shoot_date);
   if(sameDate){
     if(text(sameDate.source)===SOURCE&&text(sameDate.event_key)===eventKey){
       const rawJson=JSON.stringify({import_build:BUILD,name_key:group.name_key,source_rows:shoot._source_rows||[],dedupe_rule:'same_normalized_name+same_shoot_date',raw:shoot});
@@ -331,7 +383,9 @@ async function insertShoot(db,customerId,group,shoot){
     }
     return{created:false,event_key:text(sameDate.event_key),deduped_by:'customer_id+shoot_date'};
   }
-  const existing=await first(db,`SELECT customer_id FROM customer_reservations WHERE event_key=? LIMIT 1`,eventKey);
+  const deletedEvent=await first(db,`SELECT customer_id FROM customer_reservations WHERE event_key=? AND COALESCE(deleted_at,'')<>'' LIMIT 1`,eventKey);
+  if(deletedEvent){const e=new Error('csv_event_key_soft_deleted_requires_review');e.statusCode=409;throw e}
+  const existing=await first(db,`SELECT customer_id FROM customer_reservations WHERE event_key=? AND COALESCE(deleted_at,'')='' LIMIT 1`,eventKey);
   if(existing&&text(existing.customer_id)!==customerId){
     const e=new Error('same_name_same_date_already_linked_to_different_customer');e.statusCode=409;e.event_key=eventKey;throw e;
   }
@@ -364,7 +418,7 @@ async function resolveGroupCustomerId(db,group,mappings,prior,candidates){
     if(row)return{customer_id:priorIds[0],resolution:'prior_csv_import'};
   }
   if(priorIds.length>1){const e=new Error('prior_csv_mapping_ambiguous');e.statusCode=409;throw e}
-  return{customer_id:await createCustomer(db,group),resolution:'new_customer'};
+  return{customer_id:'',resolution:'new_customer_pending'};
 }
 
 async function commitImport(env,analysis,mappings={}){
@@ -374,10 +428,14 @@ async function commitImport(env,analysis,mappings={}){
   const results=[];let createdCustomers=0,createdShoots=0,reusedShoots=0;const repeaterIds=new Set();
   for(const group of analysis.groups){
     try{
-      const resolved=await resolveGroupCustomerId(env.DB,group,mappings,prior,candidates);
-      if(resolved.resolution==='new_customer')createdCustomers++;
+      let resolved=await resolveGroupCustomerId(env.DB,group,mappings,prior,candidates);
+      if(resolved.resolution==='new_customer_pending'){
+        resolved=await createCustomerWithFirstShoot(env.DB,group);
+        if(resolved.created){createdCustomers++;createdShoots++}else reusedShoots++;
+      }
       await fillBlankCustomerMetadata(env.DB,resolved.customer_id,group);
       for(const shoot of group.shoots){
+        if(resolved.claimed_shoot_date===shoot.shoot_date)continue;
         const out=await insertShoot(env.DB,resolved.customer_id,group,shoot);
         if(out.created)createdShoots++;else reusedShoots++;
       }
@@ -478,7 +536,7 @@ const box=document.getElementById('crmCsvGroups');box.innerHTML=(p.groups||[]).m
 let msg='プレビュー完了。内容を確認してから「取込を確定」を押してください。';if(p.errors?.length)msg='<div class="crm-csv-error">'+p.errors.slice(0,8).map(e=>'行 '+esc(e.line||'-')+'：'+esc(e.error)).join('<br>')+'</div>';status(msg);document.getElementById('crmCsvCommit').disabled=!!(p.errors?.length)}
 async function previewCsv(){csvText=decodeCsv();if(!csvText){status('<div class="crm-csv-warn">CSVファイルを選択してください。</div>');return}status('確認中…');try{renderPreview(await api('/api/customer-csv-import/preview',{csv_text:csvText}))}catch(e){status('<div class="crm-csv-error">'+esc(e.message)+'</div>')}}
 async function commitCsv(){if(!preview||!csvText||!previewReceipt)return;const mappings={};document.querySelectorAll('[data-map-key]').forEach(el=>{if(el.value)mappings[el.dataset.mapKey]=el.value});const btn=document.getElementById('crmCsvCommit');btn.disabled=true;status('取り込み中…');try{const r=await api('/api/customer-csv-import/commit',{csv_text:csvText,preview_receipt:previewReceipt,mappings});const failures=(r.results||[]).filter(x=>!x.ok);status((r.ok?'<div class="crm-csv-warn" style="background:#ecfdf5;border-color:#a7f3d0;color:#065f46">取込完了：顧客 '+r.customers_total+'人 / 新規 '+r.customers_created+'人 / 撮影 '+r.shoots_created+'件 / リピーター '+r.repeater_customers+'人</div>':'<div class="crm-csv-error">一部取込に失敗しました：'+failures.map(x=>esc(x.name)+' '+esc(x.error)).join('<br>')+'</div>'));if(r.ok){window.dispatchEvent(new CustomEvent('crm-customers-changed'));setTimeout(()=>location.reload(),900)}}catch(e){status('<div class="crm-csv-error">'+esc(e.message)+'</div>');btn.disabled=false}}
-function boot(){if(document.getElementById('crmCsvSheet'))return;const openBtn=document.createElement('button');openBtn.id='crmCsvImportOpen';openBtn.type='button';openBtn.textContent='予約CSV取込';openBtn.onclick=open;document.body.appendChild(openBtn);const modal=document.createElement('div');modal.id='crmCsvSheet';modal.className='crm-csv-sheet';modal.innerHTML='<div class="crm-csv-panel"><div class="crm-csv-head"><h2>予約CSVから顧客取込</h2><button class="crm-csv-close" type="button">×</button></div><div class="crm-csv-box"><b>CSVファイル</b><div class="crm-csv-meta">予約管理アプリと同じ予約CSVをそのまま選べます。同じ顧客名＋同じ撮影日は重複として1回、撮影日が違えばリピーターとして集計します。</div><input id="crmCsvFile" class="crm-csv-file" type="file" accept=".csv,text/csv"><select id="crmCsvEncoding" class="crm-csv-encoding"><option value="utf-8">UTF-8</option><option value="shift_jis">Shift_JIS（Excel等）</option></select><div class="crm-csv-actions"><button id="crmCsvPreview" class="crm-csv-btn secondary" type="button">内容を確認</button><button id="crmCsvCommit" class="crm-csv-btn" type="button" disabled>取込を確定</button></div><div id="crmCsvStatus" class="crm-csv-meta" style="margin-top:10px"></div><div id="crmCsvSummary"></div><div id="crmCsvGroups" style="margin-top:10px"></div></div></div>';modal.querySelector('.crm-csv-close').onclick=close;modal.addEventListener('click',e=>{if(e.target===modal)close()});document.body.appendChild(modal);document.getElementById('crmCsvFile').addEventListener('change',async e=>{const file=e.target.files?.[0];csvBuffer=file?await file.arrayBuffer():null;csvText='';preview=null;previewReceipt='';document.getElementById('crmCsvCommit').disabled=true;status(file?'選択：'+esc(file.name):'')});document.getElementById('crmCsvEncoding').addEventListener('change',()=>{if(csvBuffer){csvText=decodeCsv();preview=null;previewReceipt='';document.getElementById('crmCsvCommit').disabled=true;status('文字コードを変更しました。もう一度「内容を確認」を押してください。')}});document.getElementById('crmCsvPreview').onclick=previewCsv;document.getElementById('crmCsvCommit').onclick=commitCsv}
+function boot(){if(document.getElementById('crmCsvSheet'))return;const openBtn=document.createElement('button');openBtn.id='crmCsvImportOpen';openBtn.type='button';openBtn.textContent='予約CSV取込';openBtn.onclick=open;document.body.appendChild(openBtn);const modal=document.createElement('div');modal.id='crmCsvSheet';modal.className='crm-csv-sheet';modal.innerHTML='<div class="crm-csv-panel"><div class="crm-csv-head"><h2>予約CSVから顧客取込</h2><button class="crm-csv-close" type="button">×</button></div><div class="crm-csv-box"><b>CSVファイル</b><div class="crm-csv-meta">予約管理アプリと同じ予約CSVをそのまま選べます。同じ顧客名＋同じ撮影日は重複として1回。同じ顧客名で撮影日が違えばリピーターとして集計します。</div><input id="crmCsvFile" class="crm-csv-file" type="file" accept=".csv,text/csv"><select id="crmCsvEncoding" class="crm-csv-encoding"><option value="utf-8">UTF-8</option><option value="shift_jis">Shift_JIS（Excel等）</option></select><div class="crm-csv-actions"><button id="crmCsvPreview" class="crm-csv-btn secondary" type="button">内容を確認</button><button id="crmCsvCommit" class="crm-csv-btn" type="button" disabled>取込を確定</button></div><div id="crmCsvStatus" class="crm-csv-meta" style="margin-top:10px"></div><div id="crmCsvSummary"></div><div id="crmCsvGroups" style="margin-top:10px"></div></div></div>';modal.querySelector('.crm-csv-close').onclick=close;modal.addEventListener('click',e=>{if(e.target===modal)close()});document.body.appendChild(modal);document.getElementById('crmCsvFile').addEventListener('change',async e=>{const file=e.target.files?.[0];csvBuffer=file?await file.arrayBuffer():null;csvText='';preview=null;previewReceipt='';document.getElementById('crmCsvCommit').disabled=true;status(file?'選択：'+esc(file.name):'')});document.getElementById('crmCsvEncoding').addEventListener('change',()=>{if(csvBuffer){csvText=decodeCsv();preview=null;previewReceipt='';document.getElementById('crmCsvCommit').disabled=true;status('文字コードを変更しました。もう一度「内容を確認」を押してください。')}});document.getElementById('crmCsvPreview').onclick=previewCsv;document.getElementById('crmCsvCommit').onclick=commitCsv}
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot);else boot();
 })();<\/script>`;
   return source.includes('</head>')?source.replace('</head>',style+'</head>').replace('</body>',script+'</body>'):source+style+script;
