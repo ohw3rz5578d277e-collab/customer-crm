@@ -209,7 +209,7 @@ await test('CSV commit requires a matching signed preview receipt',async()=>{
   const req=new Request('https://crm.example.test/api/customer-csv-import/commit',{
     method:'POST',
     headers:{'content-type':'application/json','origin':'https://crm.example.test'},
-    body:JSON.stringify({csv_text:'名前,撮影日,撮影場所\\n山田花子,2026-01-01,大阪'})
+    body:JSON.stringify({csv_text:['名前,撮影日,撮影場所','山田花子,2026-01-01,大阪'].join('\n')})
   });
   const res=await handleCustomerCsvImport(req,{DB:{prepare(){throw new Error('DB must not be touched before receipt validation')}}},{authorized:true});
   assert.equal(res.status,409);
