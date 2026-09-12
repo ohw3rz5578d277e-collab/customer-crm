@@ -213,14 +213,15 @@ function b64url(bytes){let out='';for(const b of bytes)out+=String.fromCharCode(
 function fromB64url(value){const raw=String(value||'').replace(/-/g,'+').replace(/_/g,'/');const padded=raw+'='.repeat((4-raw.length%4)%4);try{const s=atob(padded),out=new Uint8Array(s.length);for(let i=0;i<s.length;i++)out[i]=s.charCodeAt(i);return out}catch{return new Uint8Array()}}
 function safeEqual(a,b){if(a.length!==b.length)return false;let diff=0;for(let i=0;i<a.length;i++)diff|=a[i]^b[i];return diff===0}
 async function hmac(value,secret){const key=await crypto.subtle.importKey('raw',encoder.encode(secret),{name:'HMAC',hash:'SHA-256'},false,['sign']);return new Uint8Array(await crypto.subtle.sign('HMAC',key,encoder.encode(value)))}
+function previewReceiptSecret(env){return text(env?.CRM_OWNER_SESSION_SECRET)||text(env?.ADMIN_TOKEN)}
 async function issuePreviewReceipt(env,csvText){
-  const secret=text(env?.CRM_OWNER_SESSION_SECRET);if(!secret)return'';
+  const secret=previewReceiptSecret(env);if(!secret)return'';
   const payload={v:1,build:BUILD,csv_sha256:await sha256Hex(csvText),exp:Math.floor(Date.now()/1000)+PREVIEW_RECEIPT_SECONDS};
   const encoded=b64url(encoder.encode(JSON.stringify(payload))),sig=b64url(await hmac(encoded,secret));
   return encoded+'.'+sig;
 }
 async function verifyPreviewReceipt(env,csvText,receipt){
-  const secret=text(env?.CRM_OWNER_SESSION_SECRET);if(!secret)return false;
+  const secret=previewReceiptSecret(env);if(!secret)return false;
   const parts=text(receipt).split('.');if(parts.length!==2)return false;
   const [encoded,sig]=parts;
   const expected=await hmac(encoded,secret);if(!safeEqual(fromB64url(sig),expected))return false;
