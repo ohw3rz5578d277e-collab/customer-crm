@@ -155,7 +155,7 @@ await test('health declares exact-only import matching and no fuzzy merge',()=>{
 
 await test('commit dedupes against an existing CRM reservation on the same customer and shoot date',()=>{
   const src=fs.readFileSync('src/crm-customer-csv-import.mjs','utf8');
-  assert.match(src,/WHERE customer_id=\? AND shoot_date=\? LIMIT 1/);
+  assert.match(src,/WHERE customer_id=\? AND shoot_date=\? AND COALESCE\(deleted_at,''\)='' LIMIT 1/);
   assert.match(src,/deduped_by:'customer_id\+shoot_date'/);
 });
 
