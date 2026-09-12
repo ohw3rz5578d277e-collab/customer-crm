@@ -157,7 +157,8 @@ test('Production entry wires owner-only CSV API and health',()=>{
 
 test('CSV module contains no fuzzy matching, LINE send, or Reservation-side Customer ID generation',()=>{
   const src=fs.readFileSync('src/crm-customer-csv-import.mjs','utf8');
-  assert.doesNotMatch(src,/levenshtein|fuzzy|similarity|soundex/i);
+  assert.doesNotMatch(src,/levenshtein|soundex|jaro|similarity\s*\(/i);
+  assert.match(src,/customer_csv_import_fuzzy_match:false/);
   assert.doesNotMatch(src,/LINE_SERVICE|pushMessage|replyMessage|api\.line\.me/i);
   assert.match(src,/allocateCustomerId/);
   assert.doesNotMatch(src,/Math\.random|Date\.now\(\).*customer/i);
