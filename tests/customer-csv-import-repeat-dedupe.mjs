@@ -5,6 +5,7 @@ import {
   analyzeCsvImport,
   normalizeImportName,
   normalizeImportDate,
+  findReservationCsvHeaderRow,
   customerCsvImportHealth,
   injectCustomerCsvImport
 } from '../src/crm-customer-csv-import.mjs';
@@ -28,6 +29,27 @@ test('CSV parser keeps commas and escaped quotes inside quoted fields',()=>{
   assert.equal(rows.length,2);
   assert.equal(rows[1][0],'山田 花子');
   assert.equal(rows[1][1],'大阪, 北区 "テスト"');
+});
+
+
+test('accepts the exact Reservation app CSV layout with preamble rows before the real header',()=>{
+  const preamble=Array.from({length:13},(_,i)=>'予約管理情報'+(i+1)+',').join('\n');
+  const csv=preamble+'\n'+[
+    '名前,撮影日,撮影場所,ジャンル,撮影プラン,単価,交通費,オプション1単価,オプション2単価,Movie,その他費用,追加購入,総額,備考',
+    '山田 花子,2026/01/10,大阪城,お宮参り,Normal,24800,2000,0,0,0,0,0,26800,初回',
+    '山田花子,2026/05/03,万博公園,ファミリーフォト,Special,35000,1500,0,0,0,0,0,36500,2回目',
+    '山田花子,2026/05/03,万博公園,ファミリーフォト,Special,35000,1500,0,0,0,0,0,36500,重複行'
+  ].join('\n');
+  const rows=parseCsvText(csv);
+  assert.equal(findReservationCsvHeaderRow(rows),13);
+  const a=analyzeCsvImport(csv);
+  assert.equal(a.header_row,14);
+  assert.equal(a.customer_count,1);
+  assert.equal(a.repeater_count,1);
+  assert.equal(a.duplicate_same_day_rows,1);
+  assert.deepEqual(a.groups[0].shoot_dates,['2026-01-10','2026-05-03']);
+  assert.equal(a.groups[0].shoots[0].total_amount,26800);
+  assert.equal(a.groups[0].shoots[1].total_amount,36500);
 });
 
 test('same normalized name and same shoot date is one shoot, not a repeat',()=>{
@@ -107,6 +129,7 @@ test('CSV without shoot-date column stays customer-only and does not invent repe
 test('health declares exact-only import matching and no fuzzy merge',()=>{
   const h=customerCsvImportHealth();
   assert.equal(h.customer_csv_import,true);
+  assert.equal(h.customer_csv_import_reservation_csv_compatible,true);
   assert.equal(h.customer_csv_import_same_day_dedupe,true);
   assert.equal(h.customer_csv_import_repeat_rule,'same_name_distinct_shoot_dates>=2');
   assert.equal(h.customer_csv_import_existing_customer_auto_name_merge,false);
@@ -137,6 +160,7 @@ test('mobile UI supports UTF-8 and Shift_JIS CSV files',()=>{
 test('mobile UI explains dedupe/repeat behavior and requires preview before commit',()=>{
   const html=injectCustomerCsvImport('<!doctype html><html><head></head><body></body></html>');
   assert.match(html,/顧客CSV取込/);
+  assert.match(html,/予約管理アプリと同じ予約CSVをそのまま選べます/);
   assert.match(html,/同じ顧客名＋同じ撮影日は重複として1回/);
   assert.match(html,/同じ顧客名で撮影日が違えばリピーター/);
   assert.match(html,/内容を確認/);
