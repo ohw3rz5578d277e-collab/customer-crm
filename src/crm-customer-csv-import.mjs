@@ -9,8 +9,8 @@ const CUSTOMER_ID_RE=/^\d{8}$/;
 function text(v){return v==null?'':String(v).trim()}
 function json(data,status=200){return new Response(JSON.stringify(data,null,2),{status,headers:{'content-type':'application/json; charset=utf-8','cache-control':'no-store, no-cache, must-revalidate, max-age=0'}})}
 function sameOrigin(request){const origin=text(request.headers.get('origin'));if(!origin)return true;try{return new URL(origin).origin===new URL(request.url).origin}catch{return false}}
-function normalizeHeader(v){return text(v).normalize('NFKC').toLowerCase().replace(/[\s_\-・･]+/g,'')}
-export function normalizeImportName(v){return text(v).normalize('NFKC').replace(/[\s　]+/g,'')}
+function normalizeHeader(v){return text(v).normalize('NFKC').replace(/[\s　\r\n]+/g,'').replace(/[①１]/g,'1').replace(/[②２]/g,'2').replace(/[③３]/g,'3').replace(/[（）()]/g,'').toLowerCase()}
+export function normalizeImportName(v){return text(v).normalize('NFKC').toLowerCase().replace(/[\s　・･.．,，、()（）\[\]［］【】「」『』]/g,'')}
 function displayName(v){return text(v).normalize('NFKC').replace(/[\s　]+/g,' ').trim()}
 function toAmount(v){const n=Number(text(v).replace(/[,，円¥￥\s]/g,''));return Number.isFinite(n)?n:0}
 function excelDate(serial){const n=Number(serial);if(!Number.isInteger(n)||n<20000||n>80000)return'';const d=new Date(Date.UTC(1899,11,30)+n*86400000);return d.toISOString().slice(0,10)}
@@ -56,10 +56,30 @@ const ALIASES={
   phone:['phone','tel','電話','電話番号','携帯番号'],
   email:['email','mail','メール','メールアドレス'],
   address:['address','住所'],
-  total_amount:['totalamount','amount','price','料金','金額','売上','合計金額','撮影料金'],
+  total_amount:['totalamount','amount','price','料金','金額','売上','総額','合計金額','撮影料金'],
+  plan_label:['planlabel','撮影プラン','プラン'],
+  plan_amount:['planamount','単価','プラン金額'],
+  traffic_amount:['trafficamount','交通費'],
+  option1_amount:['option1amount','オプション1単価','オプション①単価'],
+  option2_amount:['option2amount','オプション2単価','オプション②単価'],
+  movie_amount:['movie','movieamount'],
+  other_amount:['otheramount','その他費用'],
+  additional_purchase:['additionalpurchase','追加購入'],
+  shoot_place:['shootplace','撮影場所','場所'],
   memo:['memo','note','備考','メモ']
 };
 const HEADER_KEY=new Map(Object.entries(ALIASES).flatMap(([key,values])=>values.map(v=>[normalizeHeader(v),key])));
+
+export function findReservationCsvHeaderRow(rows){
+  for(let i=0;i<Math.min(rows.length,50);i++){
+    const map=new Set((rows[i]||[]).map(normalizeHeader));
+    const hasName=['名前','顧客名','customer_name'].some(x=>map.has(normalizeHeader(x)));
+    const hasDate=['撮影日','日付','shoot_date'].some(x=>map.has(normalizeHeader(x)));
+    const hasPlace=['撮影場所','場所','shoot_place'].some(x=>map.has(normalizeHeader(x)));
+    if(hasName&&hasDate&&hasPlace)return i;
+  }
+  return rows.length>=14?13:0;
+}
 
 function rowObject(headers,cells){
   const out={};
@@ -78,18 +98,22 @@ export function analyzeCsvImport(csvText){
   if(new TextEncoder().encode(String(csvText||'')).byteLength>MAX_CSV_BYTES)throw new Error('csv_too_large');
   const matrix=parseCsvText(csvText);
   if(matrix.length<2)throw new Error('csv_has_no_data_rows');
-  if(matrix.length-1>MAX_ROWS)throw new Error('csv_row_limit_exceeded');
-  const headers=matrix[0].map(text);
+  const headerIndex=findReservationCsvHeaderRow(matrix);
+  const dataRows=matrix.slice(headerIndex+1);
+  if(dataRows.length>MAX_ROWS)throw new Error('csv_row_limit_exceeded');
+  const headers=(matrix[headerIndex]||[]).map(text);
   const mappedHeaders=new Set(headers.map(h=>HEADER_KEY.get(normalizeHeader(h))).filter(Boolean));
   if(!mappedHeaders.has('name'))throw new Error('csv_name_column_required');
 
   const groups=new Map(),errors=[],warnings=[];
   let duplicateRows=0,validRows=0;
-  for(let i=1;i<matrix.length;i++){
-    const raw=rowObject(headers,matrix[i]),line=i+1;
+  for(let offset=0;offset<dataRows.length;offset++){
+    const raw=rowObject(headers,dataRows[offset]),line=headerIndex+offset+2;
     const name=displayName(raw.name),nameKey=normalizeImportName(name);
+    const originalDate=text(raw.shoot_date);
+    if(!nameKey&&!originalDate)continue;
     if(!nameKey){errors.push({line,error:'customer_name_required'});continue}
-    const originalDate=text(raw.shoot_date),shootDate=normalizeImportDate(originalDate);
+    const shootDate=normalizeImportDate(originalDate);
     if(originalDate&&!shootDate){errors.push({line,error:'invalid_shoot_date',value:originalDate});continue}
     const customerId=text(raw.customer_id);
     if(customerId&&!CUSTOMER_ID_RE.test(customerId)){errors.push({line,error:'invalid_customer_id',value:customerId});continue}
@@ -141,7 +165,8 @@ export function analyzeCsvImport(csvText){
 
   return{
     headers,
-    row_count:matrix.length-1,
+    header_row:headerIndex+1,
+    row_count:dataRows.length,
     valid_row_count:validRows,
     customer_count:resultGroups.length,
     duplicate_same_day_rows:duplicateRows,
@@ -357,7 +382,9 @@ export function customerCsvImportHealth(){
     customer_csv_import_build:BUILD,
     customer_csv_import_owner_only:true,
     customer_csv_import_preview_before_commit:true,
-    customer_csv_import_name_match:'NFKC+whitespace_removed_exact_only',
+    customer_csv_import_name_match:'reservation_csv_normalized_name_exact_grouping',
+    customer_csv_import_reservation_csv_compatible:true,
+    customer_csv_import_reservation_csv_header_scan_rows:50,
     customer_csv_import_same_day_dedupe:true,
     customer_csv_import_repeat_rule:'same_name_distinct_shoot_dates>=2',
     customer_csv_import_existing_customer_auto_name_merge:false,
@@ -390,7 +417,7 @@ const box=document.getElementById('crmCsvGroups');box.innerHTML=(p.groups||[]).m
 let msg='プレビュー完了。内容を確認してから「取込を確定」を押してください。';if(p.errors?.length)msg='<div class="crm-csv-error">'+p.errors.slice(0,8).map(e=>'行 '+esc(e.line||'-')+'：'+esc(e.error)).join('<br>')+'</div>';status(msg);document.getElementById('crmCsvCommit').disabled=!!(p.errors?.length)}
 async function previewCsv(){csvText=decodeCsv();if(!csvText){status('<div class="crm-csv-warn">CSVファイルを選択してください。</div>');return}status('確認中…');try{renderPreview(await api('/api/customer-csv-import/preview',{csv_text:csvText}))}catch(e){status('<div class="crm-csv-error">'+esc(e.message)+'</div>')}}
 async function commitCsv(){if(!preview||!csvText)return;const mappings={};document.querySelectorAll('[data-map-key]').forEach(el=>{if(el.value)mappings[el.dataset.mapKey]=el.value});const btn=document.getElementById('crmCsvCommit');btn.disabled=true;status('取り込み中…');try{const r=await api('/api/customer-csv-import/commit',{csv_text:csvText,mappings});const failures=(r.results||[]).filter(x=>!x.ok);status((r.ok?'<div class="crm-csv-warn" style="background:#ecfdf5;border-color:#a7f3d0;color:#065f46">取込完了：顧客 '+r.customers_total+'人 / 新規 '+r.customers_created+'人 / 撮影 '+r.shoots_created+'件 / リピーター '+r.repeater_customers+'人</div>':'<div class="crm-csv-error">一部取込に失敗しました：'+failures.map(x=>esc(x.name)+' '+esc(x.error)).join('<br>')+'</div>'));if(r.ok){window.dispatchEvent(new CustomEvent('crm-customers-changed'));setTimeout(()=>location.reload(),900)}}catch(e){status('<div class="crm-csv-error">'+esc(e.message)+'</div>');btn.disabled=false}}
-function boot(){if(document.getElementById('crmCsvSheet'))return;const openBtn=document.createElement('button');openBtn.id='crmCsvImportOpen';openBtn.type='button';openBtn.textContent='CSV取込';openBtn.onclick=open;document.body.appendChild(openBtn);const modal=document.createElement('div');modal.id='crmCsvSheet';modal.className='crm-csv-sheet';modal.innerHTML='<div class="crm-csv-panel"><div class="crm-csv-head"><h2>顧客CSV取込</h2><button class="crm-csv-close" type="button">×</button></div><div class="crm-csv-box"><b>CSVファイル</b><div class="crm-csv-meta">同じ顧客名＋同じ撮影日は重複として1回。同じ顧客名で撮影日が違えばリピーターとして集計します。</div><input id="crmCsvFile" class="crm-csv-file" type="file" accept=".csv,text/csv"><select id="crmCsvEncoding" class="crm-csv-encoding"><option value="utf-8">UTF-8</option><option value="shift_jis">Shift_JIS（Excel等）</option></select><div class="crm-csv-actions"><button id="crmCsvPreview" class="crm-csv-btn secondary" type="button">内容を確認</button><button id="crmCsvCommit" class="crm-csv-btn" type="button" disabled>取込を確定</button></div><div id="crmCsvStatus" class="crm-csv-meta" style="margin-top:10px"></div><div id="crmCsvSummary"></div><div id="crmCsvGroups" style="margin-top:10px"></div></div></div>';modal.querySelector('.crm-csv-close').onclick=close;modal.addEventListener('click',e=>{if(e.target===modal)close()});document.body.appendChild(modal);document.getElementById('crmCsvFile').addEventListener('change',async e=>{const file=e.target.files?.[0];csvBuffer=file?await file.arrayBuffer():null;csvText='';preview=null;document.getElementById('crmCsvCommit').disabled=true;status(file?'選択：'+esc(file.name):'')});document.getElementById('crmCsvEncoding').addEventListener('change',()=>{if(csvBuffer){csvText=decodeCsv();preview=null;document.getElementById('crmCsvCommit').disabled=true;status('文字コードを変更しました。もう一度「内容を確認」を押してください。')}});document.getElementById('crmCsvPreview').onclick=previewCsv;document.getElementById('crmCsvCommit').onclick=commitCsv}
+function boot(){if(document.getElementById('crmCsvSheet'))return;const openBtn=document.createElement('button');openBtn.id='crmCsvImportOpen';openBtn.type='button';openBtn.textContent='CSV取込';openBtn.onclick=open;document.body.appendChild(openBtn);const modal=document.createElement('div');modal.id='crmCsvSheet';modal.className='crm-csv-sheet';modal.innerHTML='<div class="crm-csv-panel"><div class="crm-csv-head"><h2>顧客CSV取込</h2><button class="crm-csv-close" type="button">×</button></div><div class="crm-csv-box"><b>CSVファイル</b><div class="crm-csv-meta">予約管理アプリと同じ予約CSVをそのまま選べます。同じ顧客名＋同じ撮影日は重複として1回、撮影日が違えばリピーターとして集計します。</div><input id="crmCsvFile" class="crm-csv-file" type="file" accept=".csv,text/csv"><select id="crmCsvEncoding" class="crm-csv-encoding"><option value="utf-8">UTF-8</option><option value="shift_jis">Shift_JIS（Excel等）</option></select><div class="crm-csv-actions"><button id="crmCsvPreview" class="crm-csv-btn secondary" type="button">内容を確認</button><button id="crmCsvCommit" class="crm-csv-btn" type="button" disabled>取込を確定</button></div><div id="crmCsvStatus" class="crm-csv-meta" style="margin-top:10px"></div><div id="crmCsvSummary"></div><div id="crmCsvGroups" style="margin-top:10px"></div></div></div>';modal.querySelector('.crm-csv-close').onclick=close;modal.addEventListener('click',e=>{if(e.target===modal)close()});document.body.appendChild(modal);document.getElementById('crmCsvFile').addEventListener('change',async e=>{const file=e.target.files?.[0];csvBuffer=file?await file.arrayBuffer():null;csvText='';preview=null;document.getElementById('crmCsvCommit').disabled=true;status(file?'選択：'+esc(file.name):'')});document.getElementById('crmCsvEncoding').addEventListener('change',()=>{if(csvBuffer){csvText=decodeCsv();preview=null;document.getElementById('crmCsvCommit').disabled=true;status('文字コードを変更しました。もう一度「内容を確認」を押してください。')}});document.getElementById('crmCsvPreview').onclick=previewCsv;document.getElementById('crmCsvCommit').onclick=commitCsv}
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot);else boot();
 })();<\/script>`;
   return source.includes('</head>')?source.replace('</head>',style+'</head>').replace('</body>',script+'</body>'):source+style+script;
