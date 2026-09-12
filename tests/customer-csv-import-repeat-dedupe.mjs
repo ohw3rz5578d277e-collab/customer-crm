@@ -172,7 +172,7 @@ test('mobile UI supports UTF-8 and Shift_JIS CSV files',()=>{
 
 test('mobile UI explains dedupe/repeat behavior and requires preview before commit',()=>{
   const html=injectCustomerCsvImport('<!doctype html><html><head></head><body></body></html>');
-  assert.match(html,/顧客CSV取込/);
+  assert.match(html,/予約CSVから顧客取込/);
   assert.match(html,/予約管理アプリと同じ予約CSVをそのまま選べます/);
   assert.match(html,/同じ顧客名＋同じ撮影日は重複として1回/);
   assert.match(html,/同じ顧客名で撮影日が違えばリピーター/);
