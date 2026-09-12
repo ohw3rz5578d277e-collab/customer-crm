@@ -247,17 +247,22 @@ async function recalcRepeatStats(db,customerId){
 }
 async function insertShoot(db,customerId,group,shoot){
   const eventKey=await importEventKey(group.name_key,shoot.shoot_date);
+  const sameDate=await first(db,`SELECT event_key,source,customer_id FROM customer_reservations WHERE customer_id=? AND shoot_date=? LIMIT 1`,customerId,shoot.shoot_date);
+  if(sameDate){
+    if(text(sameDate.source)===SOURCE&&text(sameDate.event_key)===eventKey){
+      const rawJson=JSON.stringify({import_build:BUILD,name_key:group.name_key,source_rows:shoot._source_rows||[],dedupe_rule:'same_normalized_name+same_shoot_date',raw:shoot});
+      await run(db,`UPDATE customer_reservations SET customer_name=?,genre=COALESCE(NULLIF(?,''),genre),total_amount=CASE WHEN ?>COALESCE(total_amount,0) THEN ? ELSE total_amount END,status=COALESCE(NULLIF(status,''),'CSV取込'),raw_json=?,updated_at=CURRENT_TIMESTAMP WHERE event_key=? AND customer_id=?`,
+        group.name,text(shoot.genre),toAmount(shoot.total_amount),toAmount(shoot.total_amount),rawJson,eventKey,customerId);
+    }
+    return{created:false,event_key:text(sameDate.event_key),deduped_by:'customer_id+shoot_date'};
+  }
   const existing=await first(db,`SELECT customer_id FROM customer_reservations WHERE event_key=? LIMIT 1`,eventKey);
   if(existing&&text(existing.customer_id)!==customerId){
     const e=new Error('same_name_same_date_already_linked_to_different_customer');e.statusCode=409;e.event_key=eventKey;throw e;
   }
   const reservationId='CSV-'+(await sha256Hex(group.name_key+'\n'+shoot.shoot_date)).slice(0,20).toUpperCase();
   const rawJson=JSON.stringify({import_build:BUILD,name_key:group.name_key,source_rows:shoot._source_rows||[],dedupe_rule:'same_normalized_name+same_shoot_date',raw:shoot});
-  if(existing){
-    await run(db,`UPDATE customer_reservations SET customer_name=?,genre=COALESCE(NULLIF(?,''),genre),total_amount=CASE WHEN ?>COALESCE(total_amount,0) THEN ? ELSE total_amount END,status=COALESCE(NULLIF(status,''),'CSV取込'),source=?,raw_json=?,updated_at=CURRENT_TIMESTAMP WHERE event_key=? AND customer_id=?`,
-      group.name,text(shoot.genre),toAmount(shoot.total_amount),toAmount(shoot.total_amount),SOURCE,rawJson,eventKey,customerId);
-    return{created:false,event_key:eventKey};
-  }
+  if(existing)return{created:false,event_key:eventKey,deduped_by:'event_key'};
   await run(db,`INSERT INTO customer_reservations (event_key,reservation_id,customer_id,customer_name,genre,shoot_date,total_amount,status,source,raw_json,created_at,updated_at)
     VALUES (?,?,?,?,?,?,?,'CSV取込',?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`,
     eventKey,reservationId,customerId,group.name,text(shoot.genre)||null,shoot.shoot_date,toAmount(shoot.total_amount),SOURCE,rawJson);
