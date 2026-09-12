@@ -115,6 +115,19 @@ test('health declares exact-only import matching and no fuzzy merge',()=>{
   assert.equal(h.customer_csv_import_fuzzy_match,false);
 });
 
+test('import implementation never reduces an existing repeat_count',()=>{
+  const src=fs.readFileSync('src/crm-customer-csv-import.mjs','utf8');
+  assert.match(src,/const count=Math\.max\(knownCount,dates\.length\)/);
+});
+
+test('mobile UI supports UTF-8 and Shift_JIS CSV files',()=>{
+  const html=injectCustomerCsvImport('<!doctype html><html><head></head><body></body></html>');
+  assert.match(html,/UTF-8/);
+  assert.match(html,/Shift_JIS/);
+  assert.match(html,/TextDecoder/);
+  assert.match(html,/arrayBuffer/);
+});
+
 test('mobile UI explains dedupe/repeat behavior and requires preview before commit',()=>{
   const html=injectCustomerCsvImport('<!doctype html><html><head></head><body></body></html>');
   assert.match(html,/顧客CSV取込/);
