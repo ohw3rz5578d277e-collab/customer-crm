@@ -117,7 +117,8 @@ export function analyzeCsvImport(csvText){
     if(ids.length>1)errors.push({line:group.first_row,error:'conflicting_customer_ids_for_same_name',name:group.name,customer_ids:ids});
     const shoots=[...group.shoots.values()].sort((a,b)=>a.shoot_date.localeCompare(b.shoot_date));
     if(shoots.length>=2)repeaters++;
-    const seed=shoots[0]||group.customer_only_rows[0]||{};
+    const allRows=[...shoots,...group.customer_only_rows];
+    const firstValue=key=>text(allRows.find(x=>text(x[key]))?.[key]);
     resultGroups.push({
       name_key:group.name_key,
       name:group.name,
@@ -126,11 +127,11 @@ export function analyzeCsvImport(csvText){
       shoot_dates:shoots.map(x=>x.shoot_date),
       is_repeater:shoots.length>=2,
       duplicate_same_day_rows:shoots.reduce((n,x)=>n+Math.max(0,(x._source_rows||[]).length-1),0),
-      furigana:text(seed.furigana),
-      phone:text(seed.phone),
-      email:text(seed.email),
-      address:text(seed.address),
-      memo:text(seed.memo),
+      furigana:firstValue('furigana'),
+      phone:firstValue('phone'),
+      email:firstValue('email'),
+      address:firstValue('address'),
+      memo:firstValue('memo'),
       shoots,
       customer_only:shoots.length===0
     });
@@ -230,12 +231,19 @@ async function fillBlankCustomerMetadata(db,customerId,group){
     m.name,m.furigana||null,m.phone||null,m.email||null,m.address||null,m.memo||null,customerId);
 }
 async function recalcRepeatStats(db,customerId){
-  const rows=await all(db,`SELECT shoot_date,status FROM customer_reservations WHERE customer_id=? AND shoot_date IS NOT NULL AND trim(shoot_date)<>''`,customerId);
+  const [rows,current]=await Promise.all([
+    all(db,`SELECT shoot_date,status FROM customer_reservations WHERE customer_id=? AND shoot_date IS NOT NULL AND trim(shoot_date)<>''`,customerId),
+    first(db,`SELECT repeat_count,first_shoot_date,last_shoot_date FROM customers WHERE customer_id=? LIMIT 1`,customerId)
+  ]);
   const dates=[...new Set(rows.filter(r=>!/(?:cancel|キャンセル)/i.test(text(r.status))).map(r=>normalizeImportDate(r.shoot_date)).filter(Boolean))].sort();
-  const count=dates.length;
+  const knownCount=Math.max(0,Number(current?.repeat_count||0)||0);
+  const count=Math.max(knownCount,dates.length);
+  const firstCandidates=[normalizeImportDate(current?.first_shoot_date),dates[0]||''].filter(Boolean).sort();
+  const lastCandidates=[normalizeImportDate(current?.last_shoot_date),dates.at(-1)||''].filter(Boolean).sort();
+  const firstShoot=firstCandidates[0]||null,lastShoot=lastCandidates.at(-1)||null;
   await run(db,`UPDATE customers SET repeat_count=?,first_shoot_date=?,last_shoot_date=?,updated_at=CURRENT_TIMESTAMP WHERE customer_id=?`,
-    count,dates[0]||null,dates.at(-1)||null,customerId);
-  return{repeat_count:count,is_repeater:count>=2,first_shoot_date:dates[0]||'',last_shoot_date:dates.at(-1)||''};
+    count,firstShoot,lastShoot,customerId);
+  return{repeat_count:count,is_repeater:count>=2,first_shoot_date:firstShoot||'',last_shoot_date:lastShoot||''};
 }
 async function insertShoot(db,customerId,group,shoot){
   const eventKey=await importEventKey(group.name_key,shoot.shoot_date);
@@ -281,7 +289,7 @@ async function commitImport(env,analysis,mappings={}){
   if(!env?.DB?.prepare)throw new Error('db_binding_missing');
   if(analysis.errors.length){const e=new Error('csv_validation_failed');e.statusCode=400;throw e}
   const prior=await priorCsvMappings(env.DB);
-  const results=[];let createdCustomers=0,createdShoots=0,reusedShoots=0,repeaters=0;
+  const results=[];let createdCustomers=0,createdShoots=0,reusedShoots=0;const repeaterIds=new Set();
   for(const group of analysis.groups){
     try{
       const resolved=await resolveGroupCustomerId(env.DB,group,mappings,prior);
@@ -292,7 +300,7 @@ async function commitImport(env,analysis,mappings={}){
         if(out.created)createdShoots++;else reusedShoots++;
       }
       const stats=await recalcRepeatStats(env.DB,resolved.customer_id);
-      if(stats.is_repeater)repeaters++;
+      if(stats.is_repeater)repeaterIds.add(resolved.customer_id);
       results.push({ok:true,name:group.name,name_key:group.name_key,customer_id:resolved.customer_id,resolution:resolved.resolution,shoot_count:group.shoot_count,...stats});
     }catch(error){
       results.push({ok:false,name:group.name,name_key:group.name_key,error:String(error?.message||error),statusCode:Number(error?.statusCode||500)});
@@ -309,7 +317,7 @@ async function commitImport(env,analysis,mappings={}){
     shoots_created:createdShoots,
     shoots_reused:reusedShoots,
     duplicate_same_day_rows:analysis.duplicate_same_day_rows,
-    repeater_customers:repeaters,
+    repeater_customers:repeaterIds.size,
     failed_count:failed.length,
     results
   };
