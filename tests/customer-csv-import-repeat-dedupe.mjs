@@ -267,9 +267,28 @@ await test('CSV import refreshes Customer360 LTV AOV and genre history from acti
   assert.match(src,/repeat_count_730d/);
   assert.match(src,/total_revenue=\?/);
   assert.match(src,/avg_order_value=\?/);
-  assert.match(src,/genre_history=COALESCE\(NULLIF\(\?,''\),genre_history\)/);
+  assert.match(src,/genre_history=\?,/);
+  assert.doesNotMatch(src,/genre_history=COALESCE\(NULLIF\(\?,''\),genre_history\)/);
   assert.match(src,/NOT LIKE '%cancel%'/);
   assert.match(src,/NOT LIKE '%キャンセル%'/);
+});
+
+await test('inferred event owner reruns deleted same-date preflight for every shoot before writes',()=>{
+  const src=fs.readFileSync('src/crm-customer-csv-import.mjs','utf8');
+  const start=src.indexOf('async function preflightGroupReservationConflicts');
+  const end=src.indexOf('async function createCustomerWithFirstShoot',start);
+  const preflight=src.slice(start,end);
+  assert.match(preflight,/if\(!customerId&&activeCustomerId\)\{[\s\S]*for\(const shoot of group\.shoots\)[\s\S]*WHERE customer_id=\? AND shoot_date=\? AND COALESCE\(deleted_at,''\)<>''[\s\S]*activeCustomerId,shoot\.shoot_date/);
+  const inferred=src.indexOf("resolved={customer_id:preflight.active_customer_id,resolution:'preflight_csv_event_winner'};");
+  const metadata=src.indexOf('await fillBlankCustomerMetadata(env.DB,resolved.customer_id,group);');
+  assert.ok(inferred>=0&&metadata>inferred);
+});
+
+await test('CSV stats refresh clears stale genre history when active aggregate is empty',()=>{
+  const src=fs.readFileSync('src/crm-customer-csv-import.mjs','utf8');
+  assert.match(src,/genre_history=\?,/);
+  assert.match(src,/text\(row\?\.genre_history\)\|\|null/);
+  assert.doesNotMatch(src,/genre_history=COALESCE\(NULLIF\(\?,''\),genre_history\)/);
 });
 
 await test('later shoot inserts converge on concurrent event-key winner for same customer',()=>{
