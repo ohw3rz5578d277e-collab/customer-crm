@@ -161,7 +161,7 @@ await test('commit dedupes against an existing CRM reservation on the same custo
 
 await test('import implementation never reduces an existing repeat_count',()=>{
   const src=fs.readFileSync('src/crm-customer-csv-import.mjs','utf8');
-  assert.match(src,/const count=Math\.max\(knownCount,activeCount\)/);
+  assert.match(src,/MAX\(COALESCE\(c\.repeat_count,0\),COALESCE\(s\.active_count,0\)\) AS repeat_count/);
 });
 
 await test('mobile UI supports UTF-8 and Shift_JIS CSV files',()=>{
@@ -265,9 +265,9 @@ await test('CSV import refreshes Customer360 LTV AOV and genre history from acti
   assert.match(src,/repeat_count_90d/);
   assert.match(src,/repeat_count_365d/);
   assert.match(src,/repeat_count_730d/);
-  assert.match(src,/total_revenue=\?/);
-  assert.match(src,/avg_order_value=\?/);
-  assert.match(src,/genre_history=\?,/);
+  assert.match(src,/total_revenue=\(SELECT total_revenue FROM merged\)/);
+  assert.match(src,/avg_order_value=\(SELECT avg_order_value FROM merged\)/);
+  assert.match(src,/genre_history=\(SELECT genre_history FROM merged\)/);
   assert.doesNotMatch(src,/genre_history=COALESCE\(NULLIF\(\?,''\),genre_history\)/);
   assert.match(src,/NOT LIKE '%cancel%'/);
   assert.match(src,/NOT LIKE '%キャンセル%'/);
@@ -286,9 +286,30 @@ await test('inferred event owner reruns deleted same-date preflight for every sh
 
 await test('CSV stats refresh clears stale genre history when active aggregate is empty',()=>{
   const src=fs.readFileSync('src/crm-customer-csv-import.mjs','utf8');
-  assert.match(src,/genre_history=\?,/);
-  assert.match(src,/text\(row\?\.genre_history\)\|\|null/);
+  assert.match(src,/s\.genre_history AS genre_history/);
+  assert.match(src,/genre_history=\(SELECT genre_history FROM merged\)/);
   assert.doesNotMatch(src,/genre_history=COALESCE\(NULLIF\(\?,''\),genre_history\)/);
+});
+
+await test('concurrent first-shoot winner is fully re-preflighted before metadata or later writes',()=>{
+  const src=fs.readFileSync('src/crm-customer-csv-import.mjs','utf8');
+  const create=src.indexOf('resolved=await createCustomerWithFirstShoot(env.DB,group);');
+  const repreflight=src.indexOf('await preflightGroupReservationConflicts(env.DB,group,resolved.customer_id);',create);
+  const metadata=src.indexOf('await fillBlankCustomerMetadata(env.DB,resolved.customer_id,group);',create);
+  assert.ok(create>=0&&repreflight>create&&metadata>repreflight);
+  assert.match(src,/if\(resolved\.created\)\{[\s\S]*\}else\{[\s\S]*await preflightGroupReservationConflicts\(env\.DB,group,resolved\.customer_id\);/);
+});
+
+await test('Customer360 aggregate refresh computes values inside one UPDATE statement',()=>{
+  const src=fs.readFileSync('src/crm-customer-csv-import.mjs','utf8');
+  const start=src.indexOf('async function recalcRepeatStats');
+  const end=src.indexOf('async function insertShoot',start);
+  const recalc=src.slice(start,end);
+  assert.match(recalc,/WITH stats AS \([\s\S]*UPDATE customers SET/);
+  assert.match(recalc,/total_revenue=\(SELECT total_revenue FROM merged\)/);
+  assert.match(recalc,/avg_order_value=\(SELECT avg_order_value FROM merged\)/);
+  assert.match(recalc,/genre_history=\(SELECT genre_history FROM merged\)/);
+  assert.doesNotMatch(recalc,/const row=await first\(db,`SELECT[\s\S]*FROM customer_reservations/);
 });
 
 await test('later shoot inserts converge on concurrent event-key winner for same customer',()=>{
