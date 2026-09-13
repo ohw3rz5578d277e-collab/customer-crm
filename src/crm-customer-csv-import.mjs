@@ -1,6 +1,6 @@
 import { allocateCustomerId, jstYear } from './customer-identity-resolver.mjs';
 
-const BUILD='crm-customer-csv-import-20260913-01';
+const BUILD='crm-customer-csv-import-20260913-02';
 const SOURCE='customer_csv_import';
 const MAX_CSV_BYTES=2_500_000;
 const MAX_ROWS=5000;
@@ -409,12 +409,13 @@ async function fillBlankCustomerMetadata(db,customerId,group){
     m.name,m.furigana||null,m.phone||null,m.email||null,m.address||null,m.memo||null,customerId);
 }
 async function recalcRepeatStats(db,customerId){
-  const row=await first(db,`SELECT
+  await run(db,`WITH stats AS (
+    SELECT
       COUNT(DISTINCT CASE
         WHEN shoot_date IS NOT NULL AND trim(shoot_date)<>''
           AND lower(COALESCE(status,'')) NOT LIKE '%cancel%'
           AND COALESCE(status,'') NOT LIKE '%キャンセル%'
-        THEN shoot_date END) AS repeat_count,
+        THEN shoot_date END) AS active_count,
       COALESCE(SUM(CASE
         WHEN lower(COALESCE(status,'')) NOT LIKE '%cancel%'
           AND COALESCE(status,'') NOT LIKE '%キャンセル%'
@@ -453,45 +454,58 @@ async function recalcRepeatStats(db,customerId){
           AND COALESCE(genre,'')<>''
         THEN genre END) AS genre_history
     FROM customer_reservations
-    WHERE customer_id=? AND COALESCE(deleted_at,'')=''`,customerId);
-  const current=await first(db,`SELECT repeat_count,first_shoot_date,last_shoot_date FROM customers WHERE customer_id=? LIMIT 1`,customerId);
-  const knownCount=Math.max(0,Number(current?.repeat_count||0)||0);
-  const activeCount=Math.max(0,Number(row?.repeat_count||0)||0);
-  const count=Math.max(knownCount,activeCount);
-  const firstCandidates=[normalizeImportDate(current?.first_shoot_date),normalizeImportDate(row?.first_shoot_date)].filter(Boolean).sort();
-  const lastCandidates=[normalizeImportDate(current?.last_shoot_date),normalizeImportDate(row?.last_shoot_date)].filter(Boolean).sort();
-  const firstShoot=firstCandidates[0]||null,lastShoot=lastCandidates.at(-1)||null;
-  const dormant=await first(db,`SELECT CASE WHEN ? IS NULL OR ?='' THEN 0 ELSE CAST(julianday('now')-julianday(?) AS INTEGER) END AS dormant_days`,lastShoot,lastShoot,lastShoot);
-  await run(db,`UPDATE customers SET
-      repeat_count=?,
-      repeat_count_1y=?,
-      repeat_count_90d=?,
-      repeat_count_365d=?,
-      repeat_count_730d=?,
-      total_revenue=?,
-      avg_order_value=?,
-      first_shoot_date=?,
-      last_shoot_date=?,
-      dormant_days=?,
-      genre_history=?,
-      updated_at=CURRENT_TIMESTAMP
-    WHERE customer_id=?`,
-    count,
-    Number(row?.repeat_count_365d||0)||0,
-    Number(row?.repeat_count_90d||0)||0,
-    Number(row?.repeat_count_365d||0)||0,
-    Number(row?.repeat_count_730d||0)||0,
-    Number(row?.total_revenue||0)||0,
-    Number(row?.avg_order_value||0)||0,
-    firstShoot,lastShoot,
-    Number(dormant?.dormant_days||0)||0,
-    text(row?.genre_history)||null,
-    customerId);
+    WHERE customer_id=? AND COALESCE(deleted_at,'')=''
+  ),
+  merged AS (
+    SELECT
+      MAX(COALESCE(c.repeat_count,0),COALESCE(s.active_count,0)) AS repeat_count,
+      COALESCE(s.repeat_count_365d,0) AS repeat_count_1y,
+      COALESCE(s.repeat_count_90d,0) AS repeat_count_90d,
+      COALESCE(s.repeat_count_365d,0) AS repeat_count_365d,
+      COALESCE(s.repeat_count_730d,0) AS repeat_count_730d,
+      COALESCE(s.total_revenue,0) AS total_revenue,
+      COALESCE(s.avg_order_value,0) AS avg_order_value,
+      CASE
+        WHEN NULLIF(trim(COALESCE(c.first_shoot_date,'')),'') IS NULL THEN s.first_shoot_date
+        WHEN s.first_shoot_date IS NULL OR s.first_shoot_date='' THEN c.first_shoot_date
+        WHEN c.first_shoot_date<=s.first_shoot_date THEN c.first_shoot_date
+        ELSE s.first_shoot_date
+      END AS first_shoot_date,
+      CASE
+        WHEN NULLIF(trim(COALESCE(c.last_shoot_date,'')),'') IS NULL THEN s.last_shoot_date
+        WHEN s.last_shoot_date IS NULL OR s.last_shoot_date='' THEN c.last_shoot_date
+        WHEN c.last_shoot_date>=s.last_shoot_date THEN c.last_shoot_date
+        ELSE s.last_shoot_date
+      END AS last_shoot_date,
+      s.genre_history AS genre_history
+    FROM customers c CROSS JOIN stats s
+    WHERE c.customer_id=?
+  )
+  UPDATE customers SET
+    repeat_count=(SELECT repeat_count FROM merged),
+    repeat_count_1y=(SELECT repeat_count_1y FROM merged),
+    repeat_count_90d=(SELECT repeat_count_90d FROM merged),
+    repeat_count_365d=(SELECT repeat_count_365d FROM merged),
+    repeat_count_730d=(SELECT repeat_count_730d FROM merged),
+    total_revenue=(SELECT total_revenue FROM merged),
+    avg_order_value=(SELECT avg_order_value FROM merged),
+    first_shoot_date=(SELECT first_shoot_date FROM merged),
+    last_shoot_date=(SELECT last_shoot_date FROM merged),
+    dormant_days=CASE
+      WHEN COALESCE((SELECT last_shoot_date FROM merged),'')='' THEN 0
+      ELSE CAST(julianday('now')-julianday((SELECT last_shoot_date FROM merged)) AS INTEGER)
+    END,
+    genre_history=(SELECT genre_history FROM merged),
+    updated_at=CURRENT_TIMESTAMP
+  WHERE customer_id=?`,customerId,customerId,customerId);
+  const row=await first(db,`SELECT repeat_count,first_shoot_date,last_shoot_date,total_revenue,avg_order_value,genre_history
+    FROM customers WHERE customer_id=? LIMIT 1`,customerId);
+  const count=Math.max(0,Number(row?.repeat_count||0)||0);
   return{
     repeat_count:count,
     is_repeater:count>=2,
-    first_shoot_date:firstShoot||'',
-    last_shoot_date:lastShoot||'',
+    first_shoot_date:text(row?.first_shoot_date),
+    last_shoot_date:text(row?.last_shoot_date),
     total_revenue:Number(row?.total_revenue||0)||0,
     avg_order_value:Number(row?.avg_order_value||0)||0,
     genre_history:text(row?.genre_history)
@@ -576,7 +590,12 @@ async function commitImport(env,analysis,mappings={}){
       }
       if(resolved.resolution==='new_customer_pending'){
         resolved=await createCustomerWithFirstShoot(env.DB,group);
-        if(resolved.created){createdCustomers++;createdShoots++}else reusedShoots++;
+        if(resolved.created){
+          createdCustomers++;createdShoots++;
+        }else{
+          reusedShoots++;
+          await preflightGroupReservationConflicts(env.DB,group,resolved.customer_id);
+        }
       }
       await fillBlankCustomerMetadata(env.DB,resolved.customer_id,group);
       for(const shoot of group.shoots){
