@@ -29,10 +29,13 @@ assert.equal(approachContactState(review).ready,false);
 assert.equal(approachContactState(blocked).code,'blocked_opt_out');
 
 const p=parseApproachQueueParams(new URLSearchParams('horizon_days=90&limit=10&status=all'));
-assert.deepEqual(p,{horizon_days:90,limit:10,status:'all'});
+assert.deepEqual(p,{horizon_days:90,limit:10,status:'all',customer_id:''});
+const exact=parseApproachQueueParams(new URLSearchParams('horizon_days=3650&limit=1&status=all&customer_id=26000003'));
+assert.deepEqual(exact,{horizon_days:3650,limit:1,status:'all',customer_id:'26000003'});
 assert.throws(()=>parseApproachQueueParams(new URLSearchParams('horizon_days=0')),/invalid_horizon_days/);
 assert.throws(()=>parseApproachQueueParams(new URLSearchParams('limit=101')),/invalid_limit/);
 assert.throws(()=>parseApproachQueueParams(new URLSearchParams('status=send')),/invalid_status/);
+assert.throws(()=>parseApproachQueueParams(new URLSearchParams('customer_id=G123')),/invalid_customer_id/);
 
 const q=buildApproachQueue([review,blocked,future,invalid,ready],p);
 assert.equal(q.total,3);
@@ -43,6 +46,11 @@ assert.equal(q.summary.opted_out,1);
 assert.equal(q.meta.line_send,false);
 assert.equal(q.meta.automatic_contact,false);
 assert.equal(q.meta.contact_details_exposed,false);
+assert.equal(q.meta.exact_customer_id_filter,true);
+const exactBlocked=buildApproachQueue([ready,review,blocked],exact);
+assert.equal(exactBlocked.total,1);
+assert.equal(exactBlocked.items[0].customer_id,'26000003');
+assert.equal(exactBlocked.items[0].contact.code,'blocked_opt_out');
 const serialized=JSON.stringify(q);
 for(const secret of ['09011112222','hanako@example.com','09033334444','09055556666','x@example.com'])assert.ok(!serialized.includes(secret),'contact detail leaked '+secret);
 
@@ -74,6 +82,9 @@ assert.ok(initStart>=0&&initEnd>initStart,'Customer360 init contract missing');
 assert.ok(!ui.slice(initStart,initEnd).includes('loadApproachQueue'),'approach queue must remain lazy and never auto-fetch on init');
 assert.ok(ui.slice(initStart,initEnd).includes("if(!window.__crmOwnerView)openView('list')"),'Owner-managed init must not steal navigation after background list load');
 assert.ok(ui.includes("id=\"crmApproachLoad\""),'explicit approach queue load control missing');
+assert.ok(ui.includes('revalidateApproachContact'),'read-only approach contact revalidation helper missing');
+assert.ok(ui.includes("customer_id:id"),'revalidation must query exact Customer ID');
+assert.ok(ui.includes("limit:'1'"),'revalidation must request only the exact candidate');
 console.log('CUSTOMER360_APPROACH_QUEUE=PASS');
 console.log('APPROACH_QUEUE_PRODUCTION_WRITE=0');
 console.log('APPROACH_QUEUE_CUSTOMER_ID_GENERATION=0');
