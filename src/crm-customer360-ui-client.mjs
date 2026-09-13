@@ -11,6 +11,19 @@ function readUrl(){const u=new URL(location.href);for(const k of KEYS){const v=u
 function syncUrl(){const u=new URL(location.href);for(const k of [...u.searchParams.keys()])if(k.startsWith('crm_'))u.searchParams.delete(k);for(const [k,v] of Object.entries(state.filters))if(v!==''&&v!=null)u.searchParams.set('crm_'+k,String(v));if(state.sort!=='recommended')u.searchParams.set('crm_sort',state.sort);if(state.page>1)u.searchParams.set('crm_page',String(state.page));history.replaceState(null,'',u.pathname+(u.search?'?'+u.searchParams.toString():'')+u.hash)}
 function ensure(){if(document.getElementById('crmMktNav'))return;readUrl();const nav=document.createElement('div');nav.id='crmMktNav';nav.innerHTML='<button class="crm-mkt-btn primary" data-view="list">顧客一覧</button><button class="crm-mkt-btn" data-view="home">分析・アプローチ</button>';host().prepend(nav);const list=document.createElement('section');list.id='crmMktList';list.className='crm-mkt-shell open';host().insertBefore(list,nav.nextSibling);const home=document.createElement('section');home.id='crmMktHome';home.className='crm-mkt-shell';host().insertBefore(home,list.nextSibling);const drawer=document.createElement('aside');drawer.id='crmFilterDrawer';drawer.className='crm-filter-drawer';document.body.appendChild(drawer);const detail=document.createElement('aside');detail.id='crmMktDetail';detail.className='crm-detail';detail.innerHTML='<button class="crm-detail-close" type="button">×</button><div id="crmMktDetailBody"></div>';document.body.appendChild(detail);detail.querySelector('button').onclick=()=>detail.classList.remove('open');nav.querySelectorAll('[data-view]').forEach(b=>b.onclick=()=>openView(b.dataset.view));document.addEventListener('keydown',e=>{if(e.key==='/'&&!/INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName||'')){e.preventDefault();document.getElementById('crmGlobalSearch')?.focus()}if(e.key==='Escape'&&state.q){state.q='';state.page=1;requestList()}})}
 async function api(path){const r=await fetch(path,{cache:'no-store'});const txt=await r.text();let j={};try{j=JSON.parse(txt)}catch{}if(!r.ok||!j.ok)throw new Error(j.error||('HTTP '+r.status));return{j,bytes:new TextEncoder().encode(txt).length}}
+async function revalidateApproachContact(customerId){
+  const id=String(customerId||'').trim();
+  if(!/^\d{8}$/.test(id))return{ok:false,ready:false,suggested_channel:'',code:'invalid_customer_id',label:'Customer ID確認が必要'};
+  try{
+    const p=new URLSearchParams({horizon_days:'3650',status:'all',limit:'1',customer_id:id});
+    const x=await api('/api/customer360/approach-queue?'+p.toString()),item=x.j?.items?.[0];
+    if(!item||String(item.customer_id)!==id)return{ok:false,ready:false,suggested_channel:'',code:'not_current_candidate',label:'最新状態で候補外'};
+    return{ok:true,ready:item.contact?.ready===true,suggested_channel:String(item.contact?.suggested_channel||''),code:String(item.contact?.code||''),label:String(item.contact?.label||'')};
+  }catch(e){
+    return{ok:false,ready:false,suggested_channel:'',code:'revalidation_failed',label:'最新の連絡条件を確認できません',error:String(e?.message||e)};
+  }
+}
+window.__crmCustomer360ReadOnly=Object.assign(window.__crmCustomer360ReadOnly||{},{revalidateApproachContact});
 function params(){const p=new URLSearchParams();for(const[k,v]of Object.entries(state.filters))if(v!==''&&v!=null)p.set(k,String(v));if(state.q)p.set('q',state.q);p.set('sort',state.sort);p.set('page',String(state.page));p.set('page_size',String(state.pageSize));return p}
 async function loadHome(){const x=await api('/api/customer360/marketing-home');state.home=x.j;state.metrics.homeBytes=x.bytes;renderHome()}
 function localIso(d){const y=d.getFullYear(),m=String(d.getMonth()+1).padStart(2,'0'),day=String(d.getDate()).padStart(2,'0');return y+'-'+m+'-'+day}
