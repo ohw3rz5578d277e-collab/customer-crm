@@ -104,6 +104,39 @@ assert.equal(failedPermissionBody.ok,false);
 assert.equal(failedPermissionBody.error,'contact_permission_unavailable');
 assert.ok(!('items' in failedPermissionBody),'failed permission read must not return contact candidates');
 
+const failingProfileEnv={
+  CRM_LOCAL_TEST_AUTH:'1',
+  DB:{
+    prepare(sql){
+      let args=[];
+      const stmt={
+        bind(...values){args=values;return stmt},
+        async first(){
+          if(sql.includes('sqlite_master')){
+            const name=String(args[0]||'');
+            return ['customer_marketing_profiles','customer_profile_enrichment'].includes(name)?{name}:null;
+          }
+          return null;
+        },
+        async all(){
+          if(sql.includes('SELECT rowid AS __customer_ref,* FROM customers'))return{results:[customer]};
+          if(sql.includes('SELECT * FROM customer_marketing_profiles'))throw new Error('injected_marketing_profile_read_failure');
+          if(sql.includes('SELECT customer_id,marketing_contact_permission FROM customer_profile_enrichment'))return{results:[{...enrichment,marketing_contact_permission:'allowed'}]};
+          return{results:[]};
+        },
+        async run(){throw new Error('read_only_test_write_attempt')}
+      };
+      return stmt;
+    }
+  }
+};
+const failedProfileResponse=await handleCustomer360Request(new Request('https://example.test/api/customer360/approach-queue?horizon_days=3650&status=all&customer_id=26000031'),failingProfileEnv);
+assert.equal(failedProfileResponse.status,503);
+const failedProfileBody=await failedProfileResponse.json();
+assert.equal(failedProfileBody.ok,false);
+assert.equal(failedProfileBody.error,'contact_permission_unavailable');
+assert.ok(!('items' in failedProfileBody),'failed marketing profile read must not return contact candidates');
+
 const failedHomeResponse=await handleCustomer360Request(new Request('https://example.test/api/customer360/marketing-home'),failingPermissionEnv);
 assert.equal(failedHomeResponse.status,200);
 const failedHomeBody=await failedHomeResponse.json();
@@ -117,6 +150,7 @@ console.log('CUSTOMER360_PROFILE_MARKETING_DENIAL_BLOCK=PASS');
 console.log('MARKETING_HOME_CONTACT_DENIAL_FILTER=PASS');
 console.log('MARKETING_HOME_PERMISSION_FAILURE_FAIL_CLOSED=PASS');
 console.log('CONTACT_PERMISSION_READ_FAILURE_FAIL_CLOSED=PASS');
+console.log('MARKETING_PROFILE_READ_FAILURE_FAIL_CLOSED=PASS');
 console.log('RESERVATION_DELIVERED_STATUS_ALIGNMENT=PASS');
 console.log('RESERVATION_SHOOT_ENDED_STATUS_ALIGNMENT=PASS');
 console.log('PRODUCTION_D1_WRITE=0');

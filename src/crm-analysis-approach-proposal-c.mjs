@@ -107,7 +107,7 @@ const SCRIPT=String.raw`<script id="${SCRIPT_ID}">
 (()=>{
 if(window.__crmProposalCAnalysisApproach)return;window.__crmProposalCAnalysisApproach=1;
 const $=id=>document.getElementById(id);
-const loaded={analytics:false,approach:false};let composerRevision=0;let clipboardSerial=Promise.resolve();
+const loaded={analytics:false,approach:false};const LINE_REVALIDATION_WINDOW_MS=15000;let composerRevision=0;let clipboardSerial=Promise.resolve();let clipboardBusy=false;
 function composer(){
  let el=$('crmProposalCComposer');if(el)return el;
  el=document.createElement('aside');el.id='crmProposalCComposer';el.setAttribute('aria-hidden','true');
@@ -119,23 +119,73 @@ function composer(){
  return el;
 }
 function closeComposer(){composerRevision++;const el=$('crmProposalCComposer');if(!el)return;el.classList.remove('open');el.setAttribute('aria-hidden','true');el.dataset.crmProposalCRevision=String(composerRevision);document.body.classList.remove('crm-owner-sheet-open')}
-function composerOperationActive(sheet,revision){return!!sheet&&sheet.classList.contains('open')&&Number(sheet.dataset.crmProposalCRevision||-1)===revision}function writeClipboard(text,isCurrent){if(!text)return Promise.resolve(false);const op=clipboardSerial.then(async()=>{if(isCurrent&&!isCurrent())return false;try{await navigator.clipboard.writeText(text);return true}catch(_){return false}});clipboardSerial=op.then(()=>undefined,()=>undefined);return op}
+function composerOperationActive(sheet,revision){return!!sheet&&sheet.classList.contains('open')&&Number(sheet.dataset.crmProposalCRevision||-1)===revision}
+function writeClipboard(text,isCurrent,fromGesture=false){
+ if(!text)return Promise.resolve(false);
+ if(fromGesture){
+   if(clipboardBusy||(isCurrent&&!isCurrent()))return Promise.resolve(false);
+   let raw;try{clipboardBusy=true;raw=navigator.clipboard.writeText(text)}catch(_){clipboardBusy=false;return Promise.resolve(false)}
+   const op=Promise.resolve(raw).then(()=>!(isCurrent&&!isCurrent()),()=>false).finally(()=>{clipboardBusy=false});
+   clipboardSerial=op.then(()=>undefined,()=>undefined);return op;
+ }
+ const op=clipboardSerial.then(async()=>{if(isCurrent&&!isCurrent())return false;clipboardBusy=true;try{await navigator.clipboard.writeText(text);return true}catch(_){return false}finally{clipboardBusy=false}});
+ clipboardSerial=op.then(()=>undefined,()=>undefined);return op;
+}
 async function copyDraft(goLine){
  const sheet=$('crmProposalCComposer'),text=$('crmProposalCText')?.value||'',result=$('crmProposalCResult'),btn=$('crmProposalCLine');
  const revision=Number(sheet?.dataset.crmProposalCRevision||-1),lineAllowed=!!btn&&!btn.disabled,isCurrent=()=>composerOperationActive(sheet,revision);
- const copied=await writeClipboard(text,isCurrent);
+ let fromGesture=false;
+ if(goLine){
+   if(!lineAllowed)return;
+   const customerId=String(sheet?.dataset.crmProposalCCustomerId||'').trim();
+   const approvalRevision=Number(sheet?.dataset.crmProposalCLineApprovalRevision||-1);
+   const approvalCustomerId=String(sheet?.dataset.crmProposalCLineApprovalCustomerId||'');
+   const approvalAt=Number(sheet?.dataset.crmProposalCLineApprovalAt||0);
+   const approvalFresh=approvalRevision===revision&&approvalCustomerId===customerId&&approvalAt>0&&(Date.now()-approvalAt)<=LINE_REVALIDATION_WINDOW_MS;
+   if(!approvalFresh){
+     const revalidate=window.__crmCustomer360ReadOnly?.revalidateApproachContact;
+     if(typeof revalidate!=='function'){
+       if(result)result.textContent='最新の連絡条件を確認できないため、LINEへ進めません。';
+       if(btn)btn.disabled=true;
+       return;
+     }
+     if(btn){btn.disabled=true;btn.textContent='連絡許可を確認中…'}
+     if(result)result.textContent='最新の連絡許可を確認中…';
+     let latest;try{latest=await revalidate(customerId)}catch(_){latest={ok:false,ready:false,suggested_channel:'',label:'最新の連絡条件を確認できません'}}
+     if(!isCurrent())return;
+     const currentLineAllowed=latest?.ok===true&&latest?.ready===true&&String(latest?.suggested_channel||'').toUpperCase()==='LINE';
+     if(!currentLineAllowed){
+       if(result)result.textContent=latest?.ok===false?'最新の連絡条件を確認できません。再度確認してください。':'最新の連絡条件ではLINEへ進めません。顧客情報と連絡許可を確認してください。';
+       if(btn){btn.disabled=latest?.ok!==false;btn.textContent=latest?.ok===false?'再確認してLINEへ':'LINEへ進めません'}
+       return;
+     }
+     sheet.dataset.crmProposalCLineApprovalRevision=String(revision);
+     sheet.dataset.crmProposalCLineApprovalCustomerId=customerId;
+     sheet.dataset.crmProposalCLineApprovalAt=String(Date.now());
+     if(btn){btn.disabled=false;btn.textContent='確認済み：もう一度押してLINEへ'}
+     if(result)result.textContent='最新の連絡許可を確認しました。もう一度ボタンを押すと文案をコピーしてLINEへ進みます。';
+     return;
+   }
+   delete sheet.dataset.crmProposalCLineApprovalRevision;
+   delete sheet.dataset.crmProposalCLineApprovalCustomerId;
+   delete sheet.dataset.crmProposalCLineApprovalAt;
+   if(btn)btn.textContent='文案をコピーしてLINEへ';
+   fromGesture=true;
+ }
+ const copied=await writeClipboard(text,isCurrent,fromGesture);
  if(!isCurrent())return;
- if(result)result.textContent=copied?'文案をコピーしました。':'コピーできませんでした。文案を選択してコピーしてください。';
- if(goLine&&lineAllowed){if(copied){window.__crmOwnerView?.showLine?.();closeComposer()}else if(result)result.textContent='コピー後にLINE画面へ進んでください。'}
+ if(result)result.textContent=copied?'文案をコピーしました。':'コピーできませんでした。もう一度操作してください。';
+ if(goLine){if(copied){window.__crmOwnerView?.showLine?.();closeComposer()}else if(result)result.textContent='コピーできませんでした。もう一度「文案をコピーしてLINEへ」を押してください。'}
 }
 function openComposer(row){
  const sheet=composer(),revision=++composerRevision;sheet.dataset.crmProposalCRevision=String(revision);
  const name=row?.querySelector('.crm-mkt-name')?.textContent?.trim()||'顧客',sub=[...row?.querySelectorAll('.crm-mkt-sub')||[]].map(x=>x.textContent.trim()),id=(sub.join(' ').match(/Customer ID\s+([0-9]{8})/)||[])[1]||'—';
  const draft=row?.querySelector('.crm-approach-draft p')?.textContent?.trim()||'',status=row?.querySelector('.crm-approach-contact .crm-status'),channelText=row?.querySelector('.crm-approach-contact .crm-mkt-sub')?.textContent?.trim()||'候補チャネル —',ready=!!status?.classList.contains('good'),channel=channelText.replace(/^候補チャネル\s*/,'').trim();
+ sheet.dataset.crmProposalCCustomerId=id;
  $('crmProposalCName').textContent=name;$('crmProposalCMeta').textContent='Customer ID '+id;
  const permission=$('crmProposalCPermission');permission.textContent=status?.textContent?.trim()||'連絡可否の確認が必要';permission.className='crm-c-compose-chip '+(ready?'ready':'blocked');
  $('crmProposalCChannel').textContent='候補チャネル '+(channel||'—');$('crmProposalCText').value=draft;
- const line=$('crmProposalCLine');line.disabled=!(ready&&String(channel).toUpperCase()==='LINE');line.title=line.disabled?'LINEでの手動連絡条件が整っていません。':'この操作では送信されません。';
+ const line=$('crmProposalCLine');line.disabled=!(ready&&String(channel).toUpperCase()==='LINE');line.textContent='文案をコピーしてLINEへ';line.title=line.disabled?'LINEでの手動連絡条件が整っていません。':'最新条件を確認後、もう一度押してLINEへ進みます。';delete sheet.dataset.crmProposalCLineApprovalRevision;delete sheet.dataset.crmProposalCLineApprovalCustomerId;delete sheet.dataset.crmProposalCLineApprovalAt;
  $('crmProposalCResult').textContent=line.disabled?'連絡許可・LINE連携を確認してから送信手続きへ進んでください。':'';
  sheet.classList.add('open');sheet.setAttribute('aria-hidden','false');document.body.classList.add('crm-owner-sheet-open');setTimeout(()=>$('crmProposalCText')?.focus({preventScroll:true}),0);
 }
@@ -180,5 +230,6 @@ export const proposalCAnalysisApproachContract=Object.freeze({
   automatic_line_send:false,
   owner_review_required:true,
   contact_permission_fail_closed:true,
+  line_handoff_revalidation:true,
   no_mutation_observer:true
 });

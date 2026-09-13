@@ -11,6 +11,7 @@ assert.equal(proposalCAnalysisApproachContract.automatic_contact,false);
 assert.equal(proposalCAnalysisApproachContract.automatic_line_send,false);
 assert.equal(proposalCAnalysisApproachContract.owner_review_required,true);
 assert.equal(proposalCAnalysisApproachContract.contact_permission_fail_closed,true);
+assert.equal(proposalCAnalysisApproachContract.line_handoff_revalidation,true);
 assert.equal(proposalCAnalysisApproachContract.no_mutation_observer,true);
 assert(!source.includes('MutationObserver('),'Proposal C must not add a MutationObserver');
 assert(!source.includes("fetch("),'Proposal C UI must not add a new network write/read path directly');
@@ -64,12 +65,20 @@ const base=`<!doctype html><html><head><meta charset="utf-8"></head><body data-c
   </section>
 </div>
 <script>
-window.__calls={analytics:0,approach:0,line:0,copied:''};
+window.__calls={analytics:0,approach:0,line:0,copied:'',revalidate:0};
 const analyticsBtn=document.getElementById('crmAnalyticsApply'),approachBtn=document.getElementById('crmApproachLoad');
 analyticsBtn.onclick=()=>window.__calls.analytics++;
 approachBtn.onclick=()=>window.__calls.approach++;
 analyticsBtn.remove();approachBtn.remove();
 window.__crmOwnerView={showLine(){window.__calls.line++;document.body.dataset.crmOwnerView='line';return true}};
+window.__revalidateMode='ready';
+window.__crmCustomer360ReadOnly={async revalidateApproachContact(id){
+  window.__calls.revalidate++;
+  if(window.__revalidateMode==='error')throw new Error('read failed');
+  if(window.__revalidateMode==='denied')return{ok:true,ready:false,suggested_channel:'',code:'blocked_opt_out',label:'配信対象外 / opt-out'};
+  if(window.__revalidateMode==='phone')return{ok:true,ready:true,suggested_channel:'phone',code:'manual_contact_ready',label:'手動連絡候補'};
+  return{ok:/^\\d{8}$/.test(String(id||'')),ready:true,suggested_channel:'LINE',code:'manual_contact_ready',label:'手動連絡候補'};
+}};
 setTimeout(()=>{
   document.body.dataset.crmOwnerView='marketing';
   document.dispatchEvent(new CustomEvent('crm:owner-view-change',{detail:{view:'marketing'}}));
@@ -126,8 +135,12 @@ try{
   for(const viewport of [{width:390,height:844},{width:1440,height:900}]){
     const context=await browser.newContext({viewport});
     await context.addInitScript(()=>{
-      window.__clipboardDelay=false;window.__clipboardPending=[];window.__clipboardWrites=[];
+      window.__clipboardDelay=false;window.__clipboardPending=[];window.__clipboardWrites=[];window.__clipboardActivation=[];
+      window.__proposalClickDispatch=false;
+      document.addEventListener('click',()=>{window.__proposalClickDispatch=true},true);
+      document.addEventListener('click',()=>{window.__proposalClickDispatch=false});
       Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:text=>{
+        window.__clipboardActivation.push(window.__proposalClickDispatch===true);
         window.__clipboardWrites.push(text);
         if(!window.__clipboardDelay){window.__calls.copied=text;return Promise.resolve()}
         return new Promise(resolve=>window.__clipboardPending.push(()=>{window.__calls.copied=text;resolve()}))
@@ -155,7 +168,15 @@ try{
     assert.equal(await page.locator('#crmProposalCLine').isDisabled(),false);
     assert((await page.locator('#crmProposalCText').inputValue()).includes('いつもありがとうございます'));
 
-    await page.evaluate(()=>document.dispatchEvent(new CustomEvent('crm:marketing-home-rendered')));
+    await page.evaluate(()=>{window.__revalidateMode='denied'});
+    await page.locator('#crmProposalCLine').click();
+    await page.waitForFunction(()=>window.__calls.revalidate===1);
+    assert.equal(await page.evaluate(()=>window.__clipboardWrites.length),0,viewport.width+': denied revalidation still wrote clipboard');
+    assert.equal(await page.evaluate(()=>window.__calls.line),0,viewport.width+': denied revalidation still navigated to LINE');
+    assert.equal(await page.locator('#crmProposalCLine').isDisabled(),true,viewport.width+': denied revalidation must fail closed');
+    assert((await page.locator('#crmProposalCResult').textContent()).includes('最新の連絡条件'),viewport.width+': denied revalidation message missing');
+
+    await page.evaluate(()=>{window.__revalidateMode='ready';document.dispatchEvent(new CustomEvent('crm:marketing-home-rendered'))});
     await page.waitForFunction(()=>!document.getElementById('crmProposalCComposer').classList.contains('open'));
     assert.equal(await page.locator('#crmProposalCComposer').isVisible(),false,viewport.width+': queue rerender did not invalidate open composer');
     assert.equal(await page.evaluate(()=>window.__calls.analytics),1,viewport.width+': rerender duplicated analytics auto-load');
@@ -163,7 +184,21 @@ try{
 
     await page.locator('.crm-approach-row').first().locator('summary').click();
     await page.waitForFunction(()=>document.getElementById('crmProposalCComposer').classList.contains('open'));
+    await page.evaluate(()=>{window.__revalidateMode='phone'});
+    await page.locator('#crmProposalCLine').click();
+    await page.waitForFunction(()=>window.__calls.revalidate===2);
+    assert.equal(await page.evaluate(()=>window.__clipboardWrites.length),0,viewport.width+': non-LINE revalidation still wrote clipboard');
+    assert.equal(await page.evaluate(()=>window.__calls.line),0,viewport.width+': non-LINE revalidation still navigated to LINE');
+    assert.equal(await page.locator('#crmProposalCLine').isDisabled(),true,viewport.width+': non-LINE revalidation must fail closed');
+
+    await page.evaluate(()=>{window.__revalidateMode='ready';document.dispatchEvent(new CustomEvent('crm:marketing-home-rendered'))});
+    await page.waitForFunction(()=>!document.getElementById('crmProposalCComposer').classList.contains('open'));
+    await page.locator('.crm-approach-row').first().locator('summary').click();
+    await page.waitForFunction(()=>document.getElementById('crmProposalCComposer').classList.contains('open'));
     await page.evaluate(()=>{window.__clipboardDelay=true});
+    await page.locator('#crmProposalCLine').click();
+    await page.waitForFunction(()=>document.getElementById('crmProposalCLine').textContent.includes('確認済み'));
+    assert.equal(await page.evaluate(()=>window.__clipboardWrites.length),0,viewport.width+': revalidation click must not touch clipboard');
     await page.locator('#crmProposalCLine').click();
     await page.waitForFunction(()=>window.__clipboardWrites.length===1&&window.__clipboardPending.length===1);
 
@@ -171,12 +206,15 @@ try{
     await page.locator('.crm-approach-row').nth(2).locator('summary').click();
     await page.waitForFunction(()=>document.getElementById('crmProposalCComposer').classList.contains('open')&&document.getElementById('crmProposalCName').textContent.includes('高橋'));
     await page.locator('#crmProposalCLine').click();
+    await page.waitForFunction(()=>document.getElementById('crmProposalCLine').textContent.includes('確認済み'));
+    await page.locator('#crmProposalCLine').click();
     assert.equal(await page.evaluate(()=>window.__clipboardWrites.length),1,viewport.width+': second clipboard write started before first completed');
+    assert((await page.locator('#crmProposalCResult').textContent()).includes('コピーできませんでした'),viewport.width+': busy clipboard retry message missing');
 
     await page.locator('.crm-c-compose-close').click();
     await page.evaluate(()=>{const done=window.__clipboardPending.shift();if(done)done()});
     await page.waitForTimeout(60);
-    assert.equal(await page.evaluate(()=>window.__clipboardWrites.length),1,viewport.width+': invalidated queued clipboard job still wrote');
+    assert.equal(await page.evaluate(()=>window.__clipboardWrites.length),1,viewport.width+': concurrent clipboard write escaped serialization');
     assert.equal(await page.evaluate(()=>window.__calls.line),0,viewport.width+': stale clipboard completion navigated to LINE');
     assert((await page.evaluate(()=>window.__calls.copied)).includes('山田 花子さん'),viewport.width+': first clipboard write did not complete as expected');
 
@@ -184,11 +222,14 @@ try{
     await page.locator('.crm-approach-row').nth(2).locator('summary').click();
     await page.waitForFunction(()=>document.getElementById('crmProposalCComposer').classList.contains('open')&&document.getElementById('crmProposalCName').textContent.includes('高橋'));
     await page.locator('#crmProposalCLine').click();
+    await page.waitForFunction(()=>document.getElementById('crmProposalCLine').textContent.includes('確認済み'));
+    await page.locator('#crmProposalCLine').click();
     await page.waitForFunction(()=>window.__calls.line===1);
-    const clipboardState=await page.evaluate(()=>({copied:window.__calls.copied,writes:[...window.__clipboardWrites]}));
+    const clipboardState=await page.evaluate(()=>({copied:window.__calls.copied,writes:[...window.__clipboardWrites],activation:[...window.__clipboardActivation]}));
     assert(clipboardState.copied.includes('高橋 次郎さん'),viewport.width+': final clipboard does not match active customer');
-    assert.equal(clipboardState.writes.length,2,viewport.width+': cancelled queued clipboard job was not skipped');
+    assert.equal(clipboardState.writes.length,2,viewport.width+': clipboard write count wrong');
     assert(clipboardState.writes[0].includes('山田 花子さん')&&clipboardState.writes[1].includes('高橋 次郎さん'),viewport.width+': serialized clipboard order wrong');
+    assert.deepEqual(clipboardState.activation,[true,true],viewport.width+': LINE clipboard write was not invoked inside explicit click dispatch');
     assert.equal(await page.locator('#crmProposalCComposer').isVisible(),false,viewport.width+': active composer remained open after LINE handoff');
 
     await page.evaluate(()=>{document.body.dataset.crmOwnerView='marketing';document.dispatchEvent(new CustomEvent('crm:owner-view-change',{detail:{view:'marketing'}}))});
@@ -215,5 +256,7 @@ console.log('PROPOSAL_C_DEFERRED_VIEW_SCOPE=PASS');
 console.log('PROPOSAL_C_ANALYSIS_APPROACH_UI=PASS');
 console.log('PROPOSAL_C_OWNER_REVIEW_COMPOSER=PASS');
 console.log('PROPOSAL_C_CONTACT_PERMISSION_FAIL_CLOSED=PASS');
+console.log('PROPOSAL_C_LINE_HANDOFF_REVALIDATION=PASS');
+console.log('PROPOSAL_C_CLIPBOARD_USER_ACTIVATION=PASS');
 console.log('PROPOSAL_C_AUTOMATIC_LINE_SEND=0');
 console.log('PROPOSAL_C_MUTATION_OBSERVER=0');

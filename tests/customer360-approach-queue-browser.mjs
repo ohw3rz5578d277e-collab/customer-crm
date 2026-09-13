@@ -39,6 +39,15 @@ try{
     assert.ok(txt.includes('候補チャネル LINE'));
     assert.ok(txt.includes('文案を見る'));
     assert.ok(!txt.includes('090'));
+    const revalidateBefore=requests.filter(x=>x.includes('/api/customer360/approach-queue')).length;
+    const revalidated=await page.evaluate(()=>window.__crmCustomer360ReadOnly.revalidateApproachContact('26000001'));
+    assert.equal(revalidated.ok,true,viewport.width+': exact revalidation failed');
+    assert.equal(revalidated.ready,true,viewport.width+': exact revalidation not ready');
+    assert.equal(revalidated.suggested_channel,'LINE',viewport.width+': exact revalidation channel mismatch');
+    assert.ok(requests.some(x=>x.includes('/api/customer360/approach-queue?')&&x.includes('customer_id=26000001')&&x.includes('limit=1')),viewport.width+': exact Customer ID revalidation request missing');
+    const invalid=await page.evaluate(()=>window.__crmCustomer360ReadOnly.revalidateApproachContact('G123'));
+    assert.equal(invalid.ok,false,viewport.width+': invalid Customer ID revalidation did not fail closed');
+    assert.equal(requests.filter(x=>x.includes('/api/customer360/approach-queue')).length,revalidateBefore+1,viewport.width+': invalid Customer ID triggered a network read');
     await page.locator('.crm-approach-draft summary').click();
     assert.ok((await page.locator('.crm-approach-draft').innerText()).includes('自動送信しません'));
     await page.locator('[data-approach-horizon="30"]').click();

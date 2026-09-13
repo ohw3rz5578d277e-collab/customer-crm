@@ -66,17 +66,19 @@ function queueItem(view){
 }
 
 export function parseApproachQueueParams(searchParams){
-  const rawH=text(searchParams?.get?.('horizon_days')),rawLimit=text(searchParams?.get?.('limit')),status=text(searchParams?.get?.('status')||'all');
+  const rawH=text(searchParams?.get?.('horizon_days')),rawLimit=text(searchParams?.get?.('limit')),status=text(searchParams?.get?.('status')||'all'),customerId=text(searchParams?.get?.('customer_id'));
   const horizonDays=rawH===''?90:Number(rawH),limit=rawLimit===''?50:Number(rawLimit);
   if(!Number.isInteger(horizonDays)||horizonDays<1||horizonDays>3650)throw new Error('invalid_horizon_days');
   if(!Number.isInteger(limit)||limit<1||limit>100)throw new Error('invalid_limit');
   if(!['all','ready','review','blocked'].includes(status))throw new Error('invalid_status');
-  return {horizon_days:horizonDays,limit,status};
+  if(customerId&&!/^\d{8}$/.test(customerId))throw new Error('invalid_customer_id');
+  return {horizon_days:horizonDays,limit,status,customer_id:customerId};
 }
 
 export function buildApproachQueue(views,params={horizon_days:90,limit:50,status:'all'}){
   const all=(views||[])
     .filter(v=>/^\d{8}$/.test(text(v.customer_id)))
+    .filter(v=>!params.customer_id||text(v.customer_id)===params.customer_id)
     .filter(v=>Number(v?.recommendation?.priority_score||0)>0)
     .filter(v=>{
       const days=v?.next_opportunity?.days;
@@ -111,7 +113,8 @@ export function buildApproachQueue(views,params={horizon_days:90,limit:50,status
       customer_write:false,
       line_send:false,
       automatic_contact:false,
-      contact_details_exposed:false
+      contact_details_exposed:false,
+      exact_customer_id_filter:true
     }
   };
 }
