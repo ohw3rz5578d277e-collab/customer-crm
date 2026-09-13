@@ -1,6 +1,6 @@
 import { allocateCustomerId, jstYear } from './customer-identity-resolver.mjs';
 
-const BUILD='crm-customer-csv-import-20260912-01';
+const BUILD='crm-customer-csv-import-20260913-01';
 const SOURCE='customer_csv_import';
 const MAX_CSV_BYTES=2_500_000;
 const MAX_ROWS=5000;
@@ -331,6 +331,15 @@ async function preflightGroupReservationConflicts(db,group,customerId=''){
   if(!customerId&&activeCustomerId){
     const activeCustomer=await customerById(db,activeCustomerId);
     if(!activeCustomer){const e=new Error('csv_event_key_customer_inactive_requires_review');e.statusCode=409;throw e}
+    for(const shoot of group.shoots){
+      const deletedSameDate=await first(db,`SELECT event_key,source FROM customer_reservations
+        WHERE customer_id=? AND shoot_date=? AND COALESCE(deleted_at,'')<>''
+        LIMIT 1`,activeCustomerId,shoot.shoot_date);
+      if(deletedSameDate){
+        const e=new Error('csv_same_date_soft_deleted_requires_review');
+        e.statusCode=409;e.customer_id=activeCustomerId;e.shoot_date=shoot.shoot_date;throw e;
+      }
+    }
   }
   return{active_customer_id:activeCustomerId};
 }
@@ -464,7 +473,7 @@ async function recalcRepeatStats(db,customerId){
       first_shoot_date=?,
       last_shoot_date=?,
       dormant_days=?,
-      genre_history=COALESCE(NULLIF(?,''),genre_history),
+      genre_history=?,
       updated_at=CURRENT_TIMESTAMP
     WHERE customer_id=?`,
     count,
