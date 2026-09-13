@@ -36,16 +36,19 @@ async function activeCustomers(env){return (await safeAll(env,"SELECT rowid AS _
 async function viewFor(env,c,onDate){return buildCustomerMarketingView(c,await familyRows(env,text(c.customer_id)),await profileRow(env,text(c.customer_id)),onDate)}
 
 async function loadCustomerViews(env,onDate,{requireContactPermissions=false}={}){
-  const customers=await activeCustomers(env);
-  const managedFamily=await tableExists(env,'customer_family_members')?await safeAll(env,"SELECT * FROM customer_family_members WHERE deleted_at IS NULL OR deleted_at='' ORDER BY customer_id,created_at,id"):[];
-  const profiles=await tableExists(env,'customer_marketing_profiles')?await safeAll(env,"SELECT * FROM customer_marketing_profiles"):[];
-  let contactPermissions=[];
+  let customers,profiles,contactPermissions=[];
   if(requireContactPermissions){
+    customers=(await strictAll(env,"SELECT rowid AS __customer_ref,* FROM customers")).filter(x=>!text(x.deleted_at));
+    if(!(await strictTableExists(env,'customer_marketing_profiles')))throw new Error('contact_permission_unavailable');
     if(!(await strictTableExists(env,'customer_profile_enrichment')))throw new Error('contact_permission_unavailable');
+    profiles=await strictAll(env,"SELECT * FROM customer_marketing_profiles");
     contactPermissions=await strictAll(env,"SELECT customer_id,marketing_contact_permission FROM customer_profile_enrichment");
-  }else if(await tableExists(env,'customer_profile_enrichment')){
-    contactPermissions=await safeAll(env,"SELECT customer_id,marketing_contact_permission FROM customer_profile_enrichment");
+  }else{
+    customers=await activeCustomers(env);
+    profiles=await tableExists(env,'customer_marketing_profiles')?await safeAll(env,"SELECT * FROM customer_marketing_profiles"):[];
+    if(await tableExists(env,'customer_profile_enrichment'))contactPermissions=await safeAll(env,"SELECT customer_id,marketing_contact_permission FROM customer_profile_enrichment");
   }
+  const managedFamily=await tableExists(env,'customer_family_members')?await safeAll(env,"SELECT * FROM customer_family_members WHERE deleted_at IS NULL OR deleted_at='' ORDER BY customer_id,created_at,id"):[];
   const familyByCustomer=new Map(),profileByCustomer=new Map(),contactPermissionByCustomer=new Map();
   for(const m of managedFamily){const id=text(m.customer_id);if(!familyByCustomer.has(id))familyByCustomer.set(id,[]);familyByCustomer.get(id).push(m)}
   for(const p of profiles)profileByCustomer.set(text(p.customer_id),p);
