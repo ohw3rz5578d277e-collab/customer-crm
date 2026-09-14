@@ -63,6 +63,8 @@ try{
   await page.waitForFunction(()=>window.__crmOwnerView.getCurrentView()==='marketing'&&document.getElementById('crmMktHome')&&getComputedStyle(document.getElementById('crmMktHome')).display!=='none');
   assert.equal(await page.locator('.crm-period-analytics').count()>0,true,viewport.width+': period analytics missing');
   assert.ok((await page.locator('#crmMktHome').innerText()).includes('今月LINE追加'),viewport.width+': monthly LINE additions KPI missing');
+  await page.locator('[data-analytics-preset="month"]').click();
+  await page.waitForFunction(()=>document.getElementById('crmMktHome')?.innerText.includes('LINE追加 +40%'));
   assert.ok((await page.locator('#crmMktHome').innerText()).includes('LINE追加 +40%'),viewport.width+': period LINE additions KPI missing');
   assert.equal(await page.locator('.crm-approach-queue').count()>0,true,viewport.width+': approach queue missing');
   if(viewport.width===390||viewport.width===1440)await page.screenshot({path:out+'/'+viewport.width+'-canonical-analysis.png',fullPage:true});
