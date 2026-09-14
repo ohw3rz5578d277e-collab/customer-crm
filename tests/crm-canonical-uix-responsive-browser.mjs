@@ -44,6 +44,10 @@ try{
   assert.equal(await page.locator('#crmTodayDashboard').isVisible(),false,viewport.width+': Today dashboard must stay removed');
   assert.equal(await page.locator('#lineOpsPanel').isVisible(),false,viewport.width+': legacy LINE panel must stay hidden');
   assert.ok((await page.locator('#crmOwnerWorkspaceTitle').textContent()).includes('顧客'),viewport.width+': Customer must be initial view');
+  assert.equal(await page.locator('#crmMktNav').isVisible(),false,viewport.width+': duplicate inner CRM nav must stay hidden');
+  assert.equal(await page.locator('#crmOwnerWorkspaceContent > .app > h1').isVisible().catch(()=>false),false,viewport.width+': legacy Customer Management heading leaked');
+  assert.equal(await page.locator('#crmCsvImportOpen').count(),0,viewport.width+': floating CSV import button leaked into canonical shell');
+  assert.equal(await page.locator('#crmCsvImportOpenInline').isVisible(),true,viewport.width+': inline CSV import action missing from customer toolbar');
   const overflow=await page.evaluate(()=>Math.max(document.documentElement.scrollWidth-document.documentElement.clientWidth,document.body.scrollWidth-document.body.clientWidth));
   assert.ok(overflow<=1,viewport.width+': horizontal overflow '+overflow);
   if(mobile){
@@ -63,6 +67,7 @@ try{
   await page.locator(analysisSelector).click();
   await page.waitForFunction(()=>window.__crmOwnerView.getCurrentView()==='marketing'&&document.getElementById('crmMktHome')&&getComputedStyle(document.getElementById('crmMktHome')).display!=='none');
   assert.equal(await page.locator('.crm-period-analytics').count()>0,true,viewport.width+': period analytics missing');
+  assert.equal(await page.locator('#crmCsvImportOpenInline').isVisible(),false,viewport.width+': CSV import action must not float over analysis');
   assert.ok((await page.locator('#crmMktHome').innerText()).includes('今月LINE追加'),viewport.width+': monthly LINE additions KPI missing');
   await page.locator('[data-analytics-preset="month"]').click();
   await page.waitForFunction(()=>document.getElementById('crmMktHome')?.innerText.includes('LINE追加 +40%'));
@@ -74,6 +79,7 @@ try{
   await page.waitForFunction(()=>window.__crmOwnerView.getCurrentView()==='line'&&document.getElementById('crmOwnerLineChat')&&getComputedStyle(document.getElementById('crmOwnerLineChat')).display!=='none');
   await page.waitForFunction(()=>document.querySelectorAll('#crmLineChatCustomers [data-line-customer]').length===2);
   assert.equal(await page.locator('#lineOpsPanel').isVisible(),false,viewport.width+': old LINE ops opened instead of chat');
+  assert.equal(await page.locator('#crmCsvImportOpenInline').isVisible(),false,viewport.width+': CSV import action must not float over LINE');
   await page.locator('#crmLineChatCustomers [data-line-customer="26000101"]').click();
   await page.waitForFunction(()=>document.querySelectorAll('#crmLineChatMessages .crm-line-chat-row').length===2);
   assert.ok((await page.locator('#crmLineChatMessages').innerText()).includes('七五三の撮影について相談したいです'),viewport.width+': inbound chat text missing');
