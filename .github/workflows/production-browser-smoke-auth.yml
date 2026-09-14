@@ -267,3 +267,210 @@ jobs:
             process.exit(1);
           });
           NODE
+
+
+  customer360_deep_readonly:
+    name: Customer360 production deep read-only smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      ADMIN_TOKEN: \${{ secrets.ADMIN_TOKEN }}
+      CF_ACCESS_CLIENT_ID: \${{ secrets.CF_ACCESS_CLIENT_ID }}
+      CF_ACCESS_CLIENT_SECRET: \${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+      BASE_URL: https://customer-crm-api.ohw3rz5578d277e.workers.dev
+      PRODUCTION_SHA: f75f30a9c745a428dcead4fcd1c0ffaca5b70cfd
+    steps:
+      - name: Checkout verification branch
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Assert verification branch changes workflow only
+        shell: bash
+        run: |
+          set -euo pipefail
+          remote_main="$(git ls-remote origin refs/heads/main | awk '{print $1}')"
+          test "$remote_main" = "$PRODUCTION_SHA"
+          git cat-file -e "$PRODUCTION_SHA^{commit}"
+          changed="$(git diff --name-only "$PRODUCTION_SHA"...HEAD)"
+          echo "CURRENT_MAIN_SHA=$remote_main"
+          echo "VERIFICATION_BRANCH_SHA=$(git rev-parse HEAD)"
+          printf 'VERIFICATION_DIFF=%s\n' "\${changed//$'\n'/,}"
+          test "$changed" = ".github/workflows/production-browser-smoke-auth.yml"
+          echo "PRODUCTION_SOURCE_DRIFT=0"
+          echo "VERIFICATION_BRANCH_WORKFLOW_ONLY=PASS"
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+
+      - name: Install Playwright
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --no-save playwright@1.55.0
+          npx playwright install --with-deps chromium
+
+      - name: Run Customer360 deep read-only Production smoke
+        shell: bash
+        run: |
+          set -euo pipefail
+          for v in CF_ACCESS_CLIENT_ID CF_ACCESS_CLIENT_SECRET ADMIN_TOKEN; do
+            test -n "\${!v}" || { echo "::error::$v missing"; exit 1; }
+          done
+          node <<'NODE'
+          const {chromium}=require('playwright');
+          const base=process.env.BASE_URL;
+          const serverAuth={
+            'CF-Access-Client-Id':process.env.CF_ACCESS_CLIENT_ID,
+            'CF-Access-Client-Secret':process.env.CF_ACCESS_CLIENT_SECRET,
+            'x-admin-token':process.env.ADMIN_TOKEN
+          };
+          const browser=await chromium.launch({headless:true});
+          const writes=[],reads=[],pageErrors=[],consoleErrors=[],browserSecretHeaders=[];
+          let customerDetail='NO_CUSTOMER_AVAILABLE';
+          let composer='NO_APPROACH_ROW';
+          try{
+            const context=await browser.newContext({
+              viewport:{width:390,height:844},
+              screen:{width:390,height:844},
+              isMobile:true,
+              hasTouch:true
+            });
+            const page=await context.newPage();
+            await page.route(base+'/**',async route=>{
+              const req=route.request();
+              const browserHeaders=await req.allHeaders();
+              for(const name of ['cf-access-client-id','cf-access-client-secret','x-admin-token','authorization','x-internal-token']){
+                if(browserHeaders[name])browserSecretHeaders.push(name);
+              }
+              if(req.method()!=='GET'&&req.method()!=='HEAD'){
+                writes.push(req.method()+' '+new URL(req.url()).pathname);
+                await route.abort('blockedbyclient');
+                return;
+              }
+              const upstream=await fetch(req.url(),{
+                method:req.method(),
+                headers:{
+                  ...serverAuth,
+                  accept:browserHeaders.accept||'*/*',
+                  'user-agent':browserHeaders['user-agent']||'Customer360-Deep-Production-Verifier'
+                },
+                redirect:'manual'
+              });
+              const responseHeaders=Object.fromEntries(upstream.headers.entries());
+              for(const h of ['content-encoding','content-length','transfer-encoding','connection'])delete responseHeaders[h];
+              await route.fulfill({
+                status:upstream.status,
+                headers:responseHeaders,
+                body:Buffer.from(await upstream.arrayBuffer())
+              });
+            });
+            page.on('request',r=>{
+              const u=new URL(r.url());
+              if(u.origin===new URL(base).origin){
+                reads.push(r.method()+' '+u.pathname+u.search);
+                if(r.method()!=='GET'&&r.method()!=='HEAD')writes.push(r.method()+' '+u.pathname);
+              }
+            });
+            page.on('pageerror',e=>pageErrors.push(String(e?.message||e)));
+            page.on('console',m=>{if(m.type()==='error')consoleErrors.push(m.text())});
+
+            const response=await page.goto(base+'/admin',{waitUntil:'domcontentloaded',timeout:45000});
+            if(!response||response.status()!==200)throw new Error('ADMIN_STATUS_'+(response?.status()||0));
+            await page.waitForFunction(()=>window.__crmOwnerView&&window.__crmCustomer360UI&&document.getElementById('crmCsvImportOpen'),null,{timeout:20000});
+
+            const html=await page.content();
+            for(const secret of [process.env.CF_ACCESS_CLIENT_ID,process.env.CF_ACCESS_CLIENT_SECRET,process.env.ADMIN_TOKEN]){
+              if(secret&&html.includes(secret))throw new Error('BROWSER_SECRET_VALUE_EXPOSED');
+            }
+
+            await page.evaluate(()=>window.__crmOwnerView.showCustomers());
+            await page.waitForFunction(()=>document.body.dataset.crmOwnerView==='customers',null,{timeout:10000});
+            await page.locator('#crmMktList.open').waitFor({timeout:15000});
+            await page.waitForTimeout(800);
+
+            const customerButton=page.locator('#crmMktList [data-open],#crmMktList [data-direct-customer]').first();
+            if(await customerButton.count()){
+              const id=(await customerButton.getAttribute('data-open'))||(await customerButton.getAttribute('data-direct-customer'))||'';
+              if(!/^\d{8}$/.test(id))throw new Error('VISIBLE_CUSTOMER_WITHOUT_CANONICAL_ID');
+              await customerButton.click();
+              await page.locator('#crmMktDetail.open').waitFor({timeout:15000});
+              const detailText=await page.locator('#crmMktDetail').innerText();
+              if(!detailText.includes(id))throw new Error('CUSTOMER_DETAIL_ID_MISSING');
+              customerDetail='PASS';
+              const close=page.locator('#crmMktDetail button').filter({hasText:/戻る|閉じる|×/}).first();
+              if(await close.count())await close.click().catch(()=>{});
+              else await page.evaluate(()=>document.getElementById('crmMktDetail')?.classList.remove('open'));
+            }
+
+            await page.evaluate(()=>window.__crmOwnerView.showMarketing());
+            await page.waitForFunction(()=>document.body.dataset.crmOwnerView==='marketing'&&document.getElementById('crmMktHome')?.classList.contains('open'),null,{timeout:10000});
+            await page.waitForSelector('#crmMktHome .crm-period-analytics',{timeout:15000});
+            await page.waitForSelector('#crmMktHome .crm-approach-queue',{timeout:15000});
+            await page.waitForTimeout(1800);
+
+            const homeText=await page.locator('#crmMktHome').innerText();
+            if(!/分析・アプローチ/.test(homeText))throw new Error('MARKETING_VIEW_COPY_MISSING');
+            if(!reads.some(x=>x.startsWith('GET /api/customer360/analytics')))throw new Error('ANALYTICS_GET_MISSING');
+            if(!reads.some(x=>x.startsWith('GET /api/customer360/approach-queue')))throw new Error('APPROACH_QUEUE_GET_MISSING');
+
+            const revalidateType=await page.evaluate(()=>typeof window.__crmCustomer360ReadOnly?.revalidateApproachContact);
+            if(revalidateType!=='function')throw new Error('LINE_REVALIDATION_HELPER_MISSING');
+
+            const summary=page.locator('.crm-approach-row .crm-approach-draft summary').first();
+            if(await summary.count()){
+              await summary.click();
+              await page.locator('#crmProposalCComposer.open').waitFor({timeout:10000});
+              if(!(await page.locator('#crmProposalCCopy').isVisible()))throw new Error('PROPOSAL_C_COPY_BUTTON_MISSING');
+              if(!(await page.locator('#crmProposalCLine').isVisible()))throw new Error('PROPOSAL_C_LINE_BUTTON_MISSING');
+              const composerText=await page.locator('#crmProposalCComposer').innerText();
+              if(!/自動送信されません/.test(composerText))throw new Error('PROPOSAL_C_AUTO_SEND_WARNING_MISSING');
+              composer='PASS';
+              await page.locator('#crmProposalCComposer .crm-c-compose-close').click();
+            }
+
+            const csvOpen=page.locator('#crmCsvImportOpen');
+            if(!(await csvOpen.isVisible()))throw new Error('CSV_IMPORT_OPEN_MISSING');
+            await csvOpen.click();
+            await page.locator('#crmCsvSheet.open').waitFor({timeout:10000});
+            if(!(await page.locator('#crmCsvFile').isVisible()))throw new Error('CSV_FILE_INPUT_MISSING');
+            if(!(await page.locator('#crmCsvPreview').isVisible()))throw new Error('CSV_PREVIEW_BUTTON_MISSING');
+            if(!(await page.locator('#crmCsvCommit').isVisible()))throw new Error('CSV_COMMIT_BUTTON_MISSING');
+            if(!(await page.locator('#crmCsvCommit').isDisabled()))throw new Error('CSV_COMMIT_NOT_DISABLED_INITIAL');
+            const enc=await page.locator('#crmCsvEncoding option').evaluateAll(opts=>opts.map(o=>o.value));
+            if(!enc.includes('utf-8')||!enc.includes('shift_jis'))throw new Error('CSV_ENCODING_OPTIONS_MISSING');
+            await page.locator('#crmCsvSheet .crm-csv-close').click();
+            await page.waitForFunction(()=>!document.getElementById('crmCsvSheet')?.classList.contains('open'));
+
+            const overflow=await page.evaluate(()=>Math.max(
+              document.documentElement.scrollWidth-document.documentElement.clientWidth,
+              document.body.scrollWidth-document.body.clientWidth
+            ));
+            if(overflow>1)throw new Error('HORIZONTAL_OVERFLOW_'+overflow);
+            if(writes.length)throw new Error('PRODUCTION_BROWSER_WRITE:'+Array.from(new Set(writes)).join(','));
+            if(browserSecretHeaders.length)throw new Error('BROWSER_SECRET_HEADER:'+browserSecretHeaders.join(','));
+            if(pageErrors.length)throw new Error('PAGE_ERRORS:'+pageErrors.join(' | '));
+            const actionableConsole=consoleErrors.filter(x=>/404|not found|uncaught|typeerror|referenceerror/i.test(x));
+            if(actionableConsole.length)throw new Error('ACTIONABLE_CONSOLE_ERRORS:'+actionableConsole.join(' | '));
+
+            console.log('PRODUCTION_MOBILE_390_CUSTOMER360=PASS');
+            console.log('PRODUCTION_CUSTOMER_DETAIL='+customerDetail);
+            console.log('PRODUCTION_ANALYTICS_READ=PASS');
+            console.log('PRODUCTION_APPROACH_QUEUE_READ=PASS');
+            console.log('PRODUCTION_LINE_REVALIDATION_HELPER=PASS');
+            console.log('PRODUCTION_PROPOSAL_C_COMPOSER='+composer);
+            console.log('PRODUCTION_LINE_NAVIGATION=0');
+            console.log('PRODUCTION_LINE_SEND=0');
+            console.log('PRODUCTION_CSV_IMPORT_UI=PASS');
+            console.log('PRODUCTION_CSV_PREVIEW_POST=0');
+            console.log('PRODUCTION_CSV_COMMIT_CLICK=0');
+            console.log('PRODUCTION_BROWSER_WRITES=0');
+            console.log('PRODUCTION_BROWSER_SECRET_HEADERS=0');
+            console.log('PRODUCTION_HORIZONTAL_OVERFLOW='+overflow);
+            console.log('CUSTOMER_ID_GENERATION=0');
+            console.log('RESULT=PASS');
+          } finally {
+            await browser.close();
+          }
+          NODE
