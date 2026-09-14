@@ -128,7 +128,8 @@ try{
 
     await page.locator('#crmDetailLine').click();
     await page.waitForFunction(()=>document.body.dataset.crmOwnerView==='line');
-    assert(await page.locator('#lineOpsPanel').isVisible(),viewport.width+': LINE workspace did not open');
+    assert(await page.locator('#crmOwnerLineChat').isVisible(),viewport.width+': canonical LINE chat workspace did not open');
+    assert.equal(await page.locator('#lineOpsPanel').isVisible(),false,viewport.width+': legacy LINE operations workspace reopened');
 
     await page.evaluate(()=>window.__crmOwnerView.showCustomers());
     await open.click();
