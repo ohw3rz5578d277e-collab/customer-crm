@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import http from 'node:http';
 import { chromium } from 'playwright';
 import { composeCustomer360AdminHtml } from '../src/production-index-crm-customer360-entry.js';
@@ -11,6 +12,7 @@ const facets={prefectures:['大阪府'],cities:['大阪市'],genres:['七五三'
 const base=`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><style>html,body{margin:0}.app{width:100%;box-sizing:border-box;padding:16px}#lineOpsPanel{display:none;position:fixed;inset:20px;background:#fff;z-index:9999}#lineOpsPanel.open{display:block}</style></head><body><button id="lineOpsOpen">旧LINE</button><section id="lineOpsPanel"><h2>LINE送信・反応管理</h2></section><main class="app"><h1>顧客管理</h1><section id="crmTodayDashboard"><h2>今日やること</h2></section></main><script>document.getElementById('lineOpsOpen').onclick=()=>document.getElementById('lineOpsPanel').classList.add('open')</script></body></html>`;
 const html=composeCustomer360AdminHtml(base);
 assert.equal(html.includes('const navObserver=new MutationObserver'),false,'canonical shell must not install a permanent document-wide nav observer');
+const out='artifacts/crm-canonical-uix-responsive';fs.mkdirSync(out,{recursive:true});
 const requests=[];
 function send(res,status,data,type='application/json; charset=utf-8'){res.writeHead(status,{'content-type':type,'cache-control':'no-store'});res.end(type.startsWith('application/json')?JSON.stringify(data):data)}
 const server=http.createServer((req,res)=>{
@@ -55,11 +57,13 @@ try{
    const dims=await page.locator('#crmOwnerWorkspace').evaluate(el=>({w:el.getBoundingClientRect().width,sw:document.documentElement.scrollWidth,cw:document.documentElement.clientWidth}));
    assert.ok(dims.w>viewport.width*0.65,viewport.width+': desktop workspace too narrow '+JSON.stringify(dims));
   }
+  if(viewport.width===390||viewport.width===1440)await page.screenshot({path:out+'/'+viewport.width+'-canonical-customer-list.png',fullPage:true});
   const analysisSelector=mobile?'#crmOwnerNavMarketing':'#crmOwnerDesktopSidebar [data-crm-shell-nav="marketing"]';
   await page.locator(analysisSelector).click();
   await page.waitForFunction(()=>window.__crmOwnerView.getCurrentView()==='marketing'&&document.getElementById('crmMktHome')&&getComputedStyle(document.getElementById('crmMktHome')).display!=='none');
   assert.equal(await page.locator('.crm-period-analytics').count()>0,true,viewport.width+': period analytics missing');
   assert.equal(await page.locator('.crm-approach-queue').count()>0,true,viewport.width+': approach queue missing');
+  if(viewport.width===390||viewport.width===1440)await page.screenshot({path:out+'/'+viewport.width+'-canonical-analysis.png',fullPage:true});
   const lineSelector=mobile?'#crmOwnerNavLine':'#crmOwnerDesktopSidebar [data-crm-shell-nav="line"]';
   await page.locator(lineSelector).click();
   await page.waitForFunction(()=>window.__crmOwnerView.getCurrentView()==='line'&&document.getElementById('crmOwnerLineChat')&&getComputedStyle(document.getElementById('crmOwnerLineChat')).display!=='none');
@@ -79,6 +83,7 @@ try{
    assert.ok(navState.canonicalUix,viewport.width+': canonical mobile nav marker missing');
    assert.equal(navState.legacyPreempted,true,viewport.width+': legacy shell owners were not preempted before boot');
   }
+  if(viewport.width===390||viewport.width===1440)await page.screenshot({path:out+'/'+viewport.width+'-canonical-line.png',fullPage:true});
   assert.equal(errors.length,0,viewport.width+': console/page errors '+errors.join(' | '));
   await context.close();
  }
@@ -90,6 +95,8 @@ try{
  console.log('LEGACY_LINE_OPS_VISIBLE=0');
  console.log('DESKTOP_SMARTPHONE_COLLAPSE=0');
  console.log('LEGACY_MOBILE_NAV_OVERRIDE=0');
+ for(const f of ['390-canonical-customer-list.png','390-canonical-analysis.png','390-canonical-line.png','1440-canonical-customer-list.png','1440-canonical-analysis.png','1440-canonical-line.png'])assert.ok(fs.existsSync(out+'/'+f),'canonical screenshot missing '+f);
+ console.log('CANONICAL_SCREENSHOTS=6');
  console.log('HTTP_WRITES=0');
 }finally{
  await browser.close();
