@@ -10,7 +10,7 @@
 
 import app from "./production-index-crm-fetch-safe-fix.js";
 
-const BUILD = "customer-crm-detail-panel-fix-20260614-01";
+const BUILD = "customer-crm-detail-panel-fix-20260914-02";
 
 function json(data, status = 200){
   return new Response(JSON.stringify(data, null, 2), {
@@ -95,7 +95,35 @@ body [class*="access"], body [id*="access"], body [class*="login"], body [id*="l
 
 const DETAIL_WORDS = ['LINE履歴','撮影履歴','購入履歴','タイムライン','累計売上','平均顧客単価'];
 const ERROR_PHRASES = ['LINE履歴APIに接続できませんでした','LINEワーカー単体は成功','CRM側からの fetch','認証で停止'];
+const OWNER_ROOT_SELECTOR = '#crmOwnerAppShell,#crmOwnerWorkspace,#crmOwnerWorkspaceContent';
 let activeHost = null;
+
+function isProtectedOwnerRoot(el){
+  if(!el || !(el instanceof HTMLElement)) return false;
+  if(el.matches?.(OWNER_ROOT_SELECTOR)) return true;
+  if(el.classList?.contains('app') || el.classList?.contains('crm-final-shell')){
+    return !!el.querySelector?.('#crmMktNav,#crmMktList,#crmMktHome,#crmOwnerMobileNav');
+  }
+  return false;
+}
+function cleanupProtectedOwnerRoots(){
+  const nodes = Array.from(document.querySelectorAll(OWNER_ROOT_SELECTOR+',.app,.crm-final-shell')).filter(isProtectedOwnerRoot);
+  let recovered = false;
+  for(const el of nodes){
+    if(el.classList.contains('crm-detail-managed-panel') || el.classList.contains('crm-detail-force-visible-close') || el.classList.contains('crm-force-hide-floating')) recovered = true;
+    el.classList.remove('crm-detail-managed-panel','crm-detail-force-visible-close','crm-force-hide-floating');
+    const close = el.querySelector(':scope > .crm-detail-close-btn');
+    if(close) close.remove();
+    if(el.style.display === 'none'){ el.style.removeProperty('display'); recovered = true; }
+    if(el.style.visibility === 'hidden'){ el.style.removeProperty('visibility'); recovered = true; }
+    if(el.getAttribute('aria-hidden') === 'true'){ el.removeAttribute('aria-hidden'); recovered = true; }
+  }
+  if(recovered || !document.querySelector('.crm-detail-managed-panel')){
+    document.body.classList.remove('crm-detail-open');
+  }
+  if(activeHost && isProtectedOwnerRoot(activeHost)) activeHost = null;
+  return recovered;
+}
 
 function isVisible(el){
   if(!el || !(el instanceof HTMLElement)) return false;
@@ -112,6 +140,7 @@ function findBestPanel(seed){
   let el = seed;
   for(let i=0; el && i<12; i++, el=el.parentElement){
     if(!(el instanceof HTMLElement)) continue;
+    if(isProtectedOwnerRoot(el)) continue;
     const r = el.getBoundingClientRect();
     const cs = getComputedStyle(el);
     const bg = cs.backgroundColor || '';
@@ -127,6 +156,7 @@ function findCloseHost(panel){
   let candidate = null;
   for(let i=0; el && i<10; i++, el=el.parentElement){
     if(!(el instanceof HTMLElement) || el === document.body || el === document.documentElement) continue;
+    if(isProtectedOwnerRoot(el)) continue;
     const r = el.getBoundingClientRect();
     const cs = getComputedStyle(el);
     const fullOverlay = cs.position === 'fixed' && r.width > window.innerWidth * .84 && r.height > window.innerHeight * .75;
@@ -135,17 +165,20 @@ function findCloseHost(panel){
   return candidate || panel;
 }
 function closeDetailPanel(){
-  const host = activeHost || document.querySelector('.crm-detail-managed-panel');
+  cleanupProtectedOwnerRoots();
+  const host = activeHost || Array.from(document.querySelectorAll('.crm-detail-managed-panel')).find(el=>!isProtectedOwnerRoot(el));
   if(host){
     const closeHost = findCloseHost(host);
-    closeHost.style.display = 'none';
-    closeHost.setAttribute('aria-hidden','true');
+    if(closeHost && !isProtectedOwnerRoot(closeHost)){
+      closeHost.style.display = 'none';
+      closeHost.setAttribute('aria-hidden','true');
+    }
   }
   document.body.classList.remove('crm-detail-open');
   activeHost = null;
 }
 function addCloseButton(panel){
-  if(!panel || panel.querySelector(':scope > .crm-detail-close-btn')) return;
+  if(!panel || isProtectedOwnerRoot(panel) || panel.querySelector(':scope > .crm-detail-close-btn')) return;
   panel.classList.add('crm-detail-managed-panel','crm-detail-force-visible-close');
   panel.style.position = panel.style.position || 'relative';
   const btn = document.createElement('button');
@@ -168,14 +201,15 @@ function softenLineErrors(root){
   });
 }
 function scanDetailPanel(){
-  const all = Array.from(document.querySelectorAll('body *')).filter(isVisible);
+  cleanupProtectedOwnerRoots();
+  const all = Array.from(document.querySelectorAll('body *')).filter(el=>isVisible(el) && !isProtectedOwnerRoot(el));
   let seed = null;
   for(const el of all){
     if(hasDetailWords(el)){ seed = el; break; }
   }
   if(!seed) { softenLineErrors(document); return; }
   const panel = findBestPanel(seed);
-  if(!panel || panel === document.body || panel === document.documentElement) return;
+  if(!panel || panel === document.body || panel === document.documentElement || isProtectedOwnerRoot(panel)) return;
   addCloseButton(panel);
   softenLineErrors(panel);
   activeHost = panel;
