@@ -274,9 +274,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
-      ADMIN_TOKEN: \${{ secrets.ADMIN_TOKEN }}
-      CF_ACCESS_CLIENT_ID: \${{ secrets.CF_ACCESS_CLIENT_ID }}
-      CF_ACCESS_CLIENT_SECRET: \${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+      ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}
+      CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+      CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
       BASE_URL: https://customer-crm-api.ohw3rz5578d277e.workers.dev
       PRODUCTION_SHA: f75f30a9c745a428dcead4fcd1c0ffaca5b70cfd
       CRM_INTERNAL_TOKEN: ${{ secrets.CRM_INTERNAL_TOKEN }}
@@ -296,7 +296,7 @@ jobs:
           changed="$(git diff --name-only "$PRODUCTION_SHA"...HEAD)"
           echo "CURRENT_MAIN_SHA=$remote_main"
           echo "VERIFICATION_BRANCH_SHA=$(git rev-parse HEAD)"
-          printf 'VERIFICATION_DIFF=%s\n' "\${changed//$'\n'/,}"
+          printf 'VERIFICATION_DIFF=%s\n' "${changed//$'\n'/,}"
           test "$changed" = ".github/workflows/production-browser-smoke-auth.yml"
           echo "PRODUCTION_SOURCE_DRIFT=0"
           echo "VERIFICATION_BRANCH_WORKFLOW_ONLY=PASS"
@@ -316,9 +316,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          for v in CF_ACCESS_CLIENT_ID CF_ACCESS_CLIENT_SECRET ADMIN_TOKEN; do
-            test -n "\${!v}" || { echo "::error::$v missing"; exit 1; }
+          for v in CF_ACCESS_CLIENT_ID CF_ACCESS_CLIENT_SECRET ADMIN_TOKEN CRM_INTERNAL_TOKEN; do
+            test -n "${!v}" || { echo "::error::$v missing"; exit 1; }
           done
+          echo 'CRM_INTERNAL_TOKEN_CONFIGURED=PASS'
           node <<'NODE'
           const {chromium}=require('playwright');
           (async()=>{
