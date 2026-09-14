@@ -16,6 +16,21 @@ function itemsOf(body){return Array.isArray(body)?body:Array.isArray(body&&body.
 async function existingIdentity(env,customerId){if(!env||!env.DB||!customerId)return null;try{return await env.DB.prepare('SELECT customer_id,name,line_user_id FROM customers WHERE customer_id=? LIMIT 1').bind(customerId).first();}catch(_){return null;}}
 async function ownersByLine(env,lineUserId){if(!env||!env.DB||!lineUserId)return[];try{const r=await env.DB.prepare('SELECT customer_id,line_user_id FROM customers WHERE line_user_id=? LIMIT 3').bind(lineUserId).all();return r.results||[];}catch(_){return[];}}
 
+async function recordFirstLineFollow(env,lineUserId,eventId,followedAt){
+  if(!env?.DB||!lineUserId)return{available:false,recorded:false};
+  try{
+    const row=await env.DB.prepare('SELECT source,raw_json,created_at FROM customer_identity_registry WHERE line_user_id=? LIMIT 1').bind(lineUserId).first();
+    if(!row)return{available:false,recorded:false};
+    let raw={};try{raw=JSON.parse(text(row.raw_json)||'{}')}catch(_){raw={}};
+    const source=text(row.source).toLowerCase();
+    if(text(raw.first_line_followed_at)||(source==='line_follow'&&text(raw.followed_at)))return{available:true,recorded:false};
+    const firstFollow=text(followedAt)||text(row.created_at)||new Date().toISOString();
+    const next={...raw,first_line_followed_at:firstFollow,first_line_follow_event_id:text(eventId)||null,first_line_follow_recorded_at:new Date().toISOString()};
+    await env.DB.prepare('UPDATE customer_identity_registry SET raw_json=?,updated_at=CURRENT_TIMESTAMP WHERE line_user_id=?').bind(JSON.stringify(next),lineUserId).run();
+    return{available:true,recorded:true};
+  }catch(_){return{available:false,recorded:false}}
+}
+
 async function sanitizeCustomerItem(item,env){
   const next={...item};
   const flags={ignored_invalid_line_user_id:false,protected_existing_real_name:false,display_name_fallback:false};
@@ -79,6 +94,7 @@ export async function handleCanonicalLineFollow(request,env){
     followed_at:text(body.followed_at)
   });
   const status=resolved.statusCode||200;delete resolved.statusCode;
+  const followAnalytics=resolved.ok?await recordFirstLineFollow(env,lineUserId,eventId,text(body.followed_at)):null;
   return json({
     ...resolved,
     build:BUILD,
@@ -87,6 +103,8 @@ export async function handleCanonicalLineFollow(request,env){
     line_profile_status:displayName?'provided':'missing',
     identity_matching:'line_user_id_only',
     name_matching:false,
+    line_follow_analytics_recorded:followAnalytics?.recorded===true,
+    line_follow_analytics_available:followAnalytics?.available===true,
     line_send_executed:false
   },status);
 }
