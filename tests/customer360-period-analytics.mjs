@@ -5,10 +5,11 @@ import { isCompletedReservationStatus, isCancelledReservationStatus } from '../s
 import { handleCustomer360Request } from '../src/crm-customer360-runtime.mjs';
 
 const lineFollowRows=[
-  {created_at:'2026-08-03 00:00:00',raw_json:JSON.stringify({followed_at:'2026-08-03T09:15:00+09:00'})},
-  {created_at:'2026-08-19 00:00:00',raw_json:JSON.stringify({followed_at:'2026-08-19T18:30:00+09:00'})},
-  {created_at:'2026-07-31 15:30:00',raw_json:JSON.stringify({followed_at:'2026-07-31T15:30:00Z'})},
-  {created_at:'2026-07-10 00:00:00',raw_json:JSON.stringify({followed_at:'2026-07-10T11:00:00+09:00'})}
+  {source:'line_follow',created_at:'2026-08-03 00:00:00',raw_json:JSON.stringify({followed_at:'2026-08-03T09:15:00+09:00'})},
+  {source:'line_follow',created_at:'2026-08-19 00:00:00',raw_json:JSON.stringify({followed_at:'2026-08-19T18:30:00+09:00'})},
+  {source:'reservation-ai-line',created_at:'2026-06-01 00:00:00',raw_json:JSON.stringify({first_line_followed_at:'2026-07-31T15:30:00Z'})},
+  {source:'line_follow',created_at:'2026-07-10 00:00:00',raw_json:JSON.stringify({followed_at:'2026-07-10T11:00:00+09:00'})},
+  {source:'reservation-ai-line',created_at:'2026-08-15 00:00:00',raw_json:JSON.stringify({received_at:'2026-08-15T00:00:00Z'})}
 ];
 
 const rows=[
