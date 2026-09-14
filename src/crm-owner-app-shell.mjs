@@ -164,7 +164,6 @@ function ensureShell(){
 let tries=0;function boot(){if(ensureShell())return;if(++tries<40)requestAnimationFrame(boot)}
 document.addEventListener('crm:owner-view-change',e=>{setShellActive(e.detail?.view||document.body.dataset.crmOwnerView||'customers');canonicalizeMobileNav()});
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot,{once:true});else boot();
-const navObserver=new MutationObserver(records=>{for(const r of records){if(r.target?.id==='crmOwnerMobileNav'){canonicalizeMobileNav();continue}for(const n of r.addedNodes){if(n?.nodeType!==1)continue;pruneLegacyVisualDom(n);quarantineForeignShellOwners(n);if(n.id==='crmOwnerMobileNav'||n.querySelector?.('#crmOwnerMobileNav'))canonicalizeMobileNav()}}});if(document.documentElement)navObserver.observe(document.documentElement,{childList:true,subtree:true});
 window.__crmOwnerAppShellApi={openView,setShellActive,ensureShell,canonicalizeMobileNav,quarantineForeignShellOwners,pruneLegacyVisualDom,openStatus,openSettings};
 })();
 <\/script>`;
