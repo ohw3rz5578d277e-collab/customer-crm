@@ -12,8 +12,8 @@ import { injectCustomer360ExactEditHandoff, customer360ExactEditHandoffHealth } 
 import { injectCustomer360Marketing } from './crm-customer360-ui.mjs';
 import { injectCustomerListDailyOperations } from './crm-customer-list-daily-operations.mjs';
 import { injectCustomer360SearchFocus } from './crm-customer360-search-focus.mjs';
-import { injectMobileOwnerInteractionRecovery } from './crm-mobile-owner-interaction-recovery.mjs';
 import { injectMobileOwnerCardSummary } from './crm-mobile-owner-card-summary.mjs';
+import { injectOwnerLineChat } from './crm-owner-line-chat.mjs';
 import { injectCustomer360DirectNavigation } from './crm-customer360-direct-navigation.mjs';
 import { injectOwnerViewState } from './crm-owner-view-state-v2.mjs';
 import { injectCustomer360ProfileUi } from './crm-customer360-profile-ui.mjs';
@@ -61,9 +61,9 @@ export function composeCustomer360AdminHtml(html){
   const withDailyOperations=injectCustomerListDailyOperations(withMarketing);
   const withSearchFocus=injectCustomer360SearchFocus(withDailyOperations);
   const withCardSummary=injectMobileOwnerCardSummary(withSearchFocus);
-  const withRecovery=injectMobileOwnerInteractionRecovery(withCardSummary);
-  const withDirectNavigation=injectCustomer360DirectNavigation(withRecovery);
-  const withOwnerViewState=injectOwnerViewState(withDirectNavigation);
+  const withDirectNavigation=injectCustomer360DirectNavigation(withCardSummary);
+  const withLineChat=injectOwnerLineChat(withDirectNavigation);
+  const withOwnerViewState=injectOwnerViewState(withLineChat);
   const withProfile=injectCustomer360ProfileUi(withOwnerViewState);
   const withMedia=injectCustomer360MediaUi(withProfile);
   const withEditHandoff=injectCustomer360ExactEditHandoff(withMedia);
