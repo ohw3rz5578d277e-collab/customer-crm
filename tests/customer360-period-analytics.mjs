@@ -7,6 +7,7 @@ import { handleCustomer360Request } from '../src/crm-customer360-runtime.mjs';
 const lineFollowRows=[
   {created_at:'2026-08-03 00:00:00',raw_json:JSON.stringify({followed_at:'2026-08-03T09:15:00+09:00'})},
   {created_at:'2026-08-19 00:00:00',raw_json:JSON.stringify({followed_at:'2026-08-19T18:30:00+09:00'})},
+  {created_at:'2026-07-31 15:30:00',raw_json:JSON.stringify({followed_at:'2026-07-31T15:30:00Z'})},
   {created_at:'2026-07-10 00:00:00',raw_json:JSON.stringify({followed_at:'2026-07-10T11:00:00+09:00'})}
 ];
 
@@ -85,9 +86,9 @@ assert.equal(res.status,200);
 const body=await res.json();
 assert.equal(body.ok,true);
 assert.equal(body.current.revenue,45000);
-assert.equal(body.current.line_additions,2);
+assert.equal(body.current.line_additions,3);
 assert.equal(body.previous.line_additions,1);
-assert.equal(body.change_pct.line_additions,100);
+assert.equal(body.change_pct.line_additions,200);
 assert.equal(body.meta.line_follow_data_available,true);
 assert.equal(body.meta.read_only,true);
 assert.equal(body.meta.identity_key,'customer_id');
