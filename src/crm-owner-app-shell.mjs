@@ -1,6 +1,6 @@
 import { injectProposalCAnalysisApproach } from './crm-analysis-approach-proposal-c.mjs';
 const RESERVATION_ADMIN_URL='https://reservation-app-api.ohw3rz5578d277e.workers.dev/admin';
-const CANONICAL_UIX='customer-crm-canonical-uix-20260914-01';
+const CANONICAL_UIX='customer-crm-canonical-uix-20260914-02';
 
 export function injectOwnerAppShell(html){
   if(!html)return html;
@@ -42,7 +42,9 @@ body.crm-owner-shell-v2,body.crm-owner-shell-v3{margin:0!important}
  #crmOwnerWorkspaceHeader{padding-left:18px;padding-right:18px}
  #crmOwnerWorkspaceContent{padding-left:18px;padding-right:18px}
 }
-#crmOwnerMobileNav{display:none}\n#crmOwnerCanonicalSettings{display:none}
+#crmOwnerMobileNav{display:none}
+#crmOwnerCanonicalSettings{display:none}
+[data-crm-legacy-nav-quarantined="1"]{display:none!important;visibility:hidden!important;pointer-events:none!important}
 @media(max-width:767px){
  #crmOwnerAppShell{display:block;min-height:auto;width:100%!important}
  #crmOwnerDesktopSidebar{display:none!important}
@@ -59,7 +61,7 @@ body.crm-owner-shell-v2,body.crm-owner-shell-v3{margin:0!important}
  .crm-owner-shell-v2 #crmTodayDashboard,.crm-owner-shell-v2 #crmReservationStatus,.crm-owner-shell-v2 #crmDeliveryDeadlinePanel,.crm-owner-shell-v2 #crmLegacyOperations,.crm-owner-shell-v2 #crmGrowthPanel{margin-left:0!important;margin-right:0!important;border-radius:15px!important}
  #crmOwnerMobileNav{position:fixed!important;left:0!important;right:0!important;bottom:0!important;z-index:1200!important;display:grid!important;grid-template-columns:repeat(5,minmax(0,1fr))!important;height:calc(70px + env(safe-area-inset-bottom))!important;padding:5px 6px calc(5px + env(safe-area-inset-bottom))!important;box-sizing:border-box!important;background:rgba(255,255,255,.98)!important;border-top:1px solid var(--crm-shell-line)!important;box-shadow:0 -8px 28px rgba(15,23,42,.08)!important}
  #crmOwnerMobileNav button,#crmOwnerMobileNav a{appearance:none!important;border:0!important;background:transparent!important;color:#52656e!important;text-decoration:none!important;min-width:0!important;min-height:58px!important;border-radius:12px!important;display:flex!important;flex-direction:column!important;align-items:center!important;justify-content:center!important;gap:3px!important;font:inherit!important;font-size:11px!important;font-weight:850!important;line-height:1.15!important;padding:4px 2px!important;cursor:pointer!important}
- #crmOwnerMobileNav button.active,#crmOwnerMobileNav a.active{background:var(--crm-shell-accent-soft)!important;color:var(--crm-shell-accent-strong)!important}
+ #crmOwnerMobileNav button.active,#crmOwnerMobileNav a.active{background:var(--crm-shell-accent-soft)!important;color:var(--crm-shell-accent)!important}
  .crm-owner-nav-icon{font-size:18px!important;line-height:1!important;font-weight:900!important}
  .crm-owner-shell-v2 #crmOwnerStatusSheet.open,.crm-owner-shell-v2 #crmOwnerCanonicalSettings.open{top:10px!important;left:10px!important;right:10px!important;bottom:calc(82px + env(safe-area-inset-bottom))!important;width:auto!important;max-height:none!important;border-radius:18px!important}
 }
@@ -80,7 +82,8 @@ const META={
 function esc(v){return String(v==null?'':v).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
 function setShellActive(view){
  const key=(view==='today'||view==='base'||!META[view])?'customers':view;
- document.querySelectorAll('[data-crm-shell-nav]').forEach(el=>el.classList.toggle('active',el.dataset.crmShellNav===key));
+ document.querySelectorAll('#crmOwnerDesktopSidebar [data-crm-shell-nav]').forEach(el=>el.classList.toggle('active',el.dataset.crmShellNav===key));
+ document.querySelectorAll('#crmOwnerMobileNav [data-owner-tab]').forEach(el=>el.classList.toggle('active',el.dataset.ownerTab===key));
  const m=META[key]||META.customers,title=$('crmOwnerWorkspaceTitle'),hint=$('crmOwnerWorkspaceHint');
  if(title)title.textContent=m.title;if(hint)hint.textContent=m.hint;
 }
@@ -91,11 +94,15 @@ function openView(view){
  if(view==='marketing')return window.__crmOwnerView?.showMarketing?.()??window.__crmCustomer360UI?.showHome?.();
  if(view==='line')return window.__crmOwnerView?.showLine?.();
 }
-function navHtml(){return '<button id="crmOwnerNavCustomers" type="button" data-owner-tab="customers" data-crm-shell-nav="customers"><span class="crm-owner-nav-icon">⌂</span><span>顧客</span></button><button id="crmOwnerNavSearch" type="button" data-owner-tab="search" data-crm-shell-nav="search"><span class="crm-owner-nav-icon">⌕</span><span>検索</span></button><button id="crmOwnerNavMarketing" type="button" data-owner-tab="marketing" data-crm-shell-nav="marketing"><span class="crm-owner-nav-icon">析</span><span>分析</span></button><button id="crmOwnerNavLine" type="button" data-owner-tab="line" data-crm-shell-nav="line"><span class="crm-owner-nav-icon">L</span><span>LINE</span></button><a id="crmOwnerNavReservation" data-owner-tab="reservation" data-crm-shell-nav="reservation" href="'+esc(RES_URL)+'" target="_blank" rel="noopener noreferrer"><span class="crm-owner-nav-icon">予</span><span>予約</span></a>'}
+function navHtml(){return '<button id="crmOwnerNavCustomers" type="button" data-owner-tab="customers"><span class="crm-owner-nav-icon">⌂</span><span>顧客</span></button><button id="crmOwnerNavSearch" type="button" data-owner-tab="search"><span class="crm-owner-nav-icon">⌕</span><span>検索</span></button><button id="crmOwnerNavMarketing" type="button" data-owner-tab="marketing"><span class="crm-owner-nav-icon">析</span><span>分析</span></button><button id="crmOwnerNavLine" type="button" data-owner-tab="line"><span class="crm-owner-nav-icon">L</span><span>LINE</span></button><a id="crmOwnerNavReservation" data-owner-tab="reservation" href="'+esc(RES_URL)+'" target="_blank" rel="noopener noreferrer"><span class="crm-owner-nav-icon">予</span><span>予約</span></a>'}
+function quarantineForeignShellOwners(root=document){
+ const nodes=[];if(root?.nodeType===1&&root.matches?.('[data-crm-shell-nav]'))nodes.push(root);root?.querySelectorAll?.('[data-crm-shell-nav]').forEach(el=>nodes.push(el));
+ for(const el of nodes){if(el.closest('#crmOwnerDesktopSidebar'))continue;const key=el.getAttribute('data-crm-shell-nav');if(el.closest('#crmOwnerMobileNav')){if(key&&!el.dataset.ownerTab)el.dataset.ownerTab=key;el.removeAttribute('data-crm-shell-nav');continue}el.removeAttribute('data-crm-shell-nav');el.dataset.crmLegacyNavQuarantined='1';el.setAttribute('aria-hidden','true');el.hidden=true}
+}
 function canonicalizeMobileNav(){
  let nav=$('crmOwnerMobileNav');if(!nav){nav=document.createElement('nav');nav.id='crmOwnerMobileNav';nav.setAttribute('aria-label','モバイルナビ');document.body.appendChild(nav)}
  const ids=['crmOwnerNavCustomers','crmOwnerNavSearch','crmOwnerNavMarketing','crmOwnerNavLine','crmOwnerNavReservation'];if(nav.dataset.canonicalUix!==UIX||ids.some(id=>!nav.querySelector('#'+id))||nav.children.length!==5){nav.innerHTML=navHtml();nav.dataset.canonicalUix=UIX}
- nav.querySelectorAll('button[data-crm-shell-nav]').forEach(el=>el.onclick=()=>openView(el.dataset.crmShellNav));
+ quarantineForeignShellOwners(nav);nav.querySelectorAll('button[data-owner-tab]').forEach(el=>el.onclick=()=>openView(el.dataset.ownerTab));
  return nav;
 }
 function ensureStatusSheet(){let p=$('crmOwnerStatusSheet');if(p)return p;p=document.createElement('section');p.id='crmOwnerStatusSheet';p.innerHTML='<div class="crm-owner-sheet-head"><div><div class="crm-shell-eyebrow">SYSTEM STATUS</div><h2>システム状態</h2><p>Customer360のread-only状態を確認します。</p></div><button id="crmOwnerStatusClose" class="crm-owner-close" type="button">×</button></div><div id="crmOwnerStatusBody" class="crm-owner-status-grid"><div class="crm-owner-status-card">読み込み待ち</div></div>';document.body.appendChild(p);p.querySelector('.crm-owner-close').onclick=()=>p.classList.remove('open');return p}
@@ -106,7 +113,7 @@ function bindShell(){
  document.querySelectorAll('#crmOwnerDesktopSidebar button[data-crm-shell-nav]').forEach(el=>el.onclick=()=>openView(el.dataset.crmShellNav));
  $('crmShellStatus')?.addEventListener('click',openStatus);$('crmShellSettings')?.addEventListener('click',openSettings);
  $('crmShellStatusTop')?.addEventListener('click',openStatus);$('crmShellSettingsTop')?.addEventListener('click',openSettings);
- canonicalizeMobileNav();
+ canonicalizeMobileNav();quarantineForeignShellOwners();
 }
 function ensureShell(){
  if($('crmOwnerAppShell'))return true;
@@ -123,8 +130,8 @@ function ensureShell(){
 let tries=0;function boot(){if(ensureShell())return;if(++tries<40)requestAnimationFrame(boot)}
 document.addEventListener('crm:owner-view-change',e=>{setShellActive(e.detail?.view||document.body.dataset.crmOwnerView||'customers');canonicalizeMobileNav()});
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot,{once:true});else boot();
-const navObserver=new MutationObserver(records=>{for(const r of records){if(r.target?.id==='crmOwnerMobileNav'){canonicalizeMobileNav();return}for(const n of r.addedNodes){if(n?.nodeType===1&&(n.id==='crmOwnerMobileNav'||n.querySelector?.('#crmOwnerMobileNav'))){canonicalizeMobileNav();return}}}});if(document.documentElement)navObserver.observe(document.documentElement,{childList:true,subtree:true});
-window.__crmOwnerAppShellApi={openView,setShellActive,ensureShell,canonicalizeMobileNav,openStatus,openSettings};
+const navObserver=new MutationObserver(records=>{for(const r of records){for(const n of r.addedNodes){if(n?.nodeType!==1)continue;quarantineForeignShellOwners(n);if(n.id==='crmOwnerMobileNav'||n.querySelector?.('#crmOwnerMobileNav'))canonicalizeMobileNav()}}});if(document.documentElement)navObserver.observe(document.documentElement,{childList:true,subtree:true});
+window.__crmOwnerAppShellApi={openView,setShellActive,ensureShell,canonicalizeMobileNav,quarantineForeignShellOwners,openStatus,openSettings};
 })();
 <\/script>`;
   const out=html.includes('</head>')?html.replace('</head>',style+'</head>').replace('</body>',script+'</body>'):style+html+script;
