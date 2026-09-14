@@ -34,6 +34,6 @@ pass('UI adapter contains no direct customer mutation SQL',!/\b(?:INSERT\s+INTO|
 pass('adapter contains no LINE send controls',!/broadcast|multicast|pushMessage|replyMessage/i.test(adapterSrc));
 pass('adapter does not require legacy top opportunity renderer',!adapterSrc.includes(`||!out.includes("top.map(row).join('')")`));
 pass('production entry applies adapter immediately after Customer360 marketing UI',entrySrc.includes('const withMarketing=injectCustomer360Marketing(html);\n  const withDailyOperations=injectCustomerListDailyOperations(withMarketing);'));
-pass('production entry keeps Owner exclusive view composition',entrySrc.includes('injectOwnerViewState(withDirectNavigation)'));
+pass('production entry keeps Owner exclusive view composition after read-only LINE chat',entrySrc.includes('const withLineChat=injectOwnerLineChat(withDirectNavigation);')&&entrySrc.includes('const withOwnerViewState=injectOwnerViewState(withLineChat);'));
 
 console.log(`CUSTOMER_LIST_DAILY_OPERATIONS=${n}/${n} PASS`);
