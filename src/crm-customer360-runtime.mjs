@@ -71,12 +71,17 @@ function tokyoDate(raw){
   for(const p of parts)o[p.type]=p.value;
   return o.year&&o.month&&o.day?o.year+'-'+o.month+'-'+o.day:dateOnly(v);
 }
-function lineFollowDate(row){let raw={};try{raw=JSON.parse(text(row?.raw_json)||'{}')}catch(_){}return tokyoDate(raw.followed_at)||tokyoDate(row?.created_at)}
+function lineFollowDate(row){
+  let raw={};try{raw=JSON.parse(text(row?.raw_json)||'{}')}catch(_){}
+  const first=text(raw.first_line_followed_at);
+  if(first)return tokyoDate(first);
+  return text(row?.source).toLowerCase()==='line_follow'?(tokyoDate(raw.followed_at)||tokyoDate(row?.created_at)):'';
+}
 async function lineFollowAdditionsData(env,from,to,previous=null){
   let available=false,rows=[];
   try{
     available=await strictTableExists(env,'customer_identity_registry');
-    if(available)rows=await strictAll(env,"SELECT created_at,raw_json FROM customer_identity_registry WHERE lower(COALESCE(source,''))='line_follow'");
+    if(available)rows=await strictAll(env,"SELECT source,created_at,raw_json FROM customer_identity_registry");
   }catch(_){return{available:false,current:null,previous:null,rows_read:0}}
   if(!available)return{available:false,current:null,previous:null,rows_read:0};
   const count=(a,b)=>rows.reduce((n,row)=>{const d=lineFollowDate(row);return n+(d&&d>=a&&d<=b?1:0)},0);
