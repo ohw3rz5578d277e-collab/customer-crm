@@ -89,7 +89,8 @@ try{
     assert.equal(await page.locator('#crmMktHome').isVisible(),true,viewport.width+': analytics/approach home hidden');
     assert.equal(await page.locator('#crmMktList').isVisible(),false,viewport.width+': list leaked into analytics view');
     assert.ok((await page.locator('#crmOwnerWorkspaceTitle').textContent()).includes('分析・アプローチ'));
-    await page.locator('#crmMktNav [data-view="list"]').click();
+    if(viewport.width>767)await page.locator('#crmOwnerDesktopSidebar [data-crm-shell-nav="customers"]').click();
+    else await page.locator('#crmOwnerNavCustomers').click();
     await page.waitForFunction(()=>document.body.dataset.crmOwnerView==='customers'&&document.getElementById('crmMktList')?.classList.contains('open'));
     const overflow=await page.evaluate(()=>Math.max(document.documentElement.scrollWidth-document.documentElement.clientWidth,document.body.scrollWidth-document.body.clientWidth));
     assert.ok(overflow<=1,viewport.width+': horizontal overflow '+overflow);
