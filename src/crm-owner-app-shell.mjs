@@ -1,11 +1,32 @@
 import { injectProposalCAnalysisApproach } from './crm-analysis-approach-proposal-c.mjs';
 const RESERVATION_ADMIN_URL='https://reservation-app-api.ohw3rz5578d277e.workers.dev/admin';
-const CANONICAL_UIX='customer-crm-canonical-uix-20260914-02';
+const CANONICAL_UIX='customer-crm-canonical-uix-20260914-03';
 
 export function injectOwnerAppShell(html){
   if(!html)return html;
   if(html.includes('crm-owner-app-shell-script'))return injectProposalCAnalysisApproach(html);
-  const style=String.raw`<style id="crm-owner-app-shell-style">
+  const style=String.raw`<script id="crm-canonical-preempt-legacy-owners">
+(()=>{
+const flags=[
+'__crmDirectMobileNavV1',
+'__crmMobileFirstUx',
+'__crmUiPolish',
+'__crmFinalLayoutCleanup',
+'__crmLineOps',
+'__crmMobileUsabilityInstalled',
+'__crmHomeDash',
+'__crmUnifiedUx',
+'__crmStabilityUxFix',
+'__crmStableAudit',
+'__crmOwnerDesktopLayoutHotfix20260825',
+'__crmDeliveryDeadline20260805',
+'__crmMobileOwnerInteractionRecovery',
+'__crmOwnerViewStateController'
+];
+for(const key of flags)window[key]=1;
+window.__crmCanonicalLegacyOwnerPreempted=flags.slice();
+})();
+<\\/script><style id="crm-owner-app-shell-style">`
 :root{--crm-shell-bg:#f4f7f8;--crm-shell-card:#fff;--crm-shell-text:#14212b;--crm-shell-muted:#667983;--crm-shell-line:#dfe7ea;--crm-shell-accent:#0b6b55;--crm-shell-accent-soft:#e9f5f1;--crm-shell-danger:#a61b1b}
 html,body{width:100%!important;max-width:none!important;min-width:0!important;overflow-x:hidden!important;background:var(--crm-shell-bg)!important;color:var(--crm-shell-text)!important}
 body.crm-owner-shell-v2,body.crm-owner-shell-v3{margin:0!important}
@@ -95,6 +116,18 @@ function openView(view){
  if(view==='line')return window.__crmOwnerView?.showLine?.();
 }
 function navHtml(){return '<button id="crmOwnerNavCustomers" type="button" data-owner-tab="customers"><span class="crm-owner-nav-icon">⌂</span><span>顧客</span></button><button id="crmOwnerNavSearch" type="button" data-owner-tab="search"><span class="crm-owner-nav-icon">⌕</span><span>検索</span></button><button id="crmOwnerNavMarketing" type="button" data-owner-tab="marketing"><span class="crm-owner-nav-icon">析</span><span>分析</span></button><button id="crmOwnerNavLine" type="button" data-owner-tab="line"><span class="crm-owner-nav-icon">L</span><span>LINE</span></button><a id="crmOwnerNavReservation" data-owner-tab="reservation" href="'+esc(RES_URL)+'" target="_blank" rel="noopener noreferrer"><span class="crm-owner-nav-icon">予</span><span>予約</span></a>'}
+const LEGACY_VISUAL_SELECTOR=[
+'#crmTodayDashboard','#crmReservationStatus','#crmDeliveryDeadlinePanel','#crmLegacyOperations','#crmTodayFilterPanel','#crmGrowthPanel',
+'#lineOpsOpen','.crm-lineops-fab','#lineOpsPanel','#crmMobileBar','#crmPriorityFab','.crmUxQuickHint',
+'.crm-mf-bottom','.crm-mf-fab','.crm-mf-scrolltop','.crm-bottom-nav','.crm-top-menu-btn','.crm-side-menu',
+'#crmStableAuditBtn','#crmStableAuditPanel','.crm-stable-audit-btn','#crmSettingsMenuBtn','#crmLogoutMenuBtn','#crmUxFab',
+'#crmReconciliationLink','#crmHomeDash','#crmUxOpen','#crmUxBackdrop','#crmUxDrawer','.crm-ux-fab','#crmFixScrim'
+].join(',');
+function pruneLegacyVisualDom(root=document){
+ const nodes=[];if(root?.nodeType===1&&root.matches?.(LEGACY_VISUAL_SELECTOR))nodes.push(root);
+ root?.querySelectorAll?.(LEGACY_VISUAL_SELECTOR).forEach(el=>nodes.push(el));
+ for(const el of [...new Set(nodes)])el.remove();
+}
 function quarantineForeignShellOwners(root=document){
  const nodes=[];if(root?.nodeType===1&&root.matches?.('[data-crm-shell-nav]'))nodes.push(root);root?.querySelectorAll?.('[data-crm-shell-nav]').forEach(el=>nodes.push(el));
  for(const el of nodes){if(el.closest('#crmOwnerDesktopSidebar'))continue;const key=el.getAttribute('data-crm-shell-nav');if(el.closest('#crmOwnerMobileNav')){if(key&&!el.dataset.ownerTab)el.dataset.ownerTab=key;el.removeAttribute('data-crm-shell-nav');continue}el.removeAttribute('data-crm-shell-nav');el.dataset.crmLegacyNavQuarantined='1';el.setAttribute('aria-hidden','true');el.hidden=true}
@@ -117,6 +150,7 @@ function bindShell(){
 }
 function ensureShell(){
  if($('crmOwnerAppShell'))return true;
+ pruneLegacyVisualDom();quarantineForeignShellOwners();
  const host=document.querySelector('.app')||document.querySelector('.crm-final-shell')||document.querySelector('main');
  if(!host||!host.parentNode)return false;
  const shell=document.createElement('div');shell.id='crmOwnerAppShell';
@@ -130,8 +164,8 @@ function ensureShell(){
 let tries=0;function boot(){if(ensureShell())return;if(++tries<40)requestAnimationFrame(boot)}
 document.addEventListener('crm:owner-view-change',e=>{setShellActive(e.detail?.view||document.body.dataset.crmOwnerView||'customers');canonicalizeMobileNav()});
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot,{once:true});else boot();
-const navObserver=new MutationObserver(records=>{for(const r of records){for(const n of r.addedNodes){if(n?.nodeType!==1)continue;quarantineForeignShellOwners(n);if(n.id==='crmOwnerMobileNav'||n.querySelector?.('#crmOwnerMobileNav'))canonicalizeMobileNav()}}});if(document.documentElement)navObserver.observe(document.documentElement,{childList:true,subtree:true});
-window.__crmOwnerAppShellApi={openView,setShellActive,ensureShell,canonicalizeMobileNav,quarantineForeignShellOwners,openStatus,openSettings};
+const navObserver=new MutationObserver(records=>{for(const r of records){if(r.target?.id==='crmOwnerMobileNav'){canonicalizeMobileNav();continue}for(const n of r.addedNodes){if(n?.nodeType!==1)continue;pruneLegacyVisualDom(n);quarantineForeignShellOwners(n);if(n.id==='crmOwnerMobileNav'||n.querySelector?.('#crmOwnerMobileNav'))canonicalizeMobileNav()}}});if(document.documentElement)navObserver.observe(document.documentElement,{childList:true,subtree:true});
+window.__crmOwnerAppShellApi={openView,setShellActive,ensureShell,canonicalizeMobileNav,quarantineForeignShellOwners,pruneLegacyVisualDom,openStatus,openSettings};
 })();
 <\/script>`;
   const out=html.includes('</head>')?html.replace('</head>',style+'</head>').replace('</body>',script+'</body>'):style+html+script;
