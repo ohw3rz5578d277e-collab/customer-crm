@@ -150,11 +150,11 @@ jobs:
           echo 'PAGES_PRODUCTION_DEPLOY=0'
           echo 'LINE_SEND=0'
 
-      - name: Upload Owner acceptance screenshots
+      - name: Upload canonical Owner acceptance screenshots
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: crm-mobile-owner-interaction-recovery-screenshots
-          path: artifacts/crm-mobile-owner-interaction/
+          name: crm-canonical-owner-uix-screenshots
+          path: artifacts/crm-canonical-uix-responsive/
           if-no-files-found: error
           retention-days: 7
