@@ -320,6 +320,7 @@ jobs:
           done
           node <<'NODE'
           const {chromium}=require('playwright');
+          (async()=>{
           const base=process.env.BASE_URL;
           const serverAuth={
             'CF-Access-Client-Id':process.env.CF_ACCESS_CLIENT_ID,
@@ -473,4 +474,5 @@ jobs:
           } finally {
             await browser.close();
           }
+          })().catch(err=>{console.error(err&&err.stack?err.stack:String(err));process.exit(1)});
           NODE
