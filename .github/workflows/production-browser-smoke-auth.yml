@@ -279,6 +279,7 @@ jobs:
       CF_ACCESS_CLIENT_SECRET: \${{ secrets.CF_ACCESS_CLIENT_SECRET }}
       BASE_URL: https://customer-crm-api.ohw3rz5578d277e.workers.dev
       PRODUCTION_SHA: f75f30a9c745a428dcead4fcd1c0ffaca5b70cfd
+      CRM_INTERNAL_TOKEN: ${{ secrets.CRM_INTERNAL_TOKEN }}
     steps:
       - name: Checkout verification branch
         uses: actions/checkout@v6
@@ -355,7 +356,9 @@ jobs:
                 headers:{
                   ...serverAuth,
                   accept:browserHeaders.accept||'*/*',
-                  'user-agent':browserHeaders['user-agent']||'Customer360-Deep-Production-Verifier'
+                  'user-agent':browserHeaders['user-agent']||'Customer360-Deep-Production-Verifier',
+                  'x-internal-token':process.env.CRM_INTERNAL_TOKEN,
+                  'x-crm-internal-principal':'reservation-app'
                 },
                 redirect:'manual'
               });
