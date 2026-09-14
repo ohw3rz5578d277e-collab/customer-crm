@@ -94,6 +94,24 @@ function rawRegistryInput(input){
   });
 }
 
+async function recordFirstLineFollow(db,input){
+  if(text(input.source).toLowerCase()!=="line_follow") return false;
+  try{
+    const reg=await registryByLine(db,input.line_user_id);
+    if(!reg) return false;
+    let raw={}; try{raw=JSON.parse(text(reg.raw_json)||"{}");}catch(_){raw={};}
+    if(text(raw.first_line_followed_at)||(text(reg.source).toLowerCase()==="line_follow"&&text(raw.followed_at))) return false;
+    const next={
+      ...raw,
+      first_line_followed_at:text(input.followed_at)||text(reg.created_at)||nowIso(),
+      first_line_follow_event_id:text(input.webhook_event_id)||null,
+      first_line_follow_recorded_at:nowIso()
+    };
+    await run(db,`UPDATE customer_identity_registry SET raw_json=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND line_user_id=?`,JSON.stringify(next),reg.id,input.line_user_id);
+    return true;
+  }catch(_){return false;}
+}
+
 async function createMissingRegistry(db,existing,input){
   const customerId=text(existing.customer_id);
   if(!customerId) return failure("existing_customer_id_missing",409);
@@ -109,7 +127,11 @@ async function createMissingRegistry(db,existing,input){
 }
 
 async function reconcileExistingRegistry(db,existing,reg,input){
-  if(!reg) return createMissingRegistry(db,existing,input);
+  if(!reg){
+    const created=await createMissingRegistry(db,existing,input);
+    if(!created) await recordFirstLineFollow(db,input);
+    return created;
+  }
   const existingId=text(existing.customer_id), regId=text(reg.customer_id);
   if(!existingId) return failure("existing_customer_id_missing",409);
   if(regId && regId!==existingId) return failure("identity_registry_mismatch",409,{customer_id:existingId});
@@ -117,6 +139,7 @@ async function reconcileExistingRegistry(db,existing,reg,input){
     try{ await run(db,`UPDATE customer_identity_registry SET customer_id=?,status='active',updated_at=CURRENT_TIMESTAMP WHERE id=? AND line_user_id=? AND customer_id IS NULL`,existingId,reg.id,input.line_user_id); }
     catch(_){ const refreshed=await registryByLine(db,input.line_user_id); if(!refreshed||text(refreshed.customer_id)!==existingId) return failure("identity_registry_mismatch",409,{customer_id:existingId}); }
   }else if(text(reg.status)!=="active") await run(db,`UPDATE customer_identity_registry SET status='active',updated_at=CURRENT_TIMESTAMP WHERE id=? AND line_user_id=?`,reg.id,input.line_user_id);
+  await recordFirstLineFollow(db,input);
   return null;
 }
 
@@ -171,6 +194,7 @@ async function resumeRegistry(db,reg,input,year){
     if(text(byId.line_user_id)!==lineUserId) return failure("identity_customer_id_collision",409,{customer_id:customerId});
     await applyCustomerMetadata(db,byId,input);
     await run(db,`UPDATE customer_identity_registry SET status='active',updated_at=CURRENT_TIMESTAMP WHERE id=? AND line_user_id=?`,reg.id,lineUserId);
+    await recordFirstLineFollow(db,input);
     return {ok:true,status:"resolved_existing",customer_id:customerId,created:false,replayed:true,canonical:true};
   }
 
@@ -182,11 +206,13 @@ async function resumeRegistry(db,reg,input,year){
     if(after && text(after.line_user_id)===lineUserId){
       await applyCustomerMetadata(db,after,input);
       await run(db,`UPDATE customer_identity_registry SET status='active',updated_at=CURRENT_TIMESTAMP WHERE id=? AND line_user_id=?`,reg.id,lineUserId);
+      await recordFirstLineFollow(db,input);
       return {ok:true,status:"resolved_existing",customer_id:customerId,created:false,replayed:true,canonical:true};
     }
     return failure("customer_create_failed",500,{review_required:true,customer_id:customerId});
   }
   await run(db,`UPDATE customer_identity_registry SET status='active',updated_at=CURRENT_TIMESTAMP WHERE id=? AND line_user_id=? AND customer_id=?`,reg.id,lineUserId,customerId);
+  await recordFirstLineFollow(db,input);
   return {ok:true,status:"created",customer_id:customerId,created:true,canonical:true};
 }
 
