@@ -100,10 +100,10 @@ let activeHost = null;
 
 function isProtectedOwnerRoot(el){
   if(!el || !(el instanceof HTMLElement)) return false;
-  if(el.matches?.(OWNER_ROOT_SELECTOR)) return true;
-  if(el.classList?.contains('app') || el.classList?.contains('crm-final-shell')){
-    return !!el.querySelector?.('#crmMktNav,#crmMktList,#crmMktHome,#crmOwnerMobileNav');
-  }
+  if(el.matches?.(OWNER_ROOT_SELECTOR+',#crmMktNav,#crmMktList,#crmMktHome')) return true;
+  if(el.closest?.('#crmOwnerAppShell')) return true;
+  const app = el.closest?.('.app,.crm-final-shell');
+  if(app && app.querySelector?.('#crmMktNav,#crmMktList,#crmMktHome,#crmOwnerMobileNav')) return true;
   return false;
 }
 function cleanupProtectedOwnerRoots(){
