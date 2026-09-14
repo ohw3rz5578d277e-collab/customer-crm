@@ -37,7 +37,7 @@ function safeLineHistoryFallback(path){
   return null;
 }
 
-function injectDetailPanelFix(html){
+export function injectDetailPanelFix(html){
   if(!html || html.includes("crm-detail-panel-fix-script")) return html;
 
   const style = `<style id="crm-detail-panel-fix-style">
