@@ -12,6 +12,7 @@ const facets={prefectures:['大阪府'],cities:['大阪市'],genres:['七五三'
 const base=`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><style>html,body{margin:0}.app{width:100%;box-sizing:border-box;padding:16px}#lineOpsPanel{display:none;position:fixed;inset:20px;background:#fff;z-index:9999}#lineOpsPanel.open{display:block}</style></head><body><button id="lineOpsOpen">旧LINE</button><section id="lineOpsPanel"><h2>LINE送信・反応管理</h2></section><main class="app"><h1>顧客管理</h1><section id="crmTodayDashboard"><h2>今日やること</h2></section></main><script>document.getElementById('lineOpsOpen').onclick=()=>document.getElementById('lineOpsPanel').classList.add('open')</script></body></html>`;
 const html=composeCustomer360AdminHtml(base);
 assert.equal(html.includes('const navObserver=new MutationObserver'),false,'canonical shell must not install a permanent document-wide nav observer');
+assert.equal(html.includes("new MutationObserver(()=>reconcileDesktopLayout()).observe(document.documentElement"),false,'legacy desktop hotfix must not install a permanent document-wide observer');
 const out='artifacts/crm-canonical-uix-responsive';fs.mkdirSync(out,{recursive:true});
 const requests=[];
 function send(res,status,data,type='application/json; charset=utf-8'){res.writeHead(status,{'content-type':type,'cache-control':'no-store'});res.end(type.startsWith('application/json')?JSON.stringify(data):data)}
