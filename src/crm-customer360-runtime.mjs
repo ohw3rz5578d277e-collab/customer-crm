@@ -63,7 +63,15 @@ async function loadCustomerViews(env,onDate,{requireContactPermissions=false}={}
 
 function pctChange(current,previous){const c=Number(current||0),p=Number(previous||0);return p===0?(c===0?0:null):Math.round((c-p)/p*1000)/10}
 function monthStartDate(date){return /^\d{4}-\d{2}-\d{2}$/.test(text(date))?text(date).slice(0,7)+'-01':''}
-function lineFollowDate(row){let raw={};try{raw=JSON.parse(text(row?.raw_json)||'{}')}catch(_){}return dateOnly(raw.followed_at)||dateOnly(row?.created_at)}
+function tokyoDate(raw){
+  const v=text(raw);if(!v)return'';
+  if(/^\d{4}-\d{2}-\d{2}$/.test(v))return v;
+  const ms=Date.parse(v);if(!Number.isFinite(ms))return dateOnly(v);
+  const parts=new Intl.DateTimeFormat('en-US',{timeZone:'Asia/Tokyo',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date(ms)),o={};
+  for(const p of parts)o[p.type]=p.value;
+  return o.year&&o.month&&o.day?o.year+'-'+o.month+'-'+o.day:dateOnly(v);
+}
+function lineFollowDate(row){let raw={};try{raw=JSON.parse(text(row?.raw_json)||'{}')}catch(_){}return tokyoDate(raw.followed_at)||tokyoDate(row?.created_at)}
 async function lineFollowAdditionsData(env,from,to,previous=null){
   let available=false,rows=[];
   try{
