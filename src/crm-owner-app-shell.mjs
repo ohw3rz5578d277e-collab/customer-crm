@@ -26,7 +26,7 @@ const flags=[
 for(const key of flags)window[key]=1;
 window.__crmCanonicalLegacyOwnerPreempted=flags.slice();
 })();
-<\\/script><style id="crm-owner-app-shell-style">`
+<\/script><style id="crm-owner-app-shell-style">
 :root{--crm-shell-bg:#f4f7f8;--crm-shell-card:#fff;--crm-shell-text:#14212b;--crm-shell-muted:#667983;--crm-shell-line:#dfe7ea;--crm-shell-accent:#0b6b55;--crm-shell-accent-soft:#e9f5f1;--crm-shell-danger:#a61b1b}
 html,body{width:100%!important;max-width:none!important;min-width:0!important;overflow-x:hidden!important;background:var(--crm-shell-bg)!important;color:var(--crm-shell-text)!important}
 body.crm-owner-shell-v2,body.crm-owner-shell-v3{margin:0!important}
