@@ -50,10 +50,10 @@ try{
     page.on('console',m=>{if(m.type()==='error')errors.push('console:'+m.text())});
     await page.goto(origin+'/admin',{waitUntil:'domcontentloaded'});
     await page.waitForFunction(()=>document.getElementById('crmOwnerAppShell')&&window.__crmOwnerView&&window.__crmCustomer360UI&&document.querySelector('#crmMktList tbody tr'));
-    await page.waitForFunction(()=>document.body.dataset.crmOwnerView==='today');
+    await page.waitForFunction(()=>document.body.dataset.crmOwnerView==='customers');
     assert.equal(await page.locator('#crmOwnerAppShell').count(),1);
-    assert.equal(await page.locator('#crmTodayDashboard').isVisible(),true,viewport.width+': today dashboard hidden on initial view');
-    assert.equal(await page.locator('#crmMktList').isVisible(),false,viewport.width+': customer list visible on Today');
+    assert.equal(await page.locator('#crmTodayDashboard').isVisible(),false,viewport.width+': Today dashboard must stay removed');
+    assert.equal(await page.locator('#crmMktList').isVisible(),true,viewport.width+': Customer list must be initial view');
     assert.equal(await page.locator('#lineOpsOpen').isVisible(),false,viewport.width+': legacy LINE entry visible under V2');
     assert.equal(await page.locator('#crmShellSettingsTop').isVisible(),true,viewport.width+': canonical Settings action missing');
     assert.equal(await page.locator('#crmShellStatusTop').isVisible(),true,viewport.width+': canonical Status action missing');
@@ -65,7 +65,7 @@ try{
     assert.equal(requests.some(x=>x.includes('/api/crm-health-check')),false,viewport.width+': mutating legacy health endpoint was requested');
     await page.locator('#crmOwnerStatusClose').click();
     await page.waitForFunction(()=>!document.getElementById('crmOwnerStatusSheet')?.classList.contains('open'));
-    if(viewport.width>900){
+    if(viewport.width>767){
       assert.equal(await page.locator('#crmOwnerDesktopSidebar').isVisible(),true,'desktop sidebar missing');
       assert.equal(await page.locator('#crmOwnerMobileNav').isVisible(),false,'mobile nav visible on desktop');
       await page.locator('[data-crm-shell-nav="customers"]').click();
@@ -77,14 +77,14 @@ try{
     await page.waitForFunction(()=>document.body.dataset.crmOwnerView==='customers'&&document.getElementById('crmMktList')?.classList.contains('open'));
     assert.equal(await page.locator('#crmMktList').isVisible(),true,viewport.width+': customer list hidden');
     assert.equal(await page.locator('#crmTodayDashboard').isVisible(),false,viewport.width+': Today leaked into Customer view');
-    if(viewport.width<=900){
+    if(viewport.width<=767){
       const toolbar=await page.evaluate(()=>{const box=id=>{const r=document.getElementById(id)?.getBoundingClientRect();return r?{x:r.x,y:r.y,w:r.width,h:r.height}:null};return{saved:box('crmSavedViews'),save:box('crmSaveCurrent'),sort:box('crmSort')}});
       assert.ok(toolbar.saved?.w>=120&&toolbar.save?.w>=120,'mobile saved-condition controls too narrow '+JSON.stringify(toolbar));
       assert.ok(toolbar.sort?.w>=300,'mobile sort control must use full row '+JSON.stringify(toolbar));
       assert.ok(toolbar.sort.y>toolbar.saved.y,'mobile sort control must stack below saved controls '+JSON.stringify(toolbar));
     }
-    if(viewport.width>900)await page.locator('[data-crm-shell-nav="marketing"]').click();
-    else await page.locator('#crmMktNav [data-view="home"]').click();
+    if(viewport.width>767)await page.locator('#crmOwnerDesktopSidebar [data-crm-shell-nav="marketing"]').click();
+    else await page.locator('#crmOwnerNavMarketing').click();
     await page.waitForFunction(()=>document.body.dataset.crmOwnerView==='marketing'&&document.getElementById('crmMktHome')?.classList.contains('open'));
     assert.equal(await page.locator('#crmMktHome').isVisible(),true,viewport.width+': analytics/approach home hidden');
     assert.equal(await page.locator('#crmMktList').isVisible(),false,viewport.width+': list leaked into analytics view');
@@ -97,7 +97,7 @@ try{
     await context.close();
   }
   assert.equal(requests.some(x=>!x.startsWith('GET ')&&!x.startsWith('HEAD ')),false,'unexpected HTTP write: '+requests.join(' | '));
-  console.log('OWNER_APP_SHELL_V2_BROWSER=PASS');
+  console.log('OWNER_APP_SHELL_CANONICAL_BROWSER=PASS');
   console.log('OWNER_APP_SHELL_DESKTOP_SIDEBAR=PASS');
   console.log('OWNER_APP_SHELL_MOBILE_NAV=PASS');
   console.log('OWNER_VIEW_EXCLUSIVE_ROUTING=PASS');
@@ -107,6 +107,8 @@ try{
   console.log('OWNER_STATUS_READ_ONLY_ENDPOINT=PASS');
   console.log('LEGACY_MUTATING_HEALTH_REQUEST=0');
   console.log('OWNER_MOBILE_TOOLBAR_STACK=PASS');
+  console.log('TODAY_VISIBLE_UI=0');
+  console.log('ANALYSIS_TAB=PASS');
   console.log('OWNER_INITIAL_BACKGROUND_LOAD_NAVIGATION_STABLE=PASS');
   console.log('HTTP_WRITES=0');
 } finally {
