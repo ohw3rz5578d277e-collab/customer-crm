@@ -280,7 +280,7 @@ jobs:
           set -euo pipefail
           node --check src/production-index-crm-customer360-entry.js
           node -e "import('./src/production-index-crm-customer360-entry.js').then(()=>console.log('PRODUCTION_ENTRY_IMPORT=PASS'))"
-          npx wrangler deploy --dry-run --outdir /tmp/customer360-preflight-dry-run --secrets-file /tmp/customer-crm-owner-secrets.json
+          npx --yes wrangler@4.131.2 deploy --dry-run --outdir /tmp/customer360-preflight-dry-run --secrets-file /tmp/customer-crm-owner-secrets.json
           test -n "$(find /tmp/customer360-preflight-dry-run -type f -print -quit)"
           echo 'WRANGLER_DRY_RUN=PASS'
           echo 'OWNER_AUTH_SECRETS_ATOMIC_WITH_DEPLOY=PASS'
@@ -651,7 +651,7 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          wranglerVersion: '4'
+          wranglerVersion: '4.131.2'
           command: deploy --secrets-file /tmp/customer-crm-owner-secrets.json
 
       - name: Verify identity sequence state (READ ONLY)
