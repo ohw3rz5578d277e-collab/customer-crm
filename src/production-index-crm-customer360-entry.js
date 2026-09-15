@@ -23,7 +23,7 @@ import { handleOwnerPasswordAuth, withOwnerPasswordPrincipal, handleOwnerPasswor
 import { reservationInternalUser } from './crm-reservation-browser-handoff.mjs';
 import { handleCustomerCsvImport, customerCsvImportHealth, injectCustomerCsvImport } from './crm-customer-csv-import.mjs';
 
-const BUILD='customer-crm-owner-password-auth-20260911-06';
+const BUILD='customer-crm-security-hardening-20260915-07';
 const OWNER_EMAIL='ohw3rz5578d277e@gmail.com';
 const RAW_SCRIPT_CLOSE='<'+String.fromCharCode(92)+'/script>';
 const CUSTOMER360_PROFILE_TABLES=[
@@ -229,11 +229,74 @@ export async function handleProductionHealthRequest(request,env){
 }
 async function patchHtml(response){const ct=response.headers.get('content-type')||'';if(response.status!==200||!ct.includes('text/html'))return response;const h=headersFrom(response);h.set('content-type','text/html; charset=utf-8');return new Response(composeCustomer360AdminHtml(await response.text()),{status:response.status,statusText:response.statusText,headers:h})}
 
-export default {
-  async fetch(request,env,ctx){
+
+const SECURITY_CSP=[
+  "default-src 'self'",
+  "base-uri 'none'",
+  "frame-ancestors 'none'",
+  "object-src 'none'",
+  "form-action 'self'",
+  "img-src 'self' data: https:",
+  "font-src 'self' data:",
+  "style-src 'self' 'unsafe-inline'",
+  "script-src 'self' 'unsafe-inline'",
+  "connect-src 'self'",
+  "upgrade-insecure-requests"
+].join('; ');
+
+function securityJson(data,status){
+  return new Response(JSON.stringify(data),{
+    status,
+    headers:{'content-type':'application/json; charset=utf-8','cache-control':'no-store'}
+  });
+}
+function isSensitiveProductionPath(pathname){
+  return pathname==='/admin'||pathname.startsWith('/api/')||pathname.startsWith('/__crm/');
+}
+export function enforceProductionRequestBoundary(request){
+  const method=String(request.method||'GET').toUpperCase();
+  if(method==='TRACE'||method==='CONNECT')return securityJson({ok:false,error:'method_not_allowed'},405);
+  const url=new URL(request.url);
+  if(!isSensitiveProductionPath(url.pathname))return null;
+  const origin=String(request.headers.get('origin')||'').trim();
+  if(origin){
+    try{if(new URL(origin).origin!==url.origin)return securityJson({ok:false,error:'cross_origin_blocked'},403)}
+    catch{return securityJson({ok:false,error:'cross_origin_blocked'},403)}
+  }
+  const fetchSite=String(request.headers.get('sec-fetch-site')||'').toLowerCase();
+  if(fetchSite==='cross-site'&&url.pathname.startsWith('/api/'))return securityJson({ok:false,error:'cross_site_api_blocked'},403);
+  if(fetchSite==='cross-site'&&method!=='GET'&&method!=='HEAD')return securityJson({ok:false,error:'cross_site_write_blocked'},403);
+  return null;
+}
+export function hardenProductionResponse(response,request){
+  const headers=new Headers(response.headers);
+  headers.delete('content-length');
+  headers.delete('access-control-allow-origin');
+  headers.delete('access-control-allow-credentials');
+  headers.delete('access-control-allow-methods');
+  headers.delete('access-control-allow-headers');
+  headers.delete('access-control-expose-headers');
+  headers.set('strict-transport-security','max-age=31536000; includeSubDomains');
+  headers.set('x-content-type-options','nosniff');
+  headers.set('x-frame-options','DENY');
+  headers.set('referrer-policy','no-referrer');
+  headers.set('permissions-policy','camera=(), microphone=(), geolocation=(), payment=(), usb=(), serial=()');
+  headers.set('cross-origin-opener-policy','same-origin');
+  headers.set('cross-origin-resource-policy','same-origin');
+  headers.set('x-permitted-cross-domain-policies','none');
+  headers.set('x-robots-tag','noindex, nofollow, noarchive');
+  const type=String(headers.get('content-type')||'').toLowerCase();
+  if(type.includes('text/html'))headers.set('content-security-policy',SECURITY_CSP);
+  try{
+    if(isSensitiveProductionPath(new URL(request.url).pathname))headers.set('cache-control','no-store, no-cache, must-revalidate, max-age=0');
+  }catch(_){}
+  return new Response(response.body,{status:response.status,statusText:response.statusText,headers});
+}
+
+async function handleCustomerCrmRequest(request,env,ctx){
     const accessAuthProbe=handleProductionAccessAuthProbe(request,env);if(accessAuthProbe)return accessAuthProbe;
     const ownerAuth=await handleOwnerPasswordAuth(request,env);if(ownerAuth)return ownerAuth;
-    const effectiveRequest=await withOwnerPasswordPrincipal(request,env);
+    const effectiveRequest=await withOwnerPasswordPrincipal(request,env,ctx);
     const ownerBrowserGate=handleOwnerPasswordBrowserGate(effectiveRequest,env);if(ownerBrowserGate)return ownerBrowserGate;
     const csvUrl=new URL(effectiveRequest.url);
     if(csvUrl.pathname==='/api/customer-csv-import/preview'||csvUrl.pathname==='/api/customer-csv-import/commit'){
@@ -257,5 +320,13 @@ export default {
     if(effectiveRequest.method==='GET'&&url.pathname==='/api/crm-health-check')return patchHealth(response,env);
     if(effectiveRequest.method==='GET'&&url.pathname==='/admin')return patchHtml(response);
     return response;
+}
+
+export default {
+  async fetch(request,env,ctx){
+    const blocked=enforceProductionRequestBoundary(request);
+    if(blocked)return hardenProductionResponse(blocked,request);
+    const response=await handleCustomerCrmRequest(request,env,ctx);
+    return hardenProductionResponse(response,request);
   }
 };
