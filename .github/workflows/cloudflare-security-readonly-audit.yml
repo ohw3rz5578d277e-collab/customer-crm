@@ -32,17 +32,53 @@ jobs:
 
           tmp_subdomain="$(mktemp)"
           tmp_workers="$(mktemp)"
+          tmp_worker_page="$(mktemp)"
           tmp_access="$(mktemp)"
+          tmp_access_page="$(mktemp)"
+          tmp_policies="$(mktemp)"
+          tmp_policy_page="$(mktemp)"
           tmp_pages="$(mktemp)"
-          trap 'rm -f "$tmp_subdomain" "$tmp_workers" "$tmp_access" "$tmp_pages"' EXIT
+          trap 'rm -f "$tmp_subdomain" "$tmp_workers" "$tmp_worker_page" "$tmp_access" "$tmp_access_page" "$tmp_policies" "$tmp_policy_page" "$tmp_pages" "$tmp_workers.next" "$tmp_access.next" "$tmp_policies.next"' EXIT
 
           api="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
           auth=(-H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" -H "Content-Type: application/json")
 
           subdomain_http="$(curl -sS -o "$tmp_subdomain" -w '%{http_code}' "${auth[@]}" --request GET             "$api/workers/scripts/${WORKER_NAME}/subdomain")"
-          workers_http="$(curl -sS -o "$tmp_workers" -w '%{http_code}' "${auth[@]}" --request GET             "$api/workers/workers")"
-          access_http="$(curl -sS -o "$tmp_access" -w '%{http_code}' "${auth[@]}" --request GET             "$api/access/apps")"
           pages_http="$(curl -sS -o "$tmp_pages" -w '%{http_code}' "${auth[@]}" --request GET             "$api/pages/projects/customer-crm")"
+
+          # Paginate the Worker inventory so a later-page Worker cannot be missed.
+          printf '[]' > "$tmp_workers"
+          workers_http="200"
+          workers_page=1
+          workers_total_pages=1
+          while [ "$workers_page" -le "$workers_total_pages" ]; do
+            code="$(curl -sS -o "$tmp_worker_page" -w '%{http_code}' "${auth[@]}" --request GET               "$api/workers/workers?page=$workers_page&per_page=100")"
+            if [ "$code" != "200" ]; then
+              workers_http="$code"
+              break
+            fi
+            jq -s '.[0] + (.[1].result // [])' "$tmp_workers" "$tmp_worker_page" > "$tmp_workers.next"
+            mv "$tmp_workers.next" "$tmp_workers"
+            workers_total_pages="$(jq -r '.result_info.total_pages // 1' "$tmp_worker_page")"
+            workers_page=$((workers_page+1))
+          done
+
+          # Paginate Access applications for the same reason.
+          printf '[]' > "$tmp_access"
+          access_http="200"
+          access_page=1
+          access_total_pages=1
+          while [ "$access_page" -le "$access_total_pages" ]; do
+            code="$(curl -sS -o "$tmp_access_page" -w '%{http_code}' "${auth[@]}" --request GET               "$api/access/apps?page=$access_page&per_page=100")"
+            if [ "$code" != "200" ]; then
+              access_http="$code"
+              break
+            fi
+            jq -s '.[0] + (.[1].result // [])' "$tmp_access" "$tmp_access_page" > "$tmp_access.next"
+            mv "$tmp_access.next" "$tmp_access"
+            access_total_pages="$(jq -r '.result_info.total_pages // 1' "$tmp_access_page")"
+            access_page=$((access_page+1))
+          done
 
           worker_prod_enabled="unknown"
           worker_previews_enabled="unknown"
@@ -53,7 +89,7 @@ jobs:
 
           worker_id=""
           if [ "$workers_http" = "200" ]; then
-            worker_id="$(jq -r --arg n "$WORKER_NAME" '.result[]? | select(.name==$n) | .id' "$tmp_workers" | head -n1)"
+            worker_id="$(jq -r --arg n "$WORKER_NAME" '.[]? | select(.name==$n) | .id' "$tmp_workers" | head -n1)"
           fi
 
           pages_preview_setting="unknown"
@@ -63,11 +99,57 @@ jobs:
             pages_production_deployments="$(jq -r '.result.source.config.production_deployments_enabled // "unknown"' "$tmp_pages")"
           fi
 
-          access_worker_protected="unknown"
-          access_matching_apps="unknown"
+          # A matching Access application is not enough: a Bypass/non-identity/
+          # Everyone policy can still make the Worker effectively public.
+          access_matching_apps=0
+          access_safe_apps=0
+          access_unsafe_apps=0
+          access_policy_http_failures=0
           if [ "$access_http" = "200" ] && [ -n "$worker_id" ]; then
-            access_matching_apps="$(jq -r --arg wid "$worker_id" '[.result[]? | select(any(.destinations[]?; .type=="worker" and .worker_id==$wid))] | length' "$tmp_access")"
-            if [ "$access_matching_apps" -gt 0 ]; then access_worker_protected="true"; else access_worker_protected="false"; fi
+            mapfile -t matching_app_ids < <(
+              jq -r --arg wid "$worker_id"                 '.[]? | select(any(.destinations[]?; .type=="worker" and .worker_id==$wid)) | .id'                 "$tmp_access"
+            )
+            access_matching_apps="${#matching_app_ids[@]}"
+
+            for app_id in "${matching_app_ids[@]}"; do
+              printf '[]' > "$tmp_policies"
+              policy_page=1
+              policy_total_pages=1
+              policy_http="200"
+
+              while [ "$policy_page" -le "$policy_total_pages" ]; do
+                code="$(curl -sS -o "$tmp_policy_page" -w '%{http_code}' "${auth[@]}" --request GET                   "$api/access/apps/$app_id/policies?page=$policy_page&per_page=100")"
+                if [ "$code" != "200" ]; then
+                  policy_http="$code"
+                  access_policy_http_failures=$((access_policy_http_failures+1))
+                  break
+                fi
+                jq -s '.[0] + (.[1].result // [])' "$tmp_policies" "$tmp_policy_page" > "$tmp_policies.next"
+                mv "$tmp_policies.next" "$tmp_policies"
+                policy_total_pages="$(jq -r '.result_info.total_pages // 1' "$tmp_policy_page")"
+                policy_page=$((policy_page+1))
+              done
+
+              if [ "$policy_http" != "200" ]; then
+                access_unsafe_apps=$((access_unsafe_apps+1))
+                continue
+              fi
+
+              allow_count="$(jq '[.[]? | select(.decision=="allow")] | length' "$tmp_policies")"
+              unsafe_decision_count="$(jq '[.[]? | select(.decision=="bypass" or .decision=="non_identity")] | length' "$tmp_policies")"
+              everyone_allow_count="$(jq '[.[]? | select(.decision=="allow") | .include[]? | select(has("everyone"))] | length' "$tmp_policies")"
+
+              if [ "$allow_count" -gt 0 ] && [ "$unsafe_decision_count" -eq 0 ] && [ "$everyone_allow_count" -eq 0 ]; then
+                access_safe_apps=$((access_safe_apps+1))
+              else
+                access_unsafe_apps=$((access_unsafe_apps+1))
+              fi
+            done
+          fi
+
+          access_worker_protected="false"
+          if [ "$access_matching_apps" -gt 0 ] &&              [ "$access_safe_apps" -eq "$access_matching_apps" ] &&              [ "$access_unsafe_apps" -eq 0 ] &&              [ "$access_policy_http_failures" -eq 0 ]; then
+            access_worker_protected="true"
           fi
 
           {
@@ -78,12 +160,17 @@ jobs:
             echo "- worker_production_workers_dev_enabled: ${worker_prod_enabled}"
             echo "- worker_preview_urls_enabled: ${worker_previews_enabled}"
             echo "- workers_inventory_api_http: ${workers_http}"
+            echo "- workers_inventory_pages_read: $((workers_page-1))"
             echo "- access_apps_api_http: ${access_http}"
+            echo "- access_apps_pages_read: $((access_page-1))"
             echo "- pages_project_api_http: ${pages_http}"
             echo "- pages_preview_deployment_setting: ${pages_preview_setting}"
             echo "- pages_production_deployments_enabled: ${pages_production_deployments}"
             echo "- worker_level_access_protected: ${access_worker_protected}"
             echo "- matching_worker_access_apps: ${access_matching_apps}"
+            echo "- safe_worker_access_apps: ${access_safe_apps}"
+            echo "- unsafe_worker_access_apps: ${access_unsafe_apps}"
+            echo "- access_policy_http_failures: ${access_policy_http_failures}"
             echo
             echo "No Cloudflare mutation, Worker deploy, D1 write, migration, Customer ID generation, or LINE send was performed."
           } >> "$GITHUB_STEP_SUMMARY"
@@ -99,6 +186,9 @@ jobs:
           echo "PAGES_PRODUCTION_DEPLOYMENTS_ENABLED=${pages_production_deployments}"
           echo "WORKER_LEVEL_ACCESS_PROTECTED=${access_worker_protected}"
           echo "MATCHING_WORKER_ACCESS_APPS=${access_matching_apps}"
+          echo "SAFE_WORKER_ACCESS_APPS=${access_safe_apps}"
+          echo "UNSAFE_WORKER_ACCESS_APPS=${access_unsafe_apps}"
+          echo "ACCESS_POLICY_HTTP_FAILURES=${access_policy_http_failures}"
           echo "PRODUCTION_D1_WRITE=0"
           echo "PRODUCTION_MIGRATION_APPLY=0"
           echo "WORKER_DEPLOY=0"
@@ -113,6 +203,8 @@ jobs:
           [ "$access_http" = "200" ] || { echo "::error::Cannot inspect Cloudflare Access applications with current token permissions"; fail=1; }
           [ "$pages_http" = "200" ] || { echo "::error::Cannot inspect Cloudflare Pages project with current token permissions"; fail=1; }
           [ "$pages_preview_setting" = "none" ] || { echo "::error::Cloudflare Pages preview deployments are enabled"; fail=1; }
+          [ "$access_policy_http_failures" -eq 0 ] || { echo "::error::Cannot inspect all matching Access application policies"; fail=1; }
+          [ "$access_unsafe_apps" -eq 0 ] || { echo "::error::Matching Worker Access application has bypass/non-identity/public policy"; fail=1; }
           [ "$access_worker_protected" = "true" ] || { echo "::error::Worker-level Cloudflare Access protection was not confirmed"; fail=1; }
 
           if [ "$fail" -ne 0 ]; then
