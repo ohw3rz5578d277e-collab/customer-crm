@@ -10,7 +10,7 @@ const profile=fs.readFileSync('src/crm-customer360-profile-enrichment.mjs','utf8
 assert.equal((entry.match(/injectCustomer360ExactEditHandoff/g)||[]).length,2,'exact edit handoff import/invocation count');
 assert.equal((entry.match(/injectCustomer360MediaUi/g)||[]).length,2,'media UI import/invocation count');
 assert.equal((entry.match(/handleCustomer360MediaRequest/g)||[]).length,2,'media API import/route count');
-const principalCall='const effectiveRequest=await withOwnerPasswordPrincipal(request,env)';
+const principalCall='const effectiveRequest=await withOwnerPasswordPrincipal(request,env,ctx)';
 const healthCall='handleProductionHealthRequest(effectiveRequest,env)';
 const mediaCall='handleCustomer360MediaRequest(effectiveRequest,env)';
 assert.ok(entry.indexOf(principalCall)>=0,'Owner principal normalization missing');
