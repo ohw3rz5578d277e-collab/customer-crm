@@ -1,0 +1,106 @@
+name: Cloudflare security read-only audit
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cloudflare-security-readonly-audit
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout exact main
+        uses: actions/checkout@v4
+
+      - name: Audit Cloudflare exposure without writes
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          REPO_PRIVATE: ${{ github.event.repository.private }}
+          WORKER_NAME: customer-crm-api
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          test -n "${CLOUDFLARE_API_TOKEN:-}" || { echo "CLOUDFLARE_TOKEN_PRESENT=NO"; exit 2; }
+          test -n "${CLOUDFLARE_ACCOUNT_ID:-}" || { echo "CLOUDFLARE_ACCOUNT_ID_PRESENT=NO"; exit 2; }
+
+          tmp_subdomain="$(mktemp)"
+          tmp_workers="$(mktemp)"
+          tmp_access="$(mktemp)"
+          trap 'rm -f "$tmp_subdomain" "$tmp_workers" "$tmp_access"' EXIT
+
+          api="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          auth=(-H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" -H "Content-Type: application/json")
+
+          subdomain_http="$(curl -sS -o "$tmp_subdomain" -w '%{http_code}' "${auth[@]}" --request GET             "$api/workers/scripts/${WORKER_NAME}/subdomain")"
+          workers_http="$(curl -sS -o "$tmp_workers" -w '%{http_code}' "${auth[@]}" --request GET             "$api/workers/workers")"
+          access_http="$(curl -sS -o "$tmp_access" -w '%{http_code}' "${auth[@]}" --request GET             "$api/access/apps")"
+
+          worker_prod_enabled="unknown"
+          worker_previews_enabled="unknown"
+          if [ "$subdomain_http" = "200" ]; then
+            worker_prod_enabled="$(jq -r '.result.enabled // false' "$tmp_subdomain")"
+            worker_previews_enabled="$(jq -r '.result.previews_enabled // false' "$tmp_subdomain")"
+          fi
+
+          worker_id=""
+          if [ "$workers_http" = "200" ]; then
+            worker_id="$(jq -r --arg n "$WORKER_NAME" '.result[]? | select(.name==$n) | .id' "$tmp_workers" | head -n1)"
+          fi
+
+          access_worker_protected="unknown"
+          access_matching_apps="unknown"
+          if [ "$access_http" = "200" ] && [ -n "$worker_id" ]; then
+            access_matching_apps="$(jq -r --arg wid "$worker_id" '[.result[]? | select(any(.destinations[]?; .type=="worker" and .worker_id==$wid))] | length' "$tmp_access")"
+            if [ "$access_matching_apps" -gt 0 ]; then access_worker_protected="true"; else access_worker_protected="false"; fi
+          fi
+
+          {
+            echo "## Cloudflare security read-only audit"
+            echo
+            echo "- repository_private: ${REPO_PRIVATE}"
+            echo "- worker_subdomain_api_http: ${subdomain_http}"
+            echo "- worker_production_workers_dev_enabled: ${worker_prod_enabled}"
+            echo "- worker_preview_urls_enabled: ${worker_previews_enabled}"
+            echo "- workers_inventory_api_http: ${workers_http}"
+            echo "- access_apps_api_http: ${access_http}"
+            echo "- worker_level_access_protected: ${access_worker_protected}"
+            echo "- matching_worker_access_apps: ${access_matching_apps}"
+            echo
+            echo "No Cloudflare mutation, Worker deploy, D1 write, migration, Customer ID generation, or LINE send was performed."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          echo "REPOSITORY_PRIVATE=${REPO_PRIVATE}"
+          echo "WORKER_SUBDOMAIN_API_HTTP=${subdomain_http}"
+          echo "WORKER_PRODUCTION_WORKERS_DEV_ENABLED=${worker_prod_enabled}"
+          echo "WORKER_PREVIEW_URLS_ENABLED=${worker_previews_enabled}"
+          echo "WORKERS_INVENTORY_API_HTTP=${workers_http}"
+          echo "ACCESS_APPS_API_HTTP=${access_http}"
+          echo "WORKER_LEVEL_ACCESS_PROTECTED=${access_worker_protected}"
+          echo "MATCHING_WORKER_ACCESS_APPS=${access_matching_apps}"
+          echo "PRODUCTION_D1_WRITE=0"
+          echo "PRODUCTION_MIGRATION_APPLY=0"
+          echo "WORKER_DEPLOY=0"
+          echo "CUSTOMER_ID_GENERATION=0"
+          echo "LINE_SEND=0"
+
+          fail=0
+          [ "${REPO_PRIVATE}" = "true" ] || { echo "::error::GitHub repository is public"; fail=1; }
+          [ "$subdomain_http" = "200" ] || { echo "::error::Cannot inspect Worker subdomain exposure"; fail=1; }
+          [ "$worker_previews_enabled" = "false" ] || { echo "::error::Worker preview URLs are still enabled"; fail=1; }
+          [ "$workers_http" = "200" ] || { echo "::error::Cannot resolve immutable Worker ID with current token permissions"; fail=1; }
+          [ "$access_http" = "200" ] || { echo "::error::Cannot inspect Cloudflare Access applications with current token permissions"; fail=1; }
+          [ "$access_worker_protected" = "true" ] || { echo "::error::Worker-level Cloudflare Access protection was not confirmed"; fail=1; }
+
+          if [ "$fail" -ne 0 ]; then
+            echo "CLOUDFLARE_SECURITY_POSTURE=NOT_CLOSED"
+            exit 3
+          fi
+
+          echo "CLOUDFLARE_SECURITY_POSTURE=PASS"
