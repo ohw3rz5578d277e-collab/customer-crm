@@ -43,9 +43,15 @@ function renderCustomers(){
 }
 function filter(){const q=String($('crmLineChatSearch')?.value||'').trim().toLowerCase();state.filtered=!q?state.customers:state.customers.filter(c=>[c.name,c.line_display_name,c.customer_id].some(v=>String(v||'').toLowerCase().includes(q)));renderCustomers()}
 async function fetchCustomers(){
- let r=await fetch('/api/customer360/customers?page=1&page_size=100&line=linked',{credentials:'same-origin',cache:'no-store'}),j=await r.json().catch(()=>({}));
- if(!r.ok||j.ok===false){r=await fetch('/api/customers?segment=line&limit=100',{credentials:'same-origin',cache:'no-store'});j=await r.json().catch(()=>({}));if(!r.ok||j.ok===false)throw Error(j.error||j.message||'顧客一覧を取得できません')}
- return j.items||j.customers||[];
+ const all=[],seen=new Set();
+ for(let page=1;page<=1000;page++){
+  const r=await fetch('/api/customer360/customers?page='+page+'&page_size=100&line=linked',{credentials:'same-origin',cache:'no-store'}),j=await r.json().catch(()=>({}));
+  if(!r.ok||j.ok===false)throw Error(j.error||j.message||'顧客一覧を取得できません');
+  const items=Array.isArray(j.items)?j.items:[];
+  for(const c of items){const id=String(c&&c.customer_id||'');if(id&&seen.has(id))continue;if(id)seen.add(id);all.push(c)}
+  if(j.has_next!==true)return all;
+ }
+ throw Error('LINE連携済み顧客のページ数が上限を超えました');
 }
 async function loadCustomers(force=false){
  if(state.loading&&!force)return;state.loading=true;ensure();const host=$('crmLineChatCustomers');if(host)host.innerHTML='<div class="crm-line-chat-empty">読み込み中…</div>';
