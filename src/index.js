@@ -921,10 +921,12 @@ async function fetchRemoteLineHistory(env, customer) {
   }
 
   const adminToken = getAdminToken(env);
-  const internalToken =
-    text(env.LINE_INTERNAL_TOKEN) ||
-    text(env.LINE_WORKER_INTERNAL_TOKEN) ||
-    text(env.RESERVATION_INTERNAL_TOKEN);
+  const lineHistoryInternalTokens = Array.from(new Set([
+    text(env.RESERVATION_INTERNAL_TOKEN),
+    text(env.LINE_INTERNAL_TOKEN),
+    text(env.LINE_WORKER_INTERNAL_TOKEN)
+  ].filter(Boolean)));
+  const lineHistoryAuthCandidates = lineHistoryInternalTokens.length ? lineHistoryInternalTokens : [""];
 
   const baseCandidates = Array.from(new Set([
     text(env.LINE_HISTORY_API_BASE),
@@ -937,84 +939,104 @@ async function fetchRemoteLineHistory(env, customer) {
   const debug = [];
 
   // 1) Service Binding があれば最優先
+  // During secret rotation, retry only authentication failures with the next configured token.
+  // Secret values are never exposed in debug output.
   if (env.LINE_SERVICE && typeof env.LINE_SERVICE.fetch === "function") {
-    try {
-      const url = new URL("https://line-service.internal" + path);
-      url.searchParams.set("line_user_id", lineUserId);
-      url.searchParams.set("user_id", lineUserId);
+    for (let authIndex = 0; authIndex < lineHistoryAuthCandidates.length; authIndex++) {
+      const internalToken = lineHistoryAuthCandidates[authIndex];
+      try {
+        const url = new URL("https://line-service.internal" + path);
+        url.searchParams.set("line_user_id", lineUserId);
+        url.searchParams.set("user_id", lineUserId);
 
-      const res = await env.LINE_SERVICE.fetch(new Request(url.toString(), {
-        method: "GET",
-        headers: {
-          "x-internal-token": internalToken,
-          "x-admin-token": adminToken,
-          "authorization": "Bearer " + internalToken
+        const res = await env.LINE_SERVICE.fetch(new Request(url.toString(), {
+          method: "GET",
+          headers: {
+            "x-internal-token": internalToken,
+            "x-admin-token": adminToken,
+            "authorization": "Bearer " + internalToken
+          }
+        }));
+
+        const rawText = await res.text();
+        let data = {};
+        try { data = rawText ? JSON.parse(rawText) : {}; } catch (_) { data = { raw: rawText }; }
+
+        debug.push({
+          source: "LINE_SERVICE",
+          status: res.status,
+          ok: res.ok,
+          auth_attempt: authIndex + 1,
+          count: Array.isArray(data.items || data.messages) ? (data.items || data.messages).length : 0
+        });
+
+        if (res.ok && data && data.ok !== false) {
+          return {
+            ok: true,
+            connected: true,
+            source: "LINE_SERVICE" + path,
+            messages: normalizeLineHistoryMessages(data.messages || data.items || []),
+            debug
+          };
         }
-      }));
 
-      const rawText = await res.text();
-      let data = {};
-      try { data = rawText ? JSON.parse(rawText) : {}; } catch (_) { data = { raw: rawText }; }
-
-      debug.push({ source: "LINE_SERVICE", status: res.status, ok: res.ok, count: Array.isArray(data.items || data.messages) ? (data.items || data.messages).length : 0 });
-
-      if (res.ok && data && data.ok !== false) {
-        return {
-          ok: true,
-          connected: true,
-          source: "LINE_SERVICE" + path,
-          messages: normalizeLineHistoryMessages(data.messages || data.items || []),
-          debug
-        };
+        if (res.status !== 401 && res.status !== 403) break;
+      } catch (e) {
+        debug.push({ source: "LINE_SERVICE", status: 0, auth_attempt: authIndex + 1, message: e && e.message ? e.message : String(e) });
+        break;
       }
-    } catch (e) {
-      debug.push({ source: "LINE_SERVICE", status: 0, message: e && e.message ? e.message : String(e) });
     }
   }
 
   // 2) public workers.dev URL
   for (const base of baseCandidates) {
-    try {
-      const url = new URL(base + path);
-      url.searchParams.set("line_user_id", lineUserId);
-      url.searchParams.set("user_id", lineUserId);
-      // line-webhook-worker はこの token で直接テスト成功済みなので、まず固定管理トークンで通す
+    for (let authIndex = 0; authIndex < lineHistoryAuthCandidates.length; authIndex++) {
+      const internalToken = lineHistoryAuthCandidates[authIndex];
+      try {
+        const url = new URL(base + path);
+        url.searchParams.set("line_user_id", lineUserId);
+        url.searchParams.set("user_id", lineUserId);
 
-      const res = await fetch(url.toString(), {
-        method: "GET",
-        headers: {
-          "x-internal-token": internalToken,
-          "x-admin-token": adminToken,
-          "authorization": "Bearer " + internalToken,
-          "cache-control": "no-cache"
-        }
-      });
+        const res = await fetch(url.toString(), {
+          method: "GET",
+          headers: {
+            "x-internal-token": internalToken,
+            "x-admin-token": adminToken,
+            "authorization": "Bearer " + internalToken,
+            "cache-control": "no-cache"
+          }
+        });
 
-      const rawText = await res.text();
-      let data = {};
-      try { data = rawText ? JSON.parse(rawText) : {}; } catch (_) { data = { raw: rawText }; }
+        const rawText = await res.text();
+        let data = {};
+        try { data = rawText ? JSON.parse(rawText) : {}; } catch (_) { data = { raw: rawText }; }
 
-      const arr = data.messages || data.items || [];
-      debug.push({
-        source: base + path,
-        status: res.status,
-        ok: res.ok,
-        data_ok: data && data.ok,
-        count: Array.isArray(arr) ? arr.length : 0,
-        message: data && (data.message || data.error) ? (data.message || data.error) : ""
-      });
-
-      if (res.ok && data && data.ok !== false) {
-        return {
-          ok: true,
-          connected: true,
+        const arr = data.messages || data.items || [];
+        debug.push({
           source: base + path,
-          messages: normalizeLineHistoryMessages(arr),
-          debug
-        };
+          status: res.status,
+          ok: res.ok,
+          auth_attempt: authIndex + 1,
+          data_ok: data && data.ok,
+          count: Array.isArray(arr) ? arr.length : 0,
+          message: data && (data.message || data.error) ? (data.message || data.error) : ""
+        });
+
+        if (res.ok && data && data.ok !== false) {
+          return {
+            ok: true,
+            connected: true,
+            source: base + path,
+            messages: normalizeLineHistoryMessages(arr),
+            debug
+          };
+        }
+
+        if (res.status !== 401 && res.status !== 403) break;
+      } catch (e) {
+        debug.push({ source: base + path, status: 0, auth_attempt: authIndex + 1, message: e && e.message ? e.message : String(e) });
+        break;
       }
-    } catch (e) {
-      debug.push({ source: base + path, status: 0, message: e && e.message ? e.message : String(e) });
     }
   }
 

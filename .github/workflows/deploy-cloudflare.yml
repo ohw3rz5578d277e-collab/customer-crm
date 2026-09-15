@@ -253,6 +253,39 @@ jobs:
           wranglerVersion: '4'
           command: whoami
 
+      - name: Verify required Production Worker secret names
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          secret_json=/tmp/customer-crm-production-secret-names.json
+          npx --yes wrangler@4 secret list --name customer-crm-api --format json > "$secret_json"
+          node <<'NODE'
+          const fs=require('fs');
+          const cfg=JSON.parse(fs.readFileSync('wrangler.jsonc','utf8'));
+          const raw=JSON.parse(fs.readFileSync('/tmp/customer-crm-production-secret-names.json','utf8'));
+          const rows=Array.isArray(raw)?raw:Array.isArray(raw.result)?raw.result:Array.isArray(raw.secrets)?raw.secrets:[];
+          const names=new Set(rows.map(x=>String(x?.name||x?.key||'')).filter(Boolean));
+          const mode=String(cfg?.vars?.CRM_OWNER_AUTH_MODE||'access').trim().toLowerCase();
+          const required=['ADMIN_TOKEN','CRM_INTERNAL_TOKEN','RESERVATION_INTERNAL_TOKEN','SYNC_TOKEN'];
+          if(mode==='hybrid'||mode==='password'){
+            required.push('CRM_OWNER_PASSWORD','CRM_OWNER_SESSION_SECRET');
+          }
+          const missing=required.filter(name=>!names.has(name));
+          console.log('CRM_OWNER_AUTH_MODE='+mode);
+          console.log('PRODUCTION_SECRET_NAME_COUNT='+names.size);
+          console.log('PRODUCTION_REQUIRED_SECRET_NAMES='+required.join(','));
+          if(missing.length){
+            console.error('::error::PRODUCTION_REQUIRED_SECRET_NAMES_MISSING:'+missing.join(','));
+            process.exit(1);
+          }
+          console.log('PRODUCTION_REQUIRED_SECRET_NAMES=PASS');
+          console.log('SECRET_VALUES_PRINTED=NO');
+          NODE
+          rm -f "$secret_json"
+
       - name: List pending managed remote D1 migrations
         id: pending_migrations
         uses: cloudflare/wrangler-action@v4
