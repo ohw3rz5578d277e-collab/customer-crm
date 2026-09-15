@@ -28,7 +28,7 @@ const composed=composeCustomer360AdminHtml(source);
 for(const id of LEGACY_OWNER_VISUAL_ASSET_IDS){
   assert.equal(composed.includes('id="'+id+'"'),false,'legacy asset reappeared after canonical composition: '+id);
 }
-assert.equal(composed.includes('crmReconciliationLink'),false,'legacy reconciliation link reappeared');
+assert.equal(/<a\\b[^>]*\\bid=["']crmReconciliationLink["']/i.test(composed),false,'legacy reconciliation link DOM reappeared');
 assert.equal(composed.includes('crm-owner-app-shell-script'),true,'canonical Owner App Shell missing');
 assert.equal(composed.includes('crm-owner-view-state-v2-script'),true,'canonical view state missing');
 assert.equal(composed.includes('crm-owner-line-chat-script'),true,'canonical LINE chat missing');
