@@ -113,7 +113,6 @@ html,body{width:100%!important;max-width:none!important;min-width:0!important}
   }
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',reconcileDesktopLayout,{once:true});else reconcileDesktopLayout();
   window.addEventListener('resize',reconcileDesktopLayout,{passive:true});
-  new MutationObserver(()=>reconcileDesktopLayout()).observe(document.documentElement,{childList:true,subtree:true});
 })();
 </script>`;
   if(!body.includes(RESPONSIVE_MARKER)){

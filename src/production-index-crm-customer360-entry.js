@@ -12,8 +12,8 @@ import { injectCustomer360ExactEditHandoff, customer360ExactEditHandoffHealth } 
 import { injectCustomer360Marketing } from './crm-customer360-ui.mjs';
 import { injectCustomerListDailyOperations } from './crm-customer-list-daily-operations.mjs';
 import { injectCustomer360SearchFocus } from './crm-customer360-search-focus.mjs';
-import { injectMobileOwnerInteractionRecovery } from './crm-mobile-owner-interaction-recovery.mjs';
 import { injectMobileOwnerCardSummary } from './crm-mobile-owner-card-summary.mjs';
+import { injectOwnerLineChat } from './crm-owner-line-chat.mjs';
 import { injectCustomer360DirectNavigation } from './crm-customer360-direct-navigation.mjs';
 import { injectOwnerViewState } from './crm-owner-view-state-v2.mjs';
 import { injectCustomer360ProfileUi } from './crm-customer360-profile-ui.mjs';
@@ -29,6 +29,137 @@ const RAW_SCRIPT_CLOSE='<'+String.fromCharCode(92)+'/script>';
 const CUSTOMER360_PROFILE_TABLES=[
   'customer_profile_enrichment','customer_family_member_metadata','customer_field_evidence','customer_notes_history','customer_profile_media','customer_delivery_links'
 ];
+
+export const LEGACY_OWNER_VISUAL_ASSET_IDS=Object.freeze([
+  'crm-production-desktop-owner-hotfix-20260825',
+  'crm-owner-desktop-layout-hotfix-script',
+  'crm-customer-detail-v2-style','crm-customer-detail-v2-script',
+  'crm-stable-customer-list-style','crm-stable-customer-list-script',
+  'crm-number-format-settings-style','crm-number-format-fix-script',
+  'crm-stable-audit-style','crm-stable-audit-script',
+  'crm-customer-list-return-style','crm-customer-list-return-script',
+  'crm-detail-panel-fix-style','crm-detail-panel-fix-script',
+  'crm-fetch-safe-fix-style','crm-fetch-safe-fix-script',
+  'crm-stability-ux-fix-style','crm-stability-ux-fix-script',
+  'crm-mobile-first-ux-style','crm-mobile-first-ux-script',
+  'crm-final-layout-cleanup-style','crm-final-layout-cleanup-script',
+  'crm-ui-polish-style','crm-ui-polish-script',
+  'crm-home-dashboard-style','crm-home-dashboard-script',
+  'crm-unified-ux-style','crm-unified-ux-script',
+  'crm-line-ops-style','crm-line-ops-script',
+  'crmListSafetyStyle','crmListSafetyScript',
+  'crmListWorkbenchStyle','crmListWorkbenchScript',
+  'crmCustomerSmartPanelStyle','crmCustomerSmartPanelScript',
+  'crmMobileUsabilityStyle','crmMobileUsabilityScript',
+  'crmUsabilityHubStyle','crmUsabilityHubScript',
+  'crmMarketingSuiteStyle','crmMarketingSuiteScript',
+  'crmFinalOpsStyle','crmFinalOpsScript',
+  'crmInquiryRowActionStyle','crmInquiryRowActionScript',
+  'crmInquiryActionStyle','crmInquiryActionScript',
+  'crmOpsScreensStyle','crmOpsScreensScript',
+  'crmRoadmapSuiteStyle','crmRoadmapSuiteScript',
+  'crmDeliveryDashboardStyle','crmDeliveryDashboardScript',
+  'crmFollowTemplateButtonStyle','crmFollowTemplateButtonScript',
+  'crmFollowTemplateStyle','crmFollowTemplateScript',
+  'crmGrowthSuiteStyle','crmGrowthSuiteScript',
+  'crmTodayFilterStyle','crmTodayFilterScript',
+  'crmTodayActionStyle','crmTodayActionScript',
+  'crmTodayDashboardStyle','crmTodayDashboardScript',
+  'crmDailySummaryStyle','crmDailySummaryScript',
+  'crmLinkAlertStyle','crmLinkAlertScript',
+  'crmLinkResyncStyle','crmLinkResyncScript',
+  'crmLinkMonitorStyle','crmLinkMonitorScript',
+  'crm-reservation-cancel-sync-style','crm-reservation-cancel-sync-script',
+  'crm-reservation-update-sync-style','crm-reservation-update-sync-script',
+  'crm-reservation-history-sync-style','crm-reservation-history-sync-script',
+  'crm-reservation-status-ui-style','crm-reservation-status-ui-script',
+  'crm-reservation-created-sync-style','crm-reservation-created-sync-script',
+  'crm-reservation-send-style','crm-reservation-send-script',
+  'crm-reservation-bridge-style','crm-reservation-bridge-script',
+  'crm-ops-polish-style','crm-ops-polish-script',
+  'crm-suite-style','crm-suite-script',
+  'crm-line-pending-csv-style','crm-line-pending-csv-script',
+  'crm-line-pending-filter-style','crm-line-pending-filter-script',
+  'crm-line-pending-badges-style','crm-line-pending-badges-script',
+  'crm-line-overview-style','crm-line-overview-script',
+  'crm-line-log-style','crm-line-log-script',
+  'crm-next-actions-script',
+  'crm-admin-users-style','crm-admin-users-script'
+]);
+
+function stripTaggedAssetById(source,tag,id){
+  const escaped=String(id);
+  return source.replace(new RegExp('<'+tag+'\\b[^>]*\\bid=(["\\\'])'+escaped+'\\1[^>]*>[\\s\\S]*?<\\/'+tag+'>','gi'),'');
+}
+export function stripLegacyOwnerVisualAssets(html){
+  let out=String(html||'');
+  for(const id of LEGACY_OWNER_VISUAL_ASSET_IDS){
+    out=stripTaggedAssetById(out,'script',id);
+    out=stripTaggedAssetById(out,'style',id);
+  }
+  out=out.replace(/<a\b[^>]*\bid=(["'])crmReconciliationLink\1[^>]*>[\s\S]*?<\/a>/gi,'');
+  return out;
+}
+
+export function stripLegacyBaseAdminUi(html){
+  let out=String(html||'');
+  const appOpen='<div class="app">';
+  const modalMarker='<div class="modal-bg" id="modalBg"></div><div class="modal" id="modal"></div><div class="filter-modal" id="filterModal"></div>';
+  const appStart=out.indexOf(appOpen);
+  const modalStart=appStart>=0?out.indexOf(modalMarker,appStart+appOpen.length):-1;
+  if(appStart<0||modalStart<0)return out;
+
+  const legacyApp=out.slice(appStart,modalStart);
+  if(!legacyApp.includes('id="deleteTestBtn"')||!legacyApp.includes('id="summary"')||!legacyApp.includes('id="tbody"'))return out;
+
+  const relativeAppClose=legacyApp.lastIndexOf('</div>');
+  if(relativeAppClose<0)return out;
+  const appClose=appStart+relativeAppClose+'</div>'.length;
+  out=out.slice(0,appStart)+appOpen+'</div>'+out.slice(appClose);
+
+  const currentModalStart=out.indexOf(modalMarker,appStart+appOpen.length);
+  if(currentModalStart>=0){
+    out=out.slice(0,currentModalStart)+out.slice(currentModalStart+modalMarker.length);
+  }
+
+  let scan=appStart+appOpen.length+'</div>'.length;
+  while(true){
+    const scriptStart=out.indexOf('<script',scan);
+    if(scriptStart<0)break;
+    const scriptOpenEnd=out.indexOf('>',scriptStart);
+    const scriptClose=scriptOpenEnd>=0?out.indexOf('</script>',scriptOpenEnd+1):-1;
+    if(scriptOpenEnd<0||scriptClose<0)break;
+    const scriptEnd=scriptClose+'</script>'.length;
+    const script=out.slice(scriptStart,scriptEnd);
+    if(script.includes('deleteTestBtn')&&script.includes('/api/customers/delete-test')){
+      out=out.slice(0,scriptStart)+out.slice(scriptEnd);
+      break;
+    }
+    scan=scriptEnd;
+  }
+
+  scan=0;
+  while(true){
+    const styleStart=out.indexOf('<style',scan);
+    if(styleStart<0)break;
+    const styleOpenEnd=out.indexOf('>',styleStart);
+    const styleClose=styleOpenEnd>=0?out.indexOf('</style>',styleOpenEnd+1):-1;
+    if(styleOpenEnd<0||styleClose<0)break;
+    const styleEnd=styleClose+'</style>'.length;
+    const style=out.slice(styleStart,styleEnd);
+    const baseAdminStyle=
+      style.includes('.tablewrap')&&
+      style.includes('.filter-modal')&&
+      style.includes('.rank-row')&&
+      style.includes('--danger:#dc2626');
+    if(baseAdminStyle){
+      out=out.slice(0,styleStart)+out.slice(styleEnd);
+      break;
+    }
+    scan=styleEnd;
+  }
+  return out;
+}
 
 export function handleProductionAccessAuthProbe(request,env){
   const url=new URL(request.url);
@@ -57,13 +188,15 @@ export function injectOwnerLogoutPostRoute(html){
   return source.includes('</body>')?source.replace('</body>',script+'</body>'):source+script;
 }
 export function composeCustomer360AdminHtml(html){
-  const withMarketing=injectCustomer360Marketing(html);
+  const visualBase=stripLegacyOwnerVisualAssets(html);
+  const canonicalBase=stripLegacyBaseAdminUi(visualBase);
+  const withMarketing=injectCustomer360Marketing(canonicalBase);
   const withDailyOperations=injectCustomerListDailyOperations(withMarketing);
   const withSearchFocus=injectCustomer360SearchFocus(withDailyOperations);
   const withCardSummary=injectMobileOwnerCardSummary(withSearchFocus);
-  const withRecovery=injectMobileOwnerInteractionRecovery(withCardSummary);
-  const withDirectNavigation=injectCustomer360DirectNavigation(withRecovery);
-  const withOwnerViewState=injectOwnerViewState(withDirectNavigation);
+  const withDirectNavigation=injectCustomer360DirectNavigation(withCardSummary);
+  const withLineChat=injectOwnerLineChat(withDirectNavigation);
+  const withOwnerViewState=injectOwnerViewState(withLineChat);
   const withProfile=injectCustomer360ProfileUi(withOwnerViewState);
   const withMedia=injectCustomer360MediaUi(withProfile);
   const withEditHandoff=injectCustomer360ExactEditHandoff(withMedia);

@@ -61,6 +61,33 @@ async function loadCustomerViews(env,onDate,{requireContactPermissions=false}={}
   });
 }
 
+function pctChange(current,previous){const c=Number(current||0),p=Number(previous||0);return p===0?(c===0?0:null):Math.round((c-p)/p*1000)/10}
+function monthStartDate(date){return /^\d{4}-\d{2}-\d{2}$/.test(text(date))?text(date).slice(0,7)+'-01':''}
+function tokyoDate(raw){
+  const v=text(raw);if(!v)return'';
+  if(/^\d{4}-\d{2}-\d{2}$/.test(v))return v;
+  const ms=Date.parse(v);if(!Number.isFinite(ms))return dateOnly(v);
+  const parts=new Intl.DateTimeFormat('en-US',{timeZone:'Asia/Tokyo',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date(ms)),o={};
+  for(const p of parts)o[p.type]=p.value;
+  return o.year&&o.month&&o.day?o.year+'-'+o.month+'-'+o.day:dateOnly(v);
+}
+function lineFollowDate(row){
+  let raw={};try{raw=JSON.parse(text(row?.raw_json)||'{}')}catch(_){}
+  const first=text(raw.first_line_followed_at);
+  if(first)return tokyoDate(first);
+  return text(row?.source).toLowerCase()==='line_follow'?(tokyoDate(raw.followed_at)||tokyoDate(row?.created_at)):'';
+}
+async function lineFollowAdditionsData(env,from,to,previous=null){
+  let available=false,rows=[];
+  try{
+    available=await strictTableExists(env,'customer_identity_registry');
+    if(available)rows=await strictAll(env,"SELECT source,created_at,raw_json FROM customer_identity_registry");
+  }catch(_){return{available:false,current:null,previous:null,rows_read:0}}
+  if(!available)return{available:false,current:null,previous:null,rows_read:0};
+  const count=(a,b)=>rows.reduce((n,row)=>{const d=lineFollowDate(row);return n+(d&&d>=a&&d<=b?1:0)},0);
+  return{available:true,current:count(from,to),previous:previous?count(previous.from,previous.to):null,rows_read:rows.length};
+}
+
 async function facetData(env,views){
   const facets=buildFacets(views);
   if(await tableExists(env,'crm_marketing_campaigns')){
@@ -81,7 +108,8 @@ export async function marketingHomeData(env,onDate=jstToday()){
   }
   const approach=(consentViews||[]).filter(v=>v.recommendation.priority_score>0&&approachContactState(v).ready).sort((a,b)=>b.recommendation.priority_score-a.recommendation.priority_score||(a.next_opportunity?.days??99999)-(b.next_opportunity?.days??99999)||text(a.customer_id).localeCompare(text(b.customer_id)));
   const avg=views.length?Math.round(views.reduce((s,v)=>s+v.realized_ltv,0)/views.length):0;
-  return {as_of:onDate,kpis:{customers: views.length,average_realized_ltv:avg,repeat_rate_pct:views.length?Math.round(views.filter(v=>v.shoot_count>=2).length/views.length*100):0,vip_high_ltv:views.filter(v=>v.realized_ltv>=CUSTOMER360_HIGH_LTV_THRESHOLD||v.marketing_classes.includes('VIP')).length,event_90d:views.filter(v=>v.opportunities.some(o=>o.days!=null&&o.days>=0&&o.days<=90)).length,dormant_180:views.filter(v=>num(v.raw.dormant_days)>=180).length,line_link_rate_pct:views.length?Math.round(views.filter(v=>v.line_linked).length/views.length*100):0,approach_this_month:approach.filter(v=>(v.next_opportunity?.days??99999)<=30||v.recommendation.priority_score>=650).length},top_opportunities:approach.slice(0,12).map(listCustomerDto),facets:await facetData(env,views),meta:{contact_candidates_available:contactCandidatesAvailable,contact_candidate_filter:'manual_contact_ready',contact_permission_fail_closed:true}};
+  const lineAdds=await lineFollowAdditionsData(env,monthStartDate(onDate),onDate);
+  return {as_of:onDate,kpis:{customers: views.length,average_realized_ltv:avg,repeat_rate_pct:views.length?Math.round(views.filter(v=>v.shoot_count>=2).length/views.length*100):0,vip_high_ltv:views.filter(v=>v.realized_ltv>=CUSTOMER360_HIGH_LTV_THRESHOLD||v.marketing_classes.includes('VIP')).length,event_90d:views.filter(v=>v.opportunities.some(o=>o.days!=null&&o.days>=0&&o.days<=90)).length,dormant_180:views.filter(v=>num(v.raw.dormant_days)>=180).length,line_link_rate_pct:views.length?Math.round(views.filter(v=>v.line_linked).length/views.length*100):0,line_additions_this_month:lineAdds.current,approach_this_month:approach.filter(v=>(v.next_opportunity?.days??99999)<=30||v.recommendation.priority_score>=650).length},top_opportunities:approach.slice(0,12).map(listCustomerDto),facets:await facetData(env,views),meta:{contact_candidates_available:contactCandidatesAvailable,contact_candidate_filter:'manual_contact_ready',contact_permission_fail_closed:true,line_follow_data_available:lineAdds.available}};
 }
 
 export async function approachQueueData(env,searchParams,onDate=jstToday()){
@@ -113,7 +141,11 @@ export async function periodAnalyticsData(env,searchParams,onDate=jstToday()){
   try{rows=await strictAll(env,"SELECT customer_id,genre,shoot_date,total_amount,status FROM customer_reservations WHERE COALESCE(deleted_at,'')='' AND substr(COALESCE(shoot_date,''),1,10)>=? AND substr(COALESCE(shoot_date,''),1,10)<=? ORDER BY shoot_date ASC",[period.previous.from,period.to])}
   catch(_){return{error:'analytics_read_unavailable',status:503}}
   const out=buildPeriodAnalytics(rows,period);
-  return {available:true,...out,meta:{...out.meta,table_available:true,rows_read:rows.length}};
+  const lineAdds=await lineFollowAdditionsData(env,period.from,period.to,period.previous);
+  out.current.line_additions=lineAdds.current;
+  out.previous.line_additions=lineAdds.previous;
+  out.change_pct.line_additions=lineAdds.available?pctChange(lineAdds.current,lineAdds.previous):null;
+  return {available:true,...out,meta:{...out.meta,table_available:true,rows_read:rows.length,line_follow_data_available:lineAdds.available,line_follow_rows_read:lineAdds.rows_read}};
 }
 
 export async function customer360ReadOnlyStatus(env){

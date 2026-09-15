@@ -4,6 +4,14 @@ import { parsePeriodAnalyticsParams, buildPeriodAnalytics } from '../src/crm-cus
 import { isCompletedReservationStatus, isCancelledReservationStatus } from '../src/crm-reservation-status-contract.mjs';
 import { handleCustomer360Request } from '../src/crm-customer360-runtime.mjs';
 
+const lineFollowRows=[
+  {source:'line_follow',created_at:'2026-08-03 00:00:00',raw_json:JSON.stringify({followed_at:'2026-08-03T09:15:00+09:00'})},
+  {source:'line_follow',created_at:'2026-08-19 00:00:00',raw_json:JSON.stringify({followed_at:'2026-08-19T18:30:00+09:00'})},
+  {source:'reservation-ai-line',created_at:'2026-06-01 00:00:00',raw_json:JSON.stringify({first_line_followed_at:'2026-07-31T15:30:00Z'})},
+  {source:'line_follow',created_at:'2026-07-10 00:00:00',raw_json:JSON.stringify({followed_at:'2026-07-10T11:00:00+09:00'})},
+  {source:'reservation-ai-line',created_at:'2026-08-15 00:00:00',raw_json:JSON.stringify({received_at:'2026-08-15T00:00:00Z'})}
+];
+
 const rows=[
   {customer_id:'26000001',genre:'七五三',shoot_date:'2026-08-05',total_amount:10000,status:'撮影完了'},
   {customer_id:'26000001',genre:'ファミリー',shoot_date:'2026-08-20',total_amount:15000,status:'納品済み'},
@@ -65,6 +73,7 @@ const env={
         async all(){
           reads++;
           if(sql.includes('FROM customer_reservations'))return {results:rows};
+          if(sql.includes('FROM customer_identity_registry'))return {results:lineFollowRows};
           return {results:[]};
         },
         async run(){writes++;return {success:true}}
@@ -78,6 +87,10 @@ assert.equal(res.status,200);
 const body=await res.json();
 assert.equal(body.ok,true);
 assert.equal(body.current.revenue,45000);
+assert.equal(body.current.line_additions,3);
+assert.equal(body.previous.line_additions,1);
+assert.equal(body.change_pct.line_additions,200);
+assert.equal(body.meta.line_follow_data_available,true);
 assert.equal(body.meta.read_only,true);
 assert.equal(body.meta.identity_key,'customer_id');
 assert.equal(writes,0);

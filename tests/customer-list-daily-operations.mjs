@@ -33,7 +33,7 @@ const entrySrc=fs.readFileSync('src/production-index-crm-customer360-entry.js','
 pass('UI adapter contains no direct customer mutation SQL',!/\b(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+customers\b/i.test(adapterSrc));
 pass('adapter contains no LINE send controls',!/broadcast|multicast|pushMessage|replyMessage/i.test(adapterSrc));
 pass('adapter does not require legacy top opportunity renderer',!adapterSrc.includes(`||!out.includes("top.map(row).join('')")`));
-pass('production entry applies adapter immediately after Customer360 marketing UI',entrySrc.includes('const withMarketing=injectCustomer360Marketing(html);\n  const withDailyOperations=injectCustomerListDailyOperations(withMarketing);'));
-pass('production entry keeps Owner exclusive view composition',entrySrc.includes('injectOwnerViewState(withDirectNavigation)'));
+pass('production entry sanitizes legacy visuals and base admin UI before Customer360 marketing and daily operations',entrySrc.includes('const visualBase=stripLegacyOwnerVisualAssets(html);\n  const canonicalBase=stripLegacyBaseAdminUi(visualBase);\n  const withMarketing=injectCustomer360Marketing(canonicalBase);\n  const withDailyOperations=injectCustomerListDailyOperations(withMarketing);'));
+pass('production entry keeps Owner exclusive view composition after read-only LINE chat',entrySrc.includes('const withLineChat=injectOwnerLineChat(withDirectNavigation);')&&entrySrc.includes('const withOwnerViewState=injectOwnerViewState(withLineChat);'));
 
 console.log(`CUSTOMER_LIST_DAILY_OPERATIONS=${n}/${n} PASS`);
