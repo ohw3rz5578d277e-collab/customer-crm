@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import { patchHealth, handleProductionHealthRequest } from '../src/production-index-crm-customer360-entry.js';
 
 const source=fs.readFileSync(new URL('../src/production-index-crm-customer360-entry.js',import.meta.url),'utf8');
-const principalCall='const effectiveRequest=await withOwnerPasswordPrincipal(request,env)';
+const principalCall='const effectiveRequest=await withOwnerPasswordPrincipal(request,env,ctx)';
 const healthCall='const ownedHealth=await handleProductionHealthRequest(effectiveRequest,env)';
 const downstreamCall='let response=await app.fetch(effectiveRequest,env,ctx)';
 assert.match(source,/handleProductionHealthRequest\(effectiveRequest,env\)/,'Production entry must own /health after Owner principal normalization');
