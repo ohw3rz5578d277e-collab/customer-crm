@@ -8,7 +8,7 @@ import {
 
 test('TRACE and CONNECT are rejected at the Production boundary',()=>{
   for(const method of ['TRACE','CONNECT']){
-    const req=new Request('https://crm.example.test/admin',{method});
+    const req={method,url:'https://crm.example.test/admin',headers:new Headers()};
     const res=enforceProductionRequestBoundary(req);
     assert.equal(res.status,405);
   }
