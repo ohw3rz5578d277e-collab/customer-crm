@@ -51,7 +51,7 @@ const env={ADMIN_TOKEN:'probe-admin-token',DB:throwingDb};
 assert.ok(entry.includes("url.pathname!=='/__crm/access-auth-probe'"),'pure probe path missing');
 const probeCall='const accessAuthProbe=handleProductionAccessAuthProbe(request,env);';
 const ownerAuthCall='const ownerAuth=await handleOwnerPasswordAuth(request,env);';
-const principalCall='const effectiveRequest=await withOwnerPasswordPrincipal(request,env);';
+const principalCall='const effectiveRequest=await withOwnerPasswordPrincipal(request,env,ctx);';
 const healthCall='const ownedHealth=await handleProductionHealthRequest(effectiveRequest,env);';
 const lineProfileCall='const lineProfileApi=await handleCustomer360LineProfileExtraction(effectiveRequest,env);';
 const appCall='let response=await app.fetch(effectiveRequest,env,ctx);';
