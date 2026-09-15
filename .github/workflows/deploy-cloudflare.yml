@@ -232,6 +232,45 @@ jobs:
           done
           echo "FULL_MAIN_LOCAL_TEST_FILES=${#tests[@]} PASS"
 
+      - name: Prepare Owner auth secrets for atomic release
+        shell: bash
+        env:
+          CRM_OWNER_PASSWORD: ${{ secrets.CRM_OWNER_PASSWORD }}
+          CRM_OWNER_SESSION_SECRET: ${{ secrets.CRM_OWNER_SESSION_SECRET }}
+        run: |
+          set -euo pipefail
+          mode="$(node -e "const fs=require('fs');const c=JSON.parse(fs.readFileSync('wrangler.jsonc','utf8'));process.stdout.write(String(c?.vars?.CRM_OWNER_AUTH_MODE||'access').trim().toLowerCase())")"
+          case "$mode" in
+            access)
+              printf '{}\n' > /tmp/customer-crm-owner-secrets.json
+              ;;
+            hybrid|password)
+              for v in CRM_OWNER_PASSWORD CRM_OWNER_SESSION_SECRET; do
+                if [[ -z "${!v:-}" ]]; then
+                  echo "::error::OWNER_AUTH_RELEASE_SECRET_MISSING:$v"
+                  exit 1
+                fi
+                echo "::add-mask::${!v}"
+              done
+              node <<'NODE'
+          const fs=require('fs');
+          const out={
+            CRM_OWNER_PASSWORD:process.env.CRM_OWNER_PASSWORD,
+            CRM_OWNER_SESSION_SECRET:process.env.CRM_OWNER_SESSION_SECRET
+          };
+          fs.writeFileSync('/tmp/customer-crm-owner-secrets.json',JSON.stringify(out));
+          NODE
+              ;;
+            *)
+              echo "::error::INVALID_CRM_OWNER_AUTH_MODE:$mode"
+              exit 1
+              ;;
+          esac
+          chmod 600 /tmp/customer-crm-owner-secrets.json
+          echo "CRM_OWNER_AUTH_MODE=$mode"
+          echo 'OWNER_AUTH_RELEASE_SECRET_MATERIAL=PASS'
+          echo 'OWNER_AUTH_SECRET_VALUES_PRINTED=NO'
+
       - name: Production entry import and Wrangler dry-run
         shell: bash
         env:
@@ -241,9 +280,10 @@ jobs:
           set -euo pipefail
           node --check src/production-index-crm-customer360-entry.js
           node -e "import('./src/production-index-crm-customer360-entry.js').then(()=>console.log('PRODUCTION_ENTRY_IMPORT=PASS'))"
-          npx wrangler deploy --dry-run --outdir /tmp/customer360-preflight-dry-run
+          npx wrangler deploy --dry-run --outdir /tmp/customer360-preflight-dry-run --secrets-file /tmp/customer-crm-owner-secrets.json
           test -n "$(find /tmp/customer360-preflight-dry-run -type f -print -quit)"
           echo 'WRANGLER_DRY_RUN=PASS'
+          echo 'OWNER_AUTH_SECRETS_ATOMIC_WITH_DEPLOY=PASS'
 
       - name: Confirm Cloudflare authentication
         uses: cloudflare/wrangler-action@v4
@@ -270,18 +310,16 @@ jobs:
           const names=new Set(rows.map(x=>String(x?.name||x?.key||'')).filter(Boolean));
           const mode=String(cfg?.vars?.CRM_OWNER_AUTH_MODE||'access').trim().toLowerCase();
           const required=['ADMIN_TOKEN','CRM_INTERNAL_TOKEN','RESERVATION_INTERNAL_TOKEN','SYNC_TOKEN'];
-          if(mode==='hybrid'||mode==='password'){
-            required.push('CRM_OWNER_PASSWORD','CRM_OWNER_SESSION_SECRET');
-          }
           const missing=required.filter(name=>!names.has(name));
           console.log('CRM_OWNER_AUTH_MODE='+mode);
           console.log('PRODUCTION_SECRET_NAME_COUNT='+names.size);
-          console.log('PRODUCTION_REQUIRED_SECRET_NAMES='+required.join(','));
+          console.log('PRODUCTION_EXISTING_REQUIRED_SECRET_NAMES='+required.join(','));
           if(missing.length){
             console.error('::error::PRODUCTION_REQUIRED_SECRET_NAMES_MISSING:'+missing.join(','));
             process.exit(1);
           }
-          console.log('PRODUCTION_REQUIRED_SECRET_NAMES=PASS');
+          console.log('PRODUCTION_EXISTING_REQUIRED_SECRET_NAMES=PASS');
+          console.log('OWNER_AUTH_SECRETS_WILL_BE_APPLIED_ATOMICALLY_WITH_DEPLOY='+(mode==='hybrid'||mode==='password'?'YES':'NOT_REQUIRED'));
           console.log('SECRET_VALUES_PRINTED=NO');
           NODE
           rm -f "$secret_json"
@@ -614,7 +652,7 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           wranglerVersion: '4'
-          command: deploy
+          command: deploy --secrets-file /tmp/customer-crm-owner-secrets.json
 
       - name: Verify identity sequence state (READ ONLY)
         id: verify_sequence
@@ -734,3 +772,10 @@ jobs:
           NODE
           echo "PRODUCTION_HEALTH_URL=$PRODUCTION_BASE_URL/health"
           if [[ -n "$DEPLOYMENT_REFERENCE_URL" ]]; then echo 'DEPLOYMENT_REFERENCE_PRESENT=YES'; fi
+
+      - name: Cleanup temporary Owner auth secret material
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          rm -f /tmp/customer-crm-owner-secrets.json
+          echo 'OWNER_AUTH_TEMP_SECRET_FILE_REMOVED=YES'
