@@ -16,6 +16,11 @@ test('Cloudflare security audit workflow is read-only by contract',()=>{
   assert.match(workflow,/--request GET|curl -sS/);
   assert.match(workflow,/pages\/projects\/customer-crm/);
   assert.match(workflow,/PAGES_PREVIEW_DEPLOYMENT_SETTING/);
+  assert.match(workflow,/access\/apps\/\$app_id\/policies/);
+  assert.match(workflow,/decision==\"bypass\"/);
+  assert.match(workflow,/has\(\"everyone\"\)/);
+  assert.match(workflow,/per_page=100/);
+  assert.match(workflow,/total_pages/);
   assert.doesNotMatch(workflow,/--request\s+(POST|PUT|PATCH|DELETE)/i);
   assert.doesNotMatch(workflow,/wrangler\s+deploy/i);
   assert.doesNotMatch(workflow,/d1\s+execute/i);
