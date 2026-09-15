@@ -28,7 +28,7 @@ function makeEnv({failFollow=false}={}){
       bind(...params){state.params=params;return stmt},
       async run(){evidence.runCalls++;throw new Error('RUN_NOT_ALLOWED')},
       async first(){
-        if(/SELECT email, role, status FROM crm_admin_users/.test(sql))return{email:'owner@example.com',role:'admin',status:'active'};
+        if(/SELECT email, role, status FROM crm_admin_users/.test(sql))return{email:'ohw3rz5578d277e@gmail.com',role:'admin',status:'active'};
         if(/SELECT name FROM sqlite_master/.test(sql)&&/name=\?/.test(sql))return{name:String(state.params[0]||'table')};
         if(/COUNT\(\*\) AS customer_count/.test(sql))return{customer_count:0,total_revenue:0,avg_revenue:0,repeat_customers:0,dormant_customers:0};
         if(/SELECT 1 AS ok/.test(sql))return{ok:1};
@@ -55,7 +55,7 @@ function makeEnv({failFollow=false}={}){
 }
 
 const headers={'x-admin-token':'test-admin-token'};
-const accessCtx={access:{getIdentity:async()=>({email:'owner@example.com'})}};
+const accessCtx={access:{getIdentity:async()=>({email:'ohw3rz5578d277e@gmail.com'})}};
 
 for(const path of ['/api/today-dashboard','/api/today-dashboard.csv']){
   const {env,evidence}=makeEnv();
