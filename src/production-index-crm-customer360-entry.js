@@ -100,6 +100,45 @@ export function stripLegacyOwnerVisualAssets(html){
   return out;
 }
 
+export function stripLegacyBaseAdminUi(html){
+  let out=String(html||'');
+  const appOpen='<div class="app">';
+  const modalMarker='<div class="modal-bg" id="modalBg"></div><div class="modal" id="modal"></div><div class="filter-modal" id="filterModal"></div>';
+  const appStart=out.indexOf(appOpen);
+  const modalStart=appStart>=0?out.indexOf(modalMarker,appStart+appOpen.length):-1;
+  if(appStart<0||modalStart<0)return out;
+
+  const legacyApp=out.slice(appStart,modalStart);
+  if(!legacyApp.includes('id="deleteTestBtn"')||!legacyApp.includes('id="summary"')||!legacyApp.includes('id="tbody"'))return out;
+
+  const relativeAppClose=legacyApp.lastIndexOf('</div>');
+  if(relativeAppClose<0)return out;
+  const appClose=appStart+relativeAppClose+'</div>'.length;
+  out=out.slice(0,appStart)+appOpen+'</div>'+out.slice(appClose);
+
+  const currentModalStart=out.indexOf(modalMarker,appStart+appOpen.length);
+  if(currentModalStart>=0){
+    out=out.slice(0,currentModalStart)+out.slice(currentModalStart+modalMarker.length);
+  }
+
+  let scan=appStart+appOpen.length+'</div>'.length;
+  while(true){
+    const scriptStart=out.indexOf('<script',scan);
+    if(scriptStart<0)break;
+    const scriptOpenEnd=out.indexOf('>',scriptStart);
+    const scriptClose=scriptOpenEnd>=0?out.indexOf('</script>',scriptOpenEnd+1):-1;
+    if(scriptOpenEnd<0||scriptClose<0)break;
+    const scriptEnd=scriptClose+'</script>'.length;
+    const script=out.slice(scriptStart,scriptEnd);
+    if(script.includes('deleteTestBtn')&&script.includes('/api/customers/delete-test')){
+      out=out.slice(0,scriptStart)+out.slice(scriptEnd);
+      break;
+    }
+    scan=scriptEnd;
+  }
+  return out;
+}
+
 export function handleProductionAccessAuthProbe(request,env){
   const url=new URL(request.url);
   if(request.method!=='GET'||url.pathname!=='/__crm/access-auth-probe')return null;
@@ -127,7 +166,8 @@ export function injectOwnerLogoutPostRoute(html){
   return source.includes('</body>')?source.replace('</body>',script+'</body>'):source+script;
 }
 export function composeCustomer360AdminHtml(html){
-  const canonicalBase=stripLegacyOwnerVisualAssets(html);
+  const visualBase=stripLegacyOwnerVisualAssets(html);
+  const canonicalBase=stripLegacyBaseAdminUi(visualBase);
   const withMarketing=injectCustomer360Marketing(canonicalBase);
   const withDailyOperations=injectCustomerListDailyOperations(withMarketing);
   const withSearchFocus=injectCustomer360SearchFocus(withDailyOperations);
