@@ -33,7 +33,8 @@ jobs:
           tmp_subdomain="$(mktemp)"
           tmp_workers="$(mktemp)"
           tmp_access="$(mktemp)"
-          trap 'rm -f "$tmp_subdomain" "$tmp_workers" "$tmp_access"' EXIT
+          tmp_pages="$(mktemp)"
+          trap 'rm -f "$tmp_subdomain" "$tmp_workers" "$tmp_access" "$tmp_pages"' EXIT
 
           api="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
           auth=(-H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" -H "Content-Type: application/json")
@@ -41,6 +42,7 @@ jobs:
           subdomain_http="$(curl -sS -o "$tmp_subdomain" -w '%{http_code}' "${auth[@]}" --request GET             "$api/workers/scripts/${WORKER_NAME}/subdomain")"
           workers_http="$(curl -sS -o "$tmp_workers" -w '%{http_code}' "${auth[@]}" --request GET             "$api/workers/workers")"
           access_http="$(curl -sS -o "$tmp_access" -w '%{http_code}' "${auth[@]}" --request GET             "$api/access/apps")"
+          pages_http="$(curl -sS -o "$tmp_pages" -w '%{http_code}' "${auth[@]}" --request GET             "$api/pages/projects/customer-crm")"
 
           worker_prod_enabled="unknown"
           worker_previews_enabled="unknown"
@@ -52,6 +54,13 @@ jobs:
           worker_id=""
           if [ "$workers_http" = "200" ]; then
             worker_id="$(jq -r --arg n "$WORKER_NAME" '.result[]? | select(.name==$n) | .id' "$tmp_workers" | head -n1)"
+          fi
+
+          pages_preview_setting="unknown"
+          pages_production_deployments="unknown"
+          if [ "$pages_http" = "200" ]; then
+            pages_preview_setting="$(jq -r '.result.source.config.preview_deployment_setting // "unknown"' "$tmp_pages")"
+            pages_production_deployments="$(jq -r '.result.source.config.production_deployments_enabled // "unknown"' "$tmp_pages")"
           fi
 
           access_worker_protected="unknown"
@@ -70,6 +79,9 @@ jobs:
             echo "- worker_preview_urls_enabled: ${worker_previews_enabled}"
             echo "- workers_inventory_api_http: ${workers_http}"
             echo "- access_apps_api_http: ${access_http}"
+            echo "- pages_project_api_http: ${pages_http}"
+            echo "- pages_preview_deployment_setting: ${pages_preview_setting}"
+            echo "- pages_production_deployments_enabled: ${pages_production_deployments}"
             echo "- worker_level_access_protected: ${access_worker_protected}"
             echo "- matching_worker_access_apps: ${access_matching_apps}"
             echo
@@ -82,6 +94,9 @@ jobs:
           echo "WORKER_PREVIEW_URLS_ENABLED=${worker_previews_enabled}"
           echo "WORKERS_INVENTORY_API_HTTP=${workers_http}"
           echo "ACCESS_APPS_API_HTTP=${access_http}"
+          echo "PAGES_PROJECT_API_HTTP=${pages_http}"
+          echo "PAGES_PREVIEW_DEPLOYMENT_SETTING=${pages_preview_setting}"
+          echo "PAGES_PRODUCTION_DEPLOYMENTS_ENABLED=${pages_production_deployments}"
           echo "WORKER_LEVEL_ACCESS_PROTECTED=${access_worker_protected}"
           echo "MATCHING_WORKER_ACCESS_APPS=${access_matching_apps}"
           echo "PRODUCTION_D1_WRITE=0"
@@ -96,6 +111,8 @@ jobs:
           [ "$worker_previews_enabled" = "false" ] || { echo "::error::Worker preview URLs are still enabled"; fail=1; }
           [ "$workers_http" = "200" ] || { echo "::error::Cannot resolve immutable Worker ID with current token permissions"; fail=1; }
           [ "$access_http" = "200" ] || { echo "::error::Cannot inspect Cloudflare Access applications with current token permissions"; fail=1; }
+          [ "$pages_http" = "200" ] || { echo "::error::Cannot inspect Cloudflare Pages project with current token permissions"; fail=1; }
+          [ "$pages_preview_setting" = "none" ] || { echo "::error::Cloudflare Pages preview deployments are enabled"; fail=1; }
           [ "$access_worker_protected" = "true" ] || { echo "::error::Worker-level Cloudflare Access protection was not confirmed"; fail=1; }
 
           if [ "$fail" -ne 0 ]; then
