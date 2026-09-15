@@ -76,3 +76,13 @@ test('Owner login limiter is tightened to five attempts per minute',()=>{
   assert.equal(limiter.simple.limit,5);
   assert.equal(limiter.simple.period,60);
 });
+
+
+test('legacy sync/admin token paths do not expose token diagnostics and use constant-time comparison',()=>{
+  const source=fs.readFileSync('src/index.js','utf8');
+  assert.match(source,/function constantTimeEqualText\(/);
+  assert.doesNotMatch(source,/requestTokenLength/);
+  assert.doesNotMatch(source,/workerTokenLength/);
+  assert.doesNotMatch(source,/tokensMatch/);
+  assert.match(source,/path === "\/api\/debug-env"\) return json\(\{ ok: false, message: "Not Found" \}, 404\)/);
+});
