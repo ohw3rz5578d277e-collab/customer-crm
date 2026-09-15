@@ -1573,7 +1573,8 @@ export default {
 
       return json({ ok: false, message: "Not Found" }, 404);
     } catch (error) {
-      return json({ ok: false, error: error && error.stack ? error.stack : error && error.message ? error.message : String(error), build: BUILD }, 500);
+      console.error('CRM_INTERNAL_ERROR', error && error.message ? error.message : String(error));
+      return json({ ok: false, error: "internal_error", build: BUILD }, 500);
     }
   }
 };
