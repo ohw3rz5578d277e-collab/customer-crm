@@ -90,7 +90,7 @@ function rawRegistryInput(input){
     line_display_name:text(input.line_display_name)||null,
     webhook_event_id:text(input.webhook_event_id)||null,
     followed_at:text(input.followed_at)||null,
-    received_at:nowIso()
+    received_at:text(input.received_at)||nowIso()
   });
 }
 
@@ -103,7 +103,7 @@ async function recordFirstLineFollow(db,input){
     if(text(raw.first_line_followed_at)||(text(reg.source).toLowerCase()==="line_follow"&&text(raw.followed_at))) return false;
     const next={
       ...raw,
-      first_line_followed_at:text(input.followed_at)||text(reg.created_at)||nowIso(),
+      first_line_followed_at:text(input.followed_at)||text(input.received_at)||nowIso(),
       first_line_follow_event_id:text(input.webhook_event_id)||null,
       first_line_follow_recorded_at:nowIso()
     };
