@@ -136,6 +136,27 @@ export function stripLegacyBaseAdminUi(html){
     }
     scan=scriptEnd;
   }
+
+  scan=0;
+  while(true){
+    const styleStart=out.indexOf('<style',scan);
+    if(styleStart<0)break;
+    const styleOpenEnd=out.indexOf('>',styleStart);
+    const styleClose=styleOpenEnd>=0?out.indexOf('</style>',styleOpenEnd+1):-1;
+    if(styleOpenEnd<0||styleClose<0)break;
+    const styleEnd=styleClose+'</style>'.length;
+    const style=out.slice(styleStart,styleEnd);
+    const baseAdminStyle=
+      style.includes('.tablewrap')&&
+      style.includes('.filter-modal')&&
+      style.includes('.rank-row')&&
+      style.includes('--danger:#dc2626');
+    if(baseAdminStyle){
+      out=out.slice(0,styleStart)+out.slice(styleEnd);
+      break;
+    }
+    scan=styleEnd;
+  }
   return out;
 }
 
