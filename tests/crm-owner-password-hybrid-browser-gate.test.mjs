@@ -31,9 +31,12 @@ test('hybrid browser gate requires verified Cloudflare Access context',async()=>
   const spoofed=await withOwnerPasswordPrincipal(raw,ENV);
   const blocked=handleOwnerPasswordBrowserGate(spoofed,ENV);
   assert.equal(blocked.status,302);
-  const ctx={access:{getIdentity:async()=>({email:'owner@example.com'})}};
+  const otherCtx={access:{getIdentity:async()=>({email:'other@example.com'})}};
+  const other=await withOwnerPasswordPrincipal(raw,ENV,otherCtx);
+  assert.equal(handleOwnerPasswordBrowserGate(other,ENV).status,302);
+  const ctx={access:{getIdentity:async()=>({email:'ohw3rz5578d277e@gmail.com'})}};
   const verified=await withOwnerPasswordPrincipal(raw,ENV,ctx);
-  assert.equal(verified.headers.get('cf-access-authenticated-user-email'),'owner@example.com');
+  assert.equal(verified.headers.get('cf-access-authenticated-user-email'),'ohw3rz5578d277e@gmail.com');
   assert.equal(handleOwnerPasswordBrowserGate(verified,ENV),null);
 });
 
