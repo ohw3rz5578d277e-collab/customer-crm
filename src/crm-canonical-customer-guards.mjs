@@ -70,15 +70,13 @@ export async function handleCanonicalLineFollow(request,env){
   if(!isFormalLineUserId(lineUserId))return json({ok:false,error:'invalid_line_user_id',review_required:false},400);
   const eventId=text(body.webhook_event_id||body.event_id||body.follow_event_id||body.idempotency_key);
   const displayName=displayNameFromPayload(body);
-  const receivedAt=new Date().toISOString();
   const resolved=await resolveOrCreateCustomerIdentity(env,{
     line_user_id:lineUserId,
     line_display_name:displayName,
     idempotency_key:eventId?`line_follow:${eventId}`:`line_follow_user:${lineUserId}`,
     source:text(body.source)||'line_follow',
     webhook_event_id:eventId,
-    followed_at:text(body.followed_at),
-    received_at:receivedAt
+    followed_at:text(body.followed_at)
   });
   const status=resolved.statusCode||200;delete resolved.statusCode;
   return json({
