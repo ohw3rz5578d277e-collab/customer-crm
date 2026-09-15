@@ -156,8 +156,8 @@ export async function withOwnerPasswordPrincipal(request,env,ctx){
   if(mode==='invalid')return base;
   if(mode==='access'||mode==='hybrid'){
     const email=await verifiedAccessEmail(ctx);
-    if(email){
-      headers.set('cf-access-authenticated-user-email',email);
+    if(email===OWNER_EMAIL){
+      headers.set('cf-access-authenticated-user-email',OWNER_EMAIL);
       headers.set('x-crm-owner-auth','cloudflare-access');
       return new Request(base,{headers});
     }
@@ -194,6 +194,7 @@ export function ownerPasswordAuthHealth(env){const mode=authMode(env);return{
   owner_password_auth_fail_closed:true,
   owner_password_auth_header_spoof_protection:true,
   owner_password_auth_cloudflare_access_ctx_required:true,
+  owner_password_auth_access_owner_email_required:true,
   owner_password_auth_rate_limit_required:passwordMode(mode),
   owner_password_auth_rate_limit_configured:rateLimiterConfigured(env),
   owner_password_auth_reservation_internal_preserved:true,
