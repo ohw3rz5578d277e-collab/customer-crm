@@ -238,7 +238,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          mode="$(node -e "const c=require('./wrangler.jsonc');process.stdout.write(String(c?.vars?.CRM_OWNER_AUTH_MODE||'access').trim().toLowerCase())")"
+          mode="$(node -e "const fs=require('fs');const c=JSON.parse(fs.readFileSync('wrangler.jsonc','utf8'));process.stdout.write(String(c?.vars?.CRM_OWNER_AUTH_MODE||'access').trim().toLowerCase())")"
           case "$mode" in
             access)
               printf '{}\n' > /tmp/customer-crm-owner-secrets.json
