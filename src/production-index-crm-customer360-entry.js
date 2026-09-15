@@ -251,13 +251,14 @@ function securityJson(data,status){
   });
 }
 function isSensitiveProductionPath(pathname){
-  return pathname==='/admin'||pathname.startsWith('/api/')||pathname.startsWith('/__crm/');
+  return pathname==='/admin'||pathname.startsWith('/admin/')||pathname.startsWith('/api/')||pathname.startsWith('/__crm/');
 }
 export function enforceProductionRequestBoundary(request){
   const method=String(request.method||'GET').toUpperCase();
   if(method==='TRACE'||method==='CONNECT')return securityJson({ok:false,error:'method_not_allowed'},405);
   const url=new URL(request.url);
   if(!isSensitiveProductionPath(url.pathname))return null;
+  if(url.searchParams.has('token')||url.searchParams.has('admin_token'))return securityJson({ok:false,error:'url_token_forbidden'},400);
   const origin=String(request.headers.get('origin')||'').trim();
   if(origin){
     try{if(new URL(origin).origin!==url.origin)return securityJson({ok:false,error:'cross_origin_blocked'},403)}
