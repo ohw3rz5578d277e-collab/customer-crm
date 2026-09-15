@@ -14,6 +14,8 @@ test('Cloudflare security audit workflow is read-only by contract',()=>{
   assert.match(workflow,/workflow_dispatch:/);
   assert.match(workflow,/permissions:\n\s+contents: read/);
   assert.match(workflow,/--request GET|curl -sS/);
+  assert.match(workflow,/pages\/projects\/customer-crm/);
+  assert.match(workflow,/PAGES_PREVIEW_DEPLOYMENT_SETTING/);
   assert.doesNotMatch(workflow,/--request\s+(POST|PUT|PATCH|DELETE)/i);
   assert.doesNotMatch(workflow,/wrangler\s+deploy/i);
   assert.doesNotMatch(workflow,/d1\s+execute/i);
