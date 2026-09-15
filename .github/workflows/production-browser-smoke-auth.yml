@@ -113,7 +113,40 @@ jobs:
 
             const response=await page.goto(BASE_URL+'/admin',{waitUntil:'domcontentloaded',timeout:45000});
             if(!response||response.status()!==200)throw new Error(label+': ADMIN_STATUS_'+(response?.status()||0));
-            await page.waitForFunction(()=>window.__crmOwnerView&&document.getElementById('crmOwnerWorkspaceTitle'),null,{timeout:20000});
+
+            const EXPECTED_BUILD='customer-crm-security-hardening-20260915-07';
+            const productionBuild=(await response.allHeaders())['x-crm-customer360-build']||'MISSING';
+            console.log('PRODUCTION_BUILD_HEADER='+productionBuild);
+            console.log('EXPECTED_PRODUCTION_BUILD='+EXPECTED_BUILD);
+
+            await page.waitForTimeout(1000);
+            const bootDiagnostic=await page.evaluate(()=>({
+              owner_view_api:!!window.__crmOwnerView,
+              owner_app_shell_api:!!window.__crmOwnerAppShellApi,
+              owner_app_shell:!!document.getElementById('crmOwnerAppShell'),
+              workspace_title:!!document.getElementById('crmOwnerWorkspaceTitle'),
+              app_shell_script:!!document.getElementById('crm-owner-app-shell-script'),
+              owner_view_state_v2_script:!!document.getElementById('crm-owner-view-state-v2-script'),
+              canonical_uix:document.body?.dataset?.crmCanonicalUix||'',
+              owner_view:document.body?.dataset?.crmOwnerView||'',
+              base_app:!!document.querySelector('.app'),
+              page_error_count:0
+            }));
+            bootDiagnostic.page_error_count=pageErrors.length;
+            console.log('OWNER_UI_BOOT_DIAGNOSTIC='+JSON.stringify(bootDiagnostic));
+
+            if(productionBuild!==EXPECTED_BUILD){
+              throw new Error(label+': STALE_PRODUCTION_BUILD:'+productionBuild);
+            }
+            if(!bootDiagnostic.app_shell_script||!bootDiagnostic.owner_view_state_v2_script){
+              throw new Error(label+': CANONICAL_UI_HTML_MISSING');
+            }
+            if(pageErrors.length){
+              throw new Error(label+': OWNER_UI_BOOT_PAGE_ERRORS:'+pageErrors.join(' | '));
+            }
+            if(!bootDiagnostic.owner_view_api||!bootDiagnostic.workspace_title||!bootDiagnostic.owner_app_shell){
+              throw new Error(label+': OWNER_UI_BOOT_INCOMPLETE');
+            }
 
             if(mobile){
               if(!(await page.locator('#crmOwnerMobileNav').isVisible()))throw new Error(label+': MOBILE_NAV_MISSING');
@@ -184,16 +217,8 @@ jobs:
             const actionable=consoleErrors.filter(x=>/404|not found|uncaught|typeerror|referenceerror/i.test(x));
             if(actionable.length)throw new Error(label+': CONSOLE_ERRORS:'+actionable.join(' | '));
 
-            await page.screenshot({
-              path:'artifacts/production-owner-ui-smoke/'+label+'-line.png',
-              fullPage:true
-            });
             await page.locator(sel.customers).click();
             await page.waitForFunction(()=>document.body.dataset.crmOwnerView==='customers',null,{timeout:10000});
-            await page.screenshot({
-              path:'artifacts/production-owner-ui-smoke/'+label+'-customers.png',
-              fullPage:true
-            });
 
             results.push({
               viewport:label,
@@ -218,7 +243,6 @@ jobs:
             }finally{
               await browser.close();
             }
-            fs.writeFileSync('artifacts/production-owner-ui-smoke/result.json',JSON.stringify(results,null,2));
             console.log('PRODUCTION_OWNER_UI_SMOKE=PASS');
             console.log('RESULTS='+JSON.stringify(results));
             console.log('PRODUCTION_BROWSER_WRITES=0');
@@ -229,12 +253,3 @@ jobs:
             process.exit(1);
           });
           NODE
-
-      - name: Upload Production Owner UI smoke artifacts
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: production-owner-ui-smoke
-          path: artifacts/production-owner-ui-smoke/
-          if-no-files-found: warn
-          retention-days: 7
