@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import {
   LEGACY_OWNER_VISUAL_ASSET_IDS,
   stripLegacyOwnerVisualAssets,
+  stripLegacyBaseAdminUi,
   composeCustomer360AdminHtml
 } from '../src/production-index-crm-customer360-entry.js';
 
@@ -23,6 +24,33 @@ for(const id of LEGACY_OWNER_VISUAL_ASSET_IDS){
 assert.equal(stripped.includes('crmReconciliationLink'),false,'legacy reconciliation floating link survived');
 assert.equal(stripped.includes('crm-production-safe-controls'),true,'production safety controls style must be preserved');
 assert.equal(stripped.includes('<div class="app">'),true,'base application host must be preserved');
+
+const legacyBase='<!doctype html><html><head>'+
+  '<style>:root{--danger:#dc2626}.tablewrap{overflow:auto}.filter-modal{display:none}.rank-row{display:grid}</style>'+
+  '<style id="crm-production-safe-controls">.safe{display:none}</style>'+
+  '</head><body><div class="app">'+
+  '<div class="header"><button id="deleteTestBtn">テスト顧客削除</button></div>'+
+  '<div id="status">loading</div><div id="summary"></div><div class="marketing"></div>'+
+  '<div class="card"><table><tbody id="tbody"></tbody></table></div></div>'+
+  '<div class="modal-bg" id="modalBg"></div><div class="modal" id="modal"></div><div class="filter-modal" id="filterModal"></div>'+
+  '<script>(function(){function deleteTest(){return fetch("/api/customers/delete-test",{method:"POST"})}document.getElementById("deleteTestBtn").onclick=deleteTest})();</script>'+
+  '</body></html>';
+const baseStripped=stripLegacyBaseAdminUi(legacyBase);
+assert.equal(baseStripped.includes('id="deleteTestBtn"'),false,'legacy delete-test control survived');
+assert.equal(baseStripped.includes('/api/customers/delete-test'),false,'legacy delete-test POST handler survived');
+assert.equal(baseStripped.includes('id="status"'),false,'legacy status DOM survived');
+assert.equal(baseStripped.includes('id="summary"'),false,'legacy summary DOM survived');
+assert.equal(baseStripped.includes('id="tbody"'),false,'legacy customer table DOM survived');
+assert.equal(baseStripped.includes('.tablewrap'),false,'legacy base admin stylesheet survived');
+assert.equal(baseStripped.includes('crm-production-safe-controls'),true,'safe controls stylesheet must survive base-admin stripping');
+assert.equal(baseStripped.includes('<div class="app"></div>'),true,'empty canonical host must remain');
+
+const baseComposed=composeCustomer360AdminHtml(legacyBase);
+assert.equal(baseComposed.includes('id="deleteTestBtn"'),false,'legacy delete-test control reappeared after canonical composition');
+assert.equal(baseComposed.includes('/api/customers/delete-test'),false,'legacy delete-test POST handler reappeared after canonical composition');
+assert.equal(baseComposed.includes('crm-owner-app-shell-script'),true,'canonical shell missing after base-admin stripping');
+assert.equal(baseComposed.includes('crm-customer360-marketing-script'),true,'Customer360 marketing/list UI missing after base-admin stripping');
+assert.equal(baseComposed.includes('crm-production-safe-controls'),true,'safe controls lost after canonical composition');
 
 const composed=composeCustomer360AdminHtml(source);
 for(const id of LEGACY_OWNER_VISUAL_ASSET_IDS){
