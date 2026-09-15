@@ -126,8 +126,6 @@ jobs:
     timeout-minutes: 40
     env:
       RELEASE_MODE: ${{ inputs.mode }}
-      CRM_OWNER_PASSWORD: ${{ secrets.CRM_OWNER_PASSWORD }}
-      CRM_OWNER_SESSION_SECRET: ${{ secrets.CRM_OWNER_SESSION_SECRET }}
     steps:
       - name: Normalize and validate authorized SHA
         id: authorized_sha
@@ -236,6 +234,9 @@ jobs:
 
       - name: Prepare Owner auth secrets for atomic release
         shell: bash
+        env:
+          CRM_OWNER_PASSWORD: ${{ secrets.CRM_OWNER_PASSWORD }}
+          CRM_OWNER_SESSION_SECRET: ${{ secrets.CRM_OWNER_SESSION_SECRET }}
         run: |
           set -euo pipefail
           mode="$(node -e "const fs=require('fs');const c=JSON.parse(fs.readFileSync('wrangler.jsonc','utf8'));process.stdout.write(String(c?.vars?.CRM_OWNER_AUTH_MODE||'access').trim().toLowerCase())")"
