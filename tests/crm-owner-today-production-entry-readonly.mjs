@@ -28,7 +28,7 @@ function makeEnv({failFollow=false}={}){
       bind(...params){state.params=params;return stmt},
       async run(){evidence.runCalls++;throw new Error('RUN_NOT_ALLOWED')},
       async first(){
-        if(/SELECT email, role, status FROM crm_admin_users/.test(sql))return{email:'owner@example.com',role:'admin',status:'active'};
+        if(/SELECT email, role, status FROM crm_admin_users/.test(sql))return{email:'ohw3rz5578d277e@gmail.com',role:'admin',status:'active'};
         if(/SELECT name FROM sqlite_master/.test(sql)&&/name=\?/.test(sql))return{name:String(state.params[0]||'table')};
         if(/COUNT\(\*\) AS customer_count/.test(sql))return{customer_count:0,total_revenue:0,avg_revenue:0,repeat_customers:0,dormant_customers:0};
         if(/SELECT 1 AS ok/.test(sql))return{ok:1};
@@ -54,14 +54,12 @@ function makeEnv({failFollow=false}={}){
   return {env:{DB,ADMIN_TOKEN:'test-admin-token'},evidence};
 }
 
-const headers={
-  'cf-access-authenticated-user-email':'owner@example.com',
-  'x-admin-token':'test-admin-token'
-};
+const headers={'x-admin-token':'test-admin-token'};
+const accessCtx={access:{getIdentity:async()=>({email:'ohw3rz5578d277e@gmail.com'})}};
 
 for(const path of ['/api/today-dashboard','/api/today-dashboard.csv']){
   const {env,evidence}=makeEnv();
-  const res=await app.fetch(new Request('https://crm.example'+path,{method:'GET',headers}),env,{});
+  const res=await app.fetch(new Request('https://crm.example'+path,{method:'GET',headers}),env,accessCtx);
   assert.equal(res.status,200,path+' should succeed with complete read schema');
   assert.equal(evidence.preparedWrites.length,0,path+' prepared runtime schema write through Production entry');
   assert.equal(evidence.runCalls,0,path+' executed D1 run through Production entry');
@@ -69,7 +67,7 @@ for(const path of ['/api/today-dashboard','/api/today-dashboard.csv']){
 
 {
   const {env,evidence}=makeEnv({failFollow:true});
-  const res=await app.fetch(new Request('https://crm.example/api/today-dashboard',{method:'GET',headers}),env,{});
+  const res=await app.fetch(new Request('https://crm.example/api/today-dashboard',{method:'GET',headers}),env,accessCtx);
   const body=await res.json();
   assert.equal(res.status,503,'Production entry must preserve Today read failure as 503');
   assert.equal(body.ok,false);

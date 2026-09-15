@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 
 const entry=fs.readFileSync('src/production-index-crm-customer360-entry.js','utf8');
 
-const principalCall='const effectiveRequest=await withOwnerPasswordPrincipal(request,env)';
+const principalCall='const effectiveRequest=await withOwnerPasswordPrincipal(request,env,ctx)';
 const healthCall='const ownedHealth=await handleProductionHealthRequest(effectiveRequest,env)';
 const mediaCall='const mediaApi=await handleCustomer360MediaRequest(effectiveRequest,env)';
 const downstreamCall='let response=await app.fetch(effectiveRequest,env,ctx)';

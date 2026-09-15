@@ -26,9 +26,18 @@ test('hybrid browser entry redirects unauthenticated owner to password login',as
   assert.equal(res.headers.get('location'),'/__crm/owner-login');
 });
 
-test('hybrid browser gate preserves authenticated Cloudflare Access principal',async()=>{
-  const req=await withOwnerPasswordPrincipal(new Request('https://crm.example.test/admin',{headers:{'cf-access-authenticated-user-email':'owner@example.com'}}),ENV);
-  assert.equal(handleOwnerPasswordBrowserGate(req,ENV),null);
+test('hybrid browser gate requires verified Cloudflare Access context',async()=>{
+  const raw=new Request('https://crm.example.test/admin',{headers:{'cf-access-authenticated-user-email':'spoofed@example.com'}});
+  const spoofed=await withOwnerPasswordPrincipal(raw,ENV);
+  const blocked=handleOwnerPasswordBrowserGate(spoofed,ENV);
+  assert.equal(blocked.status,302);
+  const otherCtx={access:{getIdentity:async()=>({email:'other@example.com'})}};
+  const other=await withOwnerPasswordPrincipal(raw,ENV,otherCtx);
+  assert.equal(handleOwnerPasswordBrowserGate(other,ENV).status,302);
+  const ctx={access:{getIdentity:async()=>({email:'ohw3rz5578d277e@gmail.com'})}};
+  const verified=await withOwnerPasswordPrincipal(raw,ENV,ctx);
+  assert.equal(verified.headers.get('cf-access-authenticated-user-email'),'ohw3rz5578d277e@gmail.com');
+  assert.equal(handleOwnerPasswordBrowserGate(verified,ENV),null);
 });
 
 test('hybrid browser gate preserves valid signed password session',async()=>{

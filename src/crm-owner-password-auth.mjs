@@ -1,6 +1,6 @@
 import { reservationInternalUser, reservationHandoffBasePath } from './crm-reservation-browser-handoff.mjs';
 
-const BUILD='crm-owner-password-auth-20260911-10';
+const BUILD='crm-owner-password-auth-20260915-11';
 const COOKIE_NAME='crm_owner_session';
 const SESSION_MAX_AGE_SECONDS=60*60*12;
 const OWNER_EMAIL='ohw3rz5578d277e@gmail.com';
@@ -102,7 +102,17 @@ async function verifySession(request,env){
 function stripSyntheticAuthHeaders(request){
   const headers=new Headers(request.headers);
   headers.delete('x-crm-owner-auth');
+  headers.delete('cf-access-authenticated-user-email');
+  headers.delete('cf-access-user-email');
+  headers.delete('x-user-email');
   return headers;
+}
+async function verifiedAccessEmail(ctx){
+  if(!ctx?.access||typeof ctx.access.getIdentity!=='function')return '';
+  try{
+    const identity=await ctx.access.getIdentity();
+    return text(identity?.email).toLowerCase();
+  }catch{return ''}
 }
 function accessLogoutLocation(request){
   const returnTo=encodeURIComponent(new URL('/admin',request.url).href);
@@ -140,16 +150,19 @@ export async function handleOwnerPasswordAuth(request,env){
   }
   return null;
 }
-export async function withOwnerPasswordPrincipal(request,env){
+export async function withOwnerPasswordPrincipal(request,env,ctx){
   const mode=authMode(env),headers=stripSyntheticAuthHeaders(request);
-  if(mode==='password'||mode==='invalid'){
-    headers.delete('cf-access-authenticated-user-email');
-    headers.delete('cf-access-user-email');
-    headers.delete('x-user-email');
-  }
   const base=new Request(request,{headers});
-  if(mode==='invalid'||mode==='access')return base;
-  if(mode==='hybrid'&&hasAccessPrincipal(base))return base;
+  if(mode==='invalid')return base;
+  if(mode==='access'||mode==='hybrid'){
+    const email=await verifiedAccessEmail(ctx);
+    if(email===OWNER_EMAIL){
+      headers.set('cf-access-authenticated-user-email',OWNER_EMAIL);
+      headers.set('x-crm-owner-auth','cloudflare-access');
+      return new Request(base,{headers});
+    }
+    if(mode==='access')return base;
+  }
   if(!(await verifySession(base,env)))return base;
   headers.set('cf-access-authenticated-user-email',OWNER_EMAIL);
   headers.set('x-crm-owner-auth','password-session');
@@ -180,6 +193,8 @@ export function ownerPasswordAuthHealth(env){const mode=authMode(env);return{
   owner_password_auth_enabled:passwordEnabled(env),
   owner_password_auth_fail_closed:true,
   owner_password_auth_header_spoof_protection:true,
+  owner_password_auth_cloudflare_access_ctx_required:true,
+  owner_password_auth_access_owner_email_required:true,
   owner_password_auth_rate_limit_required:passwordMode(mode),
   owner_password_auth_rate_limit_configured:rateLimiterConfigured(env),
   owner_password_auth_reservation_internal_preserved:true,

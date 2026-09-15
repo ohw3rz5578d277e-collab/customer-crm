@@ -19,7 +19,7 @@
       "name": "CRM_OWNER_LOGIN_RATE_LIMITER",
       "namespace_id": "2026091101",
       "simple": {
-        "limit": 10,
+        "limit": 5,
         "period": 60
       }
     }

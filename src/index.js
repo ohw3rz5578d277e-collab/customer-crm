@@ -49,6 +49,15 @@ function text(value) {
   return String(value).trim();
 }
 
+function constantTimeEqualText(a, b) {
+  const aa = new TextEncoder().encode(text(a));
+  const bb = new TextEncoder().encode(text(b));
+  const max = Math.max(aa.length, bb.length);
+  let diff = aa.length ^ bb.length;
+  for (let i = 0; i < max; i++) diff |= (aa[i] || 0) ^ (bb[i] || 0);
+  return max > 0 && diff === 0;
+}
+
 function nullableText(value) {
   const v = text(value);
   return v === "" ? null : v;
@@ -99,7 +108,9 @@ function tokenFromRequest(request) {
 }
 
 function isAdmin(request, env) {
-  return tokenFromRequest(request) === getAdminToken(env);
+  const expected = getAdminToken(env);
+  const supplied = tokenFromRequest(request);
+  return !!expected && !!supplied && constantTimeEqualText(supplied, expected);
 }
 
 function getSyncTokenFromRequest(request) {
@@ -1492,7 +1503,7 @@ async function handleApi(request, env) {
     return json({ ok: true, service: "customer-crm-api", build: BUILD, time: nowIso(), hasDb: !!env.DB, secure: true });
   }
 
-  if (path === "/api/debug-env") return json({ ok: true, hasDB: !!env.DB, hasSyncToken: !!env.SYNC_TOKEN, keys: Object.keys(env).sort() });
+  if (path === "/api/debug-env") return json({ ok: false, message: "Not Found" }, 404);
 
   if (path === "/api/customers" && request.method === "GET") return json(await listCustomers(env, url));
 
@@ -1530,8 +1541,8 @@ async function handleApi(request, env) {
     const reqToken = getSyncTokenFromRequest(request);
     const workerToken = env.SYNC_TOKEN;
     if (!workerToken) return json({ ok: false, message: "SYNC_TOKEN is not configured" }, 500);
-    if (!reqToken || reqToken !== workerToken) {
-      return json({ ok: false, message: "Unauthorized", debug: { hasRequestToken: !!reqToken, requestTokenLength: reqToken ? reqToken.length : 0, hasWorkerToken: !!workerToken, workerTokenLength: workerToken ? workerToken.length : 0, tokensMatch: !!reqToken && !!workerToken && reqToken === workerToken } }, 401);
+    if (!reqToken || !constantTimeEqualText(reqToken, workerToken)) {
+      return json({ ok: false, message: "Unauthorized" }, 401);
     }
     return json(await upsertCustomersFromPayload(env, await readJson(request)));
   }
@@ -1562,7 +1573,8 @@ export default {
 
       return json({ ok: false, message: "Not Found" }, 404);
     } catch (error) {
-      return json({ ok: false, error: error && error.stack ? error.stack : error && error.message ? error.message : String(error), build: BUILD }, 500);
+      console.error('CRM_INTERNAL_ERROR');
+      return json({ ok: false, error: "internal_error", build: BUILD }, 500);
     }
   }
 };

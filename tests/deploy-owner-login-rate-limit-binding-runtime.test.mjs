@@ -33,7 +33,7 @@ test('release config activates hybrid Owner auth and declares canonical login Ra
   const limiter=(config.ratelimits||[]).find(x=>x.name===BINDING);
   assert.ok(limiter,`${BINDING} must be declared in wrangler.jsonc`);
   assert.match(String(limiter.namespace_id),/^\d+$/);
-  assert.equal(limiter.simple?.limit,10);
+  assert.equal(limiter.simple?.limit,5);
   assert.equal(limiter.simple?.period,60);
 });
 
