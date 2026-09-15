@@ -83,7 +83,8 @@ export const LEGACY_OWNER_VISUAL_ASSET_IDS=Object.freeze([
   'crm-line-pending-badges-style','crm-line-pending-badges-script',
   'crm-line-overview-style','crm-line-overview-script',
   'crm-line-log-style','crm-line-log-script',
-  'crm-next-actions-script'
+  'crm-next-actions-script',
+  'crm-admin-users-style','crm-admin-users-script'
 ]);
 
 function stripTaggedAssetById(source,tag,id){
