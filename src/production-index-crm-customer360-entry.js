@@ -86,11 +86,8 @@ export const LEGACY_OWNER_VISUAL_ASSET_IDS=Object.freeze([
   'crm-next-actions-script'
 ]);
 
-function regexEscape(value){return String(value).replace(/[-/\\^$*+?.()|[\]{}]/g,'\\];
-
-export function handleProductionAccessAuthProbe')}
 function stripTaggedAssetById(source,tag,id){
-  const escaped=regexEscape(id);
+  const escaped=String(id);
   return source.replace(new RegExp('<'+tag+'\\b[^>]*\\bid=(["\\\'])'+escaped+'\\1[^>]*>[\\s\\S]*?<\\/'+tag+'>','gi'),'');
 }
 export function stripLegacyOwnerVisualAssets(html){
