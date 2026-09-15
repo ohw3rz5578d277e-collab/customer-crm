@@ -8,6 +8,8 @@ const customers=[
  {customer_id:'26000101',name:'山田 花子',line_display_name:'はなこ',line_linked:true,realized_ltv:128000,shoot_count:3,last_shoot_date:'2026-08-20',recommendation:{next_offer:'七五三'},next_opportunity:{label:'七五三',days:30}},
  {customer_id:'26000102',name:'佐藤 未来',line_display_name:'みらい',line_linked:true,realized_ltv:35000,shoot_count:1,last_shoot_date:'2026-06-10',recommendation:{next_offer:'家族写真'},next_opportunity:{label:'誕生日',days:60}}
 ];
+const linePage1=[...customers,...Array.from({length:98},(_,i)=>({customer_id:String(26001000+i),name:'LINE顧客 '+(i+3),line_display_name:'line-'+(i+3),line_linked:true}))];
+const linePage2Customer={customer_id:'26999999',name:'LINE 101件目',line_display_name:'page-two',line_linked:true};
 const facets={prefectures:['大阪府'],cities:['大阪市'],genres:['七五三'],sources:['Instagram'],campaigns:[],school_stages:[]};
 const base=`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><style>html,body{margin:0}.app{width:100%;box-sizing:border-box;padding:16px}#lineOpsPanel{display:none;position:fixed;inset:20px;background:#fff;z-index:9999}#lineOpsPanel.open{display:block}</style></head><body><button id="lineOpsOpen">旧LINE</button><section id="lineOpsPanel"><h2>LINE送信・反応管理</h2></section><main class="app"><h1>顧客管理</h1><section id="crmTodayDashboard"><h2>今日やること</h2></section></main><script>document.getElementById('lineOpsOpen').onclick=()=>document.getElementById('lineOpsPanel').classList.add('open')</script></body></html>`;
 const html=composeCustomer360AdminHtml(base);
@@ -20,7 +22,14 @@ const server=http.createServer((req,res)=>{
  const u=new URL(req.url,'http://127.0.0.1');requests.push(req.method+' '+u.pathname+u.search);
  if(u.pathname==='/'||u.pathname==='/admin')return send(res,200,html,'text/html; charset=utf-8');
  if(u.pathname==='/api/customer360/marketing-home')return send(res,200,{ok:true,kpis:{customers:2,average_realized_ltv:81500,repeat_rate_pct:50,vip_high_ltv:1,event_90d:2,dormant_180:0,line_link_rate_pct:100,line_additions_this_month:7,approach_this_month:2},top_opportunities:customers,facets});
- if(u.pathname==='/api/customer360/customers')return send(res,200,{ok:true,total:2,all_total:2,page:1,page_size:100,has_next:false,items:customers,facets,meta:{privacy_safe_list_dto:true}});
+ if(u.pathname==='/api/customer360/customers'){
+  if(u.searchParams.get('line')==='linked'){
+   const page=Number(u.searchParams.get('page')||1);
+   if(page===1)return send(res,200,{ok:true,total:101,all_total:101,page:1,page_size:100,has_next:true,items:linePage1,facets,meta:{privacy_safe_list_dto:true}});
+   if(page===2)return send(res,200,{ok:true,total:101,all_total:101,page:2,page_size:100,has_next:false,items:[linePage2Customer],facets,meta:{privacy_safe_list_dto:true}});
+  }
+  return send(res,200,{ok:true,total:2,all_total:2,page:1,page_size:100,has_next:false,items:customers,facets,meta:{privacy_safe_list_dto:true}});
+ }
  if(u.pathname==='/api/customer360/analytics')return send(res,200,{ok:true,available:true,period:{from:'2026-09-01',to:'2026-09-30',span_days:30},current:{revenue:163000,completed_shoots:4,unique_customers:2,average_order_value:40750,repeat_customers_in_period:1,repeat_rate_pct:50,line_additions:7,genres:[],monthly:[]},previous:{line_additions:5},change_pct:{line_additions:40}});
  if(u.pathname==='/api/customer360/approach-queue')return send(res,200,{ok:true,items:[],summary:{total:0,ready:0,review_required:0,opted_out:0}});
  if(u.pathname==='/api/customers/26000101/line-history')return send(res,200,{ok:true,connected:true,count:2,messages:[{direction:'inbound',message_text:'七五三の撮影について相談したいです',sent_at:'2026-09-14 10:00'},{direction:'outbound',message_text:'ありがとうございます。候補日をご案内します。',sent_at:'2026-09-14 10:03'}]});
@@ -77,9 +86,14 @@ try{
   const lineSelector=mobile?'#crmOwnerNavLine':'#crmOwnerDesktopSidebar [data-crm-shell-nav="line"]';
   await page.locator(lineSelector).click();
   await page.waitForFunction(()=>window.__crmOwnerView.getCurrentView()==='line'&&document.getElementById('crmOwnerLineChat')&&getComputedStyle(document.getElementById('crmOwnerLineChat')).display!=='none');
-  await page.waitForFunction(()=>document.querySelectorAll('#crmLineChatCustomers [data-line-customer]').length===2);
+  await page.waitForFunction(()=>document.querySelectorAll('#crmLineChatCustomers [data-line-customer]').length===101);
   assert.equal(await page.locator('#lineOpsPanel').isVisible(),false,viewport.width+': old LINE ops opened instead of chat');
   assert.equal(await page.locator('#crmCsvImportOpenInline').isVisible(),false,viewport.width+': CSV import action must not float over LINE');
+  await page.locator('#crmLineChatSearch').fill('26999999');
+  await page.waitForFunction(()=>document.querySelectorAll('#crmLineChatCustomers [data-line-customer]').length===1);
+  assert.equal(await page.locator('#crmLineChatCustomers [data-line-customer="26999999"]').isVisible(),true,viewport.width+': page-2 LINE customer missing from local search');
+  await page.locator('#crmLineChatSearch').fill('');
+  await page.waitForFunction(()=>document.querySelectorAll('#crmLineChatCustomers [data-line-customer]').length===101);
   await page.locator('#crmLineChatCustomers [data-line-customer="26000101"]').click();
   await page.waitForFunction(()=>document.querySelectorAll('#crmLineChatMessages .crm-line-chat-row').length===2);
   assert.ok((await page.locator('#crmLineChatMessages').innerText()).includes('七五三の撮影について相談したいです'),viewport.width+': inbound chat text missing');
@@ -99,6 +113,7 @@ try{
   await context.close();
  }
  assert.equal(requests.some(x=>!x.startsWith('GET ')&&!x.startsWith('HEAD ')),false,'unexpected HTTP write '+requests.join(' | '));
+ assert.equal(requests.some(x=>x.includes('/api/customer360/customers?page=2&page_size=100&line=linked')),true,'LINE linked-customer pagination did not request page 2');
  console.log('CRM_CANONICAL_UIX_RESPONSIVE_BROWSER=PASS');
  console.log('TODAY_VISIBLE_UI=0');
  console.log('ANALYSIS_TAB=PASS');
