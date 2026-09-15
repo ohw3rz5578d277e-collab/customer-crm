@@ -86,3 +86,22 @@ test('legacy sync/admin token paths do not expose token diagnostics and use cons
   assert.doesNotMatch(source,/tokensMatch/);
   assert.match(source,/path === "\/api\/debug-env"\) return json\(\{ ok: false, message: "Not Found" \}, 404\)/);
 });
+
+
+test('sensitive Production routes reject URL-carried auth tokens',()=>{
+  for(const url of [
+    'https://crm.example.test/admin?token=legacy-secret',
+    'https://crm.example.test/admin/customer-id-reconciliation?token=legacy-secret',
+    'https://crm.example.test/api/customer360/customers?admin_token=legacy-secret'
+  ]){
+    const res=enforceProductionRequestBoundary(new Request(url));
+    assert.equal(res.status,400);
+  }
+});
+
+test('legacy core no longer exposes stack traces or env reconnaissance',()=>{
+  const source=fs.readFileSync('src/index.js','utf8');
+  assert.doesNotMatch(source,/error && error\.stack/);
+  assert.match(source,/error: "internal_error"/);
+  assert.doesNotMatch(source,/Object\.keys\(env\)\.sort\(\)/);
+});
