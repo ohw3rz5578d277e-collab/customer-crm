@@ -22,7 +22,7 @@ test('Owner password Production acceptance contract remains intact',()=>{
   must(auth,"return new Response(null,{status:302,headers:secureHeaders({location:ownerLoginLocation(request,env)})});",'unauthenticated login redirect');
   must(auth,'CRM_OWNER_LOGIN_RATE_LIMITER','login rate limit binding');
 
-  must(entry,'const effectiveRequest=await withOwnerPasswordPrincipal(request,env);','normalized principal');
+  must(entry,'const effectiveRequest=await withOwnerPasswordPrincipal(request,env,ctx);','normalized principal');
   must(entry,'const earlyReadRequest=withReservationOwnerReadPrincipal(effectiveRequest,env);','Reservation read principal');
   must(entry,'handleOwnerPasswordBrowserGate(effectiveRequest,env)','browser gate uses normalized request');
   must(entry,'todayReadOnlyApp.fetch(earlyReadRequest,env,ctx)','Today dashboard uses read-normalized request');
