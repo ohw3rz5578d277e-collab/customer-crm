@@ -30,6 +30,79 @@ const CUSTOMER360_PROFILE_TABLES=[
   'customer_profile_enrichment','customer_family_member_metadata','customer_field_evidence','customer_notes_history','customer_profile_media','customer_delivery_links'
 ];
 
+export const LEGACY_OWNER_VISUAL_ASSET_IDS=Object.freeze([
+  'crm-production-desktop-owner-hotfix-20260825',
+  'crm-owner-desktop-layout-hotfix-script',
+  'crm-customer-detail-v2-style','crm-customer-detail-v2-script',
+  'crm-stable-customer-list-style','crm-stable-customer-list-script',
+  'crm-number-format-settings-style','crm-number-format-fix-script',
+  'crm-stable-audit-style','crm-stable-audit-script',
+  'crm-customer-list-return-style','crm-customer-list-return-script',
+  'crm-detail-panel-fix-style','crm-detail-panel-fix-script',
+  'crm-fetch-safe-fix-style','crm-fetch-safe-fix-script',
+  'crm-stability-ux-fix-style','crm-stability-ux-fix-script',
+  'crm-mobile-first-ux-style','crm-mobile-first-ux-script',
+  'crm-final-layout-cleanup-style','crm-final-layout-cleanup-script',
+  'crm-ui-polish-style','crm-ui-polish-script',
+  'crm-home-dashboard-style','crm-home-dashboard-script',
+  'crm-unified-ux-style','crm-unified-ux-script',
+  'crm-line-ops-style','crm-line-ops-script',
+  'crmListSafetyStyle','crmListSafetyScript',
+  'crmListWorkbenchStyle','crmListWorkbenchScript',
+  'crmCustomerSmartPanelStyle','crmCustomerSmartPanelScript',
+  'crmMobileUsabilityStyle','crmMobileUsabilityScript',
+  'crmUsabilityHubStyle','crmUsabilityHubScript',
+  'crmMarketingSuiteStyle','crmMarketingSuiteScript',
+  'crmFinalOpsStyle','crmFinalOpsScript',
+  'crmInquiryRowActionStyle','crmInquiryRowActionScript',
+  'crmInquiryActionStyle','crmInquiryActionScript',
+  'crmOpsScreensStyle','crmOpsScreensScript',
+  'crmRoadmapSuiteStyle','crmRoadmapSuiteScript',
+  'crmDeliveryDashboardStyle','crmDeliveryDashboardScript',
+  'crmFollowTemplateButtonStyle','crmFollowTemplateButtonScript',
+  'crmFollowTemplateStyle','crmFollowTemplateScript',
+  'crmGrowthSuiteStyle','crmGrowthSuiteScript',
+  'crmTodayFilterStyle','crmTodayFilterScript',
+  'crmTodayActionStyle','crmTodayActionScript',
+  'crmTodayDashboardStyle','crmTodayDashboardScript',
+  'crmDailySummaryStyle','crmDailySummaryScript',
+  'crmLinkAlertStyle','crmLinkAlertScript',
+  'crmLinkResyncStyle','crmLinkResyncScript',
+  'crmLinkMonitorStyle','crmLinkMonitorScript',
+  'crm-reservation-cancel-sync-style','crm-reservation-cancel-sync-script',
+  'crm-reservation-update-sync-style','crm-reservation-update-sync-script',
+  'crm-reservation-history-sync-style','crm-reservation-history-sync-script',
+  'crm-reservation-status-ui-style','crm-reservation-status-ui-script',
+  'crm-reservation-created-sync-style','crm-reservation-created-sync-script',
+  'crm-reservation-send-style','crm-reservation-send-script',
+  'crm-reservation-bridge-style','crm-reservation-bridge-script',
+  'crm-ops-polish-style','crm-ops-polish-script',
+  'crm-suite-style','crm-suite-script',
+  'crm-line-pending-csv-style','crm-line-pending-csv-script',
+  'crm-line-pending-filter-style','crm-line-pending-filter-script',
+  'crm-line-pending-badges-style','crm-line-pending-badges-script',
+  'crm-line-overview-style','crm-line-overview-script',
+  'crm-line-log-style','crm-line-log-script',
+  'crm-next-actions-script'
+]);
+
+function regexEscape(value){return String(value).replace(/[-/\\^$*+?.()|[\]{}]/g,'\\];
+
+export function handleProductionAccessAuthProbe')}
+function stripTaggedAssetById(source,tag,id){
+  const escaped=regexEscape(id);
+  return source.replace(new RegExp('<'+tag+'\\b[^>]*\\bid=(["\\\'])'+escaped+'\\1[^>]*>[\\s\\S]*?<\\/'+tag+'>','gi'),'');
+}
+export function stripLegacyOwnerVisualAssets(html){
+  let out=String(html||'');
+  for(const id of LEGACY_OWNER_VISUAL_ASSET_IDS){
+    out=stripTaggedAssetById(out,'script',id);
+    out=stripTaggedAssetById(out,'style',id);
+  }
+  out=out.replace(/<a\b[^>]*\bid=(["'])crmReconciliationLink\1[^>]*>[\s\S]*?<\/a>/gi,'');
+  return out;
+}
+
 export function handleProductionAccessAuthProbe(request,env){
   const url=new URL(request.url);
   if(request.method!=='GET'||url.pathname!=='/__crm/access-auth-probe')return null;
@@ -57,7 +130,8 @@ export function injectOwnerLogoutPostRoute(html){
   return source.includes('</body>')?source.replace('</body>',script+'</body>'):source+script;
 }
 export function composeCustomer360AdminHtml(html){
-  const withMarketing=injectCustomer360Marketing(html);
+  const canonicalBase=stripLegacyOwnerVisualAssets(html);
+  const withMarketing=injectCustomer360Marketing(canonicalBase);
   const withDailyOperations=injectCustomerListDailyOperations(withMarketing);
   const withSearchFocus=injectCustomer360SearchFocus(withDailyOperations);
   const withCardSummary=injectMobileOwnerCardSummary(withSearchFocus);
