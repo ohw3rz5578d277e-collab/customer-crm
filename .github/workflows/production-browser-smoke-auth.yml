@@ -151,7 +151,7 @@ jobs:
             for(const section of ['基本情報','家族','撮影履歴','売上','集客・紹介','満足度・許可','LINEから見つかった情報','備考・対応メモ']){
               if(!(await page.getByText(section,{exact:false}).first().isVisible()))throw new Error(label+': DETAIL_SECTION_MISSING:'+section);
             }
-            if(customerDetailGets<1)throw new Error(label+': CUSTOMER_DETAIL_GET_MISSING);
+            if(customerDetailGets<1)throw new Error(label+': CUSTOMER_DETAIL_GET_MISSING');
             await page.locator('.crm-detail-close').click();
             await page.locator('#crmMktDetail.open').waitFor({state:'hidden',timeout:10000}).catch(()=>{});
 
