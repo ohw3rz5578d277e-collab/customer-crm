@@ -63,8 +63,9 @@ try{
   const overflow=await page.evaluate(()=>Math.max(document.documentElement.scrollWidth-document.documentElement.clientWidth,document.body.scrollWidth-document.body.clientWidth));
   assert.ok(overflow<=1,viewport.width+': horizontal overflow '+overflow);
   const fontFamily=(await page.evaluate(()=>getComputedStyle(document.body).fontFamily)).toLowerCase();
-  assert.equal(/serif|mincho/.test(fontFamily),false,viewport.width+': serif/mincho font leaked '+fontFamily);
-  assert.ok(fontFamily.includes('sans-serif'),viewport.width+': canonical sans stack missing '+fontFamily);
+  const fontTokens=fontFamily.split(',').map(x=>x.trim().replace(/^["']|["']$/g,''));
+  assert.equal(fontTokens.includes('serif')||fontTokens.some(x=>x.includes('mincho')),false,viewport.width+': serif/mincho font leaked '+fontFamily);
+  assert.ok(fontTokens.includes('sans-serif'),viewport.width+': canonical sans stack missing '+fontFamily);
   const firstCustomer=page.locator('#crmMktList [data-open],#crmMktList [data-direct-customer]').first();
   await firstCustomer.click();
   await page.locator('#crmMktDetail.open').waitFor();
