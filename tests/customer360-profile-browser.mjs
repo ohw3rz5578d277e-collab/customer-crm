@@ -27,7 +27,16 @@ for(const viewport of [{width:390,height:844,name:'390'},{width:1440,height:900,
   if(await customerNav.isVisible()) await customerNav.click();
   else await page.evaluate(()=>window.__crmOwnerView.showCustomers());
   await page.locator('#crmMktList.open').waitFor();
-  const open=page.locator('[data-open="'+customerId+'"]:visible').first();await open.waitFor();await open.click();
+  let open;
+  if(viewport.width===1440){
+    await page.evaluate(async()=>{const list=document.getElementById('crmMktList');list.innerHTML='';await window.__crmCustomer360UI.refreshList({force:true})});
+    open=page.locator('[data-direct-customer="'+customerId+'"]:visible').first();
+    await open.waitFor();
+    assert(await open.getAttribute('data-open')===null,'direct fallback unexpectedly has data-open');
+  }else{
+    open=page.locator('[data-open="'+customerId+'"]:visible').first();
+  }
+  await open.waitFor();await open.click();
   await page.locator('#crmMktDetail.open').waitFor();const detail=page.locator('#crmMktDetailBody');let profileUi=detail.locator('.crm-pe');await profileUi.getByRole('heading',{name:'顧客プロフィール',exact:true}).waitFor();
   assert(await profileUi.getByText('累計売上',{exact:true}).count()>=1,'lifetime revenue label missing');assert(await profileUi.getByText('¥70,000',{exact:true}).count()>=1,'lifetime revenue value missing');assert(await profileUi.getByText('第1子',{exact:true}).count()>=1,'first child missing');assert(await profileUi.getByText('LINEから見つかった情報',{exact:false}).count()>=1,'LINE candidates section missing');assert(await profileUi.getByText('信頼度 98% / conflict',{exact:true}).count()>=1,'confidence/conflict missing');
   const overflow=await page.evaluate(()=>document.documentElement.scrollWidth-document.documentElement.clientWidth);assert(overflow<=1,viewport.name+' horizontal overflow '+overflow);await page.screenshot({path:path.join(outDir,viewport.name+'-customer-profile.png'),fullPage:false});
@@ -50,4 +59,4 @@ for(const viewport of [{width:390,height:844,name:'390'},{width:1440,height:900,
 }
 assert(detailReadCount>=2,'combined detail not used');assert(profileGetCount===0,'extra initial profile GET detected');
 await browser.close();server.close();
-console.log('PROFILE_PRODUCTION_COMPOSITION=PASS');console.log('PROFILE_INITIAL_EXTRA_REQUEST=0');console.log('PROFILE_EDIT_PATCH_CHANGED_FIELDS_ONLY=PASS');console.log('PROFILE_UNCHANGED_CHILD_WRITE=0');console.log('PROFILE_CHILD_EDIT=PASS');console.log('PROFILE_LINE_CANDIDATE=PASS');console.log('PROFILE_HORIZONTAL_OVERFLOW=0');console.log('PROFILE_CONSOLE_ERRORS=0');console.log('PROFILE_PAGE_ERRORS=0');
+console.log('PROFILE_PRODUCTION_COMPOSITION=PASS');console.log('PROFILE_DIRECT_FALLBACK_OPENER=PASS');console.log('PROFILE_INITIAL_EXTRA_REQUEST=0');console.log('PROFILE_EDIT_PATCH_CHANGED_FIELDS_ONLY=PASS');console.log('PROFILE_UNCHANGED_CHILD_WRITE=0');console.log('PROFILE_CHILD_EDIT=PASS');console.log('PROFILE_LINE_CANDIDATE=PASS');console.log('PROFILE_HORIZONTAL_OVERFLOW=0');console.log('PROFILE_CONSOLE_ERRORS=0');console.log('PROFILE_PAGE_ERRORS=0');
