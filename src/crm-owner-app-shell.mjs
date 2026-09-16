@@ -27,10 +27,12 @@ for(const key of flags)window[key]=1;
 window.__crmCanonicalLegacyOwnerPreempted=flags.slice();
 })();
 <\/script><style id="crm-owner-app-shell-style">
-:root{--crm-shell-bg:#f4f7f8;--crm-shell-card:#fff;--crm-shell-text:#14212b;--crm-shell-muted:#667983;--crm-shell-line:#dfe7ea;--crm-shell-accent:#0b6b55;--crm-shell-accent-soft:#e9f5f1;--crm-shell-danger:#a61b1b}
-html,body{width:100%!important;max-width:none!important;min-width:0!important;overflow-x:hidden!important;background:var(--crm-shell-bg)!important;color:var(--crm-shell-text)!important}
+:root{--crm-shell-bg:#f4f7f8;--crm-shell-card:#fff;--crm-shell-text:#14212b;--crm-shell-muted:#667983;--crm-shell-line:#dfe7ea;--crm-shell-accent:#0b6b55;--crm-shell-accent-soft:#e9f5f1;--crm-shell-danger:#a61b1b;--crm-font-sans:-apple-system,BlinkMacSystemFont,"Helvetica Neue","Hiragino Sans","Hiragino Kaku Gothic ProN","Noto Sans JP","Yu Gothic",Meiryo,sans-serif}
+html,body{width:100%!important;max-width:none!important;min-width:0!important;overflow-x:hidden!important;background:var(--crm-shell-bg)!important;color:var(--crm-shell-text)!important;font-family:var(--crm-font-sans)!important}
+body.crm-owner-shell-v2 *,body.crm-owner-shell-v3 *,body.crm-owner-shell-v2 button,body.crm-owner-shell-v2 input,body.crm-owner-shell-v2 textarea,body.crm-owner-shell-v2 select,body.crm-owner-shell-v3 button,body.crm-owner-shell-v3 input,body.crm-owner-shell-v3 textarea,body.crm-owner-shell-v3 select{font-family:var(--crm-font-sans)!important}
+.crm-owner-shell-v2 #crmMktDetail,.crm-owner-shell-v2 #crmMktDetail *,.crm-owner-shell-v2 .crm-pe,.crm-owner-shell-v2 .crm-pe *,.crm-owner-shell-v2 #crmOwnerLineChat,.crm-owner-shell-v2 #crmOwnerLineChat *{font-family:var(--crm-font-sans)!important}
 body.crm-owner-shell-v2,body.crm-owner-shell-v3{margin:0!important}
-#crmOwnerAppShell{width:100%!important;max-width:none!important;min-height:100vh;display:grid;grid-template-columns:252px minmax(0,1fr);background:var(--crm-shell-bg);font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Noto Sans JP",sans-serif}
+#crmOwnerAppShell{width:100%!important;max-width:none!important;min-height:100vh;display:grid;grid-template-columns:252px minmax(0,1fr);background:var(--crm-shell-bg);font-family:var(--crm-font-sans)}
 #crmOwnerDesktopSidebar{position:sticky;top:0;height:100vh;box-sizing:border-box;padding:18px 14px;border-right:1px solid var(--crm-shell-line);background:#fff;display:flex;flex-direction:column;gap:18px;z-index:120}
 .crm-shell-brand{padding:4px 8px}.crm-shell-brand b{display:block;font-size:18px;letter-spacing:-.02em}.crm-shell-brand span{display:block;margin-top:4px;color:var(--crm-shell-muted);font-size:11px;font-weight:700}
 .crm-shell-nav,.crm-shell-tools{display:grid;gap:5px}.crm-shell-tools{margin-top:auto;padding-top:12px;border-top:1px solid var(--crm-shell-line)}
