@@ -118,6 +118,9 @@ jobs:
             const page=await context.newPage();
             const writes=[],pageErrors=[],consoleErrors=[],secretHeaders=[];
             let customerDetailGets=0;
+            let detailApiStatus=0;
+            let detailApiHasProfile=false;
+            let detailApiBrowserCookie=false;
 
             await page.route(BASE_URL+'/**',async route=>{
               const req=route.request();
@@ -142,10 +145,20 @@ jobs:
               });
               const headers=Object.fromEntries(upstream.headers.entries());
               for(const h of ['content-encoding','content-length','transfer-encoding','connection'])delete headers[h];
+              const bodyBuffer=Buffer.from(await upstream.arrayBuffer());
+              const requestPath=new URL(req.url()).pathname;
+              if(req.method()==='GET'&&/^\/api\/customer360\/customer\/\d{8}$/.test(requestPath)){
+                detailApiStatus=upstream.status;
+                detailApiBrowserCookie=!!browserHeaders.cookie;
+                try{
+                  const parsed=JSON.parse(bodyBuffer.toString('utf8'));
+                  detailApiHasProfile=!!parsed?.customer?.profile;
+                }catch(_){}
+              }
               await route.fulfill({
                 status:upstream.status,
                 headers,
-                body:Buffer.from(await upstream.arrayBuffer())
+                body:bodyBuffer
               });
             });
 
@@ -236,6 +249,9 @@ jobs:
             await page.waitForTimeout(1200);
             console.log(label+': PROFILE_EXTENSION_PRESENT='+((await page.locator('#crmMktDetail .crm-pe').count())>0?'YES':'NO'));
             console.log(label+': CUSTOMER_DETAIL_GET_COUNT='+customerDetailGets);
+            console.log(label+': DETAIL_API_STATUS='+detailApiStatus);
+            console.log(label+': DETAIL_API_BROWSER_COOKIE='+(detailApiBrowserCookie?'YES':'NO'));
+            console.log(label+': DETAIL_API_HAS_PROFILE='+(detailApiHasProfile?'YES':'NO'));
             await page.getByRole('heading',{name:'顧客プロフィール'}).waitFor({timeout:15000});
             for(const section of ['基本情報','家族','撮影履歴','売上','集客・紹介','満足度・許可','LINEから見つかった情報','備考・対応メモ']){
               if(!(await page.getByText(section,{exact:false}).first().isVisible()))throw new Error(label+': DETAIL_SECTION_MISSING:'+section);
