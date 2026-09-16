@@ -85,7 +85,7 @@ jobs:
               redirect:'manual'
             });
             const setCookie=response.headers.get('set-cookie')||'';
-            if(response.status!==302)throw new Error('OWNER_AUTH_LOGIN_STATUS_'+response.status);
+            if(response.status!==303)throw new Error('OWNER_AUTH_LOGIN_STATUS_'+response.status);
             const match=setCookie.match(/(?:^|,\s*)crm_owner_session=([^;]+)/);
             if(!match)throw new Error('OWNER_AUTH_SESSION_COOKIE_MISSING');
             ownerSessionValue=match[1];
