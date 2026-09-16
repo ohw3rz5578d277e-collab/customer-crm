@@ -2,6 +2,11 @@ name: Production Authenticated Browser Smoke
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - qa/production-owner-ui-smoke-20260916
+    paths:
+      - '.github/workflows/production-browser-smoke-auth.yml'
 
 permissions:
   contents: read
@@ -15,6 +20,7 @@ jobs:
       ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}
       CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
       CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+      CRM_OWNER_PASSWORD: ${{ secrets.CRM_OWNER_PASSWORD }}
       BASE_URL: https://customer-crm-api.ohw3rz5578d277e.workers.dev
     steps:
       - name: Checkout requested ref
@@ -26,11 +32,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          for v in ADMIN_TOKEN CF_ACCESS_CLIENT_ID CF_ACCESS_CLIENT_SECRET; do
+          for v in ADMIN_TOKEN CF_ACCESS_CLIENT_ID CF_ACCESS_CLIENT_SECRET CRM_OWNER_PASSWORD; do
             test -n "${!v}" || { echo "::error::MISSING_$v"; exit 1; }
             echo "::add-mask::${!v}"
           done
-          echo 'PRODUCTION_WRITE=0'
+          echo 'PRODUCTION_BUSINESS_WRITE=0'
+          echo 'OWNER_AUTH_LOGIN_POST=1'
 
       - name: Setup Node
         uses: actions/setup-node@v5
@@ -60,6 +67,33 @@ jobs:
             'x-admin-token':process.env.ADMIN_TOKEN
           };
 
+          const OWNER_PASSWORD=process.env.CRM_OWNER_PASSWORD;
+          let ownerSessionValue='';
+
+          async function getOwnerSessionValue(){
+            if(ownerSessionValue)return ownerSessionValue;
+            const body=new URLSearchParams({password:OWNER_PASSWORD});
+            const response=await fetch(BASE_URL+'/__crm/owner-login',{
+              method:'POST',
+              headers:{
+                ...serverAuth,
+                'content-type':'application/x-www-form-urlencoded',
+                'origin':new URL(BASE_URL).origin,
+                'accept':'application/json'
+              },
+              body:body.toString(),
+              redirect:'manual'
+            });
+            const setCookie=response.headers.get('set-cookie')||'';
+            if(response.status!==302)throw new Error('OWNER_AUTH_LOGIN_STATUS_'+response.status);
+            const match=setCookie.match(/(?:^|,\s*)crm_owner_session=([^;]+)/);
+            if(!match)throw new Error('OWNER_AUTH_SESSION_COOKIE_MISSING');
+            ownerSessionValue=match[1];
+            console.log('OWNER_AUTH_LOGIN=PASS');
+            console.log('OWNER_AUTH_PASSWORD_PRINTED=NO');
+            return ownerSessionValue;
+          }
+
           const results=[];
           const forbiddenHeadings=['今日やることダッシュボード','予約管理との連携','納品進捗・遅延アラート'];
 
@@ -72,6 +106,15 @@ jobs:
               isMobile:mobile,
               hasTouch:mobile
             });
+            const ownerSession=await getOwnerSessionValue();
+            await context.addCookies([{
+              name:'crm_owner_session',
+              value:ownerSession,
+              url:BASE_URL,
+              httpOnly:true,
+              secure:true,
+              sameSite:'Strict'
+            }]);
             const page=await context.newPage();
             const writes=[],pageErrors=[],consoleErrors=[],secretHeaders=[];
             let customerDetailGets=0;
@@ -92,6 +135,7 @@ jobs:
                 headers:{
                   ...serverAuth,
                   accept:browserHeaders.accept||'*/*',
+                  cookie:browserHeaders.cookie||'',
                   'user-agent':browserHeaders['user-agent']||'CRM-Production-Owner-UI-Smoke'
                 },
                 redirect:'manual'
@@ -246,6 +290,8 @@ jobs:
             console.log('PRODUCTION_OWNER_UI_SMOKE=PASS');
             console.log('RESULTS='+JSON.stringify(results));
             console.log('PRODUCTION_BROWSER_WRITES=0');
+            console.log('OWNER_AUTH_LOGIN_POST=1');
+            console.log('PRODUCTION_BUSINESS_WRITE=0');
             console.log('CUSTOMER_ID_GENERATION=0');
             console.log('LINE_SEND=0');
           })().catch(e=>{
