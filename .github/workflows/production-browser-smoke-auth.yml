@@ -210,6 +210,10 @@ jobs:
 
             await page.locator(sel.customers).click();
             await page.waitForFunction(()=>document.body.dataset.crmOwnerView==='customers'&&document.getElementById('crmMktList')?.classList.contains('open'),null,{timeout:15000});
+            await page.waitForFunction(()=>{
+              const visible=el=>!!el&&getComputedStyle(el).display!=='none'&&getComputedStyle(el).visibility!=='hidden'&&el.getClientRects().length>0;
+              return visible(document.getElementById('crmGlobalSearch'))&&!!document.querySelector('#crmMktList [data-open],#crmMktList [data-direct-customer]');
+            },null,{timeout:15000});
             if(!(await page.locator('#crmGlobalSearch').isVisible()))throw new Error(label+': CUSTOMER_SEARCH_MISSING');
             if((await page.locator('#crmMktList [data-open],#crmMktList [data-direct-customer]').count())<1)throw new Error(label+': CUSTOMER_ROWS_MISSING');
             const title1=(await page.locator('#crmOwnerWorkspaceTitle').textContent())||'';
