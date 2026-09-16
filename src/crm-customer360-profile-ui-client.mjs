@@ -5,7 +5,7 @@ const yen=v=>'¥'+Math.round(Number(v||0)).toLocaleString('ja-JP');
 let id='',data=null;
 async function api(path,opts={}){const r=await fetch(path,{cache:'no-store',headers:{'content-type':'application/json'},...opts});const t=await r.text();let j={};try{j=JSON.parse(t)}catch{}if(!r.ok||!j.ok)throw new Error(j.error||('HTTP '+r.status));return j}
 function body(){return document.getElementById('crmMktDetailBody')}
-async function waitFor(id,n=0){const h=body();if(h&&h.textContent.includes(id))return h;if(n>30)return null;await new Promise(r=>setTimeout(r,50));return waitFor(id,n+1)}
+async function waitFor(id,n=0){const h=body();if(h&&h.textContent.includes(id))return h;if(n>200)return null;await new Promise(r=>setTimeout(r,50));return waitFor(id,n+1)}
 function kv(rows){return'<dl class="crm-pe-kv">'+rows.map(x=>'<dt>'+esc(x[0])+'</dt><dd>'+esc(x[1]||'—')+'</dd>').join('')+'</dl>'}
 function child(c,n){return'<div class="crm-pe-child"><b>第'+n+'子</b>'+kv([['名前',c?.name],['ふりがな',c?.name_kana],['生年月日',c?.birth_date]])+'</div>'}
 function childOrders(kids,extra=false){const max=Math.max(3,...(kids||[]).map(x=>Number(x.birth_order)||0));return Array.from({length:max+(extra?1:0)},(_,i)=>i+1)}
