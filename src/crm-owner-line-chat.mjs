@@ -6,7 +6,7 @@ export function injectOwnerLineChat(html){
 .crm-line-chat-list-pane{min-width:0;border-right:1px solid #e4ebe8;background:#fbfdfc;display:flex;flex-direction:column}.crm-line-chat-list-head{padding:16px;border-bottom:1px solid #e4ebe8}.crm-line-chat-list-head h2{margin:3px 0 4px;font-size:22px}.crm-line-chat-list-head p{margin:0;color:#6b7b75;font-size:12px}
 .crm-line-chat-search{margin-top:12px;width:100%;min-height:44px;border:1px solid #d8e4df;border-radius:12px;padding:0 12px;font-size:16px;background:#fff;box-sizing:border-box;outline:none}.crm-line-chat-search:focus{border-color:#087a5b;box-shadow:0 0 0 3px rgba(8,122,91,.10)}
 .crm-line-chat-customers{overflow:auto;padding:8px;display:grid;gap:4px}.crm-line-chat-customer{appearance:none;border:0;background:transparent;width:100%;padding:11px;border-radius:13px;text-align:left;cursor:pointer;display:grid;grid-template-columns:42px minmax(0,1fr);gap:10px;align-items:center}.crm-line-chat-customer:hover,.crm-line-chat-customer.active{background:#eaf6f1}.crm-line-chat-avatar{width:42px;height:42px;border-radius:50%;display:grid;place-items:center;background:#dcefe7;color:#086348;font-weight:900}.crm-line-chat-name{font-weight:900;color:#19332a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.crm-line-chat-meta{font-size:11px;color:#718078;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.crm-line-chat-main{min-width:0;display:flex;flex-direction:column;background:#f7faf9}.crm-line-chat-main-head{height:68px;box-sizing:border-box;padding:11px 16px;background:#fff;border-bottom:1px solid #e4ebe8;display:flex;align-items:center;gap:10px}.crm-line-chat-main-head h3{margin:0;font-size:17px}.crm-line-chat-main-head p{margin:2px 0 0;color:#718078;font-size:11px}.crm-line-chat-back{display:none;appearance:none;border:1px solid #dfe8e4;background:#fff;border-radius:11px;min-width:42px;height:42px;font-weight:900}
+.crm-line-chat-main{min-width:0;display:flex;flex-direction:column;background:#f7faf9}.crm-line-chat-main-head{min-height:72px;box-sizing:border-box;padding:11px 16px;background:#fff;border-bottom:1px solid #e4ebe8;display:flex;align-items:center;gap:10px}.crm-line-chat-head-avatar{width:42px;height:42px;flex:0 0 42px;border-radius:50%;background:#edf2f4;display:grid;place-items:center;overflow:hidden;font-weight:900;color:#526872}.crm-line-chat-head-avatar img{width:100%;height:100%;object-fit:cover}.crm-line-chat-head-copy{min-width:0;flex:1}.crm-line-chat-main-head h3{margin:0;font-size:17px}.crm-line-chat-main-head p{margin:2px 0 0;color:#718078;font-size:11px}.crm-line-chat-status{display:inline-flex;align-items:center;gap:5px;margin-top:4px;padding:3px 8px;border-radius:999px;background:#edf7f3;color:#0b6b55;font-size:10px;font-weight:900}.crm-line-chat-status.off{background:#f1f5f9;color:#64748b}.crm-line-chat-back{display:none;appearance:none;border:1px solid #dfe8e4;background:#fff;border-radius:11px;min-width:42px;height:42px;font-weight:900}
 .crm-line-chat-messages{flex:1;overflow:auto;padding:18px;display:flex;flex-direction:column;gap:9px}.crm-line-chat-empty{margin:auto;color:#718078;text-align:center;line-height:1.7}.crm-line-chat-row{display:flex}.crm-line-chat-row.outbound{justify-content:flex-end}.crm-line-chat-row.inbound{justify-content:flex-start}.crm-line-chat-bubble{max-width:min(72%,620px);padding:10px 12px;border-radius:16px;background:#fff;border:1px solid #dfe8e4;box-shadow:0 4px 14px rgba(20,50,40,.04);white-space:pre-wrap;word-break:break-word;line-height:1.55;font-size:14px}.crm-line-chat-row.outbound .crm-line-chat-bubble{background:#dff4e9;border-color:#c7e8da}.crm-line-chat-time{font-size:10px;color:#809087;margin-top:5px}
 .crm-line-chat-foot{padding:10px 14px;background:#fff;border-top:1px solid #e4ebe8;color:#6b7b75;font-size:11px;display:flex;justify-content:space-between;gap:10px;align-items:center}.crm-line-chat-refresh{appearance:none;border:1px solid #d8e4df;background:#fff;border-radius:10px;min-height:36px;padding:0 12px;font-weight:800;color:#315449}
 @media(max-width:767px){
@@ -18,7 +18,7 @@ export function injectOwnerLineChat(html){
   const script=String.raw`<script id="crm-owner-line-chat-script">
 (()=>{
 if(window.__crmOwnerLineChat)return;
-const $=id=>document.getElementById(id),state={customers:[],filtered:[],selected:null,loading:false};
+const $=id=>document.getElementById(id),state={customers:[],filtered:[],selected:null,loading:false,media:{}};
 function esc(v){return String(v==null?'':v).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
 function messageText(m){return m.message_text||m.text||m.message||m.body||m.content||''}
 function outbound(m){const d=String(m.direction||m.type||'').toLowerCase();return ['out','outbound','sent','send'].some(x=>d.includes(x))}
@@ -28,7 +28,7 @@ function ensure(){
  if($('crmOwnerLineChat'))return true;
  const content=$('crmOwnerWorkspaceContent');if(!content)return false;
  const section=document.createElement('section');section.id='crmOwnerLineChat';
- section.innerHTML='<div class="crm-line-chat-shell"><aside class="crm-line-chat-list-pane"><div class="crm-line-chat-list-head"><div class="crm-shell-eyebrow">LINE CHAT</div><h2>LINE</h2><p>顧客ごとのLINE履歴をチャット形式で確認します。</p><input id="crmLineChatSearch" class="crm-line-chat-search" type="search" placeholder="顧客名・Customer IDで検索"></div><div id="crmLineChatCustomers" class="crm-line-chat-customers"><div class="crm-line-chat-empty">読み込み前</div></div></aside><main class="crm-line-chat-main"><div class="crm-line-chat-main-head"><button id="crmLineChatBack" class="crm-line-chat-back" type="button">‹</button><div><h3 id="crmLineChatTitle">顧客を選択</h3><p id="crmLineChatSubtitle">LINE履歴</p></div></div><div id="crmLineChatMessages" class="crm-line-chat-messages"><div class="crm-line-chat-empty">左の顧客一覧から選択してください。</div></div><div class="crm-line-chat-foot"><span>履歴表示専用。CRMから自動送信はしません。</span><button id="crmLineChatRefresh" class="crm-line-chat-refresh" type="button">更新</button></div></main></div>';
+ section.innerHTML='<div class="crm-line-chat-shell"><aside class="crm-line-chat-list-pane"><div class="crm-line-chat-list-head"><div class="crm-shell-eyebrow">LINE CHAT</div><h2>LINE</h2><p>顧客ごとのLINE履歴をチャット形式で確認します。</p><input id="crmLineChatSearch" class="crm-line-chat-search" type="search" placeholder="顧客名・Customer IDで検索"></div><div id="crmLineChatCustomers" class="crm-line-chat-customers"><div class="crm-line-chat-empty">読み込み前</div></div></aside><main class="crm-line-chat-main"><div class="crm-line-chat-main-head"><button id="crmLineChatBack" class="crm-line-chat-back" type="button">‹</button><span id="crmLineChatHeadAvatar" class="crm-line-chat-head-avatar">L</span><div class="crm-line-chat-head-copy"><h3 id="crmLineChatTitle">顧客を選択</h3><p id="crmLineChatSubtitle">LINE履歴</p><span id="crmLineChatStatus" class="crm-line-chat-status off">未選択</span></div></div><div id="crmLineChatMessages" class="crm-line-chat-messages"><div class="crm-line-chat-empty">左の顧客一覧から選択してください。</div></div><div class="crm-line-chat-foot"><span>履歴表示専用。CRMから自動送信はしません。</span><button id="crmLineChatRefresh" class="crm-line-chat-refresh" type="button">再取得</button></div></main></div>';
  content.appendChild(section);
  $('crmLineChatSearch').addEventListener('input',filter);
  $('crmLineChatBack').onclick=()=>{shell()?.setAttribute('data-chat-open','0')};
@@ -57,16 +57,34 @@ async function loadCustomers(force=false){
  if(state.loading&&!force)return;state.loading=true;ensure();const host=$('crmLineChatCustomers');if(host)host.innerHTML='<div class="crm-line-chat-empty">読み込み中…</div>';
  try{state.customers=(await fetchCustomers()).filter(c=>c.line_linked!==false);state.filtered=state.customers;renderCustomers()}catch(e){if(host)host.innerHTML='<div class="crm-line-chat-empty">読み込み失敗<br>'+esc(e.message||e)+'</div>'}finally{state.loading=false}
 }
+function safeEmptyMessage(data){return data?.connected===false?'LINE連携を確認して、再取得してください。':'LINE履歴はまだありません。'}
+function friendlyHistoryError(){return 'LINE履歴を取得できませんでした。再取得してください。'}
+function renderAvatar(c,media){const host=$('crmLineChatHeadAvatar');if(!host)return;const src=media?.avatar_data_url||'';host.innerHTML=src?'<img src="'+esc(src)+'" alt="顧客プロフィール画像">':esc((c?.name||c?.line_display_name||'L').slice(0,1))}
 function renderMessages(data,c){
- const host=$('crmLineChatMessages');if(!host)return;const arr=data.messages||data.items||[];
+ const host=$('crmLineChatMessages');if(!host)return;const arr=data.messages||data.items||[],connected=data.connected!==false;
  $('crmLineChatTitle').textContent=c?.name||c?.line_display_name||'LINE';
- $('crmLineChatSubtitle').textContent=(data.connected?'LINE接続済み':'保存済み履歴')+' · '+arr.length+'件';
- if(!arr.length){host.innerHTML='<div class="crm-line-chat-empty">'+esc(data.message||'LINE履歴はまだありません。')+'</div>';return}
+ $('crmLineChatSubtitle').textContent=(connected?'LINE接続済み':'保存済み履歴')+' · '+arr.length+'件';
+ const status=$('crmLineChatStatus');if(status){status.textContent=connected?'連携正常':'要確認';status.classList.toggle('off',!connected)}
+ renderAvatar(c,state.media[c?.customer_id]||{});
+ if(!arr.length){host.innerHTML='<div class="crm-line-chat-empty">'+esc(safeEmptyMessage(data))+'</div>';return}
  host.innerHTML=arr.map(m=>'<div class="crm-line-chat-row '+(outbound(m)?'outbound':'inbound')+'"><div class="crm-line-chat-bubble">'+esc(messageText(m)||'（テキストなし）')+'<div class="crm-line-chat-time">'+esc(time(m))+'</div></div></div>').join('');host.scrollTop=host.scrollHeight;
 }
 async function openConversation(id,refresh=false){
- ensure();const c=state.customers.find(x=>String(x.customer_id)===String(id))||{customer_id:id,name:id};state.selected=c;renderCustomers();shell()?.setAttribute('data-chat-open','1');$('crmLineChatTitle').textContent=c.name||c.line_display_name||'LINE';$('crmLineChatMessages').innerHTML='<div class="crm-line-chat-empty">履歴を読み込み中…</div>';
- try{const r=await fetch('/api/customers/'+encodeURIComponent(id)+'/line-history'+(refresh?'?refresh=1':''),{credentials:'same-origin',cache:'no-store'}),j=await r.json().catch(()=>({}));if(!r.ok||j.ok===false)throw Error(j.error||j.message||'LINE履歴を取得できません');renderMessages(j,c)}catch(e){$('crmLineChatMessages').innerHTML='<div class="crm-line-chat-empty">読み込み失敗<br>'+esc(e.message||e)+'</div>'}
+ ensure();const c=state.customers.find(x=>String(x.customer_id)===String(id))||{customer_id:id,name:id};state.selected=c;renderCustomers();shell()?.setAttribute('data-chat-open','1');$('crmLineChatTitle').textContent=c.name||c.line_display_name||'LINE';$('crmLineChatMessages').innerHTML='<div class="crm-line-chat-empty">履歴を読み込み中…</div>';const status=$('crmLineChatStatus');if(status){status.textContent='取得中';status.classList.add('off')}
+ try{
+  const [historyRes,mediaRes]=await Promise.all([
+   fetch('/api/customers/'+encodeURIComponent(id)+'/line-history'+(refresh?'?refresh=1':''),{credentials:'same-origin',cache:'no-store'}),
+   fetch('/api/customer360/media/'+encodeURIComponent(id),{credentials:'same-origin',cache:'no-store'}).catch(()=>null)
+  ]);
+  const j=await historyRes.json().catch(()=>({}));
+  if(mediaRes?.ok){const mj=await mediaRes.json().catch(()=>({}));state.media[id]=mj.media||{}}
+  if(!historyRes.ok||j.ok===false)throw Error(j.error||j.message||'line_history_unavailable');
+  renderMessages(j,c)
+ }catch(e){
+  console.warn('CRM_LINE_HISTORY_READ_FAILED');
+  if(status){status.textContent='要確認';status.classList.add('off')}
+  $('crmLineChatMessages').innerHTML='<div class="crm-line-chat-empty">'+friendlyHistoryError()+'</div>'
+ }
 }
 async function open(){let tries=0;while(!ensure()&&tries++<40)await new Promise(r=>setTimeout(r,25));if(!state.customers.length)await loadCustomers();return true}
 window.__crmOwnerLineChat={open,loadCustomers,openConversation,getState:()=>({...state})};
