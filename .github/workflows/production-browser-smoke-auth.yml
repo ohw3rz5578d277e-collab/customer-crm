@@ -252,9 +252,11 @@ jobs:
             console.log(label+': DETAIL_API_STATUS='+detailApiStatus);
             console.log(label+': DETAIL_API_BROWSER_COOKIE='+(detailApiBrowserCookie?'YES':'NO'));
             console.log(label+': DETAIL_API_HAS_PROFILE='+(detailApiHasProfile?'YES':'NO'));
-            await page.getByRole('heading',{name:'顧客プロフィール'}).waitFor({timeout:15000});
+            const profileRoot=page.locator('#crmMktDetail .crm-pe').first();
+            await profileRoot.getByRole('heading',{name:'顧客プロフィール'}).waitFor({timeout:15000});
+            console.log(label+': PROFILE_EXTENSION_RENDERED=PASS');
             for(const section of ['基本情報','家族','撮影履歴','売上','集客・紹介','満足度・許可','LINEから見つかった情報','備考・対応メモ']){
-              if(!(await page.getByText(section,{exact:false}).first().isVisible()))throw new Error(label+': DETAIL_SECTION_MISSING:'+section);
+              if(!(await profileRoot.getByText(section,{exact:false}).first().isVisible()))throw new Error(label+': DETAIL_SECTION_MISSING:'+section);
             }
             if(customerDetailGets<1)throw new Error(label+': CUSTOMER_DETAIL_GET_MISSING');
             await page.locator('.crm-detail-close').click();
