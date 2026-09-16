@@ -34,6 +34,7 @@ const server=http.createServer((req,res)=>{
  if(u.pathname==='/api/customer360/approach-queue')return send(res,200,{ok:true,items:[],summary:{total:0,ready:0,review_required:0,opted_out:0}});
  if(u.pathname==='/api/customers/26000101/line-history')return send(res,200,{ok:true,connected:true,count:2,messages:[{direction:'inbound',message_text:'七五三の撮影について相談したいです',sent_at:'2026-09-14 10:00'},{direction:'outbound',message_text:'ありがとうございます。候補日をご案内します。',sent_at:'2026-09-14 10:03'}]});
  if(u.pathname==='/api/customers/26000102/line-history')return send(res,200,{ok:true,connected:true,count:0,messages:[]});
+ if(u.pathname.startsWith('/api/customer360/media/')){const id=decodeURIComponent(u.pathname.split('/').pop());return send(res,200,{ok:true,media:{customer_id:id,avatar_data_url:'',avatar_updated_at:'',latest_delivery_link:null,delivery_links:[]}})}
  if(u.pathname.startsWith('/api/customer360/customer/')){const id=decodeURIComponent(u.pathname.split('/').pop());const c=customers.find(x=>x.customer_id===id)||customers[0];return send(res,200,{ok:true,customer:{...c,address:{},family:[],opportunities:[],reservations:[],line_history:[],marketing_history:[],consent:{},raw:{}}})}
  return send(res,404,{ok:false,error:'not_found'});
 });
@@ -61,6 +62,19 @@ try{
   assert.equal(await page.locator('#crmCsvImportOpenInline').isVisible(),true,viewport.width+': inline CSV import action missing from customer toolbar');
   const overflow=await page.evaluate(()=>Math.max(document.documentElement.scrollWidth-document.documentElement.clientWidth,document.body.scrollWidth-document.body.clientWidth));
   assert.ok(overflow<=1,viewport.width+': horizontal overflow '+overflow);
+  const fontFamily=(await page.evaluate(()=>getComputedStyle(document.body).fontFamily)).toLowerCase();
+  assert.equal(/serif|mincho/.test(fontFamily),false,viewport.width+': serif/mincho font leaked '+fontFamily);
+  assert.ok(fontFamily.includes('sans-serif'),viewport.width+': canonical sans stack missing '+fontFamily);
+  const firstCustomer=page.locator('#crmMktList [data-open],#crmMktList [data-direct-customer]').first();
+  await firstCustomer.click();
+  await page.locator('#crmMktDetail.open').waitFor();
+  await page.locator('#crmCustomerAvatarHero').waitFor();
+  assert.equal(await page.locator('#crmCustomerAvatarHero #crmCmHeroChoose').isVisible(),true,viewport.width+': profile image change action missing');
+  await page.locator('#crmCustomerMediaCard summary').click();
+  assert.equal(await page.locator('#crmCmChoose').isVisible(),true,viewport.width+': library avatar control missing');
+  assert.equal(await page.locator('#crmCmCamera').isVisible(),true,viewport.width+': camera avatar control missing');
+  await page.locator('.crm-detail-close').click();
+  await page.locator('#crmMktDetail.open').waitFor({state:'hidden'});
   if(mobile){
    assert.equal(await page.locator('#crmOwnerDesktopSidebar').isVisible(),false,viewport.width+': desktop sidebar leaked to mobile');
    assert.equal(await page.locator('#crmOwnerMobileNav').isVisible(),true,viewport.width+': canonical mobile nav missing');
@@ -100,6 +114,15 @@ try{
   await page.waitForFunction(()=>document.querySelectorAll('#crmLineChatMessages .crm-line-chat-row').length===2);
   assert.ok((await page.locator('#crmLineChatMessages').innerText()).includes('七五三の撮影について相談したいです'),viewport.width+': inbound chat text missing');
   assert.ok((await page.locator('#crmLineChatMessages').innerText()).includes('候補日をご案内します'),viewport.width+': outbound chat text missing');
+  assert.equal((await page.locator('#crmLineChatStatus').textContent()).trim(),'連携正常',viewport.width+': LINE connected status missing');
+  await page.evaluate(()=>window.__crmOwnerLineChat.openConversation('26000102'));
+  await page.waitForFunction(()=>document.getElementById('crmLineChatMessages')?.innerText.includes('LINE履歴はまだありません。'));
+  await page.evaluate(()=>window.__crmOwnerLineChat.openConversation('26999999'));
+  await page.waitForFunction(()=>document.getElementById('crmLineChatMessages')?.innerText.includes('LINE履歴を取得できませんでした。再取得してください。'));
+  const lineFailureText=await page.locator('#crmLineChatMessages').innerText();
+  assert.equal(/not_found|http\s*404|line_history_unavailable/i.test(lineFailureText),false,viewport.width+': raw LINE error exposed '+lineFailureText);
+  await page.evaluate(()=>window.__crmOwnerLineChat.openConversation('26000101'));
+  await page.waitForFunction(()=>document.querySelectorAll('#crmLineChatMessages .crm-line-chat-row').length===2);
   if(mobile){
    const navState=await page.evaluate(()=>({
     labels:(document.getElementById('crmOwnerMobileNav')?.innerText||'').replace(/\\s+/g,''),
@@ -120,6 +143,10 @@ try{
  console.log('TODAY_VISIBLE_UI=0');
  console.log('ANALYSIS_TAB=PASS');
  console.log('LINE_CHAT_HISTORY=PASS');
+ console.log('LINE_CHAT_EMPTY_STATE=PASS');
+ console.log('LINE_CHAT_FRIENDLY_ERROR=PASS');
+ console.log('CRM_GOTHIC_FONT=PASS');
+ console.log('CUSTOMER_AVATAR_UI=PASS');
  console.log('LEGACY_LINE_OPS_VISIBLE=0');
  console.log('DESKTOP_SMARTPHONE_COLLAPSE=0');
  console.log('LEGACY_MOBILE_NAV_OVERRIDE=0');
