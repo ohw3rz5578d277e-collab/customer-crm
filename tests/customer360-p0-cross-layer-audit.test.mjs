@@ -37,7 +37,11 @@ assert.ok(!edit.includes("addEventListener('resize'"),'handoff must not add resi
 
 assert.ok(profile.includes("CRM_CUSTOMER360_WRITE_ENABLED!=='1'"),'existing Customer360 write gate missing');
 assert.ok(profile.includes("if('customer_id'in body)return json({ok:false,error:'customer_id_readonly'}"),'customer_id readonly contract missing');
-assert.ok(media.includes('CRM_CUSTOMER360_WRITE_ENABLED'),'media write gate missing');
+assert.ok(media.includes('CRM_CUSTOMER360_WRITE_ENABLED'),'legacy media write fallback gate missing');
+assert.ok(media.includes('CRM_CUSTOMER360_MEDIA_WRITE_ENABLED'),'scoped avatar write gate missing');
+assert.ok(media.includes("customer360_media_write_disabled"),'scoped avatar write disabled contract missing');
+assert.ok(mediaUi.includes('[data-open],[data-direct-customer]'),'media UI direct fallback opener missing');
+assert.ok(mediaUi.includes('crmCustomerAvatarHero'),'profile image hero missing');
 assert.ok(mediaUi.includes('window.__crmCustomerMediaUi20260908'),'media UI singleton missing');
 assert.ok(!mediaUi.includes('document.documentElement'),'media UI must not observe document root');
 
