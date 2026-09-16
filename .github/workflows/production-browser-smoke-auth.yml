@@ -224,10 +224,18 @@ jobs:
             if(await page.locator('#crmTodayDashboard').isVisible().catch(()=>false))throw new Error(label+': LEGACY_TODAY_VISIBLE');
 
             const first=page.locator('#crmMktList [data-open],#crmMktList [data-direct-customer]').first();
-            const id=(await first.getAttribute('data-open'))||(await first.getAttribute('data-direct-customer'))||'';
-            if(!/^\d{8}$/.test(id))throw new Error(label+': NON_CANONICAL_VISIBLE_CUSTOMER_ID:'+id);
+            const dataOpen=await first.getAttribute('data-open');
+            const dataDirect=await first.getAttribute('data-direct-customer');
+            console.log(label+': FIRST_CUSTOMER_HAS_DATA_OPEN='+(dataOpen?'YES':'NO'));
+            console.log(label+': FIRST_CUSTOMER_HAS_DATA_DIRECT='+(dataDirect?'YES':'NO'));
+            const id=dataOpen||dataDirect||'';
+            if(!/^\d{8}$/.test(id))throw new Error(label+': NON_CANONICAL_VISIBLE_CUSTOMER_ID');
             await first.click();
             await page.locator('#crmMktDetail.open').waitFor({timeout:15000});
+            console.log(label+': DETAIL_PANEL_OPEN=PASS');
+            await page.waitForTimeout(1200);
+            console.log(label+': PROFILE_EXTENSION_PRESENT='+((await page.locator('#crmMktDetail .crm-pe').count())>0?'YES':'NO'));
+            console.log(label+': CUSTOMER_DETAIL_GET_COUNT='+customerDetailGets);
             await page.getByRole('heading',{name:'顧客プロフィール'}).waitFor({timeout:15000});
             for(const section of ['基本情報','家族','撮影履歴','売上','集客・紹介','満足度・許可','LINEから見つかった情報','備考・対応メモ']){
               if(!(await page.getByText(section,{exact:false}).first().isVisible()))throw new Error(label+': DETAIL_SECTION_MISSING:'+section);
