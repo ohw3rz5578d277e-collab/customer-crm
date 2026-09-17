@@ -42,7 +42,7 @@ assert.ok(media.includes('CRM_CUSTOMER360_MEDIA_WRITE_ENABLED'),'scoped avatar w
 assert.ok(media.includes("customer360_media_write_disabled"),'scoped avatar write disabled contract missing');
 assert.ok(mediaUi.includes('[data-open],[data-direct-customer]'),'media UI direct fallback opener missing');
 assert.ok(mediaUi.includes('crmCustomerAvatarHero'),'profile image hero missing');
-assert.ok(mediaUi.includes('window.__crmCustomerMediaUi20260908'),'media UI singleton missing');
+assert.ok(mediaUi.includes('window.__crmCustomerMediaUi20260917'),'media UI singleton missing');
 assert.ok(!mediaUi.includes('document.documentElement'),'media UI must not observe document root');
 
 console.log('CUSTOMER360_OWNER_LOGOUT_POST_ROUTE=PASS');
