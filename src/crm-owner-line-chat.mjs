@@ -7,7 +7,7 @@ export function injectOwnerLineChat(html){
 .crm-line-chat-search{margin-top:12px;width:100%;min-height:44px;border:1px solid #d8e4df;border-radius:12px;padding:0 12px;font-size:16px;background:#fff;box-sizing:border-box;outline:none}.crm-line-chat-search:focus{border-color:#087a5b;box-shadow:0 0 0 3px rgba(8,122,91,.10)}
 .crm-line-chat-customers{overflow:auto;padding:8px;display:grid;gap:4px}.crm-line-chat-customer{appearance:none;border:0;background:transparent;width:100%;padding:11px;border-radius:13px;text-align:left;cursor:pointer;display:grid;grid-template-columns:42px minmax(0,1fr);gap:10px;align-items:center}.crm-line-chat-customer:hover,.crm-line-chat-customer.active{background:#eaf6f1}.crm-line-chat-avatar{width:42px;height:42px;border-radius:50%;display:grid;place-items:center;background:#dcefe7;color:#086348;font-weight:900}.crm-line-chat-name{font-weight:900;color:#19332a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.crm-line-chat-meta{font-size:11px;color:#718078;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .crm-line-chat-main{min-width:0;display:flex;flex-direction:column;background:#f7faf9}.crm-line-chat-main-head{min-height:72px;box-sizing:border-box;padding:11px 16px;background:#fff;border-bottom:1px solid #e4ebe8;display:flex;align-items:center;gap:10px}.crm-line-chat-head-avatar{width:42px;height:42px;flex:0 0 42px;border-radius:50%;background:#edf2f4;display:grid;place-items:center;overflow:hidden;font-weight:900;color:#526872}.crm-line-chat-head-avatar img{width:100%;height:100%;object-fit:cover}.crm-line-chat-head-copy{min-width:0;flex:1}.crm-line-chat-main-head h3{margin:0;font-size:17px}.crm-line-chat-main-head p{margin:2px 0 0;color:#718078;font-size:11px}.crm-line-chat-status{display:inline-flex;align-items:center;gap:5px;margin-top:4px;padding:3px 8px;border-radius:999px;background:#edf7f3;color:#0b6b55;font-size:10px;font-weight:900}.crm-line-chat-status.off{background:#f1f5f9;color:#64748b}.crm-line-chat-back{display:none;appearance:none;border:1px solid #dfe8e4;background:#fff;border-radius:11px;min-width:42px;height:42px;font-weight:900}
-.crm-line-chat-messages{flex:1;overflow:auto;padding:18px;display:flex;flex-direction:column;gap:9px}.crm-line-chat-empty{margin:auto;color:#718078;text-align:center;line-height:1.7}.crm-line-chat-row{display:flex}.crm-line-chat-row.outbound{justify-content:flex-end}.crm-line-chat-row.inbound{justify-content:flex-start}.crm-line-chat-bubble{max-width:min(72%,620px);padding:10px 12px;border-radius:16px;background:#fff;border:1px solid #dfe8e4;box-shadow:0 4px 14px rgba(20,50,40,.04);white-space:pre-wrap;word-break:break-word;line-height:1.55;font-size:14px}.crm-line-chat-row.outbound .crm-line-chat-bubble{background:#dff4e9;border-color:#c7e8da}.crm-line-chat-time{font-size:10px;color:#809087;margin-top:5px}
+.crm-line-chat-messages{flex:1;overflow:auto;padding:18px;display:flex;flex-direction:column;gap:9px}.crm-line-chat-empty{margin:auto;color:#718078;text-align:center;line-height:1.7;max-width:520px;padding:18px}.crm-line-chat-row{display:flex}.crm-line-chat-row.outbound{justify-content:flex-end}.crm-line-chat-row.inbound{justify-content:flex-start}.crm-line-chat-bubble{max-width:min(72%,620px);padding:10px 12px;border-radius:16px;background:#fff;border:1px solid #dfe8e4;box-shadow:0 4px 14px rgba(20,50,40,.04);white-space:pre-wrap;word-break:break-word;line-height:1.55;font-size:14px}.crm-line-chat-row.outbound .crm-line-chat-bubble{background:#dff4e9;border-color:#c7e8da}.crm-line-chat-time{font-size:10px;color:#809087;margin-top:5px}
 .crm-line-chat-foot{padding:10px 14px;background:#fff;border-top:1px solid #e4ebe8;color:#6b7b75;font-size:11px;display:flex;justify-content:space-between;gap:10px;align-items:center}.crm-line-chat-refresh{appearance:none;border:1px solid #d8e4df;background:#fff;border-radius:10px;min-height:36px;padding:0 12px;font-weight:800;color:#315449}
 @media(max-width:767px){
  .crm-line-chat-shell{height:calc(100vh - 164px);min-height:500px;display:block;border-radius:16px}
@@ -22,7 +22,7 @@ const $=id=>document.getElementById(id),state={customers:[],filtered:[],selected
 function esc(v){return String(v==null?'':v).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
 function messageText(m){return m.message_text||m.text||m.message||m.body||m.content||''}
 function outbound(m){const d=String(m.direction||m.type||'').toLowerCase();return ['out','outbound','sent','send'].some(x=>d.includes(x))}
-function time(m){return m.sent_at||m.created_at||m.timestamp||m.occurred_at||''}
+function time(m){return m.sent_at||m.event_timestamp||m.created_at||m.timestamp||m.occurred_at||''}
 function shell(){return $('crmOwnerLineChat')?.querySelector('.crm-line-chat-shell')}
 function ensure(){
  if($('crmOwnerLineChat'))return true;
@@ -57,14 +57,25 @@ async function loadCustomers(force=false){
  if(state.loading&&!force)return;state.loading=true;ensure();const host=$('crmLineChatCustomers');if(host)host.innerHTML='<div class="crm-line-chat-empty">読み込み中…</div>';
  try{state.customers=(await fetchCustomers()).filter(c=>c.line_linked!==false);state.filtered=state.customers;renderCustomers()}catch(e){if(host)host.innerHTML='<div class="crm-line-chat-empty">読み込み失敗<br>'+esc(e.message||e)+'</div>'}finally{state.loading=false}
 }
-function safeEmptyMessage(data){return data?.connected===false?'LINE連携を確認して、再取得してください。':'LINE履歴はまだありません。'}
+function safeEmptyMessage(data){
+ if(data?.connected===false)return 'LINE連携を確認して、再取得してください。';
+ if(data?.contact_found===false||data?.line_identity_found===false)return 'この顧客のLINE紐付けを確認してください。';
+ return 'LINE履歴はまだありません。保存開始前のLINE公式アカウントのトークは遡って取得できません。';
+}
 function friendlyHistoryError(){return 'LINE履歴を取得できませんでした。再取得してください。'}
 function renderAvatar(c,media){const host=$('crmLineChatHeadAvatar');if(!host)return;const src=media?.avatar_data_url||'';host.innerHTML=src?'<img src="'+esc(src)+'" alt="顧客プロフィール画像">':esc((c?.name||c?.line_display_name||'L').slice(0,1))}
 function renderMessages(data,c){
- const host=$('crmLineChatMessages');if(!host)return;const arr=data.messages||data.items||[],connected=data.connected!==false;
+ const host=$('crmLineChatMessages');if(!host)return;
+ const arr=data.messages||data.items||[],connected=data.connected!==false;
+ const identityConfirmed=data.contact_found===true||data.line_identity_found===true||arr.length>0;
+ const hasHistory=arr.length>0;
  $('crmLineChatTitle').textContent=c?.name||c?.line_display_name||'LINE';
- $('crmLineChatSubtitle').textContent=(connected?'LINE接続済み':'保存済み履歴')+' · '+arr.length+'件';
- const status=$('crmLineChatStatus');if(status){status.textContent=connected?'連携正常':'要確認';status.classList.toggle('off',!connected)}
+ $('crmLineChatSubtitle').textContent=(hasHistory?'LINE履歴':identityConfirmed?'LINE紐付け済み':'LINE履歴')+' · '+arr.length+'件';
+ const status=$('crmLineChatStatus');
+ if(status){
+  status.textContent=hasHistory?'連携正常':identityConfirmed?'保存履歴なし':connected?'履歴未確認':'要確認';
+  status.classList.toggle('off',!hasHistory);
+ }
  renderAvatar(c,state.media[c?.customer_id]||{});
  if(!arr.length){host.innerHTML='<div class="crm-line-chat-empty">'+esc(safeEmptyMessage(data))+'</div>';return}
  host.innerHTML=arr.map(m=>'<div class="crm-line-chat-row '+(outbound(m)?'outbound':'inbound')+'"><div class="crm-line-chat-bubble">'+esc(messageText(m)||'（テキストなし）')+'<div class="crm-line-chat-time">'+esc(time(m))+'</div></div></div>').join('');host.scrollTop=host.scrollHeight;
