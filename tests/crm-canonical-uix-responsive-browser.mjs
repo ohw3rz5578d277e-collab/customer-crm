@@ -16,7 +16,7 @@ const html=composeCustomer360AdminHtml(base);
 assert.equal(html.includes('const navObserver=new MutationObserver'),false,'canonical shell must not install a permanent document-wide nav observer');
 assert.equal(html.includes("new MutationObserver(()=>reconcileDesktopLayout()).observe(document.documentElement"),false,'legacy desktop hotfix must not install a permanent document-wide observer');
 const out='artifacts/crm-canonical-uix-responsive';fs.mkdirSync(out,{recursive:true});
-const requests=[];
+const requests=[],notFoundRequests=[];
 function send(res,status,data,type='application/json; charset=utf-8'){res.writeHead(status,{'content-type':type,'cache-control':'no-store'});res.end(type.startsWith('application/json')?JSON.stringify(data):data)}
 const server=http.createServer((req,res)=>{
  const u=new URL(req.url,'http://127.0.0.1');requests.push(req.method+' '+u.pathname+u.search);
@@ -37,6 +37,7 @@ const server=http.createServer((req,res)=>{
  if(u.pathname==='/api/customers/26999999/line-history')return send(res,200,{ok:false,error:'line_history_unavailable'});
  if(u.pathname.startsWith('/api/customer360/media/')){const id=decodeURIComponent(u.pathname.split('/').pop());return send(res,200,{ok:true,media:{customer_id:id,avatar_data_url:'',avatar_updated_at:'',latest_delivery_link:null,delivery_links:[]}})}
  if(u.pathname.startsWith('/api/customer360/customer/')){const id=decodeURIComponent(u.pathname.split('/').pop());const c=customers.find(x=>x.customer_id===id)||customers[0];return send(res,200,{ok:true,customer:{...c,address:{},family:[],opportunities:[],reservations:[],line_history:[],marketing_history:[],consent:{},raw:{}}})}
+ notFoundRequests.push(req.method+' '+u.pathname+u.search);
  return send(res,404,{ok:false,error:'not_found'});
 });
 await new Promise(r=>server.listen(0,'127.0.0.1',r));
@@ -157,7 +158,8 @@ try{
    assert.equal(navState.legacyPreempted,true,viewport.width+': legacy shell owners were not preempted before boot');
   }
   if(viewport.width===390||viewport.width===1440)await page.screenshot({path:out+'/'+viewport.width+'-canonical-line.png',fullPage:true});
-  assert.equal(errors.length,0,viewport.width+': console/page errors '+errors.join(' | '));
+  if(errors.length)console.log('HTTP_404_DIAGNOSTIC='+JSON.stringify(notFoundRequests));
+  assert.equal(errors.length,0,viewport.width+': console/page errors '+errors.join(' | ')+' / 404='+notFoundRequests.join(' | '));
   await context.close();
  }
  assert.equal(requests.some(x=>!x.startsWith('GET ')&&!x.startsWith('HEAD ')),false,'unexpected HTTP write '+requests.join(' | '));
