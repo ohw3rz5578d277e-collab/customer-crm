@@ -67,17 +67,29 @@ try{
   assert.equal(fontTokens.includes('serif')||fontTokens.some(x=>x.includes('mincho')),false,viewport.width+': serif/mincho font leaked '+fontFamily);
   assert.ok(fontTokens.includes('sans-serif'),viewport.width+': canonical sans stack missing '+fontFamily);
   const firstCustomer=page.locator('#crmMktList [data-open],#crmMktList [data-direct-customer]').first();
+  const firstCustomerId=(await firstCustomer.getAttribute('data-open'))||(await firstCustomer.getAttribute('data-direct-customer'))||'';
   await firstCustomer.click();
   await page.locator('#crmMktDetail.open').waitFor();
   await page.waitForTimeout(300);
   const mediaDiagnostic=await page.evaluate(()=>({
     media_flag:!!window.__crmCustomerMediaUi20260908,
-    media_script:!!document.getElementById('crm-customer360-media-ui-script'),
+    media_script:!!document.getElementById('crm-customer360-media-ui-20260908-01'),
     detail_open:document.getElementById('crmMktDetail')?.classList.contains('open')||false,
     detail_has_customer_id:/Customer ID\s+\d{8}/.test(document.getElementById('crmMktDetailBody')?.innerText||''),
     hero:!!document.getElementById('crmCustomerAvatarHero')
   }));
-  console.log('CRM_MEDIA_UI_DIAGNOSTIC='+JSON.stringify({...mediaDiagnostic,media_gets:requests.filter(x=>x.includes('/api/customer360/media/')).length,page_errors:errors.length}));
+  const naturalHero=mediaDiagnostic.hero;
+  let manualDiagnostic=null;
+  if(!naturalHero&&/^\d{8}$/.test(firstCustomerId)){
+    await page.evaluate(id=>document.dispatchEvent(new CustomEvent('crm:customer-detail-opened',{detail:{customer_id:id}})),firstCustomerId);
+    await page.waitForTimeout(300);
+    manualDiagnostic={
+      hero:await page.locator('#crmCustomerAvatarHero').count()>0,
+      media_gets:requests.filter(x=>x.includes('/api/customer360/media/')).length
+    };
+  }
+  console.log('CRM_MEDIA_UI_DIAGNOSTIC='+JSON.stringify({...mediaDiagnostic,media_gets:requests.filter(x=>x.includes('/api/customer360/media/')).length,page_errors:errors.length,manual_event:manualDiagnostic}));
+  assert.equal(naturalHero,true,viewport.width+': avatar hero did not render from the natural detail-open path');
   await page.locator('#crmCustomerAvatarHero').waitFor();
   assert.equal(await page.locator('#crmCustomerAvatarHero #crmCmHeroChoose').isVisible(),true,viewport.width+': profile image change action missing');
   await page.locator('#crmCustomerMediaCard summary').click();
