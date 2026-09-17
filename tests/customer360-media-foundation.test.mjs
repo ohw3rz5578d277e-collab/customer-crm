@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import assert from 'node:assert/strict';
+import { injectCustomer360MediaUi } from '../src/crm-customer360-media-ui.mjs';
 
 const migration=fs.readFileSync('migrations_managed/20260908_customer_media_delivery_links.sql','utf8');
 const api=fs.readFileSync('src/crm-customer360-media.mjs','utf8');
@@ -33,6 +34,9 @@ assert.match(ui,/crmCmDeleteAvatar/);
 assert.match(ui,/\[data-open\],\[data-direct-customer\]/);
 assert.match(ui,/toDataURL\('image\/jpeg',0\.72\)/);
 assert.match(ui,/h\.querySelector\('#crmCustomerMediaCard'\)\?\.remove\(\)/);
+const injectedMediaHtml=injectCustomer360MediaUi('<html><head></head><body></body></html>');
+assert.ok(injectedMediaHtml.includes('/^\\d{8}$/'),'rendered media script must preserve Customer ID digit regex');
+assert.equal(injectedMediaHtml.includes('/^d{8}$/'),false,'rendered media script must not lose regex backslash');
 assert.match(entry,/handleCustomer360MediaRequest/);
 assert.match(entry,/injectCustomer360MediaUi/);
 assert.match(entry,/customer360MediaUiHealth/);
