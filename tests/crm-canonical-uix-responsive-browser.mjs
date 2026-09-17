@@ -69,6 +69,15 @@ try{
   const firstCustomer=page.locator('#crmMktList [data-open],#crmMktList [data-direct-customer]').first();
   await firstCustomer.click();
   await page.locator('#crmMktDetail.open').waitFor();
+  await page.waitForTimeout(300);
+  const mediaDiagnostic=await page.evaluate(()=>({
+    media_flag:!!window.__crmCustomerMediaUi20260908,
+    media_script:!!document.getElementById('crm-customer360-media-ui-script'),
+    detail_open:document.getElementById('crmMktDetail')?.classList.contains('open')||false,
+    detail_has_customer_id:/Customer ID\s+\d{8}/.test(document.getElementById('crmMktDetailBody')?.innerText||''),
+    hero:!!document.getElementById('crmCustomerAvatarHero')
+  }));
+  console.log('CRM_MEDIA_UI_DIAGNOSTIC='+JSON.stringify({...mediaDiagnostic,media_gets:requests.filter(x=>x.includes('/api/customer360/media/')).length,page_errors:errors.length}));
   await page.locator('#crmCustomerAvatarHero').waitFor();
   assert.equal(await page.locator('#crmCustomerAvatarHero #crmCmHeroChoose').isVisible(),true,viewport.width+': profile image change action missing');
   await page.locator('#crmCustomerMediaCard summary').click();
