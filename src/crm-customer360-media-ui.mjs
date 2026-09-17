@@ -1,5 +1,5 @@
-const BUILD='crm-customer360-media-ui-20260908-01';
-const MARKER='crm-customer360-media-ui-20260908-01';
+const BUILD='crm-customer360-media-ui-20260917-02';
+const MARKER='crm-customer360-media-ui-20260917-02';
 
 const STYLE=`<style id="${MARKER}-style">
 #crmCustomerMediaCard{margin:14px 0;border:1px solid #e5e7eb;border-radius:18px;background:#fff;overflow:hidden}
@@ -18,7 +18,7 @@ const STYLE=`<style id="${MARKER}-style">
 </style>`;
 
 const SCRIPT=`<script id="${MARKER}">(function(){
-if(window.__crmCustomerMediaUi20260908)return;window.__crmCustomerMediaUi20260908=1;
+if(window.__crmCustomerMediaUi20260917)return;window.__crmCustomerMediaUi20260917=1;
 var currentId='',selectedAvatar='';
 function text(v){return v==null?'':String(v).trim()}
 function esc(v){return text(v).replace(/[&<>\"']/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#39;'}[c]})}
