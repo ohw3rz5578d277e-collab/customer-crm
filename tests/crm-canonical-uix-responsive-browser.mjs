@@ -72,8 +72,8 @@ try{
   await page.locator('#crmMktDetail.open').waitFor();
   await page.waitForTimeout(300);
   const mediaDiagnostic=await page.evaluate(()=>({
-    media_flag:!!window.__crmCustomerMediaUi20260908,
-    media_script:!!document.getElementById('crm-customer360-media-ui-20260908-01'),
+    media_flag:!!window.__crmCustomerMediaUi20260917,
+    media_script:!!document.getElementById('crm-customer360-media-ui-20260917-02'),
     detail_open:document.getElementById('crmMktDetail')?.classList.contains('open')||false,
     detail_has_customer_id:/Customer ID\s+\d{8}/.test(document.getElementById('crmMktDetailBody')?.innerText||''),
     hero:!!document.getElementById('crmCustomerAvatarHero')
