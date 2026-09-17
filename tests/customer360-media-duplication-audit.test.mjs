@@ -11,7 +11,7 @@ assert.equal(occurrences(entry,"./crm-customer360-media-ui.mjs"),1);
 assert.equal(occurrences(entry,"./crm-customer360-media.mjs"),1);
 assert.equal(occurrences(entry,'injectCustomer360MediaUi'),2); // import + single composition
 assert.equal(occurrences(entry,'handleCustomer360MediaRequest'),2); // import + single routing call
-assert.match(ui,/window\.__crmCustomerMediaUi20260908/);
+assert.match(ui,/window\.__crmCustomerMediaUi20260917/);
 assert.match(ui,/h\.querySelector\('#crmCustomerMediaCard'\)\?\.remove\(\)/);
 assert.doesNotMatch(ui,/document\.documentElement/);
 assert.doesNotMatch(ui,/addEventListener\(['\"]resize/);
