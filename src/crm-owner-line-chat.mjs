@@ -60,7 +60,7 @@ async function loadCustomers(force=false){
 function safeEmptyMessage(data){
  if(data?.connected===false)return 'LINE連携を確認して、再取得してください。';
  if(data?.contact_found===false||data?.line_identity_found===false)return 'この顧客のLINE紐付けを確認してください。';
- return '保存済みのLINE履歴はありません。LINE公式アカウントの保存開始前のトークは遡って取得できません。';
+ return 'LINE履歴はまだありません。保存開始前のLINE公式アカウントのトークは遡って取得できません。';
 }
 function friendlyHistoryError(){return 'LINE履歴を取得できませんでした。再取得してください。'}
 function renderAvatar(c,media){const host=$('crmLineChatHeadAvatar');if(!host)return;const src=media?.avatar_data_url||'';host.innerHTML=src?'<img src="'+esc(src)+'" alt="顧客プロフィール画像">':esc((c?.name||c?.line_display_name||'L').slice(0,1))}
@@ -73,7 +73,7 @@ function renderMessages(data,c){
  $('crmLineChatSubtitle').textContent=(hasHistory?'LINE履歴':identityConfirmed?'LINE紐付け済み':'LINE履歴')+' · '+arr.length+'件';
  const status=$('crmLineChatStatus');
  if(status){
-  status.textContent=hasHistory?'履歴取得済み':identityConfirmed?'保存履歴なし':connected?'履歴未確認':'要確認';
+  status.textContent=hasHistory?'連携正常':identityConfirmed?'保存履歴なし':connected?'履歴未確認':'要確認';
   status.classList.toggle('off',!hasHistory);
  }
  renderAvatar(c,state.media[c?.customer_id]||{});
