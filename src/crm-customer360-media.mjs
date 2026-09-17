@@ -7,6 +7,7 @@ function accessEmail(request){return text(request.headers.get('cf-access-authent
 function bearer(request){const h=text(request.headers.get('authorization'));return /^Bearer\s+/i.test(h)?h.replace(/^Bearer\s+/i,'').trim():''}
 function internalAllowed(request,env){const supplied=text(request.headers.get('x-internal-token')||bearer(request)),expected=text(env?.CRM_INTERNAL_TOKEN);return !!expected&&supplied===expected}
 function ownerAllowed(request,env){return env?.CRM_LOCAL_TEST_AUTH==='1'||!!accessEmail(request)}
+function avatarWriteAllowed(env){return env?.CRM_CUSTOMER360_MEDIA_WRITE_ENABLED==='1'||env?.CRM_CUSTOMER360_WRITE_ENABLED==='1'}
 async function first(env,sql,params=[]){let q=env.DB.prepare(sql);if(params.length)q=q.bind(...params);return (await q.first())||null}
 async function all(env,sql,params=[]){let q=env.DB.prepare(sql);if(params.length)q=q.bind(...params);const r=await q.all();return r.results||[]}
 async function tableExists(env,name){return !!(await first(env,"SELECT name FROM sqlite_master WHERE type='table' AND name=? LIMIT 1",[name]))}
@@ -27,7 +28,7 @@ async function readMedia(env,id){
   return{customer_id:id,avatar_data_url,avatar_updated_at,latest_delivery_link:delivery_links[0]||null,delivery_links};
 }
 async function patchAvatar(request,env,id){
-  if(env?.CRM_CUSTOMER360_WRITE_ENABLED!=='1')return json({ok:false,error:'customer360_write_disabled'},403);
+  if(!avatarWriteAllowed(env))return json({ok:false,error:'customer360_media_write_disabled'},403);
   if(!ownerAllowed(request,env))return json({ok:false,error:'owner_auth_required'},401);
   if(!(await exactCustomer(env,id)))return json({ok:false,error:'customer_not_found'},404);
   if(!(await tableExists(env,'customer_profile_media')))return json({ok:false,error:'customer_media_schema_not_applied'},409);
@@ -63,6 +64,7 @@ export async function handleCustomer360MediaRequest(request,env){
 export function customer360MediaHealth(){return{
   customer360_media_api:true,
   customer360_avatar_manual_upload:true,
+  customer360_avatar_scoped_write_gate:true,
   customer360_avatar_original_storage:false,
   customer360_avatar_max_chars:MAX_AVATAR_CHARS,
   customer360_delivery_provider:'amazon_photos',

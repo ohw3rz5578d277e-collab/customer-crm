@@ -106,6 +106,11 @@ ok('production entry composes the real Customer360 profile feature',()=>{
   assert.ok(html.includes('crm-customer360-profile-style'));
 });
 
+ok('Owner UI never exposes raw Customer360 write gate errors',()=>{
+  assert.ok(!client.includes('LINE情報を確認できませんでした: '));
+  assert.ok(client.includes('LINEからの情報抽出は現在利用できません。LINE履歴はLINEタブで確認できます。'));
+});
+
 ok('LINE send remains absent',()=>{
   assert.ok(!runtime.includes('LINE_SERVICE.fetch'));
   assert.ok(!lineRuntime.includes('LINE_SERVICE.fetch'));
@@ -113,5 +118,5 @@ ok('LINE send remains absent',()=>{
   assert.ok(!lineRuntime.includes('/multicast'));
 });
 
-console.log(`RESULT ${pass}/13 PASS`);
+console.log(`RESULT ${pass}/14 PASS`);
 if(process.exitCode)process.exit(process.exitCode);

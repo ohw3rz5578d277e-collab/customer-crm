@@ -43,6 +43,7 @@ assert.ok(workflow.includes('PRODUCTION_MIGRATION_APPLY=0'),'preflight migration
 assert.ok(workflow.includes('WORKER_DEPLOY=0'),'preflight deploy safety declaration missing');
 assert.ok(!/\npush:\s*(?:\n|$)/.test(workflow),'push trigger must not be enabled');
 assert.ok(!workflow.includes('CRM_CUSTOMER360_WRITE_ENABLED=1'),'release workflow must not enable Customer360 writes');
+assert.ok(!workflow.includes('CRM_CUSTOMER360_MEDIA_WRITE_ENABLED=1'),'release workflow must not enable avatar writes without Owner activation');
 assert.ok(!/migrations_managed\/\*\.sql/.test(workflow),'migration allowlist must remain explicit, not globbed');
 
 for(const [name,migration] of [['family',familyMigration],['profile',profileMigration],['media',mediaMigration]]){

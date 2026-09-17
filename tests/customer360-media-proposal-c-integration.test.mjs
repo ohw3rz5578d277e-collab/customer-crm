@@ -22,7 +22,7 @@ assert.equal(occurrences(shell,"./crm-analysis-approach-proposal-c.mjs"),1,'Prop
 assert.match(proposal,/automatic_line_send:false/,'Proposal C must keep automatic LINE send disabled');
 assert.match(proposal,/owner_review_required:true/,'Proposal C must require Owner review');
 assert.doesNotMatch(proposal,/MutationObserver\(/,'Proposal C must not introduce MutationObserver');
-assert.match(mediaUi,/window\.__crmCustomerMediaUi20260908/,'media UI single-owner marker missing');
+assert.match(mediaUi,/window\.__crmCustomerMediaUi20260917/,'media UI single-owner marker missing');
 assert.doesNotMatch(mediaUi,/document\.documentElement/,'media UI must not observe document root');
 assert.match(editHandoff,/customer360_exact_edit_handoff_direct_write:false/,'exact edit handoff must remain navigation-only');
 assert.doesNotMatch(editHandoff,/fetch\s*\(/,'exact edit handoff must not add direct write/read fetches');

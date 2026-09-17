@@ -61,6 +61,7 @@ const server=http.createServer((req,res)=>{
   if(u.pathname==='/api/customer360/approach-queue')return send(res,200,{ok:true,items:[],total:0,summary:{total:0,ready:0,review_required:0,opted_out:0,no_contact:0},filters:{horizon_days:90,status:'all',limit:50},meta:{read_only:true,line_send:false}});
   if(u.pathname==='/__fixture/deny'){permissionMode='denied';return send(res,200,{ok:true})}
   if(u.pathname==='/__fixture/legacy-optout'){permissionMode='legacy-optout';return send(res,200,{ok:true})}
+  if(u.pathname==='/api/customer360/media/26000101')return send(res,200,{ok:true,media:{customer_id:'26000101',avatar_data_url:'',avatar_updated_at:'',latest_delivery_link:null,delivery_links:[]}});
   if(u.pathname==='/api/customer360/customer/26000101'){
     let current=customer;
     if(permissionMode==='denied')current={...customer,profile:{experience:{marketing_contact_permission:'denied'}},consent:{marketing_contact_permission:'denied'}};
