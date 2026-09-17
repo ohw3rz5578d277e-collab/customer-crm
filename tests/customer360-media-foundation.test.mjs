@@ -22,7 +22,7 @@ assert.match(api,/amazon_photos/);
 assert.ok(api.includes('const CUSTOMER_ID_RE=/^\\d{8}$/;'));
 assert.match(api,/customer360_media_customer_id_generation:false/);
 assert.match(api,/customer360_media_paid_storage_required:false/);
-assert.match(ui,/crm-customer360-media-ui-20260908-01/);
+assert.match(ui,/crm-customer360-media-ui-20260917-02/);
 assert.match(ui,/写真・納品/);
 assert.match(ui,/Amazon Photos 納品リンク/);
 assert.match(ui,/crmCustomerAvatarHero/);
