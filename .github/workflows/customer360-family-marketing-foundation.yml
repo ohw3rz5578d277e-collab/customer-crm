@@ -7,12 +7,15 @@ on:
     paths:
       - 'src/crm-customer360-*.mjs'
       - 'src/crm-owner-line-chat.mjs'
+      - 'src/crm-line-history-sheet-backfill.mjs'
       - 'src/production-index-crm-customer360-entry.js'
+      - 'scripts/prepare-line-history-sheet-backfill.mjs'
       - 'migrations_managed/20260828_customer360_family_marketing_foundation.sql'
       - 'migrations_managed/20260903_customer360_profile_auto_enrichment.sql'
       - 'tests/customer360-family-marketing-*.mjs'
       - 'tests/customer360-profile-*.mjs'
       - 'tests/crm-canonical-uix-responsive-browser.mjs'
+      - 'tests/line-history-sheet-backfill.test.mjs'
       - 'wrangler.jsonc'
       - '.github/workflows/customer360-family-marketing-foundation.yml'
 
@@ -53,10 +56,12 @@ jobs:
           node --check src/crm-customer360-profile-ui.mjs
           node --check src/crm-customer360-ui.mjs
           node --check src/crm-owner-line-chat.mjs
+          node --check src/crm-line-history-sheet-backfill.mjs
+          node --check scripts/prepare-line-history-sheet-backfill.mjs
           node --check src/production-index-crm-customer360-entry.js
-          ! grep -R -E "INSERT[[:space:]]+INTO[[:space:]]+customers\b|DELETE[[:space:]]+FROM[[:space:]]+customers\b" src/crm-customer360-*.mjs
-          ! grep -R -E "SET[[:space:]]+customer_id[[:space:]]*=" src/crm-customer360-*.mjs
-          ! grep -R -E "LINE_SERVICE.*(send|push|multicast)|api.line.me.*message" src/crm-customer360-*.mjs src/crm-owner-line-chat.mjs src/production-index-crm-customer360-entry.js
+          ! grep -R -E "INSERT[[:space:]]+INTO[[:space:]]+customers\b|DELETE[[:space:]]+FROM[[:space:]]+customers\b" src/crm-customer360-*.mjs src/crm-line-history-sheet-backfill.mjs scripts/prepare-line-history-sheet-backfill.mjs
+          ! grep -R -E "SET[[:space:]]+customer_id[[:space:]]*=" src/crm-customer360-*.mjs src/crm-line-history-sheet-backfill.mjs scripts/prepare-line-history-sheet-backfill.mjs
+          ! grep -R -E "LINE_SERVICE.*(send|push|multicast)|api.line.me.*message" src/crm-customer360-*.mjs src/crm-owner-line-chat.mjs src/crm-line-history-sheet-backfill.mjs scripts/prepare-line-history-sheet-backfill.mjs src/production-index-crm-customer360-entry.js
           ! grep -E "ALTER[[:space:]]+TABLE[[:space:]]+customers" migrations_managed/20260828_customer360_family_marketing_foundation.sql migrations_managed/20260903_customer360_profile_auto_enrichment.sql
           ! grep -E "DROP[[:space:]]+(TABLE|COLUMN)" migrations_managed/20260903_customer360_profile_auto_enrichment.sql
           ! grep -E "customer_identity_(sequence|registry)" migrations_managed/20260903_customer360_profile_auto_enrichment.sql
@@ -68,6 +73,7 @@ jobs:
           node tests/customer360-profile-auto-enrichment.mjs
           node tests/customer360-profile-write-identity-guard.mjs
           node tests/customer360-profile-migration-local.mjs
+          node tests/line-history-sheet-backfill.test.mjs
 
       - name: Install local browser/build tooling
         run: |
