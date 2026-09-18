@@ -69,6 +69,8 @@ export function assertCustomerIdentitySequenceMonotonic(rawOutput) {
     sequence_key: SEQUENCE_KEY,
     last_value: lastValue,
     existing_numeric_suffix_max: existingMax,
+    ahead_by: lastValue-existingMax,
+    ahead_of_existing_max: lastValue>existingMax,
     monotonic: true
   };
 }
@@ -83,7 +85,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   try {
     const input = await readStdin();
     const result = assertCustomerIdentitySequenceMonotonic(input);
-    console.log(`Customer identity sequence monotonic guard passed: last_value=${result.last_value}, existing_numeric_suffix_max=${result.existing_numeric_suffix_max}`);
+    console.log(`Customer identity sequence monotonic guard passed: last_value=${result.last_value}, existing_numeric_suffix_max=${result.existing_numeric_suffix_max}, ahead_by=${result.ahead_by}`);
   } catch (error) {
     console.error(error && error.message ? error.message : String(error));
     process.exit(1);
