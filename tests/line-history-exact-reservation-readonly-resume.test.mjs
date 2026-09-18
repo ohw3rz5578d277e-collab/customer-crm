@@ -21,10 +21,10 @@ assert.match(src,/SECRET_VALUES_PRINTED=NO/);
 assert.match(src,/env\s+-u CLOUDFLARE_API_TOKEN/);
 assert.match(src,/RESERVATION_DB_NAME="reservation-app-db"/);
 assert.match(src,/CRM_DB_NAME="customer-crm-db"/);
-assert.match(src,/auth_probe "\\$RESERVATION_DB_NAME"/);
-assert.match(src,/auth_probe "\\$CRM_DB_NAME"/);
-assert.match(src,/wrangler_clean d1 execute "\\$RESERVATION_DB_NAME"/);
-assert.match(src,/wrangler_clean d1 execute "\\$CRM_DB_NAME"/);
+assert.match(src,/auth_probe "\$RESERVATION_DB_NAME"/);
+assert.match(src,/auth_probe "\$CRM_DB_NAME"/);
+assert.match(src,/wrangler_clean d1 execute "\$RESERVATION_DB_NAME"/);
+assert.match(src,/wrangler_clean d1 execute "\$CRM_DB_NAME"/);
 assert.doesNotMatch(src,/d1 execute RESERVATION_DB/);
 assert.doesNotMatch(src,/d1 execute CRM_DB/);
 
