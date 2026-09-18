@@ -9,7 +9,8 @@ export function resolveLineHistoryRecoveryNextPhase({
   preauthPreviewReady=false,
   d1Packet=null,
   approvalFilePresent=false,
-  completionReceipt=null
+  completionReceipt=null,
+  currentMainSha=''
 }={}){
   if(completionReceipt&&completionReceipt.complete===true){
     return {
@@ -21,6 +22,19 @@ export function resolveLineHistoryRecoveryNextPhase({
   }
 
   if(d1Packet){
+    if(
+      currentMainSha&&
+      /^[0-9a-f]{40}$/.test(String(currentMainSha))&&
+      String(d1Packet.source_main_sha||'')!==String(currentMainSha)
+    ){
+      return {
+        stage:'STALE_AUTHORIZATION_PACKET',
+        next_phase:'d1-preview',
+        next_action:'Re-run the D1 SELECT-only preview to bind a new authorization packet to the current main SHA.',
+        production_write_possible:false
+      };
+    }
+
     if(d1Packet.packet_ready!==true){
       return {
         stage:'BLOCKED_D1_PREVIEW',
