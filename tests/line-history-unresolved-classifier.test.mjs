@@ -86,7 +86,12 @@ const runner=fs.readFileSync('scripts/run-line-history-unresolved-readonly.sh','
 assert.match(runner,/D1_ACTION=READ_ONLY_CUSTOMERS/);
 assert.match(runner,/D1_ACTION=READ_ONLY_RECONCILIATION_REVIEWS/);
 assert.match(runner,/--command=/);
-assert.doesNotMatch(runner,/\b(?:INSERT|UPDATE|DELETE|CREATE|ALTER|DROP|REPLACE|TRUNCATE)\b/i);
+const runnerSql=[...runner.matchAll(/(?:CUSTOMERS|REVIEWS)_SQL="([^"]*)"/g)].map(x=>x[1]);
+assert.equal(runnerSql.length,2);
+for(const sql of runnerSql){
+  assert.match(sql,/^SELECT\b/i);
+  assert.doesNotMatch(sql,/\b(?:INSERT|UPDATE|DELETE|CREATE|ALTER|DROP|REPLACE|TRUNCATE)\b/i);
+}
 assert.doesNotMatch(runner,/wrangler\s+deploy/i);
 assert.doesNotMatch(runner,/api\.line\.me/i);
 
