@@ -20,6 +20,7 @@ const preauthDir=arg('--preauth-dir');
 const d1PreviewDir=arg('--d1-preview-dir');
 const approvalFile=arg('--approval-file');
 const completionReceiptArg=arg('--completion-receipt');
+const mainSha=arg('--main-sha');
 
 const resumeTriage=resumeDir?path.join(resumeDir,'final-triage.json'):'';
 const reviewQueue=resumeDir?path.join(resumeDir,'owner-review-queue.json'):'';
@@ -42,7 +43,8 @@ const result=resolveLineHistoryRecoveryNextPhase({
   preauthPreviewReady:!!(preauthSummaryJson&&preauthSummaryJson.preview_ready===true&&Number(preauthSummaryJson.validation_error_count||0)===0),
   d1Packet:packet,
   approvalFilePresent:exists(approvalFile),
-  completionReceipt:receipt
+  completionReceipt:receipt,
+  currentMainSha:mainSha
 });
 
 console.log('RESULT=LINE_HISTORY_RECOVERY_NEXT_PHASE');
