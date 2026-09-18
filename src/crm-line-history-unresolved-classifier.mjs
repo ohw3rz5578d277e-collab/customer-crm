@@ -122,6 +122,7 @@ function classifyGroup(group,indexes){
 
   const hinted=[...new Set([...group.customer_id_hints,...group.legacy_customer_id_hints])].filter(Boolean);
   const reviewTargets=[];
+  const pendingReviewTargets=[];
   let hasPendingReview=false;
   let hasDifferentReview=false;
   for(const hint of hinted){
@@ -134,6 +135,7 @@ function classifyGroup(group,indexes){
         conflicts.push('explicit_different_person_review:'+hint+'->'+r.crm_candidate_customer_id);
       }else if(r.decision==='DEFERRED'||r.decision==='UNREVIEWED'){
         hasPendingReview=true;
+        if(indexes.prodById.has(r.crm_candidate_customer_id))pendingReviewTargets.push(r.crm_candidate_customer_id);
         evidence.push('pending_reconciliation_review:'+hint+'->'+r.crm_candidate_customer_id);
       }
     }
@@ -144,6 +146,13 @@ function classifyGroup(group,indexes){
   }
   if(uniqueReviewTargets.length>1){
     return {category:'BLOCKED_CONFLICT',reason:'MULTIPLE_SAME_PERSON_REVIEW_TARGETS',target_customer_id:'',evidence,conflicts:['same_source_id_maps_to_multiple_current_customers']};
+  }
+  const uniquePendingTargets=[...new Set(pendingReviewTargets)];
+  if(uniquePendingTargets.length===1&&!hasDifferentReview){
+    return {category:'REVIEW_REQUIRED',reason:'EXISTING_REVIEW_NOT_CONFIRMED',target_customer_id:uniquePendingTargets[0],evidence,conflicts};
+  }
+  if(uniquePendingTargets.length>1){
+    return {category:'BLOCKED_CONFLICT',reason:'MULTIPLE_PENDING_REVIEW_TARGETS',target_customer_id:'',evidence,conflicts:['pending_reviews_point_to_multiple_current_customers']};
   }
 
   if(line){
@@ -160,6 +169,15 @@ function classifyGroup(group,indexes){
         }
       }else{
         evidence.push('customer_master_exact_line_but_customer_missing_in_production:'+masterIds[0]);
+        const masterNames=[...new Set(masterMatches.map(x=>normName(x.name)).filter(Boolean))];
+        if(masterNames.length===1){
+          const nameTargets=[...new Set((indexes.prodByName.get(masterNames[0])||[]).map(x=>x.customer_id))];
+          if(nameTargets.length===1){
+            return {category:'REVIEW_REQUIRED',reason:'MASTER_LINE_NAME_UNIQUE_CURRENT_CANDIDATE',target_customer_id:nameTargets[0],evidence:[...evidence,'name_only_unique_current_candidate'],conflicts};
+          }
+          if(nameTargets.length>1)evidence.push('master_name_ambiguous_in_production');
+          else evidence.push('master_name_missing_in_production');
+        }
       }
     }else if(masterIds.length>1){
       conflicts.push('customer_master_line_maps_to_multiple_customer_ids');
