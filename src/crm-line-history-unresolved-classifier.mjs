@@ -45,6 +45,13 @@ function normalizeReservationIdentity(r){
     line_user_id:text(r.line_user_id??r.lineUserId)
   };
 }
+function normalizeExactReservationEvidence(r){
+  return {
+    source_customer_id:text(r.source_customer_id??r.reservation_customer_id??r.customer_id_hint),
+    reservation_id:text(r.reservation_id),
+    target_customer_id:text(r.target_customer_id??r.crm_candidate_customer_id??r.crm_customer_id)
+  };
+}
 
 function groupCandidates(candidates){
   const groups=new Map();
@@ -69,11 +76,12 @@ function groupCandidates(candidates){
   }));
 }
 
-function buildIndexes(customers,master,reviews,reservationIdentities){
+function buildIndexes(customers,master,reviews,reservationIdentities,exactReservationEvidence){
   const active=(customers||[]).map(normalizeCustomer).filter(x=>x.customer_id&&!x.deleted_at);
   const masters=(master||[]).map(normalizeMaster).filter(x=>x.customer_id||x.line_user_id);
   const revs=(reviews||[]).map(normalizeReview);
   const reservations=(reservationIdentities||[]).map(normalizeReservationIdentity).filter(x=>x.customer_id);
+  const exactReservations=(exactReservationEvidence||[]).map(normalizeExactReservationEvidence).filter(x=>x.source_customer_id&&x.reservation_id);
 
   const prodById=new Map(),prodByLine=new Map(),prodByPhone=new Map(),prodByEmail=new Map(),prodByName=new Map();
   for(const c of active){
@@ -92,7 +100,10 @@ function buildIndexes(customers,master,reviews,reservationIdentities){
   const reservationById=new Map();
   for(const r of reservations)add(reservationById,r.customer_id,r);
 
-  return {active,prodById,prodByLine,prodByPhone,prodByEmail,prodByName,masterByLine,reviewByReservation,reservationById};
+  const exactReservationBySource=new Map();
+  for(const r of exactReservations)add(exactReservationBySource,r.source_customer_id,r);
+
+  return {active,prodById,prodByLine,prodByPhone,prodByEmail,prodByName,masterByLine,reviewByReservation,reservationById,exactReservationBySource};
 }
 
 function exactContactTargets(reservation,indexes){
@@ -153,6 +164,82 @@ function classifyGroup(group,indexes){
   }
   if(uniquePendingTargets.length>1){
     return {category:'BLOCKED_CONFLICT',reason:'MULTIPLE_PENDING_REVIEW_TARGETS',target_customer_id:'',evidence,conflicts:['pending_reviews_point_to_multiple_current_customers']};
+  }
+  if(hasDifferentReview){
+    return {category:'BLOCKED_CONFLICT',reason:'EXPLICIT_DIFFERENT_PERSON_REVIEW',target_customer_id:'',evidence,conflicts};
+  }
+
+  const exactReservationRows=[];
+  for(const hint of hinted){
+    exactReservationRows.push(...(indexes.exactReservationBySource.get(hint)||[]));
+  }
+  if(exactReservationRows.length){
+    evidence.push('reservation_id_exact');
+    const targetIds=[...new Set(exactReservationRows.map(x=>x.target_customer_id).filter(Boolean))];
+
+    if(targetIds.length>1){
+      return {
+        category:'BLOCKED_CONFLICT',
+        reason:'MULTIPLE_EXACT_RESERVATION_TARGETS',
+        target_customer_id:'',
+        evidence,
+        conflicts:[...conflicts,'exact_reservation_ids_point_to_multiple_current_customer_ids']
+      };
+    }
+
+    if(targetIds.length===0){
+      return {
+        category:'REVIEW_REQUIRED',
+        reason:'EXACT_RESERVATION_TARGET_MISSING',
+        target_customer_id:'',
+        evidence:[...evidence,'exact_reservation_target_missing'],
+        conflicts
+      };
+    }
+
+    const targetId=targetIds[0];
+    const target=indexes.prodById.get(targetId);
+    if(!CURRENT_ID_RE.test(targetId)||!target){
+      return {
+        category:'REVIEW_REQUIRED',
+        reason:'EXACT_RESERVATION_TARGET_NOT_CURRENT',
+        target_customer_id:CURRENT_ID_RE.test(targetId)?targetId:'',
+        evidence:[...evidence,'exact_reservation_target_not_current'],
+        conflicts
+      };
+    }
+
+    if(!line){
+      return {
+        category:'REVIEW_REQUIRED',
+        reason:'EXACT_RESERVATION_REQUIRES_LINE_ID',
+        target_customer_id:targetId,
+        evidence:[...evidence,'candidate_line_id_missing'],
+        conflicts
+      };
+    }
+
+    if(target.line_user_id&&target.line_user_id!==line){
+      return {
+        category:'BLOCKED_CONFLICT',
+        reason:'EXACT_RESERVATION_LINE_CONFLICT',
+        target_customer_id:targetId,
+        evidence:[...evidence,'exact_reservation_unique_current_target'],
+        conflicts:[...conflicts,'exact_reservation_target_has_different_nonempty_line_id']
+      };
+    }
+
+    return {
+      category:'AUTO_CONFIRMABLE',
+      reason:'EXACT_RESERVATION_ID_UNIQUE_CURRENT_TARGET',
+      target_customer_id:targetId,
+      evidence:[
+        ...evidence,
+        'exact_reservation_unique_current_target',
+        target.line_user_id?'production_line_id_exact':'production_line_id_empty'
+      ],
+      conflicts
+    };
   }
 
   if(line){
@@ -222,9 +309,9 @@ function classifyGroup(group,indexes){
   return {category:'UNRESOLVED',reason:'NO_SAFE_IDENTITY_EVIDENCE',target_customer_id:'',evidence,conflicts};
 }
 
-export function classifyLineHistoryUnresolved({candidates=[],customers=[],customerMaster=[],reviews=[],reservationIdentities=[]}={}){
+export function classifyLineHistoryUnresolved({candidates=[],customers=[],customerMaster=[],reviews=[],reservationIdentities=[],exactReservationEvidence=[]}={}){
   const groups=groupCandidates(candidates);
-  const indexes=buildIndexes(customers,customerMaster,reviews,reservationIdentities);
+  const indexes=buildIndexes(customers,customerMaster,reviews,reservationIdentities,exactReservationEvidence);
   const classified=groups.map(group=>{
     const result=classifyGroup(group,indexes);
     return {
@@ -247,7 +334,7 @@ export function classifyLineHistoryUnresolved({candidates=[],customers=[],custom
   const countMessages=category=>unresolved.filter(x=>x.category===category).reduce((n,x)=>n+x.message_rows,0);
 
   return {
-    planner:'line_history_unresolved_triage_v1',
+    planner:'line_history_unresolved_triage_v2',
     candidate_message_rows:(candidates||[]).length,
     identity_groups:classified.length,
     already_resolved_groups:classified.filter(x=>x.category==='ALREADY_RESOLVED').length,
