@@ -114,7 +114,7 @@ case "$PHASE" in
       echo
       echo "=== Safe local artifact auto-discovery ==="
 
-      DISCOVERY_TMP="$(mktemp -t customer-crm-line-history-discovery.XXXXXX.json)"
+      DISCOVERY_TMP="$(mktemp "${TMPDIR:-/tmp}/customer-crm-line-history-discovery.XXXXXX")"
       DISCOVERY_ROOT_ARGS=(--root "$PWD")
 
       if [ -d "$HOME/Downloads" ]; then
