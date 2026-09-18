@@ -118,23 +118,28 @@ assert.equal(plan.decision_summary.SAME_PERSON,3);
 assert.equal(plan.decision_summary.DIFFERENT_PERSON,1);
 assert.equal(plan.decision_summary.NEEDS_MORE_EVIDENCE,1);
 assert.equal(plan.proposed_write_actions,1);
-assert.equal(plan.accepted_no_write_decisions,3);
+assert.equal(plan.accepted_no_write_decisions,2);
 assert.equal(plan.validation_error_count,1);
+assert.equal(plan.ready_for_readonly_backfill_preview,false);
 assert.equal(plan.ready_for_separate_write_authorization,false);
 assert.equal(plan.authorization_granted,false);
 
 assert.deepEqual(plan.proposed_actions[0],{
   queue_id:qByTarget.get('26000001'),
-  action:'LINK_LINE_ID_TO_EXISTING_CUSTOMER',
+  action:'BACKFILL_LINE_HISTORY_TO_EXISTING_CUSTOMER',
   target_customer_id:'26000001',
   line_user_id:line1,
+  source_line_id_hash:hash(line1),
+  message_rows:5,
+  target_line_state:'EMPTY',
   source:'owner_review_same_person'
 });
 
-assert.ok(plan.no_write_decisions.some(x=>
+assert.ok(plan.proposed_actions.some(x=>
   x.queue_id===qByTarget.get('26000002')&&
-  x.decision==='SAME_PERSON'&&
-  x.result==='ALREADY_LINKED'
+  x.action==='BACKFILL_LINE_HISTORY_TO_EXISTING_CUSTOMER'&&
+  x.target_line_state==='EXACT'&&
+  x.message_rows===3
 ));
 assert.ok(plan.no_write_decisions.some(x=>
   x.queue_id===qByTarget.get('26000004')&&x.decision==='DIFFERENT_PERSON'
@@ -158,7 +163,8 @@ const validPlan=buildLineHistoryOwnerDecisionPlan({
 });
 assert.equal(validPlan.proposed_write_actions,1);
 assert.equal(validPlan.validation_error_count,0);
-assert.equal(validPlan.ready_for_separate_write_authorization,true);
+assert.equal(validPlan.ready_for_readonly_backfill_preview,true);
+assert.equal(validPlan.ready_for_separate_write_authorization,false);
 assert.equal(validPlan.authorization_granted,false);
 assert.equal(validPlan.safety.production_d1_write,0);
 assert.equal(validPlan.safety.generated_sql,false);
@@ -196,11 +202,11 @@ assert.match(cli,/PRODUCTION_D1_WRITE=0/);
 assert.match(cli,/PRIVATE_ACTION_VALUES_PRINTED_TO_TERMINAL=0/);
 
 console.log('LINE_HISTORY_OWNER_DECISION_PLAN_SAFE_LINK=PASS');
-console.log('LINE_HISTORY_OWNER_DECISION_PLAN_ALREADY_LINKED_NOOP=PASS');
+console.log('LINE_HISTORY_OWNER_DECISION_PLAN_EXISTING_LINE_STILL_BACKFILLS_MESSAGES=PASS');
 console.log('LINE_HISTORY_OWNER_DECISION_PLAN_CONFLICT_BLOCK=PASS');
 console.log('LINE_HISTORY_OWNER_DECISION_PLAN_NON_WRITE_DECISIONS=PASS');
 console.log('LINE_HISTORY_OWNER_DECISION_PLAN_DUPLICATE_UNKNOWN_BLOCK=PASS');
-console.log('LINE_HISTORY_OWNER_DECISION_PLAN_SEPARATE_AUTH_GATE=PASS');
+console.log('LINE_HISTORY_OWNER_DECISION_PLAN_READONLY_PREVIEW_GATE=PASS');
 console.log('SQL_GENERATED=0');
 console.log('SQL_EXECUTED=0');
 console.log('PRODUCTION_D1_WRITE=0');
