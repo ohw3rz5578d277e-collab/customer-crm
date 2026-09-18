@@ -36,7 +36,7 @@ const packet=buildLineHistoryOwnerAuthorizationPacket({
 
 fs.writeFileSync(outPath,JSON.stringify(packet,null,2)+'\n');
 
-console.log('RESULT=LINE_HISTORY_OWNER_AUTHORIZATION_PACKET_READY');
+console.log('RESULT='+(packet.packet_ready?'LINE_HISTORY_OWNER_AUTHORIZATION_PACKET_READY':'LINE_HISTORY_OWNER_AUTHORIZATION_PACKET_BLOCKED'));
 console.log('PACKET_READY='+(packet.packet_ready?'YES':'NO'));
 console.log('AUTHORIZATION_REQUIRED='+(packet.authorization_required?'YES':'NO'));
 console.log('AUTHORIZATION_GRANTED=NO');
