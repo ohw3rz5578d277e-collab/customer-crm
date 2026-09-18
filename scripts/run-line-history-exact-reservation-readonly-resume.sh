@@ -124,6 +124,7 @@ build_owner_review_queue() {
   local triage_file="$1"
   node scripts/build-line-history-owner-review-queue.mjs     --triage "$triage_file"     --out "$OUT_DIR/owner-review-queue.json"
   node scripts/render-line-history-owner-review-html.mjs     --queue "$OUT_DIR/owner-review-queue.json"     --out "$OUT_DIR/owner-review.html"
+  node scripts/render-line-history-owner-private-review.mjs     --triage "$triage_file"     --customer-master "$CUSTOMER_MASTER"     --customers "$BASELINE_DIR/customers.json"     --out "$OUT_DIR/owner-private-review.html"
 }
 
 echo
@@ -560,4 +561,5 @@ echo "EVIDENCE=$OUT_DIR/exact-reservation-evidence.json"
 echo "FINAL_TRIAGE=$OUT_DIR/final-triage.json"
 echo "OWNER_REVIEW_QUEUE=$OUT_DIR/owner-review-queue.json"
 echo "OWNER_REVIEW_HTML=$OUT_DIR/owner-review.html"
+echo "OWNER_PRIVATE_REVIEW_HTML=$OUT_DIR/owner-private-review.html"
 echo "=================================================="
