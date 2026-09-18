@@ -23,6 +23,11 @@ expectStage({
 
 expectStage({
   resumeReady:true,
+  reviewQueueGroups:null
+},'OWNER_REVIEW_REQUIRED','preauth');
+
+expectStage({
+  resumeReady:true,
   reviewQueueGroups:0
 },'COMPLETE_NO_REVIEW','none');
 
