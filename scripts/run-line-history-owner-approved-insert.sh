@@ -402,6 +402,17 @@ print("TARGET_LINE_CONFLICT_ROWS=0")
 PY
 
 echo
+echo "=== 10. Build privacy-safe completion receipt ==="
+
+node scripts/build-line-history-write-completion-receipt.mjs \
+  --packet "$PACKET" \
+  --insert-manifest "$OUT_DIR/approved-insert-manifest.json" \
+  --write-result "$OUT_DIR/write-result.json" \
+  --post-preview-result "$OUT_DIR/post-preview-result.json" \
+  --main-sha "$LOCAL_HEAD" \
+  --out "$OUT_DIR/completion-receipt.json"
+
+echo
 echo "=================================================="
 echo " RESULT=OWNER_APPROVED_LINE_HISTORY_INSERT_COMPLETE"
 echo "=================================================="
@@ -418,4 +429,5 @@ echo "WORKER_DEPLOY=0"
 echo "PRODUCTION_DEPLOY=0"
 echo "WRITE_RESULT=$OUT_DIR/write-result.json"
 echo "POST_PREVIEW_RESULT=$OUT_DIR/post-preview-result.json"
+echo "COMPLETION_RECEIPT=$OUT_DIR/completion-receipt.json"
 echo "=================================================="
