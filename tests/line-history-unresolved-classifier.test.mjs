@@ -82,6 +82,117 @@ assert.equal(result.safety.line_send,0);
 assert.equal(result.safety.name_only_auto_link,false);
 assert.equal(result.safety.output_contains_message_text,false);
 
+const exactLines={
+  safeEmpty:line(8),
+  safeSame:line(9),
+  lineConflict:line(10),
+  multiple:line(11),
+  missing:line(12),
+  differentReview:line(14)
+};
+
+const exactCandidates=[
+  {message_key:'x8',line_user_id:exactLines.safeEmpty,legacy_customer_id_hint:'C-RES-8',message_text:'exact-secret-8'},
+  {message_key:'x9',line_user_id:exactLines.safeSame,legacy_customer_id_hint:'C-RES-9',message_text:'exact-secret-9'},
+  {message_key:'x10',line_user_id:exactLines.lineConflict,legacy_customer_id_hint:'C-RES-10',message_text:'exact-secret-10'},
+  {message_key:'x11',line_user_id:exactLines.multiple,legacy_customer_id_hint:'C-RES-11',message_text:'exact-secret-11'},
+  {message_key:'x12',line_user_id:exactLines.missing,legacy_customer_id_hint:'C-RES-12',message_text:'exact-secret-12'},
+  {message_key:'x13',line_user_id:'',legacy_customer_id_hint:'C-RES-13',message_text:'exact-secret-13'},
+  {message_key:'x14',line_user_id:exactLines.differentReview,legacy_customer_id_hint:'C-RES-14',message_text:'exact-secret-14'}
+];
+
+const exactCustomers=[
+  {customer_id:'26000008',line_user_id:'',name:'Exact Empty'},
+  {customer_id:'26000009',line_user_id:exactLines.safeSame,name:'Exact Same'},
+  {customer_id:'26000010',line_user_id:line(99),name:'Exact Conflict'},
+  {customer_id:'26000011',line_user_id:'',name:'Exact Multi A'},
+  {customer_id:'26000012',line_user_id:'',name:'Exact Multi B'},
+  {customer_id:'26000013',line_user_id:'',name:'Exact No Line'},
+  {customer_id:'26000014',line_user_id:'',name:'Exact Review Block'}
+];
+
+const exactReviews=[
+  {reservation_customer_id:'C-RES-14',crm_candidate_customer_id:'26000014',decision:'DIFFERENT_PERSON'}
+];
+
+const exactReservationEvidence=[
+  {source_customer_id:'C-RES-8',reservation_id:'R-EXACT-8',target_customer_id:'26000008'},
+  {source_customer_id:'C-RES-9',reservation_id:'R-EXACT-9',target_customer_id:'26000009'},
+  {source_customer_id:'C-RES-10',reservation_id:'R-EXACT-10',target_customer_id:'26000010'},
+  {source_customer_id:'C-RES-11',reservation_id:'R-EXACT-11A',target_customer_id:'26000011'},
+  {source_customer_id:'C-RES-11',reservation_id:'R-EXACT-11B',target_customer_id:'26000012'},
+  {source_customer_id:'C-RES-12',reservation_id:'R-EXACT-12',target_customer_id:'26009999'},
+  {source_customer_id:'C-RES-13',reservation_id:'R-EXACT-13',target_customer_id:'26000013'},
+  {source_customer_id:'C-RES-14',reservation_id:'R-EXACT-14',target_customer_id:'26000014'}
+];
+
+const exactResult=classifyLineHistoryUnresolved({
+  candidates:exactCandidates,
+  customers:exactCustomers,
+  reviews:exactReviews,
+  exactReservationEvidence
+});
+
+assert.equal(exactResult.planner,'line_history_unresolved_triage_v2');
+assert.equal(exactResult.already_resolved_groups,1);
+assert.equal(exactResult.auto_confirmable_groups,1);
+assert.equal(exactResult.review_required_groups,2);
+assert.equal(exactResult.blocked_conflict_groups,3);
+assert.equal(exactResult.unresolved_groups,0);
+
+const byLegacyHint=hint=>exactResult.classifications.find(x=>x.legacy_customer_id_hints.includes(hint));
+
+const safeEmpty=byLegacyHint('C-RES-8');
+assert.equal(safeEmpty.category,'AUTO_CONFIRMABLE');
+assert.equal(safeEmpty.reason,'EXACT_RESERVATION_ID_UNIQUE_CURRENT_TARGET');
+assert.equal(safeEmpty.target_customer_id,'26000008');
+assert.ok(safeEmpty.evidence.includes('production_line_id_empty'));
+
+const safeSame=byLegacyHint('C-RES-9');
+assert.equal(safeSame.category,'ALREADY_RESOLVED');
+assert.equal(safeSame.reason,'PRODUCTION_EXACT_LINE');
+assert.equal(safeSame.target_customer_id,'26000009');
+
+const lineConflict=byLegacyHint('C-RES-10');
+assert.equal(lineConflict.category,'BLOCKED_CONFLICT');
+assert.equal(lineConflict.reason,'EXACT_RESERVATION_LINE_CONFLICT');
+
+const multiConflict=byLegacyHint('C-RES-11');
+assert.equal(multiConflict.category,'BLOCKED_CONFLICT');
+assert.equal(multiConflict.reason,'MULTIPLE_EXACT_RESERVATION_TARGETS');
+
+const missingTarget=byLegacyHint('C-RES-12');
+assert.equal(missingTarget.category,'REVIEW_REQUIRED');
+assert.equal(missingTarget.reason,'EXACT_RESERVATION_TARGET_NOT_CURRENT');
+
+const noLine=byLegacyHint('C-RES-13');
+assert.equal(noLine.category,'REVIEW_REQUIRED');
+assert.equal(noLine.reason,'EXACT_RESERVATION_REQUIRES_LINE_ID');
+
+const differentReview=byLegacyHint('C-RES-14');
+assert.equal(differentReview.category,'BLOCKED_CONFLICT');
+assert.equal(differentReview.reason,'EXPLICIT_DIFFERENT_PERSON_REVIEW');
+
+const exactSerialized=JSON.stringify(exactResult);
+for(const secret of exactCandidates.map(x=>x.message_text)){
+  assert.ok(!exactSerialized.includes(secret),'exact reservation message text leaked');
+}
+for(const rawLine of Object.values(exactLines)){
+  assert.ok(!exactSerialized.includes(rawLine),'exact reservation raw LINE User ID leaked');
+}
+for(const reservationId of exactReservationEvidence.map(x=>x.reservation_id)){
+  assert.ok(!exactSerialized.includes(reservationId),'reservation ID leaked');
+}
+assert.equal(exactResult.safety.production_d1_write,0);
+assert.equal(exactResult.safety.customer_id_generation,0);
+assert.equal(exactResult.safety.customer_update,0);
+assert.equal(exactResult.safety.customer_delete,0);
+assert.equal(exactResult.safety.line_send,0);
+assert.equal(exactResult.safety.name_only_auto_link,false);
+
+const cli=fs.readFileSync('scripts/classify-line-history-unresolved.mjs','utf8');
+assert.match(cli,/--exact-reservation-evidence/);
+
 const runner=fs.readFileSync('scripts/run-line-history-unresolved-readonly.sh','utf8');
 assert.match(runner,/D1_ACTION=READ_ONLY_CUSTOMERS/);
 assert.match(runner,/D1_ACTION=READ_ONLY_RECONCILIATION_REVIEWS/);
@@ -102,6 +213,11 @@ console.log('LINE_HISTORY_UNRESOLVED_NAME_ONLY_NOT_AUTO=PASS');
 console.log('LINE_HISTORY_UNRESOLVED_CONFLICT_BLOCK=PASS');
 console.log('LINE_HISTORY_UNRESOLVED_PRIVACY=PASS');
 console.log('LINE_HISTORY_UNRESOLVED_READONLY_RUNNER=PASS');
+console.log('LINE_HISTORY_EXACT_RESERVATION_SAFE_EMPTY_LINE=PASS');
+console.log('LINE_HISTORY_EXACT_RESERVATION_SAFE_SAME_LINE=PASS');
+console.log('LINE_HISTORY_EXACT_RESERVATION_CONFLICT_BLOCK=PASS');
+console.log('LINE_HISTORY_EXACT_RESERVATION_REVIEW_GUARDS=PASS');
+console.log('LINE_HISTORY_EXACT_RESERVATION_PRIVACY=PASS');
 console.log('PRODUCTION_D1_WRITE=0');
 console.log('CUSTOMER_ID_GENERATION=0');
 console.log('CUSTOMER_UPDATE=0');
