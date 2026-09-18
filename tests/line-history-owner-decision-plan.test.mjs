@@ -117,7 +117,8 @@ assert.equal(plan.undecided_groups,0);
 assert.equal(plan.decision_summary.SAME_PERSON,3);
 assert.equal(plan.decision_summary.DIFFERENT_PERSON,1);
 assert.equal(plan.decision_summary.NEEDS_MORE_EVIDENCE,1);
-assert.equal(plan.proposed_write_actions,1);
+assert.equal(plan.proposed_backfill_identity_actions,2);
+assert.equal(plan.proposed_write_actions,0);
 assert.equal(plan.accepted_no_write_decisions,2);
 assert.equal(plan.validation_error_count,1);
 assert.equal(plan.ready_for_readonly_backfill_preview,false);
@@ -161,7 +162,8 @@ const validPlan=buildLineHistoryOwnerDecisionPlan({
   customerMaster,
   customers
 });
-assert.equal(validPlan.proposed_write_actions,1);
+assert.equal(validPlan.proposed_backfill_identity_actions,1);
+assert.equal(validPlan.proposed_write_actions,0);
 assert.equal(validPlan.validation_error_count,0);
 assert.equal(validPlan.ready_for_readonly_backfill_preview,true);
 assert.equal(validPlan.ready_for_separate_write_authorization,false);
