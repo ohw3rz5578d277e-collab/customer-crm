@@ -11,6 +11,7 @@ D1_PREVIEW_DIR=""
 APPROVAL_FILE=""
 OUT_DIR=""
 EXECUTE_PRODUCTION_WRITE="NO"
+AUTO_DISCOVER="NO"
 
 usage() {
   cat <<'EOF'
@@ -26,6 +27,8 @@ Phases:
 
 Common:
   --out-dir <dir>
+  --auto-discover
+    status phase only. Searches safe local recovery roots for missing non-approval artifacts.
 
 readonly-resume:
   --candidates <candidate-snapshot.json>
@@ -67,6 +70,7 @@ while [ "$#" -gt 0 ]; do
     --approval-file) APPROVAL_FILE="${2:-}"; shift 2 ;;
     --out-dir) OUT_DIR="${2:-}"; shift 2 ;;
     --execute-production-write) EXECUTE_PRODUCTION_WRITE="${2:-NO}"; shift 2 ;;
+    --auto-discover) AUTO_DISCOVER="YES"; shift ;;
     -h|--help) usage; exit 0 ;;
     *) echo "RESULT=STOP_UNKNOWN_ARGUMENT"; echo "ARG=$1"; usage; exit 2 ;;
   esac
@@ -106,6 +110,50 @@ status_path() {
 
 case "$PHASE" in
   status)
+    if [ "$AUTO_DISCOVER" = "YES" ]; then
+      echo
+      echo "=== Safe local artifact auto-discovery ==="
+
+      DISCOVERY_TMP="$(mktemp "${TMPDIR:-/tmp}/customer-crm-line-history-discovery.XXXXXX")"
+      DISCOVERY_ROOT_ARGS=(--root "$PWD")
+
+      if [ -d "$HOME/Downloads" ]; then
+        DISCOVERY_ROOT_ARGS+=(--root "$HOME/Downloads")
+      fi
+
+      shopt -s nullglob
+      for d in "$HOME"/customer-crm-*; do
+        [ -d "$d" ] && DISCOVERY_ROOT_ARGS+=(--root "$d")
+      done
+      shopt -u nullglob
+
+      node scripts/discover-line-history-recovery-artifacts.mjs \
+        "${DISCOVERY_ROOT_ARGS[@]}" \
+        --out "$DISCOVERY_TMP"
+
+      discovery_value() {
+        local key="$1"
+        python3 - "$DISCOVERY_TMP" "$key" <<'PY'
+import json,sys
+x=json.load(open(sys.argv[1],encoding="utf-8"))
+node=x.get(sys.argv[2]) or {}
+print(str(node.get("path") or ""))
+PY
+      }
+
+      [ -z "$CANDIDATES" ] && CANDIDATES="$(discovery_value candidates)"
+      [ -z "$CUSTOMER_MASTER" ] && CUSTOMER_MASTER="$(discovery_value customer_master)"
+      [ -z "$RESUME_DIR" ] && RESUME_DIR="$(discovery_value resume_dir)"
+      [ -z "$DECISIONS" ] && DECISIONS="$(discovery_value decisions)"
+      [ -z "$PREAUTH_DIR" ] && PREAUTH_DIR="$(discovery_value preauth_dir)"
+      [ -z "$D1_PREVIEW_DIR" ] && D1_PREVIEW_DIR="$(discovery_value d1_preview_dir)"
+
+      rm -f "$DISCOVERY_TMP"
+
+      echo "AUTO_DISCOVER=COMPLETE"
+      echo "APPROVAL_FILE_AUTO_DISCOVERY=NO"
+    fi
+
     echo
     echo "=== Operator status ==="
     status_path "CANDIDATES" "$CANDIDATES"
@@ -146,6 +194,7 @@ PY
     ;;
 
   readonly-resume)
+    test "$AUTO_DISCOVER" = "NO" || { echo "RESULT=STOP_AUTO_DISCOVER_STATUS_ONLY"; exit 9; }
     test -n "$CANDIDATES" || { echo "RESULT=STOP_CANDIDATES_REQUIRED"; exit 10; }
     test -n "$CUSTOMER_MASTER" || { echo "RESULT=STOP_CUSTOMER_MASTER_REQUIRED"; exit 11; }
     test -f "$CANDIDATES" || { echo "RESULT=STOP_CANDIDATES_MISSING"; exit 12; }
@@ -161,6 +210,7 @@ PY
     ;;
 
   preauth)
+    test "$AUTO_DISCOVER" = "NO" || { echo "RESULT=STOP_AUTO_DISCOVER_STATUS_ONLY"; exit 19; }
     test -n "$RESUME_DIR" || { echo "RESULT=STOP_RESUME_DIR_REQUIRED"; exit 20; }
     test -n "$CUSTOMER_MASTER" || { echo "RESULT=STOP_CUSTOMER_MASTER_REQUIRED"; exit 21; }
     test -n "$DECISIONS" || { echo "RESULT=STOP_DECISIONS_REQUIRED"; exit 22; }
@@ -177,6 +227,7 @@ PY
     ;;
 
   d1-preview)
+    test "$AUTO_DISCOVER" = "NO" || { echo "RESULT=STOP_AUTO_DISCOVER_STATUS_ONLY"; exit 29; }
     test -n "$PREAUTH_DIR" || { echo "RESULT=STOP_PREAUTH_DIR_REQUIRED"; exit 30; }
     test -d "$PREAUTH_DIR" || { echo "RESULT=STOP_PREAUTH_DIR_MISSING"; exit 31; }
     PLAN="$PREAUTH_DIR/decision-plan-private.json"
@@ -195,6 +246,7 @@ PY
     ;;
 
   approved-write)
+    test "$AUTO_DISCOVER" = "NO" || { echo "RESULT=STOP_AUTO_DISCOVER_STATUS_ONLY"; exit 39; }
     test -n "$PREAUTH_DIR" || { echo "RESULT=STOP_PREAUTH_DIR_REQUIRED"; exit 40; }
     test -n "$D1_PREVIEW_DIR" || { echo "RESULT=STOP_D1_PREVIEW_DIR_REQUIRED"; exit 41; }
     test -n "$APPROVAL_FILE" || { echo "RESULT=STOP_APPROVAL_FILE_REQUIRED"; exit 42; }
