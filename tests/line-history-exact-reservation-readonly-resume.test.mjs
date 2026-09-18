@@ -18,7 +18,7 @@ assert.match(src,/RESERVATION_D1_AUTH=PASS/);
 assert.match(src,/CRM_D1_AUTH=PASS/);
 assert.match(src,/CLOUDFLARE_LOGIN=START/);
 assert.match(src,/SECRET_VALUES_PRINTED=NO/);
-assert.match(src,/env\s+\\[\s\S]*-u CLOUDFLARE_API_TOKEN/);
+assert.match(src,/env\s+-u CLOUDFLARE_API_TOKEN/);
 
 assert.match(src,/bash scripts\/run-line-history-unresolved-readonly\.sh/);
 assert.match(src,/PRAGMA table_info\(app_reservations\)/);
