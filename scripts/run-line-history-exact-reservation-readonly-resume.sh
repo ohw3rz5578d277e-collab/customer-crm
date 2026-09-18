@@ -5,6 +5,8 @@ REPO="ohw3rz5578d277e-collab/customer-crm"
 ACCOUNT_ID="799b203a471e51a791129a5ca97a9b2b"
 RESERVATION_DB_ID="507be6dd-7c94-4c84-ae28-81624834f84a"
 CRM_DB_ID="1ae3e0d9-72c0-47ad-8fc1-fed9d15ec70f"
+RESERVATION_DB_NAME="reservation-app-db"
+CRM_DB_NAME="customer-crm-db"
 WRANGLER_VERSION="4.107.0"
 
 CANDIDATES="${1:-}"
@@ -54,12 +56,12 @@ cat >"$CFG" <<JSON
   "d1_databases": [
     {
       "binding": "RESERVATION_DB",
-      "database_name": "reservation-app-db",
+      "database_name": "$RESERVATION_DB_NAME",
       "database_id": "$RESERVATION_DB_ID"
     },
     {
       "binding": "CRM_DB",
-      "database_name": "customer-crm-db",
+      "database_name": "$CRM_DB_NAME",
       "database_id": "$CRM_DB_ID"
     }
   ]
@@ -131,7 +133,7 @@ echo
 echo "=== 1. Cloudflare READ ONLY auth probes ==="
 
 set +e
-auth_probe RESERVATION_DB "$OUT_DIR/reservation-auth.raw"
+auth_probe "$RESERVATION_DB_NAME" "$OUT_DIR/reservation-auth.raw"
 RES_AUTH_RC=$?
 set -e
 
@@ -141,7 +143,7 @@ if [ "$RES_AUTH_RC" -ne 0 ]; then
     echo "CLOUDFLARE_LOGIN=START"
     env       -u CLOUDFLARE_API_TOKEN       -u CLOUDFLARE_API_KEY       -u CLOUDFLARE_EMAIL       npx --yes "wrangler@$WRANGLER_VERSION" login
     echo "CLOUDFLARE_LOGIN=FINISHED"
-    auth_probe RESERVATION_DB "$OUT_DIR/reservation-auth.raw" || {
+    auth_probe "$RESERVATION_DB_NAME" "$OUT_DIR/reservation-auth.raw" || {
       echo "RESULT=STOP_RESERVATION_D1_AUTH_FAILED_AFTER_REFRESH"
       exit 10
     }
@@ -153,7 +155,7 @@ fi
 
 echo "RESERVATION_D1_AUTH=PASS"
 
-auth_probe CRM_DB "$OUT_DIR/crm-auth.raw" || {
+auth_probe "$CRM_DB_NAME" "$OUT_DIR/crm-auth.raw" || {
   echo "RESULT=STOP_CRM_D1_AUTH_FAILED"
   exit 12
 }
@@ -217,7 +219,7 @@ fi
 echo
 echo "=== 4. Reservation Production schema — SELECT ONLY ==="
 
-wrangler_clean d1 execute RESERVATION_DB   --config "$CFG"   --remote   --json   --command "PRAGMA table_info(app_reservations);"   >"$OUT_DIR/reservation-schema.raw" 2>&1
+wrangler_clean d1 execute "$RESERVATION_DB_NAME"   --config "$CFG"   --remote   --json   --command "PRAGMA table_info(app_reservations);"   >"$OUT_DIR/reservation-schema.raw" 2>&1
 
 normalize_rows "$OUT_DIR/reservation-schema.raw" "$OUT_DIR/reservation-schema.json" >/dev/null
 
@@ -276,7 +278,7 @@ for sql in "$OUT_DIR"/reservation-query-*.sql; do
   name="$(basename "$sql" .sql)"
   raw="$OUT_DIR/$name.raw"
   echo "READING_RESERVATION_CHUNK=$name"
-  wrangler_clean d1 execute RESERVATION_DB     --config "$CFG"     --remote     --json     --file "$sql"     >"$raw" 2>&1
+  wrangler_clean d1 execute "$RESERVATION_DB_NAME"     --config "$CFG"     --remote     --json     --file "$sql"     >"$raw" 2>&1
   RES_RAW_LIST+=("$raw")
 done
 
@@ -359,7 +361,7 @@ fi
 echo
 echo "=== 7. Customer CRM reservation schema — SELECT ONLY ==="
 
-wrangler_clean d1 execute CRM_DB   --config "$CFG"   --remote   --json   --command "PRAGMA table_info(customer_reservations);"   >"$OUT_DIR/crm-reservation-schema.raw" 2>&1
+wrangler_clean d1 execute "$CRM_DB_NAME"   --config "$CFG"   --remote   --json   --command "PRAGMA table_info(customer_reservations);"   >"$OUT_DIR/crm-reservation-schema.raw" 2>&1
 
 normalize_rows "$OUT_DIR/crm-reservation-schema.raw" "$OUT_DIR/crm-reservation-schema.json" >/dev/null
 
@@ -424,7 +426,7 @@ for sql in "$OUT_DIR"/crm-reservation-query-*.sql; do
   name="$(basename "$sql" .sql)"
   raw="$OUT_DIR/$name.raw"
   echo "READING_CRM_RESERVATION_CHUNK=$name"
-  wrangler_clean d1 execute CRM_DB     --config "$CFG"     --remote     --json     --file "$sql"     >"$raw" 2>&1
+  wrangler_clean d1 execute "$CRM_DB_NAME"     --config "$CFG"     --remote     --json     --file "$sql"     >"$raw" 2>&1
   CRM_RAW_LIST+=("$raw")
 done
 
