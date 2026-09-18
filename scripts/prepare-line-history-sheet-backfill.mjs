@@ -33,7 +33,7 @@ function identityKey(e){return `${text(e.customer_id)}\u0000${text(e.line_user_i
 function uniqueEntry(entries){const usable=(entries||[]).filter(x=>x.customer_id||x.line_user_id),ids=[...new Set(usable.map(identityKey))];return ids.length===1?usable[0]:null}
 function countReasons(items){const out={};for(const x of items||[])out[x.reason]=(out[x.reason]||0)+1;return out}
 function countMatchSources(items){const out={};for(const x of items||[])out[x.match_source]=(out[x.match_source]||0)+1;return out}
-function batchFingerprint(x){const identity=text(x.line_user_id)?`line:${text(x.line_user_id)}`:`customer:${text(x.customer_id_hint)}`;return [identity,text(x.direction),text(x.sent_at),text(x.message_text)].join('\u0000')}
+function batchFingerprint(x){return [text(x.customer_id_hint),text(x.line_user_id),text(x.direction),text(x.sent_at),text(x.message_text)].join('\u0000')}
 function markBatchDuplicates(candidates){const seen=new Map();return candidates.map(x=>{const fingerprint=batchFingerprint(x),duplicateOf=seen.get(fingerprint)||'';if(!duplicateOf)seen.set(fingerprint,x.message_key);return {...x,batch_duplicate:Boolean(duplicateOf),batch_duplicate_of_message_key:duplicateOf}})}
 
 const LINE_HEADERS={
