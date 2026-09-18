@@ -123,6 +123,7 @@ auth_probe() {
 build_owner_review_queue() {
   local triage_file="$1"
   node scripts/build-line-history-owner-review-queue.mjs     --triage "$triage_file"     --out "$OUT_DIR/owner-review-queue.json"
+  node scripts/render-line-history-owner-review-html.mjs     --queue "$OUT_DIR/owner-review-queue.json"     --out "$OUT_DIR/owner-review.html"
 }
 
 echo
@@ -558,4 +559,5 @@ echo "PRODUCTION_DEPLOY=0"
 echo "EVIDENCE=$OUT_DIR/exact-reservation-evidence.json"
 echo "FINAL_TRIAGE=$OUT_DIR/final-triage.json"
 echo "OWNER_REVIEW_QUEUE=$OUT_DIR/owner-review-queue.json"
+echo "OWNER_REVIEW_HTML=$OUT_DIR/owner-review.html"
 echo "=================================================="
