@@ -33,6 +33,8 @@ assert.match(src,/SAFE_EXACT_RESERVATION_GROUPS/);
 assert.match(src,/SAFE_EXACT_RESERVATION_MESSAGES/);
 assert.match(src,/build-line-history-owner-review-queue\.mjs/);
 assert.match(src,/OWNER_REVIEW_QUEUE=\$OUT_DIR\/owner-review-queue\.json/);
+assert.match(src,/render-line-history-owner-review-html\.mjs/);
+assert.match(src,/OWNER_REVIEW_HTML=\$OUT_DIR\/owner-review\.html/);
 
 const forbiddenSql=[
   /\bINSERT\s+INTO\b/i,
@@ -80,6 +82,7 @@ console.log('EXACT_RESERVATION_RESUME_SCHEMA_AWARE=PASS');
 console.log('EXACT_RESERVATION_RESUME_SELECT_ONLY=PASS');
 console.log('EXACT_RESERVATION_RESUME_LOCAL_JOIN_AND_TRIAGE=PASS');
 console.log('EXACT_RESERVATION_RESUME_OWNER_REVIEW_QUEUE=PASS');
+console.log('EXACT_RESERVATION_RESUME_OWNER_REVIEW_HTML=PASS');
 console.log('EXACT_RESERVATION_RESUME_PRIVACY_MARKERS=PASS');
 console.log('PRODUCTION_D1_WRITE=0');
 console.log('LINE_SEND=0');
