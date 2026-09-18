@@ -75,7 +75,7 @@ export function resolveLineHistoryRecoveryNextPhase({
   }
 
   if(resumeReady){
-    if(Number(reviewQueueGroups)===0){
+    if(reviewQueueGroups!==null&&reviewQueueGroups!==undefined&&Number(reviewQueueGroups)===0){
       return {
         stage:'COMPLETE_NO_REVIEW',
         next_phase:'none',
