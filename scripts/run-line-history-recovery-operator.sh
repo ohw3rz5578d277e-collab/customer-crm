@@ -137,6 +137,7 @@ PY
     [ -n "$D1_PREVIEW_DIR" ] && STATUS_ARGS+=(--d1-preview-dir "$D1_PREVIEW_DIR")
     [ -n "$APPROVAL_FILE" ] && STATUS_ARGS+=(--approval-file "$APPROVAL_FILE")
 
+    STATUS_ARGS+=(--main-sha "$LOCAL_HEAD")
     node scripts/inspect-line-history-recovery-status.mjs "${STATUS_ARGS[@]}"
 
     echo "PRODUCTION_D1_WRITE=0"
