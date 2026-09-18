@@ -120,6 +120,11 @@ auth_probe() {
   wrangler_clean d1 execute "$binding"     --config "$CFG"     --remote     --json     --command "SELECT 1 AS auth_probe;"     >"$raw" 2>&1
 }
 
+build_owner_review_queue() {
+  local triage_file="$1"
+  node scripts/build-line-history-owner-review-queue.mjs     --triage "$triage_file"     --out "$OUT_DIR/owner-review-queue.json"
+}
+
 echo
 echo "=== 1. Cloudflare READ ONLY auth probes ==="
 
@@ -198,6 +203,7 @@ PY
 if [ "$HINT_COUNT" -eq 0 ]; then
   cp "$BASELINE_DIR/triage.json" "$OUT_DIR/final-triage.json"
   printf '[]\n' >"$OUT_DIR/exact-reservation-evidence.json"
+  build_owner_review_queue "$OUT_DIR/final-triage.json"
   echo "RESULT=NO_REVIEW_REQUIRED_HINTS"
   echo "SAFE_EXACT_RESERVATION_GROUPS=0"
   echo "SAFE_EXACT_RESERVATION_MESSAGES=0"
@@ -339,6 +345,7 @@ PY
 if [ "$RESERVATION_HISTORY_COUNT" -eq 0 ]; then
   cp "$BASELINE_DIR/triage.json" "$OUT_DIR/final-triage.json"
   printf '[]\n' >"$OUT_DIR/exact-reservation-evidence.json"
+  build_owner_review_queue "$OUT_DIR/final-triage.json"
   echo "RESULT=EXACT_RESERVATION_NO_HISTORY_MATCH"
   echo "SAFE_EXACT_RESERVATION_GROUPS=0"
   echo "SAFE_EXACT_RESERVATION_MESSAGES=0"
@@ -488,7 +495,12 @@ echo "=== 11. Re-classify locally with exact reservation evidence ==="
 node scripts/classify-line-history-unresolved.mjs   --candidates "$CANDIDATES"   --customers "$BASELINE_DIR/customers.json"   --customer-master "$CUSTOMER_MASTER"   --reviews "$BASELINE_DIR/reviews.json"   --exact-reservation-evidence "$OUT_DIR/exact-reservation-evidence.json"   --out "$OUT_DIR/final-triage.json"
 
 echo
-echo "=== 12. Privacy-safe before / after summary ==="
+echo "=== 12. Build privacy-safe Owner review queue locally ==="
+
+build_owner_review_queue "$OUT_DIR/final-triage.json"
+
+echo
+echo "=== 13. Privacy-safe before / after summary ==="
 
 python3 -   "$BASELINE_DIR/triage.json"   "$OUT_DIR/final-triage.json" <<'PY'
 import json,sys
@@ -545,4 +557,5 @@ echo "WORKER_DEPLOY=0"
 echo "PRODUCTION_DEPLOY=0"
 echo "EVIDENCE=$OUT_DIR/exact-reservation-evidence.json"
 echo "FINAL_TRIAGE=$OUT_DIR/final-triage.json"
+echo "OWNER_REVIEW_QUEUE=$OUT_DIR/owner-review-queue.json"
 echo "=================================================="
