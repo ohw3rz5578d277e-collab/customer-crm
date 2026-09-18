@@ -48,7 +48,7 @@ function normalizeReservationIdentity(r){
 function normalizeExactReservationEvidence(r){
   return {
     source_customer_id:text(r.source_customer_id??r.reservation_customer_id??r.customer_id_hint),
-    reservation_id:text(r.reservation_id),
+    reservation_id:text(r.reservation_id??r.reservation_id_hash),
     target_customer_id:text(r.target_customer_id??r.crm_candidate_customer_id??r.crm_customer_id)
   };
 }
@@ -184,6 +184,16 @@ function classifyGroup(group,indexes){
         target_customer_id:'',
         evidence,
         conflicts:[...conflicts,'exact_reservation_ids_point_to_multiple_current_customer_ids']
+      };
+    }
+
+    if(exactReservationRows.some(x=>!x.target_customer_id)){
+      return {
+        category:'REVIEW_REQUIRED',
+        reason:'EXACT_RESERVATION_TARGET_MISSING',
+        target_customer_id:'',
+        evidence:[...evidence,'exact_reservation_target_missing'],
+        conflicts
       };
     }
 
