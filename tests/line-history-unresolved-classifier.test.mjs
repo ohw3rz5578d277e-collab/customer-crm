@@ -60,7 +60,7 @@ const byReason=new Map(result.classifications.map(x=>[x.reason,x]));
 assert.equal(byReason.get('PRODUCTION_EXACT_LINE').target_customer_id,'26000001');
 assert.equal(byReason.get('MASTER_EXACT_LINE_TO_EXISTING_CURRENT_ID').target_customer_id,'26000002');
 assert.equal(byReason.get('EXPLICIT_SAME_PERSON_REVIEW').target_customer_id,'26000003');
-assert.equal(byReason.get('EXISTING_REVIEW_NOT_CONFIRMED').category,'REVIEW_REQUIRED');
+assert.equal(byReason.get('EXISTING_REVIEW_NOT_CONFIRMED').category,'REVIEW_REQUIRED');\nassert.equal(byReason.get('EXISTING_REVIEW_NOT_CONFIRMED').target_customer_id,'26000004');
 assert.equal(byReason.get('WEAK_OR_INCOMPLETE_EVIDENCE').category,'REVIEW_REQUIRED');
 assert.equal(byReason.get('NO_SAFE_IDENTITY_EVIDENCE').category,'UNRESOLVED');
 assert.equal(byReason.get('MASTER_LINE_CONFLICTS_WITH_PRODUCTION_LINE').category,'BLOCKED_CONFLICT');
