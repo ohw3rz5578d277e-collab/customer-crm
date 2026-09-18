@@ -37,9 +37,13 @@ test "$LOCAL_HEAD" = "$REMOTE_MAIN" || {
 }
 echo "MAIN_SHA_GUARD=PASS"
 
-rm -rf "$OUT_DIR"
+if [ -e "$OUT_DIR" ] && [ -n "$(find "$OUT_DIR" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null)" ]; then
+  echo "RESULT=STOP_OUTPUT_DIR_NOT_EMPTY"
+  exit 6
+fi
 mkdir -p "$OUT_DIR"
 OUT_DIR="$(cd "$OUT_DIR" && pwd)"
+test "$OUT_DIR" != "/" || { echo "RESULT=STOP_UNSAFE_OUTPUT_DIR"; exit 7; }
 
 CFG="$OUT_DIR/wrangler-readonly.jsonc"
 cat >"$CFG" <<JSON
