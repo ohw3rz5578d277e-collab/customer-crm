@@ -84,7 +84,7 @@ try{
   const ambiguous=discoverLineHistoryRecoveryArtifacts({roots:[root]});
   assert.equal(ambiguous.candidates.count,3);
   assert.equal(ambiguous.candidates.ambiguous,true);
-  assert.equal(ambiguous.candidates.path,path.join(different,'candidate-snapshot.json'));
+  assert.equal(ambiguous.candidates.path,'');
 
   const cli=fs.readFileSync('scripts/discover-line-history-recovery-artifacts.mjs','utf8');
   assert.doesNotMatch(cli,/child_process/i);
