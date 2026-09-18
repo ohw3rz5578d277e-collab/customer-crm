@@ -188,6 +188,7 @@ button.active{background:var(--text);color:#fff}button:disabled{opacity:.35;curs
 .summaryGrid{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin-top:9px}.summaryGrid>div{background:#fafafa;border-radius:10px;padding:8px}.summaryGrid small,.section small{display:block;color:var(--muted);font-size:10px}.summaryGrid b{font-size:13px}
 .section{margin-top:9px}.chips{display:flex;gap:5px;flex-wrap:wrap}.chip{font-size:10px;background:#f2f4f7;border-radius:999px;padding:4px 7px}.chip.danger{background:#fef3f2;color:var(--danger)}
 .decisionBar{display:flex;gap:6px;flex-wrap:wrap;margin-top:12px}.decisionBar button.selected{outline:2px solid var(--text);outline-offset:1px}.decisionState{font-size:11px;color:var(--muted);margin-top:7px}
+.progressNotice{margin:8px 0 12px;padding:10px 12px;background:#fff;border:1px solid var(--line);border-radius:12px;font-size:12px;font-weight:800;line-height:1.5}
 .hidden{display:none!important}.privateNotice{margin-top:15px;padding:10px 12px;background:#fff6ed;border-radius:12px;font-size:11px;line-height:1.6}
 @media(max-width:760px){.app{padding:12px}header{align-items:flex-start;flex-direction:column}h1{font-size:22px}.stats{grid-template-columns:1fr 1fr}.identityGrid{grid-template-columns:1fr}.search{flex-basis:100%}}
 </style>
@@ -210,32 +211,107 @@ button.active{background:var(--text);color:#fff}button:disabled{opacity:.35;curs
 <button data-filter="REVIEW_REQUIRED">要確認</button>
 <button data-filter="UNRESOLVED">未解決</button>
 <input id="search" class="search" placeholder="名前 / Customer ID / Queue IDで検索">
-<button id="export">判断JSONを書き出す</button>
+<button id="bulkDeferred">未判断をすべて保留</button>
+<button id="bulkMoreEvidence">未判断をすべて追加証拠</button>
+<button id="export" disabled>判断JSONを書き出す</button>
 <button id="reset">判断をリセット</button>
 </div>
+<div id="decisionProgress" class="progressNotice">判断保存済み: 0 / ${records.length} — すべて判断するとExportできます</div>
 <div class="list">${cards||'<div class="case">確認対象はありません。</div>'}</div>
 <div class="privateNotice">このHTMLには顧客名・Customer ID等の個人情報が含まれる場合があります。ローカル確認専用です。外部アップロード・Pages公開・メール添付は行わない運用にしてください。</div>
 </div>
 <script type="application/json" id="bootstrap">${bootstrap}</script>
 <script>
 (()=>{
-  const decisions={};
   const cards=[...document.querySelectorAll('.case[data-queue]')];
   const filters=[...document.querySelectorAll('[data-filter]')];
   const search=document.getElementById('search');
+  const exportButton=document.getElementById('export');
+  const progress=document.getElementById('decisionProgress');
+  const allowedDecisions=new Set(['SAME_PERSON','DIFFERENT_PERSON','DEFERRED','NEEDS_MORE_EVIDENCE']);
+  const bootstrap=JSON.parse(document.getElementById('bootstrap').textContent||'{}');
+  const storageKey='crm-line-history-owner-review-v2:'+(bootstrap.queue_ids||[]).join('|');
+  const decisions={};
   let filter='ALL';
 
-  function updateCount(){
-    document.getElementById('decisionCount').textContent=Object.keys(decisions).length;
+  function persist(){
+    try{
+      localStorage.setItem(storageKey,JSON.stringify(decisions));
+    }catch{}
   }
+
+  function restore(){
+    let saved={};
+    try{
+      saved=JSON.parse(localStorage.getItem(storageKey)||'{}')||{};
+    }catch{}
+    cards.forEach(card=>{
+      const queueId=card.dataset.queue;
+      const decision=saved[queueId];
+      if(!allowedDecisions.has(decision))return;
+      const button=[...card.querySelectorAll('[data-decision]')]
+        .find(x=>x.dataset.decision===decision&&!x.disabled);
+      if(!button)return;
+      decisions[queueId]=decision;
+      card.querySelectorAll('[data-decision]')
+        .forEach(x=>x.classList.toggle('selected',x===button));
+      const state=card.querySelector('[data-state]');
+      if(state)state.textContent='判断: '+button.textContent;
+    });
+  }
+
+  function updateCount(){
+    const count=Object.keys(decisions).length;
+    document.getElementById('decisionCount').textContent=count;
+    const complete=count===cards.length;
+    exportButton.disabled=!complete;
+    progress.textContent='判断保存済み: '+count+' / '+cards.length+
+      (complete?' — Exportできます':' — すべて判断するとExportできます');
+  }
+
+  function setDecision(card,decision){
+    const queueId=card.dataset.queue;
+    const button=[...card.querySelectorAll('[data-decision]')]
+      .find(x=>x.dataset.decision===decision&&!x.disabled);
+    if(!button)return false;
+    decisions[queueId]=decision;
+    card.querySelectorAll('[data-decision]')
+      .forEach(x=>x.classList.toggle('selected',x===button));
+    const state=card.querySelector('[data-state]');
+    if(state)state.textContent='判断: '+button.textContent;
+    persist();
+    updateCount();
+    return true;
+  }
+
   function apply(){
     const q=(search.value||'').trim().toLowerCase();
     cards.forEach(card=>{
       const category=card.dataset.category||'';
-      const text=(card.textContent||'').toLowerCase();
-      card.classList.toggle('hidden',!((filter==='ALL'||category===filter)&&(!q||text.includes(q))));
+      const body=(card.textContent||'').toLowerCase();
+      card.classList.toggle('hidden',!((filter==='ALL'||category===filter)&&(!q||body.includes(q))));
     });
   }
+
+  function bulkUndecided(decision,label){
+    const remaining=cards.filter(card=>!decisions[card.dataset.queue]);
+    if(!remaining.length)return;
+    if(!confirm('未判断 '+remaining.length+' 件を「'+label+'」に設定します。\\n既に判断済みの項目は変更しません。'))return;
+    remaining.forEach(card=>{
+      const queueId=card.dataset.queue;
+      const button=[...card.querySelectorAll('[data-decision]')]
+        .find(x=>x.dataset.decision===decision&&!x.disabled);
+      if(!button)return;
+      decisions[queueId]=decision;
+      card.querySelectorAll('[data-decision]')
+        .forEach(x=>x.classList.toggle('selected',x===button));
+      const state=card.querySelector('[data-state]');
+      if(state)state.textContent='判断: '+button.textContent;
+    });
+    persist();
+    updateCount();
+  }
+
   filters.forEach(button=>button.addEventListener('click',()=>{
     filter=button.dataset.filter||'ALL';
     filters.forEach(x=>x.classList.toggle('active',x===button));
@@ -244,18 +320,22 @@ button.active{background:var(--text);color:#fff}button:disabled{opacity:.35;curs
   search.addEventListener('input',apply);
 
   cards.forEach(card=>{
-    const queueId=card.dataset.queue;
-    const state=card.querySelector('[data-state]');
     card.querySelectorAll('[data-decision]').forEach(button=>button.addEventListener('click',()=>{
-      decisions[queueId]=button.dataset.decision;
-      card.querySelectorAll('[data-decision]').forEach(x=>x.classList.toggle('selected',x===button));
-      state.textContent='判断: '+button.textContent;
-      updateCount();
+      setDecision(card,button.dataset.decision);
     }));
   });
 
+  document.getElementById('bulkDeferred').addEventListener('click',()=>{
+    bulkUndecided('DEFERRED','保留');
+  });
+  document.getElementById('bulkMoreEvidence').addEventListener('click',()=>{
+    bulkUndecided('NEEDS_MORE_EVIDENCE','追加証拠');
+  });
+
   document.getElementById('reset').addEventListener('click',()=>{
+    if(Object.keys(decisions).length&&!confirm('保存済みの判断をすべてリセットしますか？'))return;
     Object.keys(decisions).forEach(k=>delete decisions[k]);
+    try{localStorage.removeItem(storageKey);}catch{}
     cards.forEach(card=>{
       card.querySelectorAll('[data-decision]').forEach(x=>x.classList.remove('selected'));
       const state=card.querySelector('[data-state]');
@@ -264,11 +344,18 @@ button.active{background:var(--text);color:#fff}button:disabled{opacity:.35;curs
     updateCount();
   });
 
-  document.getElementById('export').addEventListener('click',()=>{
+  exportButton.addEventListener('click',()=>{
+    if(Object.keys(decisions).length!==cards.length){
+      alert('すべての確認グループを判断してからExportしてください。');
+      return;
+    }
     const payload={
       planner:'line_history_owner_review_decisions_v1',
       generated_at:new Date().toISOString(),
-      decisions:Object.entries(decisions).map(([queue_id,decision])=>({queue_id,decision}))
+      decisions:cards.map(card=>({
+        queue_id:card.dataset.queue,
+        decision:decisions[card.dataset.queue]
+      }))
     };
     const blob=new Blob([JSON.stringify(payload,null,2)+'\\n'],{type:'application/json'});
     const url=URL.createObjectURL(blob);
@@ -280,6 +367,18 @@ button.active{background:var(--text);color:#fff}button:disabled{opacity:.35;curs
     a.remove();
     URL.revokeObjectURL(url);
   });
+
+  window.addEventListener('beforeunload',event=>{
+    const count=Object.keys(decisions).length;
+    if(count>0&&count<cards.length){
+      event.preventDefault();
+      event.returnValue='';
+    }
+  });
+
+  restore();
+  persist();
+  updateCount();
 })();
 </script>
 </body>
