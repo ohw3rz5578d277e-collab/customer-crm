@@ -86,6 +86,15 @@ assert.match(html,/line_history_owner_review_decisions_v1/);
 assert.match(html,/new Blob/);
 assert.match(html,/URL\.createObjectURL/);
 assert.match(html,/line-history-owner-review-decisions\.json/);
+assert.match(html,/id="bulkDeferred"/);
+assert.match(html,/id="bulkMoreEvidence"/);
+assert.match(html,/localStorage\.setItem/);
+assert.match(html,/localStorage\.getItem/);
+assert.match(html,/未判断をすべて保留/);
+assert.match(html,/未判断をすべて追加証拠/);
+assert.match(html,/exportButton\.disabled=!complete/);
+assert.match(html,/既に判断済みの項目は変更しません/);
+assert.match(html,/beforeunload/);
 
 assert.match(html,/@media\(max-width:760px\)/);
 assert.match(html,/name="robots" content="noindex,nofollow,noarchive"/);
