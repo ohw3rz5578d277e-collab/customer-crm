@@ -9,14 +9,18 @@ WRANGLER_VERSION="4.107.0"
 CANDIDATES="${1:-}"
 CUSTOMER_MASTER="${2:-}"
 OUT_DIR="${3:-line-history-unresolved-triage-results}"
+EXACT_RESERVATION_EVIDENCE="${4:-}"
 
 if [ -z "$CANDIDATES" ] || [ -z "$CUSTOMER_MASTER" ]; then
-  echo "Usage: $0 candidate-snapshot.json customer-master.json [output-dir]"
+  echo "Usage: $0 candidate-snapshot.json customer-master.json [output-dir] [exact-reservation-evidence.json]"
   exit 2
 fi
 
 test -f "$CANDIDATES" || { echo "RESULT=STOP_CANDIDATE_SNAPSHOT_MISSING"; exit 3; }
 test -f "$CUSTOMER_MASTER" || { echo "RESULT=STOP_CUSTOMER_MASTER_MISSING"; exit 4; }
+if [ -n "$EXACT_RESERVATION_EVIDENCE" ]; then
+  test -f "$EXACT_RESERVATION_EVIDENCE" || { echo "RESULT=STOP_EXACT_RESERVATION_EVIDENCE_MISSING"; exit 6; }
+fi
 
 echo "=================================================="
 echo " CUSTOMER CRM — UNRESOLVED LINE HISTORY TRIAGE"
@@ -74,11 +78,27 @@ for src,dst in [(sys.argv[1],sys.argv[2]),(sys.argv[3],sys.argv[4])]:
 print("WRANGLER_JSON_NORMALIZE=PASS")
 PY
 
-node scripts/classify-line-history-unresolved.mjs   --candidates "$CANDIDATES"   --customers "$OUT_DIR/customers.json"   --customer-master "$CUSTOMER_MASTER"   --reviews "$OUT_DIR/reviews.json"   --out "$OUT_DIR/triage.json"
+CLASSIFIER_ARGS=(
+  --candidates "$CANDIDATES"
+  --customers "$OUT_DIR/customers.json"
+  --customer-master "$CUSTOMER_MASTER"
+  --reviews "$OUT_DIR/reviews.json"
+  --out "$OUT_DIR/triage.json"
+)
+
+if [ -n "$EXACT_RESERVATION_EVIDENCE" ]; then
+  echo "EXACT_RESERVATION_EVIDENCE=LOCAL_FILE_ENABLED"
+  CLASSIFIER_ARGS+=(--exact-reservation-evidence "$EXACT_RESERVATION_EVIDENCE")
+else
+  echo "EXACT_RESERVATION_EVIDENCE=NOT_PROVIDED"
+fi
+
+node scripts/classify-line-history-unresolved.mjs "${CLASSIFIER_ARGS[@]}"
 
 echo
 echo "=================================================="
 echo " RESULT=LINE_HISTORY_UNRESOLVED_READONLY_TRIAGE_COMPLETE"
+echo " EXACT_RESERVATION_EVIDENCE_FILE_READ=$([ -n "$EXACT_RESERVATION_EVIDENCE" ] && echo YES || echo NO)"
 echo " PRODUCTION_D1_READ=YES"
 echo " PRODUCTION_D1_WRITE=0"
 echo " CUSTOMER_ID_GENERATION=0"
