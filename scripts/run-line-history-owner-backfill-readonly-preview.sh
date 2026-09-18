@@ -6,20 +6,22 @@ CRM_DB_ID="1ae3e0d9-72c0-47ad-8fc1-fed9d15ec70f"
 WRANGLER_VERSION="4.107.0"
 
 PREVIEW_DIR="${1:-}"
-OUT_DIR="${2:-}"
+PLAN="${2:-}"
+OUT_DIR="${3:-}"
 
-if [ -z "$PREVIEW_DIR" ]; then
-  echo "Usage: $0 <owner-backfill-preview-dir> [output-dir]"
+if [ -z "$PREVIEW_DIR" ] || [ -z "$PLAN" ]; then
+  echo "Usage: $0 <owner-backfill-preview-dir> <decision-plan-private.json> [output-dir]"
   exit 2
 fi
 
 test -d "$PREVIEW_DIR" || { echo "RESULT=STOP_PREVIEW_DIR_MISSING"; exit 3; }
+test -f "$PLAN" || { echo "RESULT=STOP_DECISION_PLAN_MISSING"; exit 4; }
 
 SUMMARY="$PREVIEW_DIR/owner-backfill-preview-summary.json"
 SQL="$PREVIEW_DIR/owner-backfill-preview.sql"
 
-test -f "$SUMMARY" || { echo "RESULT=STOP_PREVIEW_SUMMARY_MISSING"; exit 4; }
-test -f "$SQL" || { echo "RESULT=STOP_PREVIEW_SQL_MISSING"; exit 5; }
+test -f "$SUMMARY" || { echo "RESULT=STOP_PREVIEW_SUMMARY_MISSING"; exit 5; }
+test -f "$SQL" || { echo "RESULT=STOP_PREVIEW_SQL_MISSING"; exit 6; }
 
 LOCAL_HEAD="$(git rev-parse HEAD)"
 REMOTE_MAIN="$(git ls-remote origin refs/heads/main | awk '{print $1}')"
@@ -165,12 +167,23 @@ echo "=== 4. Aggregate privacy-safe D1 preview result ==="
 node scripts/summarize-line-history-owner-backfill-preview.mjs   --preview-summary "$SUMMARY"   --d1-raw "$OUT_DIR/preview.clean.json"   --out "$OUT_DIR/owner-backfill-preview-result.json"
 
 echo
+echo "=== 5. Build exact public write-authorization packet ==="
+
+node scripts/build-line-history-owner-authorization-packet.mjs \
+  --plan "$PLAN" \
+  --preview-result "$OUT_DIR/owner-backfill-preview-result.json" \
+  --main-sha "$LOCAL_HEAD" \
+  --out "$OUT_DIR/write-authorization-packet.json"
+
+echo
 echo "=================================================="
 echo " RESULT=OWNER_BACKFILL_D1_READONLY_PREVIEW_COMPLETE"
 echo "=================================================="
 echo "PREVIEW_RESULT=$OUT_DIR/owner-backfill-preview-result.json"
+echo "AUTHORIZATION_PACKET=$OUT_DIR/write-authorization-packet.json"
 echo "PRODUCTION_D1_READ=YES"
 echo "PRODUCTION_D1_WRITE=0"
+echo "AUTHORIZATION_GRANTED=NO"
 echo "WRITE_SQL_GENERATED=0"
 echo "CUSTOMER_ID_GENERATION=0"
 echo "CUSTOMER_UPDATE=0"
