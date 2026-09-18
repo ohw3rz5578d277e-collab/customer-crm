@@ -134,7 +134,8 @@ const exactResult=classifyLineHistoryUnresolved({
 });
 
 assert.equal(exactResult.planner,'line_history_unresolved_triage_v2');
-assert.equal(exactResult.auto_confirmable_groups,2);
+assert.equal(exactResult.already_resolved_groups,1);
+assert.equal(exactResult.auto_confirmable_groups,1);
 assert.equal(exactResult.review_required_groups,2);
 assert.equal(exactResult.blocked_conflict_groups,3);
 assert.equal(exactResult.unresolved_groups,0);
@@ -148,10 +149,9 @@ assert.equal(safeEmpty.target_customer_id,'26000008');
 assert.ok(safeEmpty.evidence.includes('production_line_id_empty'));
 
 const safeSame=byLegacyHint('C-RES-9');
-assert.equal(safeSame.category,'AUTO_CONFIRMABLE');
-assert.equal(safeSame.reason,'EXACT_RESERVATION_ID_UNIQUE_CURRENT_TARGET');
+assert.equal(safeSame.category,'ALREADY_RESOLVED');
+assert.equal(safeSame.reason,'PRODUCTION_EXACT_LINE');
 assert.equal(safeSame.target_customer_id,'26000009');
-assert.ok(safeSame.evidence.includes('production_line_id_exact'));
 
 const lineConflict=byLegacyHint('C-RES-10');
 assert.equal(lineConflict.category,'BLOCKED_CONFLICT');
