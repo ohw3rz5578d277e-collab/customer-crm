@@ -128,6 +128,17 @@ PY
       echo "WRITE_AUTHORIZATION_PACKET=MISSING"
     fi
 
+    STATUS_ARGS=()
+    [ -n "$CANDIDATES" ] && STATUS_ARGS+=(--candidates "$CANDIDATES")
+    [ -n "$CUSTOMER_MASTER" ] && STATUS_ARGS+=(--customer-master "$CUSTOMER_MASTER")
+    [ -n "$RESUME_DIR" ] && STATUS_ARGS+=(--resume-dir "$RESUME_DIR")
+    [ -n "$DECISIONS" ] && STATUS_ARGS+=(--decisions "$DECISIONS")
+    [ -n "$PREAUTH_DIR" ] && STATUS_ARGS+=(--preauth-dir "$PREAUTH_DIR")
+    [ -n "$D1_PREVIEW_DIR" ] && STATUS_ARGS+=(--d1-preview-dir "$D1_PREVIEW_DIR")
+    [ -n "$APPROVAL_FILE" ] && STATUS_ARGS+=(--approval-file "$APPROVAL_FILE")
+
+    node scripts/inspect-line-history-recovery-status.mjs "${STATUS_ARGS[@]}"
+
     echo "PRODUCTION_D1_WRITE=0"
     echo "LINE_SEND=0"
     echo "RESULT=LINE_HISTORY_RECOVERY_OPERATOR_STATUS"
