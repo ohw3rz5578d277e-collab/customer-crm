@@ -104,20 +104,22 @@ function fileSelection(paths){
       try{return sha256File(x.path)===h}catch{return false}
     }).length;
   }catch{}
+  const ambiguous=ranked.length>1&&same!==ranked.length;
   return {
-    path:selected.path,
+    path:ambiguous?'':selected.path,
     count:ranked.length,
     equivalent_count:same,
-    ambiguous:ranked.length>1&&same!==ranked.length
+    ambiguous
   };
 }
 function dirSelection(paths){
   const ranked=rank(paths);
+  const ambiguous=ranked.length>1;
   return {
-    path:ranked[0]?.path||'',
+    path:ambiguous?'':(ranked[0]?.path||''),
     count:ranked.length,
     equivalent_count:ranked.length?1:0,
-    ambiguous:ranked.length>1
+    ambiguous
   };
 }
 
