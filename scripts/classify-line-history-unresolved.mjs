@@ -21,10 +21,11 @@ const customersPath=arg('--customers');
 const masterPath=arg('--customer-master');
 const reviewsPath=arg('--reviews');
 const reservationPath=arg('--reservation-identities');
+const exactReservationEvidencePath=arg('--exact-reservation-evidence');
 const outPath=arg('--out')||'line-history-unresolved-triage.json';
 
 if(!candidatesPath||!customersPath){
-  console.error('Usage: node scripts/classify-line-history-unresolved.mjs --candidates candidate-snapshot.json --customers production-customers.json [--customer-master master.json] [--reviews reviews.json] [--reservation-identities reservation-identities.json] [--out result.json]');
+  console.error('Usage: node scripts/classify-line-history-unresolved.mjs --candidates candidate-snapshot.json --customers production-customers.json [--customer-master master.json] [--reviews reviews.json] [--reservation-identities reservation-identities.json] [--exact-reservation-evidence exact-reservation-evidence.json] [--out result.json]');
   process.exit(2);
 }
 
@@ -33,7 +34,8 @@ const result=classifyLineHistoryUnresolved({
   customers:readJson(customersPath),
   customerMaster:readJson(masterPath,false),
   reviews:readJson(reviewsPath,false),
-  reservationIdentities:readJson(reservationPath,false)
+  reservationIdentities:readJson(reservationPath,false),
+  exactReservationEvidence:readJson(exactReservationEvidencePath,false)
 });
 
 fs.writeFileSync(outPath,JSON.stringify(result,null,2)+'\n');
