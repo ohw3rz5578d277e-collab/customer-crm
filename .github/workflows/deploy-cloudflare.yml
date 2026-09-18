@@ -652,7 +652,9 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           wranglerVersion: '4.131.2'
-          command: deploy --secrets-file /tmp/customer-crm-owner-secrets.json
+          command: >-
+            deploy --secrets-file /tmp/customer-crm-owner-secrets.json
+            --define "CRM_RELEASE_SHA:'${{ steps.authorized_sha.outputs.sha }}'"
 
       - name: Verify identity sequence state (READ ONLY)
         id: verify_sequence
@@ -748,6 +750,7 @@ jobs:
         env:
           PRODUCTION_BASE_URL: https://customer-crm-api.ohw3rz5578d277e.workers.dev
           DEPLOYMENT_REFERENCE_URL: ${{ steps.deploy_worker.outputs.deployment-url }}
+          EXPECTED_SHA: ${{ steps.authorized_sha.outputs.sha }}
         run: |
           set -euo pipefail
           node <<'NODE'
@@ -763,13 +766,21 @@ jobs:
           if(h.customer360_identity_fallback!==false)throw new Error(`IDENTITY_FALLBACK_NOT_FALSE:actual=${JSON.stringify(h.customer360_identity_fallback)}`);
           if(h.customer360_paid_ai_provider_active!==false)throw new Error(`PAID_AI_PROVIDER_NOT_FALSE:actual=${JSON.stringify(h.customer360_paid_ai_provider_active)}`);
           if(h.line_event_direction!=='incoming'||h.line_event_receive_status!=='received')throw new Error(`LINE_CANONICAL_EVENT_CONTRACT:direction=${JSON.stringify(h.line_event_direction)}:receive_status=${JSON.stringify(h.line_event_receive_status)}`);
+          if(h.customer360_release_sha!==process.env.EXPECTED_SHA)throw new Error(`PRODUCTION_RELEASE_SHA_MISMATCH:expected=${process.env.EXPECTED_SHA}:actual=${JSON.stringify(h.customer360_release_sha)}`);
           console.log('POST_DEPLOY_HTTP_READ_ONLY=PASS');
+          console.log('PRODUCTION_RELEASE_SHA_BODY=PASS');
           console.log('CUSTOMER360_PROFILE_SCHEMA=PASS');
           console.log('CUSTOMER360_CANDIDATE_ONLY=PASS');
           console.log('CUSTOMER_ID_GENERATION=0');
           console.log('LINE_SEND=0');
           console.log('PAID_AI_ACTIVATION=0');
           NODE
+          release_header="$(awk 'BEGIN{IGNORECASE=1} /^x-crm-release-sha:/{sub(/^[^:]*:[[:space:]]*/,""); sub(/\r$/,""); print}' /tmp/customer-crm-health.headers | tail -1)"
+          if [[ "$release_header" != "$EXPECTED_SHA" ]]; then
+            echo "::error::PRODUCTION_RELEASE_SHA_HEADER_MISMATCH"
+            exit 1
+          fi
+          echo 'PRODUCTION_RELEASE_SHA_HEADER=PASS'
           echo "PRODUCTION_HEALTH_URL=$PRODUCTION_BASE_URL/health"
           if [[ -n "$DEPLOYMENT_REFERENCE_URL" ]]; then echo 'DEPLOYMENT_REFERENCE_PRESENT=YES'; fi
 
