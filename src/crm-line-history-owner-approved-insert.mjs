@@ -103,53 +103,66 @@ export function buildApprovedLineHistoryInsertSql({
     };
   }
 
-  const statements=[];
-  statements.push('-- APPROVED WRITE SQL. customer_line_messages INSERT-only.');
-  statements.push('-- Exact approval, packet, preview result, private rows, and main SHA were validated before generation.');
-  statements.push('-- No customers INSERT/UPDATE/DELETE. No Customer ID generation. No LINE send.');
-
-  for(const row of insertable){
+  const values=insertable.map(row=>{
     const raw=JSON.stringify({
       source:'line_history_owner_review_backfill_v1',
       queue_id:row.queue_id||null,
       source_kind:row.source||null,
       source_row:row.source_row||null
     });
+    return '('+[
+      sqlText(row.message_key),
+      sqlText(row.target_customer_id),
+      sqlText(row.line_user_id),
+      sqlText(row.direction),
+      sqlText(row.message_type),
+      sqlText(row.message_text),
+      row.sender_name?sqlText(row.sender_name):'NULL',
+      sqlText(row.sent_at),
+      sqlText(raw)
+    ].join(',')+')';
+  }).join(',\\n');
 
-    statements.push(
-`INSERT OR IGNORE INTO customer_line_messages
+  const sql=[
+    '-- APPROVED WRITE SQL. customer_line_messages INSERT-only.',
+    '-- Exact approval, packet, preview result, private rows, and main SHA were validated before generation.',
+    '-- Single-statement write. No customers INSERT/UPDATE/DELETE. No Customer ID generation. No LINE send.',
+    `WITH candidates(message_key,target_customer_id,line_user_id,direction,message_type,message_text,sender_name,sent_at,raw_json) AS (VALUES
+${values}
+)
+INSERT OR IGNORE INTO customer_line_messages
 (message_key,customer_id,line_user_id,direction,message_type,message_text,sender_name,sent_at,raw_json,created_at)
 SELECT
-  ${sqlText(row.message_key)},
+  candidates.message_key,
   c.customer_id,
-  ${sqlText(row.line_user_id)},
-  ${sqlText(row.direction)},
-  ${sqlText(row.message_type)},
-  ${sqlText(row.message_text)},
-  ${row.sender_name?sqlText(row.sender_name):'NULL'},
-  ${sqlText(row.sent_at)},
-  ${sqlText(raw)},
+  candidates.line_user_id,
+  candidates.direction,
+  candidates.message_type,
+  candidates.message_text,
+  candidates.sender_name,
+  candidates.sent_at,
+  candidates.raw_json,
   datetime('now')
-FROM customers c
-WHERE c.customer_id=${sqlText(row.target_customer_id)}
-  AND COALESCE(c.deleted_at,'')=''
-  AND (COALESCE(c.line_user_id,'')='' OR COALESCE(c.line_user_id,'')=${sqlText(row.line_user_id)})
+FROM candidates
+JOIN customers c
+  ON c.customer_id=candidates.target_customer_id
+WHERE COALESCE(c.deleted_at,'')=''
+  AND (COALESCE(c.line_user_id,'')='' OR COALESCE(c.line_user_id,'')=candidates.line_user_id)
   AND NOT EXISTS (
     SELECT 1
     FROM customer_line_messages m
-    WHERE m.message_key=${sqlText(row.message_key)}
+    WHERE m.message_key=candidates.message_key
        OR (
          m.customer_id=c.customer_id
-         AND COALESCE(m.line_user_id,'')=${sqlText(row.line_user_id)}
-         AND m.direction=${sqlText(row.direction)}
-         AND m.sent_at=${sqlText(row.sent_at)}
-         AND m.message_text=${sqlText(row.message_text)}
+         AND COALESCE(m.line_user_id,'')=candidates.line_user_id
+         AND m.direction=candidates.direction
+         AND m.sent_at=candidates.sent_at
+         AND m.message_text=candidates.message_text
        )
-  );`
-    );
-  }
+  );`,
+    ''
+  ].join('\\n');
 
-  const sql=statements.join('\n\n')+'\n';
   const body=sql.replace(/^--.*$/gm,'');
 
   if(/\b(?:UPDATE|DELETE|CREATE|ALTER|DROP|REPLACE|TRUNCATE|UPSERT)\b/i.test(body)){
