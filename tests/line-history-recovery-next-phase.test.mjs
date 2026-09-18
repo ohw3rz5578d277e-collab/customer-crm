@@ -46,6 +46,16 @@ expectStage({
 
 expectStage({
   d1Packet:{
+    packet_ready:true,
+    authorization_required:true,
+    source_main_sha:'1'.repeat(40)
+  },
+  currentMainSha:'2'.repeat(40),
+  approvalFilePresent:true
+},'STALE_AUTHORIZATION_PACKET','d1-preview');
+
+expectStage({
+  d1Packet:{
     packet_ready:false,
     authorization_required:true
   }
@@ -88,6 +98,7 @@ assert.doesNotMatch(cli,/\bwrangler\b/i);
 assert.doesNotMatch(cli,/child_process/i);
 assert.doesNotMatch(cli,/d1\s+execute/i);
 assert.doesNotMatch(cli,/INSERT\s+(?:OR\s+IGNORE\s+)?INTO/i);
+assert.match(cli,/--main-sha/);
 assert.match(cli,/PRODUCTION_WRITE_POSSIBLE=/);
 assert.match(cli,/PRIVATE_VALUES_PRINTED_TO_TERMINAL=0/);
 
@@ -100,6 +111,7 @@ console.log('LINE_HISTORY_RECOVERY_NEXT_PHASE_INPUTS=PASS');
 console.log('LINE_HISTORY_RECOVERY_NEXT_PHASE_REVIEW=PASS');
 console.log('LINE_HISTORY_RECOVERY_NEXT_PHASE_PREAUTH=PASS');
 console.log('LINE_HISTORY_RECOVERY_NEXT_PHASE_D1_PREVIEW=PASS');
+console.log('LINE_HISTORY_RECOVERY_NEXT_PHASE_STALE_PACKET=PASS');
 console.log('LINE_HISTORY_RECOVERY_NEXT_PHASE_EXACT_APPROVAL=PASS');
 console.log('LINE_HISTORY_RECOVERY_NEXT_PHASE_COMPLETE=PASS');
 console.log('LINE_HISTORY_RECOVERY_STATUS_LOCAL_ONLY=PASS');
