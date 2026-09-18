@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import assert from 'node:assert/strict';
 import { classifyLineHistoryUnresolved } from '../src/crm-line-history-unresolved-classifier.mjs';
 
@@ -80,12 +81,21 @@ assert.equal(result.safety.line_send,0);
 assert.equal(result.safety.name_only_auto_link,false);
 assert.equal(result.safety.output_contains_message_text,false);
 
+const runner=fs.readFileSync('scripts/run-line-history-unresolved-readonly.sh','utf8');
+assert.match(runner,/D1_ACTION=READ_ONLY_CUSTOMERS/);
+assert.match(runner,/D1_ACTION=READ_ONLY_RECONCILIATION_REVIEWS/);
+assert.match(runner,/--command=/);
+assert.doesNotMatch(runner,/\b(?:INSERT|UPDATE|DELETE|CREATE|ALTER|DROP|REPLACE|TRUNCATE)\b/i);
+assert.doesNotMatch(runner,/wrangler\s+deploy/i);
+assert.doesNotMatch(runner,/api\.line\.me/i);
+
 console.log('LINE_HISTORY_UNRESOLVED_GROUPING=PASS');
 console.log('LINE_HISTORY_UNRESOLVED_EXPLICIT_REVIEW=PASS');
 console.log('LINE_HISTORY_UNRESOLVED_MASTER_EXACT_LINE=PASS');
 console.log('LINE_HISTORY_UNRESOLVED_NAME_ONLY_NOT_AUTO=PASS');
 console.log('LINE_HISTORY_UNRESOLVED_CONFLICT_BLOCK=PASS');
 console.log('LINE_HISTORY_UNRESOLVED_PRIVACY=PASS');
+console.log('LINE_HISTORY_UNRESOLVED_READONLY_RUNNER=PASS');
 console.log('PRODUCTION_D1_WRITE=0');
 console.log('CUSTOMER_ID_GENERATION=0');
 console.log('CUSTOMER_UPDATE=0');
