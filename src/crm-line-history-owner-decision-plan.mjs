@@ -155,20 +155,14 @@ export function buildLineHistoryOwnerDecisionPlan({
       continue;
     }
 
-    if(target.line_user_id===candidateLine){
-      acceptedNoWrite.push({
-        queue_id:queueId,
-        decision,
-        result:'ALREADY_LINKED'
-      });
-      continue;
-    }
-
     proposedActions.push({
       queue_id:queueId,
-      action:'LINK_LINE_ID_TO_EXISTING_CUSTOMER',
+      action:'BACKFILL_LINE_HISTORY_TO_EXISTING_CUSTOMER',
       target_customer_id:targetId,
       line_user_id:candidateLine,
+      source_line_id_hash:hash,
+      message_rows:Number(row.message_rows||0),
+      target_line_state:target.line_user_id===candidateLine?'EXACT':'EMPTY',
       source:'owner_review_same_person'
     });
   }
@@ -183,14 +177,16 @@ export function buildLineHistoryOwnerDecisionPlan({
     decided_known_groups:decidedKnownCount,
     undecided_groups:Math.max(0,reviewRows.length-decidedKnownCount),
     decision_summary:decisionSummary,
-    proposed_write_actions:proposedActions.length,
+    proposed_backfill_identity_actions:proposedActions.length,
+    proposed_write_actions:0,
     accepted_no_write_decisions:acceptedNoWrite.length,
     validation_error_count:validationErrors.length,
     proposed_actions:proposedActions,
     no_write_decisions:acceptedNoWrite,
     validation_errors:validationErrors,
-    ready_for_separate_write_authorization:
+    ready_for_readonly_backfill_preview:
       validationErrors.length===0&&proposedActions.length>0,
+    ready_for_separate_write_authorization:false,
     authorization_granted:false,
     safety:{
       production_d1_read:0,
