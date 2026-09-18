@@ -24,6 +24,7 @@ import { reservationInternalUser } from './crm-reservation-browser-handoff.mjs';
 import { handleCustomerCsvImport, customerCsvImportHealth, injectCustomerCsvImport } from './crm-customer-csv-import.mjs';
 
 const BUILD='customer-crm-security-hardening-20260915-07';
+const RELEASE_SHA=(typeof CRM_RELEASE_SHA==='string'&&/^[0-9a-f]{40}$/.test(CRM_RELEASE_SHA))?CRM_RELEASE_SHA:'source-untracked';
 const OWNER_EMAIL='ohw3rz5578d277e@gmail.com';
 const RAW_SCRIPT_CLOSE='<'+String.fromCharCode(92)+'/script>';
 const CUSTOMER360_PROFILE_TABLES=[
@@ -205,7 +206,7 @@ export function composeCustomer360AdminHtml(html){
   const withLogoutRoute=injectOwnerLogoutPostRoute(withCsvImport);
   return normalizeCustomer360InjectedHtml(withLogoutRoute);
 }
-function headersFrom(response){const h=new Headers(response.headers);h.delete('content-length');h.set('cache-control','no-store, no-cache, must-revalidate, max-age=0');h.set('x-crm-customer360-build',BUILD);return h}
+function headersFrom(response){const h=new Headers(response.headers);h.delete('content-length');h.set('cache-control','no-store, no-cache, must-revalidate, max-age=0');h.set('x-crm-customer360-build',BUILD);h.set('x-crm-release-sha',RELEASE_SHA);return h}
 async function customer360SchemaHealth(env){
   const fallback={customer360_profile_enrichment_schema_available:false,customer360_family_metadata_available:false,customer360_field_evidence_available:false,customer360_notes_history_available:false,customer360_profile_media_schema_available:false,customer360_delivery_links_schema_available:false};
   if(!env?.DB?.prepare)return fallback;
@@ -220,7 +221,7 @@ export async function patchHealth(response,env){
   const inheritedNotFound=response.status===404;const raw=await response.text();let data={};try{data=raw?JSON.parse(raw):{}}catch(_){}
   if(inheritedNotFound){const {ok:_staleOk,message:_staleMessage,error:_staleError,...preservedHealth}=data;data=preservedHealth}
   const h=headersFrom(response);h.set('content-type','application/json; charset=utf-8');const schema=await customer360SchemaHealth(env);const status=inheritedNotFound?200:response.status;
-  return new Response(JSON.stringify({...data,...(inheritedNotFound?{ok:true}:{}),service:data.service||'customer-crm-api',...customer360Health(),...customerProfileEnrichmentHealth(),...customer360LineProfileExtractionHealth(),...customer360ProfileWriteGuardHealth(),...customer360CombinedDetailHealth(),...customer360MediaHealth(),...customer360MediaUiHealth(),...customer360ExactEditHandoffHealth(),...customerCsvImportHealth(),...ownerPasswordAuthHealth(env),...schema,customer360_identity_fallback:false,customer360_paid_ai_provider_active:false,customer360_build:BUILD},null,2),{status,headers:h});
+  return new Response(JSON.stringify({...data,...(inheritedNotFound?{ok:true}:{}),service:data.service||'customer-crm-api',...customer360Health(),...customerProfileEnrichmentHealth(),...customer360LineProfileExtractionHealth(),...customer360ProfileWriteGuardHealth(),...customer360CombinedDetailHealth(),...customer360MediaHealth(),...customer360MediaUiHealth(),...customer360ExactEditHandoffHealth(),...customerCsvImportHealth(),...ownerPasswordAuthHealth(env),...schema,customer360_identity_fallback:false,customer360_paid_ai_provider_active:false,customer360_build:BUILD,customer360_release_sha:RELEASE_SHA},null,2),{status,headers:h});
 }
 export async function handleProductionHealthRequest(request,env){
   const url=new URL(request.url);if(request.method!=='GET'||url.pathname!=='/health')return null;

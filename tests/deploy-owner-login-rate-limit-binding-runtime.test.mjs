@@ -70,7 +70,7 @@ test('canonical production deploy step selects Wrangler version that supports Ra
   const workflow=fs.readFileSync('.github/workflows/deploy-cloudflare.yml','utf8');
   const deploy=namedStepBlock(workflow,'Deploy customer-crm-api');
   assert.match(deploy,/uses:\s*cloudflare\/wrangler-action@v4/);
-  assert.match(deploy,/command:\s*deploy\b/);
+  assert.match(deploy,/command:\s*(?:>-\s*)?deploy\b/);
   const match=deploy.match(/wranglerVersion:\s*['"]([^'"]+)['"]/);
   assert.ok(match,'Deploy customer-crm-api must declare wranglerVersion');
   const selected=match[1].trim();
