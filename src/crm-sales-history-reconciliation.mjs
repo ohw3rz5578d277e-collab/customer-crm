@@ -229,6 +229,9 @@ export function reconcileSalesHistory({
     }else if(salesCurrentIds.length>1||salesIdTargets.length>1){
       classification='SALES_CUSTOMER_ID_AMBIGUOUS';
       evidenceText='sales_source_contains_multiple_current_customer_ids';
+    }else if(salesCurrentIds.length===1&&salesIdTargets.length===0){
+      classification='SALES_CUSTOMER_ID_NOT_FOUND_REVIEW';
+      evidenceText='sales_source_current_customer_id_not_found_in_production;no_name_fallback';
     }else if(salesLineIds.length===1&&salesLineTargets.length===1){
       classification='SALES_LINE_USER_ID_TO_PRODUCTION_UNIQUE';
       targetCustomerId=salesLineTargets[0].customer_id;
@@ -237,6 +240,9 @@ export function reconcileSalesHistory({
     }else if(salesLineIds.length>1||salesLineTargets.length>1){
       classification='SALES_LINE_USER_ID_AMBIGUOUS';
       evidenceText='sales_source_line_user_id_not_unique';
+    }else if(salesLineIds.length===1&&salesLineTargets.length===0){
+      classification='SALES_LINE_USER_ID_NOT_FOUND_REVIEW';
+      evidenceText='sales_source_line_user_id_not_found_in_production;no_name_fallback';
     }else if(direct.length===1){
       classification='PRODUCTION_EXACT_NAME_REVIEW';
       targetCustomerId=direct[0].customer_id;
