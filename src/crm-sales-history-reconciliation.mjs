@@ -32,7 +32,8 @@ export function normalizeSalesRecord(raw={}){
     genre:text(raw.genre),
     status:text(raw.status),
     repeat_flag:text(raw.repeat_flag),
-    sales_customer_id:text(raw.sales_customer_id)
+    sales_customer_id:text(raw.sales_customer_id),
+    line_user_id:text(raw.line_user_id)
   };
 }
 
@@ -68,12 +69,14 @@ export function analyzeSalesHistory(records=[]){
         shoots:new Map(),
         source_rows:[],
         sales_customer_ids:new Set(),
+        line_user_ids:new Set(),
         repeat_flag_seen:false
       };
       groups.set(row.name_key,group);
     }
     group.source_rows.push(row.source_row);
     if(row.sales_customer_id)group.sales_customer_ids.add(row.sales_customer_id);
+    if(row.line_user_id)group.line_user_ids.add(row.line_user_id);
     if(row.repeat_flag)group.repeat_flag_seen=true;
 
     const existing=group.shoots.get(row.shoot_date);
@@ -100,6 +103,7 @@ export function analyzeSalesHistory(records=[]){
     const shoots=[...group.shoots.values()].sort((a,b)=>a.shoot_date.localeCompare(b.shoot_date));
     const years=[...new Set(shoots.map(x=>Number(x.year)||Number(x.shoot_date.slice(0,4))))].filter(Boolean).sort();
     const ids=[...group.sales_customer_ids];
+    const lineIds=[...group.line_user_ids];
     customers.push({
       name_key:group.name_key,
       name:group.name,
@@ -111,6 +115,8 @@ export function analyzeSalesHistory(records=[]){
       duplicate_same_day_rows:shoots.reduce((n,x)=>n+Number(x.duplicate_source_rows||0),0),
       sales_customer_ids:ids,
       sales_customer_id_conflict:ids.length>1,
+      line_user_ids:lineIds,
+      line_user_id_conflict:lineIds.length>1,
       shoots
     });
   }
@@ -210,28 +216,47 @@ export function reconcileSalesHistory({
     let evidenceText='no_conservative_exact_identity_evidence';
     let safeExistingTarget=false;
 
-    if(direct.length===1){
-      classification='PRODUCTION_EXACT_UNIQUE';
-      targetCustomerId=direct[0].customer_id;
-      evidenceText='production_name_exact_unique';
+    const salesCurrentIds=[...new Set((sales.sales_customer_ids||[]).filter(id=>CURRENT_CUSTOMER_ID_RE.test(id)))];
+    const salesLineIds=[...new Set((sales.line_user_ids||[]).filter(id=>LINE_USER_ID_RE.test(id)))];
+    const salesIdTargets=uniqueByCustomerId(salesCurrentIds.map(id=>prodById.get(id)).filter(Boolean));
+    const salesLineTargets=uniqueByCustomerId(salesLineIds.flatMap(id=>prodByLine.get(id)||[]));
+
+    if(salesCurrentIds.length===1&&salesIdTargets.length===1){
+      classification='SALES_CUSTOMER_ID_TO_PRODUCTION_UNIQUE';
+      targetCustomerId=salesIdTargets[0].customer_id;
+      evidenceText='sales_source_current_customer_id_exact';
       safeExistingTarget=true;
+    }else if(salesCurrentIds.length>1||salesIdTargets.length>1){
+      classification='SALES_CUSTOMER_ID_AMBIGUOUS';
+      evidenceText='sales_source_contains_multiple_current_customer_ids';
+    }else if(salesLineIds.length===1&&salesLineTargets.length===1){
+      classification='SALES_LINE_USER_ID_TO_PRODUCTION_UNIQUE';
+      targetCustomerId=salesLineTargets[0].customer_id;
+      evidenceText='sales_source_line_user_id_exact';
+      safeExistingTarget=true;
+    }else if(salesLineIds.length>1||salesLineTargets.length>1){
+      classification='SALES_LINE_USER_ID_AMBIGUOUS';
+      evidenceText='sales_source_line_user_id_not_unique';
+    }else if(direct.length===1){
+      classification='PRODUCTION_EXACT_NAME_REVIEW';
+      targetCustomerId=direct[0].customer_id;
+      evidenceText='production_name_exact_unique;owner_confirmation_required';
     }else if(direct.length>1){
-      classification='PRODUCTION_EXACT_AMBIGUOUS';
+      classification='PRODUCTION_EXACT_NAME_AMBIGUOUS';
       evidenceText='multiple_production_name_exact_matches';
     }else if(linked.size===1){
       const [id,detail]=[...linked.entries()][0];
-      classification='MASTER_TO_PRODUCTION_UNIQUE';
+      classification='MASTER_EXACT_NAME_TO_PRODUCTION_REVIEW';
       targetCustomerId=id;
-      evidenceText='customer_master_exact_name_to_production_'+detail.via;
-      safeExistingTarget=true;
+      evidenceText='customer_master_exact_name_to_production_'+detail.via+';owner_confirmation_required';
     }else if(linked.size>1){
-      classification='MASTER_TO_PRODUCTION_AMBIGUOUS';
+      classification='MASTER_EXACT_NAME_TO_PRODUCTION_AMBIGUOUS';
       evidenceText='multiple_production_targets_from_customer_master';
     }else if(masterMatches.length===1){
-      classification='CUSTOMER_MASTER_EXACT_ONLY';
-      evidenceText='customer_master_exact_name_without_unique_current_production_target';
+      classification='CUSTOMER_MASTER_EXACT_NAME_REVIEW';
+      evidenceText='customer_master_exact_name_without_unique_current_production_target;owner_confirmation_required';
     }else if(masterMatches.length>1){
-      classification='CUSTOMER_MASTER_EXACT_AMBIGUOUS';
+      classification='CUSTOMER_MASTER_EXACT_NAME_AMBIGUOUS';
       evidenceText='multiple_customer_master_exact_name_matches';
     }else if(lineEvidence.length===1){
       const lineId=lineEvidence[0].line_user_id;
@@ -272,6 +297,8 @@ export function reconcileSalesHistory({
       duplicate_same_day_rows:sales.duplicate_same_day_rows,
       sales_customer_ids:sales.sales_customer_ids,
       sales_customer_id_conflict:sales.sales_customer_id_conflict,
+      line_user_ids:sales.line_user_ids,
+      line_user_id_conflict:sales.line_user_id_conflict,
       classification,
       target_customer_id:targetCustomerId,
       safe_existing_target:safeExistingTarget,
@@ -318,8 +345,10 @@ export function salesReconciliationHealth(){
     sales_reconciliation_read_only:true,
     sales_reconciliation_same_name_same_date_dedupe:true,
     sales_reconciliation_repeat_rule:'same_normalized_name_distinct_shoot_dates>=2',
-    sales_reconciliation_production_name_exact_only:true,
-    sales_reconciliation_customer_master_exact_only:true,
+    sales_reconciliation_sales_customer_id_exact_auto_target_only:true,
+    sales_reconciliation_sales_line_user_id_exact_auto_target_only:true,
+    sales_reconciliation_production_name_exact_review_only:true,
+    sales_reconciliation_customer_master_exact_review_only:true,
     sales_reconciliation_customer_master_line_id_exact:true,
     sales_reconciliation_line_body_exact_name_review_only:true,
     sales_reconciliation_line_body_auto_link:false,
