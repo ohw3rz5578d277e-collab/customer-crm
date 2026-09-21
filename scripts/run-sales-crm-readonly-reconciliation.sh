@@ -4,9 +4,10 @@ set -euo pipefail
 SALES_XLSX="${1:-}"
 CUSTOMER_MASTER="${2:-}"
 OUT_DIR="${3:-}"
+LINE_HISTORY_XLSX="${4:-}"
 
 if [ -z "$SALES_XLSX" ] || [ -z "$CUSTOMER_MASTER" ]; then
-  echo "Usage: $0 <Photo売上管理.xlsx> <customer-master.json> [output-dir]"
+  echo "Usage: $0 <Photo売上管理.xlsx> <customer-master.json> [output-dir] [LINE履歴.xlsx]"
   exit 2
 fi
 
@@ -45,11 +46,25 @@ mkdir -p "$TMP"
 
 SALES_RECORDS="$TMP/sales-records.json"
 PRODUCTION_RAW="$TMP/production-customers.raw"
+LINE_EVIDENCE="$TMP/line-name-evidence.json"
 
 echo
 echo "=== 1. Extract Photo sales schedule rows ==="
 
 python3 scripts/extract-photo-sales-xlsx.py   --xlsx "$SALES_XLSX"   --out "$SALES_RECORDS"
+
+LINE_EVIDENCE_ARGS=()
+if [ -n "$LINE_HISTORY_XLSX" ]; then
+  test -f "$LINE_HISTORY_XLSX" || { echo "RESULT=STOP_LINE_HISTORY_XLSX_MISSING"; exit 7; }
+  python3 scripts/extract-line-name-evidence-xlsx.py \
+    --line-history-xlsx "$LINE_HISTORY_XLSX" \
+    --sales-records "$SALES_RECORDS" \
+    --out "$LINE_EVIDENCE"
+  LINE_EVIDENCE_ARGS=(--line-evidence "$LINE_EVIDENCE")
+  echo "LINE_NAME_EVIDENCE=READY"
+else
+  echo "LINE_NAME_EVIDENCE=NOT_PROVIDED"
+fi
 
 SQL="SELECT customer_id,name,line_user_id FROM customers WHERE COALESCE(deleted_at,'')='' ORDER BY customer_id;"
 
@@ -116,7 +131,12 @@ echo "PRODUCTION_D1_READ=PASS"
 echo
 echo "=== 3. Reconcile locally ==="
 
-node scripts/reconcile-photo-sales-readonly.mjs   --sales-records "$SALES_RECORDS"   --customer-master "$CUSTOMER_MASTER"   --production-customers "$PRODUCTION_RAW"   --out-dir "$OUT_DIR"
+node scripts/reconcile-photo-sales-readonly.mjs \
+  --sales-records "$SALES_RECORDS" \
+  --customer-master "$CUSTOMER_MASTER" \
+  --production-customers "$PRODUCTION_RAW" \
+  --out-dir "$OUT_DIR" \
+  "${LINE_EVIDENCE_ARGS[@]}"
 
 if command -v open >/dev/null 2>&1; then
   open "$OUT_DIR/review.html"
@@ -136,6 +156,7 @@ echo "CUSTOMER_UPDATE=0"
 echo "CUSTOMER_DELETE=0"
 echo "CUSTOMER_MERGE=0"
 echo "FUZZY_AUTO_LINK=0"
+echo "LINE_BODY_AUTO_LINK=0"
 echo "LINE_SEND=0"
 echo "PRODUCTION_DEPLOY=0"
 echo "=================================================="
