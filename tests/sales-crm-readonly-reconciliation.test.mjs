@@ -130,10 +130,51 @@ await test('conflicting sales customer IDs are surfaced but do not choose identi
   assert.equal(a.customers[0].sales_customer_ids.length,2);
 });
 
+await test('LINE body exact-name evidence stays review-only even with one Production LINE target',()=>{
+  const sales=analyzeSalesHistory([
+    {year:2026,source_row:15,name:'中村未来',shoot_date:'2026/03/01'}
+  ]);
+  const line='Uabcdefabcdefabcdefabcdefabcdefab';
+  const r=reconcileSalesHistory({
+    salesAnalysis:sales,
+    customerMaster:[],
+    productionCustomers:[
+      {customer_id:'26990005',name:'LINEニックネーム',line_user_id:line}
+    ],
+    lineNameEvidence:[
+      {name:'中村未来',line_user_id:line,source:'line_body_exact_full_name'}
+    ]
+  });
+  assert.equal(r.rows[0].classification,'LINE_BODY_EXACT_NAME_TO_PRODUCTION_REVIEW');
+  assert.equal(r.rows[0].target_customer_id,'26990005');
+  assert.equal(r.rows[0].safe_existing_target,false);
+  assert.equal(r.line_body_auto_link,false);
+});
+
+await test('same sales full name observed on multiple LINE IDs is ambiguous',()=>{
+  const sales=analyzeSalesHistory([
+    {year:2026,source_row:15,name:'中村未来',shoot_date:'2026/03/01'}
+  ]);
+  const r=reconcileSalesHistory({
+    salesAnalysis:sales,
+    customerMaster:[],
+    productionCustomers:[],
+    lineNameEvidence:[
+      {name:'中村未来',line_user_id:'U11111111111111111111'},
+      {name:'中村未来',line_user_id:'U22222222222222222222'}
+    ]
+  });
+  assert.equal(r.rows[0].classification,'LINE_BODY_EXACT_NAME_AMBIGUOUS');
+  assert.equal(r.rows[0].target_customer_id,'');
+  assert.equal(r.rows[0].safe_existing_target,false);
+});
+
 await test('health locks reconciliation to read-only exact-match behavior',()=>{
   const h=salesReconciliationHealth();
   assert.equal(h.sales_reconciliation_read_only,true);
   assert.equal(h.sales_reconciliation_same_name_same_date_dedupe,true);
+  assert.equal(h.sales_reconciliation_line_body_exact_name_review_only,true);
+  assert.equal(h.sales_reconciliation_line_body_auto_link,false);
   assert.equal(h.sales_reconciliation_fuzzy_auto_link,false);
   assert.equal(h.sales_reconciliation_unmatched_auto_create,false);
   assert.equal(h.sales_reconciliation_customer_merge,false);
@@ -145,6 +186,7 @@ await test('local reconciliation scripts contain no write path',()=>{
   const core=fs.readFileSync('src/crm-sales-history-reconciliation.mjs','utf8');
   const cli=fs.readFileSync('scripts/reconcile-photo-sales-readonly.mjs','utf8');
   const extractor=fs.readFileSync('scripts/extract-photo-sales-xlsx.py','utf8');
+  const lineEvidenceExtractor=fs.readFileSync('scripts/extract-line-name-evidence-xlsx.py','utf8');
   const runner=fs.readFileSync('scripts/run-sales-crm-readonly-reconciliation.sh','utf8');
 
   assert.doesNotMatch(core,/\b(?:INSERT|UPDATE|DELETE|REPLACE|UPSERT)\s+/i);
@@ -161,6 +203,9 @@ await test('local reconciliation scripts contain no write path',()=>{
   assert.match(cli,/PRODUCTION_D1_WRITE=0/);
   assert.match(cli,/AUTOMATIC_CUSTOMER_CREATION=0/);
   assert.match(extractor,/PRODUCTION_D1_WRITE=0/);
+  assert.match(lineEvidenceExtractor,/LINE_BODY_AUTO_LINK=0/);
+  assert.match(lineEvidenceExtractor,/PRODUCTION_D1_WRITE=0/);
+  assert.match(runner,/LINE_BODY_AUTO_LINK=0/);
 });
 
 console.log('SALES_CRM_READONLY_RECONCILIATION='+passed+'/'+passed+' PASS');
