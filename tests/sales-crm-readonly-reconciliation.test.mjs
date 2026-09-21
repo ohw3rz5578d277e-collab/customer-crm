@@ -145,10 +145,19 @@ await test('local reconciliation scripts contain no write path',()=>{
   const core=fs.readFileSync('src/crm-sales-history-reconciliation.mjs','utf8');
   const cli=fs.readFileSync('scripts/reconcile-photo-sales-readonly.mjs','utf8');
   const extractor=fs.readFileSync('scripts/extract-photo-sales-xlsx.py','utf8');
+  const runner=fs.readFileSync('scripts/run-sales-crm-readonly-reconciliation.sh','utf8');
 
   assert.doesNotMatch(core,/\b(?:INSERT|UPDATE|DELETE|REPLACE|UPSERT)\s+/i);
   assert.doesNotMatch(cli,/\b(?:INSERT|UPDATE|DELETE|REPLACE|UPSERT)\s+/i);
+  assert.doesNotMatch(runner,/\b(?:INSERT|UPDATE|DELETE|CREATE|ALTER|DROP|REPLACE|TRUNCATE|UPSERT)\s+/i);
   assert.doesNotMatch(cli,/LINE_SERVICE|pushMessage|replyMessage|api\.line\.me/i);
+  assert.doesNotMatch(runner,/LINE_SERVICE|pushMessage|replyMessage|api\.line\.me/i);
+  assert.match(runner,/SELECT customer_id,name,line_user_id FROM customers/);
+  assert.match(runner,/PRODUCTION_QUERY_STATIC_AUDIT=PASS/);
+  assert.match(runner,/PRODUCTION_D1_WRITE=0/);
+  assert.match(runner,/CUSTOMER_CREATION=0/);
+  assert.match(runner,/CUSTOMER_ID_GENERATION=0/);
+  assert.match(runner,/CUSTOMER_MERGE=0/);
   assert.match(cli,/PRODUCTION_D1_WRITE=0/);
   assert.match(cli,/AUTOMATIC_CUSTOMER_CREATION=0/);
   assert.match(extractor,/PRODUCTION_D1_WRITE=0/);
