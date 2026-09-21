@@ -35,7 +35,7 @@ await test('same normalized name on different dates is repeater',()=>{
   assert.deepEqual(a.customers[0].shoot_dates,['2024-03-01','2025-03-02']);
 });
 
-await test('unique Production exact name is safe existing target',()=>{
+await test('unique Production exact name is review-only, never auto-linked',()=>{
   const sales=analyzeSalesHistory([
     {year:2025,source_row:15,name:'鈴木 花子',shoot_date:'2025/04/01'}
   ]);
@@ -46,9 +46,9 @@ await test('unique Production exact name is safe existing target',()=>{
       {customer_id:'26990001',name:'鈴木花子',line_user_id:'U11111111111111111111'}
     ]
   });
-  assert.equal(r.rows[0].classification,'PRODUCTION_EXACT_UNIQUE');
+  assert.equal(r.rows[0].classification,'PRODUCTION_EXACT_NAME_REVIEW');
   assert.equal(r.rows[0].target_customer_id,'26990001');
-  assert.equal(r.rows[0].safe_existing_target,true);
+  assert.equal(r.rows[0].safe_existing_target,false);
 });
 
 await test('duplicate Production exact names are ambiguous and never auto-linked',()=>{
@@ -63,12 +63,12 @@ await test('duplicate Production exact names are ambiguous and never auto-linked
       {customer_id:'26990002',name:'鈴木 花子',line_user_id:'U22222222222222222222'}
     ]
   });
-  assert.equal(r.rows[0].classification,'PRODUCTION_EXACT_AMBIGUOUS');
+  assert.equal(r.rows[0].classification,'PRODUCTION_EXACT_NAME_AMBIGUOUS');
   assert.equal(r.rows[0].target_customer_id,'');
   assert.equal(r.rows[0].safe_existing_target,false);
 });
 
-await test('Customer Master exact name can resolve through exact LINE UserID',()=>{
+await test('Customer Master exact name + LINE target remains review-only',()=>{
   const sales=analyzeSalesHistory([
     {year:2025,source_row:15,name:'高橋未来',shoot_date:'2025/05/01'}
   ]);
@@ -82,9 +82,9 @@ await test('Customer Master exact name can resolve through exact LINE UserID',()
       {customer_id:'26990003',name:'LINE表示名',line_user_id:line}
     ]
   });
-  assert.equal(r.rows[0].classification,'MASTER_TO_PRODUCTION_UNIQUE');
+  assert.equal(r.rows[0].classification,'MASTER_EXACT_NAME_TO_PRODUCTION_REVIEW');
   assert.equal(r.rows[0].target_customer_id,'26990003');
-  assert.equal(r.rows[0].safe_existing_target,true);
+  assert.equal(r.rows[0].safe_existing_target,false);
 });
 
 await test('legacy Customer Master ID alone is never adopted as current target',()=>{
@@ -98,9 +98,42 @@ await test('legacy Customer Master ID alone is never adopted as current target',
     ],
     productionCustomers:[]
   });
-  assert.equal(r.rows[0].classification,'CUSTOMER_MASTER_EXACT_ONLY');
+  assert.equal(r.rows[0].classification,'CUSTOMER_MASTER_EXACT_NAME_REVIEW');
   assert.equal(r.rows[0].target_customer_id,'');
   assert.equal(r.rows[0].safe_existing_target,false);
+});
+
+await test('sales-source current Customer ID exact match is the only automatic ID target',()=>{
+  const sales=analyzeSalesHistory([
+    {year:2026,source_row:15,name:'顧客A',shoot_date:'2026/02/01',sales_customer_id:'26990006'}
+  ]);
+  const r=reconcileSalesHistory({
+    salesAnalysis:sales,
+    customerMaster:[],
+    productionCustomers:[
+      {customer_id:'26990006',name:'別表記',line_user_id:'U44444444444444444444'}
+    ]
+  });
+  assert.equal(r.rows[0].classification,'SALES_CUSTOMER_ID_TO_PRODUCTION_UNIQUE');
+  assert.equal(r.rows[0].target_customer_id,'26990006');
+  assert.equal(r.rows[0].safe_existing_target,true);
+});
+
+await test('sales-source LINE UserID exact match may be automatic even when name differs',()=>{
+  const line='U55555555555555555555';
+  const sales=analyzeSalesHistory([
+    {year:2026,source_row:15,name:'顧客B',shoot_date:'2026/02/02',line_user_id:line}
+  ]);
+  const r=reconcileSalesHistory({
+    salesAnalysis:sales,
+    customerMaster:[],
+    productionCustomers:[
+      {customer_id:'26990007',name:'LINE別名',line_user_id:line}
+    ]
+  });
+  assert.equal(r.rows[0].classification,'SALES_LINE_USER_ID_TO_PRODUCTION_UNIQUE');
+  assert.equal(r.rows[0].target_customer_id,'26990007');
+  assert.equal(r.rows[0].safe_existing_target,true);
 });
 
 await test('unmatched sales customer remains unmatched and is never auto-created',()=>{
@@ -173,6 +206,10 @@ await test('health locks reconciliation to read-only exact-match behavior',()=>{
   const h=salesReconciliationHealth();
   assert.equal(h.sales_reconciliation_read_only,true);
   assert.equal(h.sales_reconciliation_same_name_same_date_dedupe,true);
+  assert.equal(h.sales_reconciliation_sales_customer_id_exact_auto_target_only,true);
+  assert.equal(h.sales_reconciliation_sales_line_user_id_exact_auto_target_only,true);
+  assert.equal(h.sales_reconciliation_production_name_exact_review_only,true);
+  assert.equal(h.sales_reconciliation_customer_master_exact_review_only,true);
   assert.equal(h.sales_reconciliation_line_body_exact_name_review_only,true);
   assert.equal(h.sales_reconciliation_line_body_auto_link,false);
   assert.equal(h.sales_reconciliation_fuzzy_auto_link,false);
