@@ -1,6 +1,6 @@
 import { normalizeImportName, normalizeImportDate } from './crm-customer-csv-import.mjs';
 
-export const SALES_RECONCILIATION_BUILD='crm-sales-readonly-reconciliation-20260921-01';
+export const SALES_RECONCILIATION_BUILD='crm-sales-readonly-reconciliation-20260921-02';
 export const CURRENT_CUSTOMER_ID_RE=/^\d{8}$/;
 export const LINE_USER_ID_RE=/^U[0-9a-fA-F]{20,}$/;
 
@@ -132,7 +132,8 @@ export function analyzeSalesHistory(records=[]){
 export function reconcileSalesHistory({
   salesAnalysis,
   customerMaster=[],
-  productionCustomers=[]
+  productionCustomers=[],
+  lineNameEvidence=[]
 }={}){
   if(!salesAnalysis||!Array.isArray(salesAnalysis.customers))throw new Error('sales_analysis_required');
 
@@ -155,6 +156,12 @@ export function reconcileSalesHistory({
     valid_line_user_id:LINE_USER_ID_RE.test(text(row?.line_user_id??row?.lineUserId))
   })).filter(x=>x.customer_id||x.line_user_id||x.name||x.line_name);
 
+  const evidence=(lineNameEvidence||[]).map(row=>({
+    name_key:normalizeImportName(row?.name_key??row?.name),
+    line_user_id:text(row?.line_user_id??row?.lineUserId),
+    source:text(row?.source)||'line_body_exact_full_name'
+  })).filter(x=>x.name_key&&LINE_USER_ID_RE.test(x.line_user_id));
+
   const prodByName=new Map(),prodByLine=new Map(),prodById=new Map();
   for(const p of production){
     if(p.name_key)pushIndex(prodByName,p.name_key,p);
@@ -162,16 +169,24 @@ export function reconcileSalesHistory({
     prodById.set(p.customer_id,p);
   }
 
-  const masterByName=new Map();
+  const masterByName=new Map(),masterByLine=new Map();
   for(const m of master){
     const keys=[m.name_key,m.line_name_key].filter(Boolean);
     for(const key of new Set(keys))pushIndex(masterByName,key,m);
+    if(m.valid_line_user_id)pushIndex(masterByLine,m.line_user_id,m);
+  }
+
+  const evidenceByName=new Map();
+  for(const e of evidence){
+    if(!evidenceByName.has(e.name_key))evidenceByName.set(e.name_key,new Map());
+    evidenceByName.get(e.name_key).set(e.line_user_id,e);
   }
 
   const rows=[];
   for(const sales of salesAnalysis.customers){
     const direct=uniqueByCustomerId(prodByName.get(sales.name_key)||[]);
     const masterMatches=masterByName.get(sales.name_key)||[];
+    const lineEvidence=[...(evidenceByName.get(sales.name_key)?.values()||[])];
 
     const linked=new Map();
     for(const m of masterMatches){
@@ -192,32 +207,59 @@ export function reconcileSalesHistory({
 
     let classification='UNMATCHED';
     let targetCustomerId='';
-    let evidence='no_conservative_exact_identity_evidence';
+    let evidenceText='no_conservative_exact_identity_evidence';
     let safeExistingTarget=false;
 
     if(direct.length===1){
       classification='PRODUCTION_EXACT_UNIQUE';
       targetCustomerId=direct[0].customer_id;
-      evidence='production_name_exact_unique';
+      evidenceText='production_name_exact_unique';
       safeExistingTarget=true;
     }else if(direct.length>1){
       classification='PRODUCTION_EXACT_AMBIGUOUS';
-      evidence='multiple_production_name_exact_matches';
+      evidenceText='multiple_production_name_exact_matches';
     }else if(linked.size===1){
       const [id,detail]=[...linked.entries()][0];
       classification='MASTER_TO_PRODUCTION_UNIQUE';
       targetCustomerId=id;
-      evidence='customer_master_exact_name_to_production_'+detail.via;
+      evidenceText='customer_master_exact_name_to_production_'+detail.via;
       safeExistingTarget=true;
     }else if(linked.size>1){
       classification='MASTER_TO_PRODUCTION_AMBIGUOUS';
-      evidence='multiple_production_targets_from_customer_master';
+      evidenceText='multiple_production_targets_from_customer_master';
     }else if(masterMatches.length===1){
       classification='CUSTOMER_MASTER_EXACT_ONLY';
-      evidence='customer_master_exact_name_without_unique_current_production_target';
+      evidenceText='customer_master_exact_name_without_unique_current_production_target';
     }else if(masterMatches.length>1){
       classification='CUSTOMER_MASTER_EXACT_AMBIGUOUS';
-      evidence='multiple_customer_master_exact_name_matches';
+      evidenceText='multiple_customer_master_exact_name_matches';
+    }else if(lineEvidence.length===1){
+      const lineId=lineEvidence[0].line_user_id;
+      const prodLine=uniqueByCustomerId(prodByLine.get(lineId)||[]);
+      const masterLine=masterByLine.get(lineId)||[];
+      if(prodLine.length===1){
+        classification='LINE_BODY_EXACT_NAME_TO_PRODUCTION_REVIEW';
+        targetCustomerId=prodLine[0].customer_id;
+        evidenceText='line_body_exact_full_name+unique_line_user_id_to_production;human_review_required';
+      }else if(prodLine.length>1){
+        classification='LINE_BODY_EXACT_NAME_AMBIGUOUS';
+        evidenceText='line_body_exact_full_name_but_line_user_id_maps_multiple_production_customers';
+      }else if(masterLine.length===1){
+        classification='LINE_BODY_EXACT_NAME_TO_MASTER_REVIEW';
+        if(masterLine[0].current_customer_id&&prodById.has(masterLine[0].customer_id)){
+          targetCustomerId=masterLine[0].customer_id;
+        }
+        evidenceText='line_body_exact_full_name+unique_line_user_id_to_customer_master;human_review_required';
+      }else if(masterLine.length>1){
+        classification='LINE_BODY_EXACT_NAME_AMBIGUOUS';
+        evidenceText='line_body_exact_full_name_but_line_user_id_maps_multiple_customer_master_rows';
+      }else{
+        classification='LINE_BODY_EXACT_NAME_REVIEW';
+        evidenceText='line_body_exact_full_name+unique_line_user_id_without_current_identity_target;human_review_required';
+      }
+    }else if(lineEvidence.length>1){
+      classification='LINE_BODY_EXACT_NAME_AMBIGUOUS';
+      evidenceText='same_exact_full_name_observed_on_multiple_line_user_ids';
     }
 
     rows.push({
@@ -235,7 +277,8 @@ export function reconcileSalesHistory({
       safe_existing_target:safeExistingTarget,
       production_exact_match_count:direct.length,
       customer_master_exact_match_count:masterMatches.length,
-      evidence
+      line_body_exact_name_evidence_count:lineEvidence.length,
+      evidence:evidenceText
     });
   }
 
@@ -251,14 +294,17 @@ export function reconcileSalesHistory({
     sales_customer_count:rows.length,
     customer_master_rows:master.length,
     production_customer_rows:production.length,
+    line_name_evidence_rows:evidence.length,
     classification_counts:counts,
     safe_existing_target_count:rows.filter(x=>x.safe_existing_target).length,
+    review_evidence_count:rows.filter(x=>x.classification.startsWith('LINE_BODY_EXACT_NAME_')).length,
     unresolved_count:rows.filter(x=>!x.safe_existing_target).length,
     production_duplicate_name_groups:productionDuplicateNameGroups,
     production_duplicate_line_user_id_groups:productionDuplicateLineGroups,
     automatic_customer_creation:false,
     automatic_customer_merge:false,
     fuzzy_auto_link:false,
+    line_body_auto_link:false,
     name_only_unmatched_auto_create:false,
     customer_id_generation:false,
     production_write:false,
@@ -275,6 +321,8 @@ export function salesReconciliationHealth(){
     sales_reconciliation_production_name_exact_only:true,
     sales_reconciliation_customer_master_exact_only:true,
     sales_reconciliation_customer_master_line_id_exact:true,
+    sales_reconciliation_line_body_exact_name_review_only:true,
+    sales_reconciliation_line_body_auto_link:false,
     sales_reconciliation_fuzzy_auto_link:false,
     sales_reconciliation_unmatched_auto_create:false,
     sales_reconciliation_customer_merge:false,
