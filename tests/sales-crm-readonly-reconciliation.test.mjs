@@ -136,6 +136,38 @@ await test('sales-source LINE UserID exact match may be automatic even when name
   assert.equal(r.rows[0].safe_existing_target,true);
 });
 
+await test('missing sales-source current Customer ID blocks weaker name fallback',()=>{
+  const sales=analyzeSalesHistory([
+    {year:2026,source_row:15,name:'同名顧客',shoot_date:'2026/02/03',sales_customer_id:'26999999'}
+  ]);
+  const r=reconcileSalesHistory({
+    salesAnalysis:sales,
+    customerMaster:[],
+    productionCustomers:[
+      {customer_id:'26990008',name:'同名顧客',line_user_id:'U66666666666666666666'}
+    ]
+  });
+  assert.equal(r.rows[0].classification,'SALES_CUSTOMER_ID_NOT_FOUND_REVIEW');
+  assert.equal(r.rows[0].target_customer_id,'');
+  assert.equal(r.rows[0].safe_existing_target,false);
+});
+
+await test('missing sales-source LINE UserID blocks weaker name fallback',()=>{
+  const sales=analyzeSalesHistory([
+    {year:2026,source_row:15,name:'同名顧客',shoot_date:'2026/02/04',line_user_id:'U77777777777777777777'}
+  ]);
+  const r=reconcileSalesHistory({
+    salesAnalysis:sales,
+    customerMaster:[],
+    productionCustomers:[
+      {customer_id:'26990009',name:'同名顧客',line_user_id:'U88888888888888888888'}
+    ]
+  });
+  assert.equal(r.rows[0].classification,'SALES_LINE_USER_ID_NOT_FOUND_REVIEW');
+  assert.equal(r.rows[0].target_customer_id,'');
+  assert.equal(r.rows[0].safe_existing_target,false);
+});
+
 await test('unmatched sales customer remains unmatched and is never auto-created',()=>{
   const sales=analyzeSalesHistory([
     {year:2026,source_row:15,name:'未登録顧客',shoot_date:'2026/02/01'}
