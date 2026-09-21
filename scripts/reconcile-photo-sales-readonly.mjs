@@ -92,12 +92,14 @@ const salesRecordsPath=required('--sales-records');
 const customerMasterPath=required('--customer-master');
 const productionCustomersPath=required('--production-customers');
 const outDir=required('--out-dir');
+const lineEvidencePath=arg('--line-evidence');
 
 fs.mkdirSync(outDir,{recursive:true});
 
 const salesPayload=readJson(salesRecordsPath);
 const salesRecords=unwrapRows(salesPayload);
 const customerMaster=unwrapRows(readJson(customerMasterPath));
+const lineEvidence=lineEvidencePath?(readJson(lineEvidencePath).evidence_rows||[]):[];
 
 const productionRaw=fs.readFileSync(productionCustomersPath,'utf8')
   .replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g,'');
@@ -130,7 +132,8 @@ if(analysis.errors.length){
 const result=reconcileSalesHistory({
   salesAnalysis:analysis,
   customerMaster,
-  productionCustomers
+  productionCustomers,
+  lineNameEvidence:lineEvidence
 });
 
 const summary={
@@ -144,6 +147,8 @@ const summary={
   cross_year_repeater_count:analysis.cross_year_repeater_count,
   customer_master_rows:result.customer_master_rows,
   production_customer_rows:result.production_customer_rows,
+  line_name_evidence_rows:result.line_name_evidence_rows,
+  line_review_evidence_count:result.review_evidence_count,
   safe_existing_target_count:result.safe_existing_target_count,
   unresolved_count:result.unresolved_count,
   production_duplicate_name_groups:result.production_duplicate_name_groups,
@@ -152,6 +157,7 @@ const summary={
   automatic_customer_creation:false,
   automatic_customer_merge:false,
   fuzzy_auto_link:false,
+  line_body_auto_link:false,
   name_only_unmatched_auto_create:false,
   customer_id_generation:false,
   production_d1_write:false
@@ -166,7 +172,7 @@ const headers=[
   'sales_name','shoot_count','shoot_dates','years','is_repeater',
   'duplicate_same_day_rows','classification','target_customer_id',
   'safe_existing_target','production_exact_match_count',
-  'customer_master_exact_match_count','evidence'
+  'customer_master_exact_match_count','line_body_exact_name_evidence_count','evidence'
 ];
 const csv=[headers.join(',')];
 for(const row of result.rows){
@@ -182,6 +188,7 @@ for(const row of result.rows){
     safe_existing_target:row.safe_existing_target?'YES':'NO',
     production_exact_match_count:row.production_exact_match_count,
     customer_master_exact_match_count:row.customer_master_exact_match_count,
+    line_body_exact_name_evidence_count:row.line_body_exact_name_evidence_count,
     evidence:row.evidence
   };
   csv.push(headers.map(h=>csvCell(record[h])).join(','));
@@ -198,6 +205,7 @@ const body=result.rows.map(row=>`
 <td>${esc(row.classification)}</td>
 <td>${esc(row.target_customer_id)}</td>
 <td>${row.safe_existing_target?'既存顧客候補':'自動処理禁止'}</td>
+<td>${row.line_body_exact_name_evidence_count}</td>
 <td>${esc(row.evidence)}</td>
 </tr>`).join('');
 
@@ -235,6 +243,7 @@ READ ONLY照合です。名前だけでの自動統合、新規顧客作成、Cu
 <div class="card">同日重複行<br><b>${analysis.duplicate_same_day_rows}</b></div>
 <div class="card">リピーター候補<br><b>${analysis.repeater_count}</b></div>
 <div class="card">既存顧客安全候補<br><b>${result.safe_existing_target_count}</b></div>
+<div class="card">LINE追加証拠<br><b>${result.review_evidence_count}</b></div>
 <div class="card">未解決<br><b>${result.unresolved_count}</b></div>
 </div>
 <h2>分類</h2>
@@ -243,7 +252,7 @@ READ ONLY照合です。名前だけでの自動統合、新規顧客作成、Cu
 <table>
 <thead><tr>
 <th>売上管理名</th><th>撮影回数</th><th>撮影日</th><th>年</th><th>リピート</th>
-<th>分類</th><th>既存Customer ID候補</th><th>処理</th><th>根拠</th>
+<th>分類</th><th>既存Customer ID候補</th><th>処理</th><th>LINE証拠数</th><th>根拠</th>
 </tr></thead>
 <tbody>${body}</tbody>
 </table>
@@ -259,6 +268,8 @@ console.log('REPEATER_COUNT='+analysis.repeater_count);
 console.log('CROSS_YEAR_REPEATER_COUNT='+analysis.cross_year_repeater_count);
 console.log('CUSTOMER_MASTER_ROWS='+result.customer_master_rows);
 console.log('PRODUCTION_CUSTOMER_ROWS='+result.production_customer_rows);
+console.log('LINE_NAME_EVIDENCE_ROWS='+result.line_name_evidence_rows);
+console.log('LINE_REVIEW_EVIDENCE='+result.review_evidence_count);
 console.log('SAFE_EXISTING_TARGETS='+result.safe_existing_target_count);
 console.log('UNRESOLVED='+result.unresolved_count);
 for(const [key,value] of Object.entries(result.classification_counts).sort()){
@@ -270,6 +281,7 @@ console.log('AUTOMATIC_CUSTOMER_CREATION=0');
 console.log('CUSTOMER_ID_GENERATION=0');
 console.log('CUSTOMER_MERGE=0');
 console.log('FUZZY_AUTO_LINK=0');
+console.log('LINE_BODY_AUTO_LINK=0');
 console.log('NAME_ONLY_UNMATCHED_AUTO_CREATE=0');
 console.log('PRODUCTION_D1_WRITE=0');
 console.log('PRIVATE_VALUES_PRINTED=0');
