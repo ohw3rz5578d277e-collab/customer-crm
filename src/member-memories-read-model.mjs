@@ -1,5 +1,6 @@
 import { readMemberFamilyByCustomer } from './crm-member-family-identity.mjs';
 import { readFavoriteRowsForAuthorizedMember } from './member-favorites-read-model.mjs';
+import { memberPrivateMediaDeliveryPublicContract } from './member-private-media-delivery-grant.mjs';
 
 const BUILD='member-memories-read-model-20260924-01';
 const CUSTOMER_ID_RE=/^\d{8}$/;
@@ -99,7 +100,8 @@ function mediaView(row){
     sort_order:Number.isFinite(Number(row.sort_order))?Number(row.sort_order):0,
     width:row.width==null?null:Number(row.width),
     height:row.height==null?null:Number(row.height),
-    private_delivery_required:true
+    private_delivery_required:true,
+    delivery:memberPrivateMediaDeliveryPublicContract()
   };
 }
 
@@ -315,6 +317,16 @@ export function memberMemoriesReadHealth(){
     cross_family_fail_closed:true,
     malformed_memory_id_fail_closed:true,
     private_storage_key_exposed:false,
+    private_media_delivery_contract_exposed:true,
+    private_media_delivery_source_contract_ready:true,
+    private_media_delivery_ready:false,
+    private_media_delivery_grant_path:'/api/internal/member/media/grant',
+    private_media_delivery_content_path:'/api/internal/member/media/content',
+    private_media_delivery_storage_key_exposed:false,
+    private_media_delivery_signed_storage_url_exposed:false,
+    private_media_delivery_external_redirect:false,
+    private_media_delivery_production_route_wired:false,
+    private_media_delivery_production_storage_binding:false,
     favorite_state_optional_read:true,
     favorite_schema_absence_degrades_to_false:true,
     favorite_mutation_ready:false,
