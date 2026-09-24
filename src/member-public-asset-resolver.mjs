@@ -63,6 +63,7 @@ function validLocalAssetPath(value){
   if(!raw.startsWith(LOCAL_PREFIX))return false;
   if(raw.startsWith('//'))return false;
   if(raw.includes('..'))return false;
+  if(raw.includes('\\')||raw.includes('%'))return false;
   if(raw.includes('?')||raw.includes('#'))return false;
   if(/^[a-z][a-z0-9+.-]*:/i.test(raw))return false;
   return true;
