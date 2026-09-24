@@ -1,5 +1,6 @@
 import { readMemberFamilyByCustomer } from './crm-member-family-identity.mjs';
 import { jstToday } from './crm-customer360-marketing-engine.mjs';
+import { resolveMemberPublicAssetMapOptional } from './member-public-asset-resolver.mjs';
 
 const BUILD='member-news-read-model-20260925-01';
 const CUSTOMER_ID_RE=/^\d{8}$/;
@@ -253,8 +254,34 @@ export async function readMemberNewsForSession(env,session,{as_of}={}){
     as_of:validDateOnly(as_of)||jstToday()
   });
 
+  const assetIds=(built.items||[])
+    .map(item=>item.hero_asset_ref?.asset_id)
+    .filter(Boolean);
+  const assetResolution=await resolveMemberPublicAssetMapOptional(env,assetIds);
+  const assetById=assetResolution.status==='ok'
+    ?assetResolution.asset_by_id||{}
+    :{};
+
+  const items=(built.items||[]).map(item=>({
+    ...item,
+    hero_asset_ref:item.hero_asset_ref?{
+      ...item.hero_asset_ref,
+      public_asset:assetById[item.hero_asset_ref.asset_id]||null,
+      public_asset_resolution_available:assetResolution.status==='ok'
+    }:null
+  }));
+  const itemById=new Map(items.map(item=>[item.news_id,item]));
+  const homeNews=(built.home_news||[])
+    .map(item=>itemById.get(item.news_id))
+    .filter(Boolean);
+
   return {
     ...built,
+    items,
+    home_news:homeNews,
+    public_assets_available:assetResolution.status==='ok',
+    public_assets_status:assetResolution.status,
+    unresolved_public_asset_ids:assetResolution.unresolved_asset_ids||[],
     family_id:auth.family_id,
     customer_id:auth.customer_id,
     source:{
@@ -263,7 +290,9 @@ export async function readMemberNewsForSession(env,session,{as_of}={}){
       published_only:true,
       deleted_hidden:true,
       arbitrary_html:false,
-      arbitrary_external_url:false
+      arbitrary_external_url:false,
+      public_asset_resolver:'member_public_asset_resolver',
+      public_asset_resolution_optional:true
     }
   };
 }
@@ -310,6 +339,9 @@ export function memberNewsHealth(){
     plain_text_only:true,
     supported_news_types:[...NEWS_TYPES],
     logical_asset_id_only:true,
+    public_asset_resolution_optional:true,
+    public_asset_local_path_only:true,
+    public_asset_schema_absence_degrades_locally:true,
     storage_key_exposed:false,
     local_navigation_only:true,
     arbitrary_external_url_exposed:false,
