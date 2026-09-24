@@ -258,8 +258,10 @@ export function memberFamilyPassReadHealth(){
       black:10
     },
     durable_black_entitlement_source_supported:true,
+    black_lifetime_persistence_supported:true,
     entitlement_table:'member_family_pass_entitlements',
     entitlement_schema_optional_for_backward_compatibility:true,
+    production_entitlement_schema_apply_executed:false,
     black_benefit_enforcement_ready:false,
     black_goods_discount_percent:10,
     black_shooting_fee_discount:false,
