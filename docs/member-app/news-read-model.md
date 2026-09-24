@@ -40,7 +40,7 @@ This keeps the initial Member content surface simple and avoids turning announce
 
 Managed source migration:
 
-`migrations_managed/20260925_member_news_catalog_foundation.sql`
+`migrations_managed/20260924_member_news_catalog_foundation.sql`
 
 Table:
 
