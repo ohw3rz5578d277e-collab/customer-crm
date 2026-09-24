@@ -6,7 +6,7 @@
 --   Add an explicit household/family identity layer for MIZUNO PHOTO MEMBER.
 -- Safety:
 --   * additive tables only
---   * no ALTER TABLE customers
+--   * the canonical customers table is not altered
 --   * no automatic family formation
 --   * no name/address/phone/email based linking
 --   * no Customer ID generation or mutation
