@@ -80,6 +80,20 @@ const baseComponents={
     },
     read_only:true
   },
+  todayMemory:{
+    status:'ok',
+    today_memory:{
+      as_of:'2026-09-24',
+      mode:'exact_anniversary',
+      headline:'この日の思い出',
+      primary:memory('mem_today','2025-09-24','ファミリー','去年の今日'),
+      memories:[memory('mem_today','2025-09-24','ファミリー','去年の今日')],
+      exact_match_count:1,
+      seasonal_fallback_used:false
+    },
+    source:{reader:'member_memories_read_model',family_scoped:true},
+    read_only:true
+  },
   nextMemory:{
     status:'ok',
     family_id:familyId,
@@ -113,7 +127,8 @@ function compose(overrides={}){
     memories:overrides.memories??baseComponents.memories,
     familyPass:overrides.familyPass??baseComponents.familyPass,
     passport:overrides.passport??baseComponents.passport,
-    nextMemory:overrides.nextMemory??baseComponents.nextMemory
+    nextMemory:overrides.nextMemory??baseComponents.nextMemory,
+    todayMemory:overrides.todayMemory??baseComponents.todayMemory
   });
 }
 
@@ -123,12 +138,13 @@ pass('HOME keeps only three recent MEMORIES',full.home.recent_memories.length===
 pass('HOME reports loaded visible MEMORY count without inventing DB total',full.home.visible_memory_count===4);
 pass('HOME composes FAMILY PASS',full.home.family_pass.family_pass.current_tier==='SILVER');
 pass('HOME composes FAMILY PASSPORT',full.home.family_passport.achieved_count===3);
+pass('HOME composes TODAY\'S MEMORY',full.home.today_memory.today_memory.mode==='exact_anniversary'&&full.home.today_memory.today_memory.headline==='この日の思い出');
 pass('HOME composes NEXT MEMORY',full.home.next_memory.next_memory.type==='first_birthday');
 pass('HOME caps NEXT MEMORY candidate preview at three',full.home.next_memory.candidates.length===3);
 pass('HOME keeps LINE consultation CTA non-automatic',full.home.next_memory.consultation_cta.channel==='line'&&full.home.next_memory.consultation_cta.automatic_send===false);
 pass('HOME does not claim Family history is child specific',full.home.next_memory.family_history_is_child_specific===false&&full.home.next_memory.child_memory_link_available===false);
 pass('full HOME is not partial',full.home.partial===false&&full.home.unavailable_sections.length===0);
-pass('future HOME modules stay inactive',full.home.future_modules.today_memory===false&&full.home.future_modules.creative===false&&full.home.future_modules.shop_pickup===false&&full.home.future_modules.news===false);
+pass('TODAY\'S MEMORY is active while other future modules stay inactive',full.home.future_modules.today_memory===true&&full.home.future_modules.creative===false&&full.home.future_modules.shop_pickup===false&&full.home.future_modules.news===false);
 pass('HOME result is read-only',full.read_only===true);
 
 const degradedNext=compose({
@@ -142,6 +158,16 @@ const degradedNext=compose({
 pass('missing optional child schema degrades NEXT MEMORY only',degradedNext.status==='ok'&&degradedNext.home.partial===true&&degradedNext.home.next_memory===null);
 pass('degraded HOME reports unavailable NEXT MEMORY section',degradedNext.home.unavailable_sections.length===1&&degradedNext.home.unavailable_sections[0].section==='next_memory'&&degradedNext.home.unavailable_sections[0].error==='child_profile_schema_not_applied');
 pass('degraded NEXT MEMORY does not hide safe recent MEMORIES',degradedNext.home.recent_memories.length===3);
+
+const degradedToday=compose({
+  todayMemory:{
+    status:'invalid_as_of',
+    today_memory:null,
+    read_only:true
+  }
+});
+pass('TODAY\'S MEMORY internal clock failure can remain section-local',degradedToday.status==='ok'&&degradedToday.home.partial===true&&degradedToday.home.today_memory===null);
+pass('degraded TODAY\'S MEMORY section reports its reason',degradedToday.home.unavailable_sections.some(x=>x.section==='today_memory'&&x.error==='invalid_as_of'));
 
 const degradedPass=compose({
   familyPass:{
@@ -223,6 +249,17 @@ function makeDb({
       published:1,
       created_at:'2026-08-15',
       updated_at:'2026-08-15'
+    },
+    {
+      memory_id:'mem_today',
+      family_id:familyId,
+      shoot_date:'2025-09-24',
+      genre:'ファミリー',
+      title:'去年の今日',
+      amazon_photos_url:'',
+      published:1,
+      created_at:'2025-09-24',
+      updated_at:'2025-09-24'
     },
     {
       memory_id:'mem_old',
@@ -321,9 +358,10 @@ const integrated=await readMemberHomeForSession(
   {as_of:'2026-09-24'}
 );
 pass('integrated HOME read succeeds from existing component readers',integrated.status==='ok'&&integrated.family_id===familyId);
-pass('integrated HOME reads MEMORIES',integrated.home.recent_memories.length===2&&integrated.home.recent_memories[0].memory_id==='mem_new');
-pass('integrated HOME reads FAMILY PASS',integrated.home.family_pass.family_pass.current_tier==='WELCOME_BACK');
+pass('integrated HOME reads MEMORIES',integrated.home.recent_memories.length===3&&integrated.home.recent_memories[0].memory_id==='mem_new');
+pass('integrated HOME reads FAMILY PASS',integrated.home.family_pass.family_pass.current_tier==='SILVER');
 pass('integrated HOME reads FAMILY PASSPORT',integrated.home.family_passport.achieved_count===2);
+pass('integrated HOME composes exact TODAY\'S MEMORY from the already-loaded MEMORIES',integrated.home.today_memory.today_memory?.mode==='exact_anniversary'&&integrated.home.today_memory.today_memory?.primary?.memory_id==='mem_today');
 pass('integrated HOME reads NEXT MEMORY from canonical child',integrated.home.next_memory.next_memory?.type==='first_birthday');
 pass('integrated HOME performs zero writes',db.writes.length===0&&integrated.read_only===true);
 
@@ -333,7 +371,7 @@ const integratedPartial=await readMemberHomeForSession(
   {family_id:familyId,customer_id:customerId},
   {as_of:'2026-09-24'}
 );
-pass('integrated HOME degrades only NEXT MEMORY when child schema is absent',integratedPartial.status==='ok'&&integratedPartial.home.partial===true&&integratedPartial.home.next_memory===null&&integratedPartial.home.recent_memories.length===2);
+pass('integrated HOME degrades only NEXT MEMORY when child schema is absent',integratedPartial.status==='ok'&&integratedPartial.home.partial===true&&integratedPartial.home.next_memory===null&&integratedPartial.home.recent_memories.length===3&&integratedPartial.home.today_memory.today_memory?.primary?.memory_id==='mem_today');
 
 const noMediaDb=makeDb({mediaSchema:false});
 const integratedNoMemory=await readMemberHomeForSession(
@@ -367,11 +405,12 @@ const post=await handleMemberHomeReadRequest(
 pass('HTTP HOME is GET only',post.status===405);
 
 const health=memberHomeReadHealth();
-pass('health records four composed components',health.components.join(',')==='member_memories,family_pass,family_passport,next_memory');
+pass('health records five composed components',health.components.join(',')==='member_memories,family_pass,family_passport,today_memory,next_memory');
 pass('health requires component identity consistency',health.component_identity_consistency_required===true&&health.identity_security_failures_fail_closed===true);
 pass('health records MEMORIES as core and NEXT MEMORY optional degradation',health.memories_core_required===true&&health.next_memory_optional_schema_degradation===true);
+pass('health records TODAY\'S MEMORY derives from loaded MEMORIES with no extra DB read',health.today_memory_derived_from_loaded_memories===true&&health.today_memory_extra_db_read===false);
 pass('health records response limits',health.recent_memory_limit===3&&health.next_memory_candidate_limit===3);
-pass('health keeps future modules inactive',health.today_memory_active===false&&health.creative_active===false&&health.shop_pickup_active===false&&health.news_active===false);
+pass('health activates TODAY\'S MEMORY source composition only',health.today_memory_active===true&&health.creative_active===false&&health.shop_pickup_active===false&&health.news_active===false);
 pass('health records no contact/send/reservation/write',health.automatic_contact===false&&health.line_send===false&&health.reservation_creation===false&&health.production_write===false);
 pass('health records source-only route state',health.production_route_wired===false&&health.read_only===true&&health.request_customer_id_input===false&&health.request_family_id_input===false&&health.request_as_of_input===false);
 
