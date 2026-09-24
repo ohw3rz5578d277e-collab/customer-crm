@@ -97,10 +97,10 @@ const pure=__test.buildNextMemoryCandidates(
 );
 
 pass('NEXT MEMORY builds candidates from canonical child evidence',pure.candidates.length>=3);
-pass('nearest candidate becomes next_memory',pure.next_memory?.type==='school_entry_candidate'&&pure.next_memory?.child?.child_id==='child_school');
+pass('nearest specific candidate becomes next_memory',pure.next_memory?.type==='shichigosan'&&pure.next_memory?.child?.child_id==='child_school');
 pass('first birthday candidate is present',pure.candidates.some(x=>x.type==='first_birthday'&&x.child.child_id==='child_first'));
 pass('three-year shichigosan candidate is present',pure.candidates.some(x=>x.type==='shichigosan'&&x.child.child_id==='child_753'));
-pass('school-stage candidate is present',pure.candidates.some(x=>x.type==='school_entry_candidate'&&x.child.child_id==='child_school'));
+pass('school-stage candidate is also preserved',pure.candidates.some(x=>x.type==='school_entry_candidate'&&x.child.child_id==='child_school'));
 pass('generic birthday is suppressed when same child/date has first birthday',!pure.candidates.some(x=>x.type==='birthday'&&x.child.child_id==='child_first'));
 pass('generic birthday is suppressed when same child/date has shichigosan',!pure.candidates.some(x=>x.type==='birthday'&&x.child.child_id==='child_753'));
 pass('family genre history is not presented as child-specific',pure.family_history_is_child_specific===false&&pure.child_memory_link_available===false);
