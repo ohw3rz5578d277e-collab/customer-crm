@@ -2,8 +2,9 @@ import { readMemberMemoriesForSession } from './member-memories-read-model.mjs';
 import { readMemberFamilyPassForSession } from './member-family-pass-read-model.mjs';
 import { readMemberFamilyPassportForSession } from './member-family-passport-read-model.mjs';
 import { readMemberNextMemoryForSession } from './member-next-memory-read-model.mjs';
+import { buildTodaysMemory } from './member-todays-memory-read-model.mjs';
 
-const BUILD='member-home-read-model-20260924-01';
+const BUILD='member-home-read-model-20260924-02';
 const CUSTOMER_ID_RE=/^\d{8}$/;
 const MAX_FAMILY_ID=128;
 const RECENT_MEMORY_LIMIT=3;
@@ -79,7 +80,8 @@ export function composeMemberHomeModel({
   memories,
   familyPass,
   passport,
-  nextMemory
+  nextMemory,
+  todayMemory
 }){
   const normalized=validSession(session);
   if(!normalized.ok){
@@ -135,6 +137,13 @@ export function composeMemberHomeModel({
   // NEXT MEMORY depends on managed child profile data that may not yet be
   // available in every environment. Its schema absence is optional/degraded,
   // while identity ambiguity has already failed closed above.
+  const todayMemorySection=todayMemory?.status==='ok'
+    ?sectionAvailable({
+        today_memory:todayMemory.today_memory||null,
+        source:todayMemory.source||null
+      })
+    :sectionUnavailable(todayMemory?.status);
+
   const nextMemorySection=nextMemory?.status==='ok'
     ?sectionAvailable({
         next_memory:nextMemory.next_memory||null,
@@ -156,6 +165,7 @@ export function composeMemberHomeModel({
     }),
     family_pass:familyPassSection,
     family_passport:passportSection,
+    today_memory:todayMemorySection,
     next_memory:nextMemorySection
   };
 
@@ -172,12 +182,13 @@ export function composeMemberHomeModel({
       visible_memory_count:(memories.memories||[]).length,
       family_pass:familyPassSection.available?familyPassSection.data:null,
       family_passport:passportSection.available?passportSection.data:null,
+      today_memory:todayMemorySection.available?todayMemorySection.data:null,
       next_memory:nextMemorySection.available?nextMemorySection.data:null,
       sections,
       partial:unavailableSections.length>0,
       unavailable_sections:unavailableSections,
       future_modules:{
-        today_memory:false,
+        today_memory:true,
         creative:false,
         shop_pickup:false,
         news:false
@@ -203,12 +214,17 @@ export async function readMemberHomeForSession(env,session,{as_of}={}){
     readMemberNextMemoryForSession(env,normalized,{as_of})
   ]);
 
+  const todayMemory=memories.status==='ok'
+    ?buildTodaysMemory(memories.memories,as_of)
+    :{status:memories.status,today_memory:null,read_only:true};
+
   return composeMemberHomeModel({
     session:normalized,
     memories,
     familyPass,
     passport,
-    nextMemory
+    nextMemory,
+    todayMemory
   });
 }
 
@@ -257,15 +273,18 @@ export function memberHomeReadHealth(){
       'member_memories',
       'family_pass',
       'family_passport',
+      'today_memory',
       'next_memory'
     ],
     component_identity_consistency_required:true,
     identity_security_failures_fail_closed:true,
     memories_core_required:true,
     next_memory_optional_schema_degradation:true,
+    today_memory_derived_from_loaded_memories:true,
+    today_memory_extra_db_read:false,
     recent_memory_limit:RECENT_MEMORY_LIMIT,
     next_memory_candidate_limit:NEXT_MEMORY_CANDIDATE_LIMIT,
-    today_memory_active:false,
+    today_memory_active:true,
     creative_active:false,
     shop_pickup_active:false,
     news_active:false,
