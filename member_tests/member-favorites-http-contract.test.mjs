@@ -348,6 +348,36 @@ const remove=await handleMemberFavoriteMutationRequest(
 const removeBody=await remove.json();
 pass('valid request removes Favorite',remove.status===200&&removeBody.favorite===false&&removeBody.changed===true&&db.state.writes.length===2);
 
+const limitedDb=makeDb();
+const limitedCookie=await issuedCookie(limitedDb);
+for(let i=1;i<=6;i++){
+  const response=await handleMemberFavoriteMutationRequest(
+    request({memory_id:memoryId,desired_favorite:true},{cookie:limitedCookie}),
+    {
+      DB:limitedDb,
+      MEMBER_SESSION_SECRET:secret,
+      MEMBER_FAVORITES_MUTATION_ROUTE_MODE:'enabled',
+      MEMBER_FAVORITES_RATE_LIMIT_MODE:'enabled',
+      MEMBER_FAVORITES_WRITE_MODE:'enabled'
+    }
+  );
+  pass(`HTTP same-MEMORY attempt ${i} allowed`,response.status===200);
+}
+const limited=await handleMemberFavoriteMutationRequest(
+  request({memory_id:memoryId,desired_favorite:true},{cookie:limitedCookie}),
+  {
+    DB:limitedDb,
+    MEMBER_SESSION_SECRET:secret,
+    MEMBER_FAVORITES_MUTATION_ROUTE_MODE:'enabled',
+    MEMBER_FAVORITES_RATE_LIMIT_MODE:'enabled',
+    MEMBER_FAVORITES_WRITE_MODE:'enabled'
+  }
+);
+const limitedBody=await limited.json();
+pass('HTTP seventh same-MEMORY attempt returns 429',limited.status===429&&limitedBody.error==='rate_limited');
+pass('HTTP 429 includes Retry-After',Number(limited.headers.get('retry-after'))>=1&&Number(limited.headers.get('retry-after'))<=60);
+pass('rate-limited HTTP request does not execute extra Favorite write',limitedDb.state.writes.length===1);
+
 const staleDb=makeDb();
 const staleCookie=await issuedCookie(staleDb);
 staleDb.state.linkedFamily='fam_B';
