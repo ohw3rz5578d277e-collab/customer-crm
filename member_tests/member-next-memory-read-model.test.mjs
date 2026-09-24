@@ -166,7 +166,8 @@ const invalidBirth=await readMemberNextMemoryForSession(
   {family_id:familyId,customer_id:customerA},
   {as_of:asOf}
 );
-pass('invalid birthdate does not generate age-based recommendation',invalidBirth.status==='ok'&&!invalidBirth.candidates.some(x=>x.child.child_id==='child_bad'));
+pass('invalid birthdate still returns a safe read result',invalidBirth.status==='ok');
+pass('invalid birthdate does not generate age-based recommendation',!invalidBirth.candidates.some(x=>x.child.child_id==='child_bad'));
 
 const missingChildSchema=await readMemberNextMemoryForSession(
   {DB:makeDb({childSchema:false,memoryRows})},
