@@ -115,7 +115,12 @@ const noFamilySchema=await authorizeMemberPrivateMediaAccess(
 );
 pass('missing Family schema is not bypassed',noFamilySchema.status==='schema_not_applied');
 
+pass('media ID validator accepts exact raw ID',__test.validMediaId('media_A')===true);
+pass('media ID validator rejects outer whitespace',__test.validMediaId(' media_A')===false);
+pass('media ID validator rejects control characters',__test.validMediaId('media_A\n')===false);
 pass('storage key validator accepts opaque nested key',__test.validPrivateStorageKey('member/fam_A/mem_A/cover.jpg')===true);
+pass('storage key validator rejects outer whitespace',__test.validPrivateStorageKey(' member/fam_A/mem_A/cover.jpg')===false);
+pass('storage key validator rejects control characters',__test.validPrivateStorageKey('member/fam_A/mem_A/cover.jpg\n')===false);
 pass('storage key validator rejects traversal',__test.validPrivateStorageKey('member/fam_A/../secret.jpg')===false);
 pass('storage key validator rejects absolute path',__test.validPrivateStorageKey('/member/fam_A/file.jpg')===false);
 pass('storage key validator rejects public URL',__test.validPrivateStorageKey('https://example.com/file.jpg')===false);
