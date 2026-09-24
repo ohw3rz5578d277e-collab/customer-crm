@@ -46,7 +46,7 @@ A list item exposes:
 - cover media metadata
 - preview count
 - Amazon Photos availability
-- favorite placeholder
+- per-Member Favorite state when the optional Favorite schema is available
 - CREATE availability flag
 - SHOP availability flag
 
@@ -65,7 +65,7 @@ A detail response exposes:
 - MEMORY title/date/genre
 - authorized preview media metadata
 - exact stored Amazon Photos link when it is HTTPS
-- favorite placeholder
+- per-Member Favorite state when the optional Favorite schema is available
 - `next_memory = null` until that phase exists
 - empty CREATE actions until CREATE is implemented
 - SHOP unavailable until SHOP is implemented
@@ -101,12 +101,18 @@ No customer-level fallback is performed.
 
 ## Schema behavior
 
-This phase expects source definitions for:
+This phase requires the core source definitions:
 
 - `member_memories`
 - `member_memory_media`
 
-If the tables are not present in the runtime database, the read model fails with `member_memory_schema_not_applied`.
+It can also read the optional:
+
+- `member_memory_favorites`
+
+If the core MEMORY tables are not present, the read model fails with `member_memory_schema_not_applied`.
+
+If only the Favorite table is unavailable, MEMORIES still renders safely with `favorites_available=false` and `favorite=false`.
 
 This is expected in Production until a separate Owner-approved schema gate is granted.
 
@@ -123,12 +129,22 @@ This phase performs:
 - zero LINE sends
 - zero Production deploys
 
-## Feature placeholders
+## Feature state
 
-Favorites, CREATE, SHOP, and Next Memory are represented conservatively:
+Favorite now has a source-level read foundation.
 
-- `favorite = false`
+When the optional Favorite schema is available:
+
+- Favorite state is isolated by exact Family + Customer + MEMORY
+- a matching row returns `favorite=true`
+- another Family or Customer cannot affect the result
+
+Mutation is still disabled:
+
 - `favorite_mutable = false`
+
+Other feature placeholders remain conservative:
+
 - `create_available = false`
 - `create_actions = []`
 - `shop_available = false`
@@ -158,7 +174,7 @@ Not included:
 - Production D1 write
 - historical MEMORY insertion
 - private media binary delivery
-- favorites persistence
+- Favorite mutation / persistence writes
 - CREATE implementation
 - SHOP implementation
 - NEXT MEMORY implementation
@@ -169,7 +185,7 @@ Not included:
 
 ## Next gate
 
-After CI and review pass, Phase 3 may be merged to main with Owner approval.
+The MEMORIES read contract is now extended by the separately reviewed Favorites read foundation. Any Favorite mutation remains a later Owner-gated phase.
 
 Production use still requires separate future authorization for:
 
