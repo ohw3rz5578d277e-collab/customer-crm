@@ -1,4 +1,5 @@
 import { readMemberFamilyByCustomer } from './crm-member-family-identity.mjs';
+import { readFavoriteRowsForAuthorizedMember } from './member-favorites-read-model.mjs';
 
 const BUILD='member-memories-read-model-20260924-01';
 const CUSTOMER_ID_RE=/^\d{8}$/;
@@ -110,7 +111,7 @@ function sortMedia(a,b){
     || text(a.media_id).localeCompare(text(b.media_id));
 }
 
-function memoryListItem(row,mediaRows=[]){
+function memoryListItem(row,mediaRows=[],favoriteIds=new Set()){
   const media=mediaRows.slice().sort(sortMedia);
   const cover=media.length?mediaView(media[0]):null;
   const amazon=safeHttpsUrl(row.amazon_photos_url);
@@ -122,14 +123,14 @@ function memoryListItem(row,mediaRows=[]){
     cover,
     preview_count:media.length,
     amazon_photos_available:!!amazon,
-    favorite:false,
+    favorite:favoriteIds.has(text(row.memory_id)),
     favorite_mutable:false,
     create_available:false,
     shop_available:false
   };
 }
 
-function memoryDetail(row,mediaRows=[]){
+function memoryDetail(row,mediaRows=[],favoriteIds=new Set()){
   const amazon=safeHttpsUrl(row.amazon_photos_url);
   return {
     memory:{
@@ -140,7 +141,7 @@ function memoryDetail(row,mediaRows=[]){
     },
     media:mediaRows.slice().sort(sortMedia).map(mediaView),
     amazon_link:amazon?{provider:'amazon_photos',url:amazon}:null,
-    favorite:false,
+    favorite:favoriteIds.has(text(row.memory_id)),
     favorite_mutable:false,
     next_memory:null,
     create_available:false,
@@ -185,6 +186,13 @@ export async function readMemberMemoriesForSession(env,session){
     [auth.family_id]
   );
 
+  const favoriteResult=await readFavoriteRowsForAuthorizedMember(env,auth);
+  const favoriteIds=new Set(
+    favoriteResult.status==='ok'
+      ?favoriteResult.favorites.map(row=>text(row.memory_id))
+      :[]
+  );
+
   const mediaRows=await readFamilyMedia(env,auth.family_id);
   const mediaByMemory=new Map();
   for(const media of mediaRows){
@@ -196,7 +204,13 @@ export async function readMemberMemoriesForSession(env,session){
   return {
     status:'ok',
     family_id:auth.family_id,
-    memories:rows.map(row=>memoryListItem(row,mediaByMemory.get(text(row.memory_id))||[])),
+    memories:rows.map(row=>memoryListItem(
+      row,
+      mediaByMemory.get(text(row.memory_id))||[],
+      favoriteIds
+    )),
+    favorites_available:favoriteResult.status==='ok',
+    favorite_mutation_ready:false,
     read_only:true
   };
 }
@@ -226,6 +240,13 @@ export async function readMemberMemoryDetailForSession(env,session,memoryId){
 
   if(!row)return {status:'memory_not_found',read_only:true};
 
+  const favoriteResult=await readFavoriteRowsForAuthorizedMember(env,auth);
+  const favoriteIds=new Set(
+    favoriteResult.status==='ok'
+      ?favoriteResult.favorites.map(item=>text(item.memory_id))
+      :[]
+  );
+
   const mediaRows=await all(
     env,
     `SELECT media_id,memory_id,family_id,media_type,role,sort_order,width,height
@@ -241,7 +262,9 @@ export async function readMemberMemoryDetailForSession(env,session,memoryId){
   return {
     status:'ok',
     family_id:auth.family_id,
-    ...memoryDetail(row,mediaRows),
+    ...memoryDetail(row,mediaRows,favoriteIds),
+    favorites_available:favoriteResult.status==='ok',
+    favorite_mutation_ready:false,
     read_only:true
   };
 }
@@ -292,6 +315,9 @@ export function memberMemoriesReadHealth(){
     cross_family_fail_closed:true,
     malformed_memory_id_fail_closed:true,
     private_storage_key_exposed:false,
+    favorite_state_optional_read:true,
+    favorite_schema_absence_degrades_to_false:true,
+    favorite_mutation_ready:false,
     production_write:false
   };
 }
