@@ -186,7 +186,7 @@ pass('health keeps push/LINE/automatic contact disabled',health.push_delivery_re
 pass('health records no Production route/write',health.production_route_wired===false&&health.production_write===false);
 
 const migration=fs.readFileSync(
-  'migrations_managed/20260925_member_news_catalog_foundation.sql',
+  'migrations_managed/20260924_member_news_catalog_foundation.sql',
   'utf8'
 );
 const schemaOnly=migration.replace(/^\s*--.*$/gm,'');
