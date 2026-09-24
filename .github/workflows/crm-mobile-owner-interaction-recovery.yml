@@ -14,6 +14,7 @@ on:
       - 'src/crm-customer360-*.mjs'
       - 'src/customer-identity-resolver.mjs'
       - 'src/crm-member-family-identity.mjs'
+      - 'src/crm-member-line-identity.mjs'
       - 'src/production-index-crm-customer360-entry.js'
       - 'migrations_managed/20260903_customer360_profile_auto_enrichment.sql'
       - 'migrations_managed/20260924_member_family_identity_foundation.sql'
@@ -62,7 +63,7 @@ jobs:
           mapfile -t identity_changed < <(printf '%s\n' "${changed[@]}" | grep -E '^src/.*(identity|customer-id|canonical-customer)' || true)
           for path in "${identity_changed[@]}"; do
             case "$path" in
-              src/customer-identity-resolver.mjs|src/crm-customer-id-autofill-runtime.mjs|src/crm-member-family-identity.mjs) ;;
+              src/customer-identity-resolver.mjs|src/crm-customer-id-autofill-runtime.mjs|src/crm-member-family-identity.mjs|src/crm-member-line-identity.mjs) ;;
               *) echo "::error::Unexpected identity source change: $path"; exit 1 ;;
             esac
           done
@@ -101,6 +102,7 @@ jobs:
           node --check src/crm-customer-id-autofill-runtime.mjs
           node --check src/customer-identity-resolver.mjs
           node --check src/crm-member-family-identity.mjs
+          node --check src/crm-member-line-identity.mjs
           node --check src/crm-customer360-profile-enrichment.mjs
           node --check src/crm-customer360-line-profile-extraction.mjs
           node --check src/crm-customer360-profile-ui-client.mjs
@@ -108,6 +110,7 @@ jobs:
           node tests/crm-mobile-owner-interaction-recovery.mjs
           node tests/customer360-profile-auto-enrichment.mjs
           node tests/member-family-identity-foundation.test.mjs
+          node tests/member-line-identity-foundation.test.mjs
 
       - name: CRM prefixed full regression
         shell: bash
