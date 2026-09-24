@@ -23,6 +23,8 @@ function makeDb({favorite=false}={}){
     favorite,
     linkedFamily:familyId,
     writes:[],
+    rateWrites:[],
+    rateCounters:new Map(),
     seenSql:[]
   };
 
@@ -30,7 +32,8 @@ function makeDb({favorite=false}={}){
     'customer_family_groups',
     'customer_family_customer_links',
     'member_memories',
-    'member_memory_favorites'
+    'member_memory_favorites',
+    'member_favorite_mutation_rate_limits'
   ]);
 
   return {
@@ -55,6 +58,12 @@ function makeDb({favorite=false}={}){
             return requestedMemory===memoryId&&requestedFamily===familyId
               ?{memory_id:memoryId,family_id:familyId}
               :null;
+          }
+          if(sql.includes('FROM member_favorite_mutation_rate_limits')){
+            const [requestedFamily,requestedCustomer,scopeKey,windowStartedAt]=bound.params;
+            const key=[requestedFamily,requestedCustomer,scopeKey,windowStartedAt].join('|');
+            const count=state.rateCounters.get(key)||0;
+            return count>0?{attempt_count:count}:null;
           }
           if(sql.includes('FROM member_memory_favorites')){
             const [requestedFamily,requestedCustomer,requestedMemory]=bound.params;
@@ -91,6 +100,13 @@ function makeDb({favorite=false}={}){
           return {results:[]};
         },
         async run(){
+          if(sql.includes('INSERT INTO member_favorite_mutation_rate_limits')){
+            const [requestedFamily,requestedCustomer,scopeKey,windowStartedAt]=bound.params;
+            const key=[requestedFamily,requestedCustomer,scopeKey,windowStartedAt].join('|');
+            state.rateCounters.set(key,(state.rateCounters.get(key)||0)+1);
+            state.rateWrites.push({sql,params:bound.params});
+            return {success:true,meta:{changes:1}};
+          }
           state.writes.push({sql,params:bound.params});
           if(sql.includes('INSERT INTO member_memory_favorites')){
             state.favorite=true;
@@ -168,6 +184,7 @@ const wrongMethod=await handleMemberFavoriteMutationRequest(
     DB:db,
     MEMBER_SESSION_SECRET:secret,
     MEMBER_FAVORITES_MUTATION_ROUTE_MODE:'enabled',
+    MEMBER_FAVORITES_RATE_LIMIT_MODE:'enabled',
     MEMBER_FAVORITES_WRITE_MODE:'enabled'
   }
 );
@@ -179,6 +196,7 @@ const crossOrigin=await handleMemberFavoriteMutationRequest(
     DB:db,
     MEMBER_SESSION_SECRET:secret,
     MEMBER_FAVORITES_MUTATION_ROUTE_MODE:'enabled',
+    MEMBER_FAVORITES_RATE_LIMIT_MODE:'enabled',
     MEMBER_FAVORITES_WRITE_MODE:'enabled'
   }
 );
@@ -190,6 +208,7 @@ const noOrigin=await handleMemberFavoriteMutationRequest(
     DB:db,
     MEMBER_SESSION_SECRET:secret,
     MEMBER_FAVORITES_MUTATION_ROUTE_MODE:'enabled',
+    MEMBER_FAVORITES_RATE_LIMIT_MODE:'enabled',
     MEMBER_FAVORITES_WRITE_MODE:'enabled'
   }
 );
@@ -201,6 +220,7 @@ const wrongType=await handleMemberFavoriteMutationRequest(
     DB:db,
     MEMBER_SESSION_SECRET:secret,
     MEMBER_FAVORITES_MUTATION_ROUTE_MODE:'enabled',
+    MEMBER_FAVORITES_RATE_LIMIT_MODE:'enabled',
     MEMBER_FAVORITES_WRITE_MODE:'enabled'
   }
 );
@@ -212,6 +232,7 @@ const noSession=await handleMemberFavoriteMutationRequest(
     DB:db,
     MEMBER_SESSION_SECRET:secret,
     MEMBER_FAVORITES_MUTATION_ROUTE_MODE:'enabled',
+    MEMBER_FAVORITES_RATE_LIMIT_MODE:'enabled',
     MEMBER_FAVORITES_WRITE_MODE:'enabled'
   }
 );
@@ -227,6 +248,7 @@ const injectedIdentity=await handleMemberFavoriteMutationRequest(
     DB:db,
     MEMBER_SESSION_SECRET:secret,
     MEMBER_FAVORITES_MUTATION_ROUTE_MODE:'enabled',
+    MEMBER_FAVORITES_RATE_LIMIT_MODE:'enabled',
     MEMBER_FAVORITES_WRITE_MODE:'enabled'
   }
 );
@@ -242,6 +264,7 @@ const injectedApproval=await handleMemberFavoriteMutationRequest(
     DB:db,
     MEMBER_SESSION_SECRET:secret,
     MEMBER_FAVORITES_MUTATION_ROUTE_MODE:'enabled',
+    MEMBER_FAVORITES_RATE_LIMIT_MODE:'enabled',
     MEMBER_FAVORITES_WRITE_MODE:'enabled'
   }
 );
@@ -256,10 +279,22 @@ const oversized=await handleMemberFavoriteMutationRequest(
     DB:db,
     MEMBER_SESSION_SECRET:secret,
     MEMBER_FAVORITES_MUTATION_ROUTE_MODE:'enabled',
+    MEMBER_FAVORITES_RATE_LIMIT_MODE:'enabled',
     MEMBER_FAVORITES_WRITE_MODE:'enabled'
   }
 );
 pass('oversized request body rejected',oversized.status===413&&db.state.writes.length===0);
+
+const rateOff=await handleMemberFavoriteMutationRequest(
+  request({memory_id:memoryId,desired_favorite:true},{cookie}),
+  {
+    DB:db,
+    MEMBER_SESSION_SECRET:secret,
+    MEMBER_FAVORITES_MUTATION_ROUTE_MODE:'enabled',
+    MEMBER_FAVORITES_WRITE_MODE:'enabled'
+  }
+);
+pass('rate-limit mode is an independent fail-closed gate',rateOff.status===503&&db.state.writes.length===0);
 
 const writeOff=await handleMemberFavoriteMutationRequest(
   request({memory_id:memoryId,desired_favorite:true},{cookie}),
@@ -267,6 +302,7 @@ const writeOff=await handleMemberFavoriteMutationRequest(
     DB:db,
     MEMBER_SESSION_SECRET:secret,
     MEMBER_FAVORITES_MUTATION_ROUTE_MODE:'enabled',
+    MEMBER_FAVORITES_RATE_LIMIT_MODE:'enabled',
     MEMBER_FAVORITES_WRITE_MODE:'disabled'
   }
 );
@@ -278,6 +314,7 @@ const add=await handleMemberFavoriteMutationRequest(
     DB:db,
     MEMBER_SESSION_SECRET:secret,
     MEMBER_FAVORITES_MUTATION_ROUTE_MODE:'enabled',
+    MEMBER_FAVORITES_RATE_LIMIT_MODE:'enabled',
     MEMBER_FAVORITES_WRITE_MODE:'enabled'
   }
 );
@@ -291,6 +328,7 @@ const addAgain=await handleMemberFavoriteMutationRequest(
     DB:db,
     MEMBER_SESSION_SECRET:secret,
     MEMBER_FAVORITES_MUTATION_ROUTE_MODE:'enabled',
+    MEMBER_FAVORITES_RATE_LIMIT_MODE:'enabled',
     MEMBER_FAVORITES_WRITE_MODE:'enabled'
   }
 );
@@ -303,6 +341,7 @@ const remove=await handleMemberFavoriteMutationRequest(
     DB:db,
     MEMBER_SESSION_SECRET:secret,
     MEMBER_FAVORITES_MUTATION_ROUTE_MODE:'enabled',
+    MEMBER_FAVORITES_RATE_LIMIT_MODE:'enabled',
     MEMBER_FAVORITES_WRITE_MODE:'enabled'
   }
 );
@@ -318,6 +357,7 @@ const stale=await handleMemberFavoriteMutationRequest(
     DB:staleDb,
     MEMBER_SESSION_SECRET:secret,
     MEMBER_FAVORITES_MUTATION_ROUTE_MODE:'enabled',
+    MEMBER_FAVORITES_RATE_LIMIT_MODE:'enabled',
     MEMBER_FAVORITES_WRITE_MODE:'enabled'
   }
 );
@@ -328,6 +368,7 @@ pass('health records route default disabled and not Production-wired',health.rou
 pass('health records exact JSON request contract',health.method==='POST'&&health.content_type==='application/json'&&health.exact_request_keys.join(',')==='memory_id,desired_favorite');
 pass('health forbids client approval and identity',health.client_approved_input===false&&health.client_customer_id_input===false&&health.client_family_id_input===false);
 pass('health requires signed cookie and same-origin defense',health.signed_member_session_cookie_required===true&&health.same_origin_required===true&&health.same_site_cookie_defense==='Lax');
+pass('health records required default-disabled rate limit gate',health.rate_limit_required===true&&health.rate_limit_default_disabled===true&&health.rate_limit_mode==='disabled'&&health.rate_limit_window_seconds===60&&health.rate_limit_customer_attempts===20&&health.rate_limit_memory_attempts===6&&health.rate_limit_retry_after_supported===true);
 pass('health preserves executor write gate and no automatic Production write',health.executor_write_mode_still_required===true&&health.automatic_write===false&&health.production_write_enabled===false&&health.line_send===false);
 
 console.log(`MEMBER_FAVORITES_HTTP_CONTRACT=${n}/${n} PASS`);
