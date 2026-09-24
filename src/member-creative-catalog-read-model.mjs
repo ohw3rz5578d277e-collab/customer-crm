@@ -1,5 +1,6 @@
 import { readMemberMemoriesForSession } from './member-memories-read-model.mjs';
 import { jstToday } from './crm-customer360-marketing-engine.mjs';
+import { resolveMemberPublicAssetMapOptional } from './member-public-asset-resolver.mjs';
 
 const BUILD='member-creative-catalog-read-model-20260924-01';
 const CUSTOMER_ID_RE=/^\d{8}$/;
@@ -284,8 +285,37 @@ export async function readMemberCreativeCatalogFromAuthorizedMemories(
     visible_memory_count:(memories.memories||[]).length
   });
 
+  const assetIds=[];
+  for(const template of built.templates||[]){
+    if(template.asset_ref?.asset_id)assetIds.push(template.asset_ref.asset_id);
+    if(template.asset_ref?.preview_asset_id)assetIds.push(template.asset_ref.preview_asset_id);
+  }
+
+  const assetResolution=await resolveMemberPublicAssetMapOptional(env,assetIds);
+  const assetById=assetResolution.status==='ok'
+    ?assetResolution.asset_by_id||{}
+    :{};
+
+  const templates=(built.templates||[]).map(template=>({
+    ...template,
+    asset_ref:{
+      ...template.asset_ref,
+      public_asset:template.asset_ref?.asset_id
+        ?assetById[template.asset_ref.asset_id]||null
+        :null,
+      preview_public_asset:template.asset_ref?.preview_asset_id
+        ?assetById[template.asset_ref.preview_asset_id]||null
+        :null,
+      public_asset_resolution_available:assetResolution.status==='ok'
+    }
+  }));
+
   return {
     ...built,
+    templates,
+    public_assets_available:assetResolution.status==='ok',
+    public_assets_status:assetResolution.status,
+    unresolved_public_asset_ids:assetResolution.unresolved_asset_ids||[],
     family_id:normalized.family_id,
     customer_id:normalized.customer_id,
     source:{
@@ -294,7 +324,9 @@ export async function readMemberCreativeCatalogFromAuthorizedMemories(
       deleted_hidden:true,
       family_memory_reader:'member_memories_read_model',
       bounded_memory_count:true,
-      authorized_memory_result_reused:true
+      authorized_memory_result_reused:true,
+      public_asset_resolver:'member_public_asset_resolver',
+      public_asset_resolution_optional:true
     }
   };
 }
@@ -368,6 +400,9 @@ export function memberCreativeCatalogHealth(){
     arbitrary_external_url:false,
     storage_key_exposed:false,
     asset_ref_is_logical_id_only:true,
+    public_asset_resolution_optional:true,
+    public_asset_local_path_only:true,
+    public_asset_schema_absence_degrades_locally:true,
     browser_side_composition_preferred:true,
     generation_ready:false,
     upload_ready:false,

@@ -1,5 +1,6 @@
 import { readMemberFamilyByCustomer } from './crm-member-family-identity.mjs';
 import { jstToday } from './crm-customer360-marketing-engine.mjs';
+import { resolveMemberPublicAssetMapOptional } from './member-public-asset-resolver.mjs';
 
 const BUILD='member-shop-pickup-read-model-20260924-01';
 const CUSTOMER_ID_RE=/^\d{8}$/;
@@ -252,8 +253,36 @@ export async function readMemberShopCatalogForSession(env,session,{as_of}={}){
     as_of:validDateOnly(as_of)||jstToday()
   });
 
+  const assetIds=(built.products||[])
+    .map(product=>product.hero_asset_ref?.asset_id)
+    .filter(Boolean);
+  const assetResolution=await resolveMemberPublicAssetMapOptional(env,assetIds);
+  const assetById=assetResolution.status==='ok'
+    ?assetResolution.asset_by_id||{}
+    :{};
+
+  const products=(built.products||[]).map(product=>({
+    ...product,
+    hero_asset_ref:{
+      ...product.hero_asset_ref,
+      public_asset:product.hero_asset_ref?.asset_id
+        ?assetById[product.hero_asset_ref.asset_id]||null
+        :null,
+      public_asset_resolution_available:assetResolution.status==='ok'
+    }
+  }));
+  const productById=new Map(products.map(product=>[product.product_id,product]));
+  const homePickup=(built.home_pickup||[])
+    .map(product=>productById.get(product.product_id))
+    .filter(Boolean);
+
   return {
     ...built,
+    products,
+    home_pickup:homePickup,
+    public_assets_available:assetResolution.status==='ok',
+    public_assets_status:assetResolution.status,
+    unresolved_public_asset_ids:assetResolution.unresolved_asset_ids||[],
     family_id:auth.family_id,
     customer_id:auth.customer_id,
     source:{
@@ -262,7 +291,9 @@ export async function readMemberShopCatalogForSession(env,session,{as_of}={}){
       published_only:true,
       deleted_hidden:true,
       price_source_connected:false,
-      checkout_source_connected:false
+      checkout_source_connected:false,
+      public_asset_resolver:'member_public_asset_resolver',
+      public_asset_resolution_optional:true
     }
   };
 }
@@ -309,6 +340,9 @@ export function memberShopPickupHealth(){
     presentation_catalog_only:true,
     supported_product_types:[...PRODUCT_TYPES],
     logical_asset_id_only:true,
+    public_asset_resolution_optional:true,
+    public_asset_local_path_only:true,
+    public_asset_schema_absence_degrades_locally:true,
     storage_key_exposed:false,
     local_shop_path_only:true,
     arbitrary_external_url_exposed:false,
