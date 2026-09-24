@@ -51,12 +51,14 @@ export async function readMemberFamilyByCustomer(env,customerId){
     return {status:'schema_not_applied',customer_id:id,family:null};
   }
 
-  const link=await first(
+  const links=await all(
     env,
     "SELECT family_id,customer_id,relation,access_role FROM customer_family_customer_links WHERE customer_id=? AND COALESCE(deleted_at,'')='' LIMIT 2",
     [id]
   );
-  if(!link) return {status:'unlinked',customer_id:id,family:null};
+  if(links.length===0) return {status:'unlinked',customer_id:id,family:null};
+  if(links.length>1) return {status:'ambiguous_family_identity',customer_id:id,family:null};
+  const link=links[0];
 
   const family=await first(
     env,
@@ -95,6 +97,7 @@ export async function handleMemberFamilyIdentityReadRequest(request,env){
   if(result.status==='linked') return json({ok:true,...result});
   if(result.status==='unlinked') return json({ok:true,...result});
   if(result.status==='schema_not_applied') return json({ok:false,error:'member_family_schema_not_applied'},409);
+  if(result.status==='ambiguous_family_identity') return json({ok:false,error:'ambiguous_family_identity',review_required:true},409);
   return json({ok:false,error:result.status},400);
 }
 
@@ -106,6 +109,7 @@ export function memberFamilyIdentityHealth(){
     production_route_wired:false,
     customer_identity_source:'canonical_customer_id_only',
     family_auto_inference:false,
+    duplicate_active_family_link_fail_closed:true,
     name_match:false,
     address_match:false,
     phone_match:false,
