@@ -156,7 +156,8 @@ function makeDb(){
     'customer_family_customer_links',
     'member_memories',
     'member_memory_media',
-    'member_creative_templates'
+    'member_creative_templates',
+    'member_public_assets'
   ]);
   const writes=[];
   const seenSql=[];
@@ -369,6 +370,15 @@ function makeDb(){
           if(sql.includes('FROM member_creative_templates')){
             return {results:templates};
           }
+          if(sql.includes('FROM member_public_assets')){
+            const assets=[
+              {asset_id:'asset:creative:single',asset_kind:'image',local_path:'/member-assets/creative/single.png',mime_type:'image/png',width:1290,height:2796},
+              {asset_id:'asset:creative:single:preview',asset_kind:'image',local_path:'/member-assets/creative/single-preview.png',mime_type:'image/png',width:645,height:1398},
+              {asset_id:'asset:creative:pair',asset_kind:'image',local_path:'/member-assets/creative/pair.jpg',mime_type:'image/jpeg',width:1600,height:1200},
+              {asset_id:'asset:creative:locked',asset_kind:'image',local_path:'/member-assets/creative/locked.jpg',mime_type:'image/jpeg',width:1600,height:1200}
+            ];
+            return {results:assets.filter(asset=>state.params.includes(asset.asset_id))};
+          }
           return {results:[]};
         },
         async run(){
@@ -391,6 +401,12 @@ const integrated=await planMemberCreativeComposition(
 );
 pass('authorized Member can build Creative composition plan',integrated.status==='ok'&&integrated.family_id===familyId&&integrated.customer_id===customerId);
 pass('integrated plan preserves exact selected media metadata',integrated.plan.selected_media[0].media_id==='media_1'&&integrated.plan.selected_media[0].memory_id==='mem_1');
+pass('integrated selected media carries source-only private delivery contract',integrated.plan.selected_media[0].delivery?.source_contract_ready===true&&integrated.plan.selected_media[0].delivery?.delivery_ready===false);
+pass('integrated plan resolves trusted local template asset',integrated.plan.template.asset_ref.public_asset?.public_path==='/member-assets/creative/single.png');
+pass('integrated plan attaches browser execution contract',integrated.browser_execution_status==='ok'&&integrated.plan.browser_execution?.execution_environment==='browser');
+pass('browser execution contract uses fixed single-photo recipe',integrated.plan.browser_execution?.layout?.recipe==='single_full_bleed_v1'&&integrated.plan.browser_execution?.photo_layers?.length===1);
+pass('browser execution contract remains runtime-blocked',integrated.plan.browser_execution?.readiness?.runtime_ready===false&&integrated.plan.browser_execution?.readiness?.blockers?.includes('private_media_delivery_not_active')&&integrated.plan.browser_execution?.readiness?.blockers?.includes('browser_renderer_not_implemented'));
+pass('local download contract exists but is not active',integrated.plan.browser_execution?.local_download?.mechanism==='browser_blob_object_url'&&integrated.plan.browser_execution?.local_download?.ready===false);
 pass('integrated plan never exposes private storage key',!JSON.stringify(integrated).includes('member/fam_A/'));
 pass('integrated plan remains generation-disabled',integrated.generation_executed===false&&integrated.generated_output_write===false);
 pass('integrated plan performs zero writes',db.writes.length===0);
@@ -540,6 +556,7 @@ pass('health requires exact slots and rejects duplicates',health.exact_photo_slo
 pass('health records per-media reauthorization and cross-Family hiding',health.private_media_reauthorized_individually===true&&health.cross_family_media_hidden===true);
 pass('health records image-only input and distinct pair MEMORY rule',health.input_media_type==='image_only'&&health.pair_photo_distinct_memory_required===true);
 pass('health records zero storage/URL/raw-binary exposure',health.private_storage_key_exposed===false&&health.template_storage_key_exposed===false&&health.arbitrary_external_url_exposed===false&&health.raw_photo_binary_in_plan===false);
-pass('health records no generation/browser executor/write/Production route',health.generation_executed===false&&health.browser_composition_implemented===false&&health.customer_photo_write===false&&health.generated_output_write===false&&health.production_route_wired===false&&health.production_write===false);
+pass('health records browser contract ready but renderer/generation inactive',health.generation_executed===false&&health.browser_composition_implemented===false&&health.browser_execution_contract_ready===true&&health.local_download_contract_ready===true&&health.memory_movie_execution_supported===false);
+pass('health records no photo/output write or Production route',health.customer_photo_write===false&&health.generated_output_write===false&&health.production_route_wired===false&&health.production_write===false);
 
 console.log(`MEMBER_CREATIVE_COMPOSITION_PLAN=${n}/${n} PASS`);
