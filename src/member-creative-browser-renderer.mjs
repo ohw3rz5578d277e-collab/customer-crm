@@ -12,7 +12,7 @@ const text=v=>v==null?'':String(v).trim();
 
 function validDimension(value){
   const n=Number(value);
-  return Number.isInteger(n)&&n>=1&&n<=MAX_DIMENSION;
+  return Number.isInteger(n)&&n>=320&&n<=MAX_DIMENSION;
 }
 
 function validLocalMemberAssetPath(value){
@@ -429,7 +429,8 @@ export async function renderMemberCreativeBrowserContract(contract,runtime){
         filename:validation.filename,
         mime_type:validation.output_mime,
         width:validation.width,
-        height:validation.height
+        height:validation.height,
+        revoke_object_url_required:true
       },
       local_only:true,
       server_upload:false,
