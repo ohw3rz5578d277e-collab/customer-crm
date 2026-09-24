@@ -27,10 +27,9 @@ const media=[
   {media_id:'media_b',memory_id:'mem_B',family_id:'fam_B',storage_key:'private/b.jpg',media_type:'image',role:'cover',sort_order:0,width:1200,height:800,deleted_at:''}
 ];
 
-function makeDb({schema=true}={}){
+function makeDb({schema=true,familySchema=true}={}){
   const tables=new Set([
-    'customer_family_groups',
-    'customer_family_customer_links',
+    ...(familySchema?['customer_family_groups','customer_family_customer_links']:[]),
     ...(schema?['member_memories','member_memory_media']:[])
   ]);
 
@@ -126,6 +125,14 @@ const noSession=await handleMemberMemoriesReadRequest(
 );
 pass('read API requires server-supplied Member session',noSession.status===401);
 
+const familySchemaMissing=await handleMemberMemoriesReadRequest(
+  new Request('https://example.test/api/internal/member/memories'),
+  {DB:makeDb({familySchema:false})},
+  {family_id:familyId,customer_id:customerId}
+);
+const familySchemaBody=await familySchemaMissing.json();
+pass('missing Family schema is reported separately from MEMORY schema',familySchemaMissing.status===409&&familySchemaBody.error==='member_family_schema_not_applied');
+
 const tamperedQuery=await handleMemberMemoriesReadRequest(
   new Request('https://example.test/api/internal/member/memories?customer_id=26000999&family_id=fam_B'),
   env,
@@ -148,6 +155,13 @@ const detailHttp=await handleMemberMemoriesReadRequest(
 );
 pass('cross-family MEMORY id returns 404',detailHttp.status===404);
 
+const malformedId=await handleMemberMemoriesReadRequest(
+  new Request('https://example.test/api/internal/member/memories/%'),
+  env,
+  {family_id:familyId,customer_id:customerId}
+);
+pass('malformed encoded MEMORY id fails closed without throwing',malformedId.status===400);
+
 const post=await handleMemberMemoriesReadRequest(
   new Request('https://example.test/api/internal/member/memories',{method:'POST'}),
   env,
@@ -159,5 +173,6 @@ const health=memberMemoriesReadHealth();
 pass('health contract records no route wiring or Production write',health.read_only===true&&health.production_route_wired===false&&health.production_write===false);
 pass('health contract forbids request-supplied identity',health.request_customer_id_input===false&&health.request_family_id_input===false);
 pass('health contract keeps private storage key hidden',health.private_storage_key_exposed===false);
+pass('health contract records malformed MEMORY id fail-closed behavior',health.malformed_memory_id_fail_closed===true);
 
 console.log(`MEMBER_MEMORIES_READ_MODEL=${n}/${n} PASS`);
