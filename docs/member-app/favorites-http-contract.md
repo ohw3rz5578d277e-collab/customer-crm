@@ -26,11 +26,13 @@ Default is disabled.
 
 If disabled, the conceptual path returns a generic not-found response.
 
-This route gate is separate from the executor write gate:
+This route gate is separate from both the rate-limit gate and the executor write gate:
+
+`MEMBER_FAVORITES_RATE_LIMIT_MODE=enabled`
 
 `MEMBER_FAVORITES_WRITE_MODE=enabled`
 
-Both must be enabled before a write can occur.
+All three source-level gates must be enabled before a Favorite write can occur. The rate-limit schema must also be available.
 
 The write executor also still requires its internal `approved=true` argument, which the HTTP handler supplies only after the server-side route gate and request security checks have passed.
 
@@ -112,6 +114,25 @@ This preserves the idempotent semantics from the executor:
 - true -> true = no-op
 - false -> false = no-op
 
+## Rate-limit boundary
+
+After signed-session verification and strict JSON parsing, the handler consumes the authenticated Favorite mutation rate limit.
+
+Current source limits:
+
+- 20 attempts per Member per 60 seconds
+- 6 attempts for the same MEMORY per 60 seconds
+
+If the limiter is disabled, missing its schema, or cannot verify its counter write, the Favorite mutation fails closed.
+
+If a limit is exceeded, the handler returns:
+
+- HTTP 429
+- `error=rate_limited`
+- `Retry-After` for the remaining window
+
+The Favorite write executor is not called for a rate-limited request.
+
 ## Response boundary
 
 Successful response contains only:
@@ -134,18 +155,19 @@ It does not expose:
 Not included:
 
 - Production route wiring
-- setting either route/write env mode in Production
+- setting route / rate-limit / write env modes in Production
 - Production Favorite write
 - `favorite_mutable=true`
 - final MEMORIES UI
 - optimistic browser state
-- rate limiting
-- abuse throttling
+- IP-based throttling
+- device fingerprinting
+- CAPTCHA
 - Production schema apply
 - LINE send
 - Production deploy
 
-Rate limiting / abuse controls should be reviewed before actual customer-facing activation.
+The current authenticated rate-limit foundation is source-ready. Broader IP/device-level abuse controls can be reviewed separately if needed before activation.
 
 ## Safety status
 
@@ -162,6 +184,9 @@ Current contract provides:
 - exact same-Origin requirement
 - SameSite=Lax session cookie defense
 - separate route mode gate
+- separate rate-limit mode gate
+- fail-closed rate-limit schema/counter requirement
+- HTTP 429 + Retry-After support
 - separate executor write mode gate
 - declarative desired state
 - idempotent semantics
