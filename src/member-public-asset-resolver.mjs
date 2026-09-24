@@ -1,5 +1,6 @@
 const BUILD='member-public-asset-resolver-20260925-01';
 const MAX_ASSET_IDS=20;
+const INTERNAL_MAX_ASSET_IDS=240;
 const MAX_ASSET_ID=160;
 const SAFE_ID_RE=/^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/;
 const LOCAL_PREFIX='/member-assets/';
@@ -190,6 +191,102 @@ export async function resolveMemberPublicAssets(env,assetIds){
   };
 }
 
+export async function resolveMemberPublicAssetMapOptional(env,assetIds=[]){
+  if(!Array.isArray(assetIds)){
+    return {
+      status:'invalid_asset_ids',
+      available:false,
+      asset_by_id:{},
+      unresolved_asset_ids:[],
+      read_only:true
+    };
+  }
+
+  const requested=[];
+  const seen=new Set();
+
+  for(const value of assetIds){
+    if(value==null||value==='')continue;
+    if(!validAssetId(value)){
+      return {
+        status:'invalid_asset_ids',
+        available:false,
+        asset_by_id:{},
+        unresolved_asset_ids:[],
+        read_only:true
+      };
+    }
+    if(seen.has(value))continue;
+    seen.add(value);
+    requested.push(value);
+  }
+
+  if(requested.length>INTERNAL_MAX_ASSET_IDS){
+    return {
+      status:'too_many_asset_ids',
+      available:false,
+      asset_by_id:{},
+      unresolved_asset_ids:requested,
+      read_only:true
+    };
+  }
+
+  if(requested.length===0){
+    return {
+      status:'ok',
+      available:true,
+      asset_by_id:{},
+      unresolved_asset_ids:[],
+      complete:true,
+      read_only:true
+    };
+  }
+
+  const assetById={};
+  const unresolved=[];
+
+  for(let offset=0;offset<requested.length;offset+=MAX_ASSET_IDS){
+    const chunk=requested.slice(offset,offset+MAX_ASSET_IDS);
+    const resolved=await resolveMemberPublicAssets(env,chunk);
+
+    if(resolved.status==='public_asset_schema_not_applied'){
+      return {
+        status:resolved.status,
+        available:false,
+        asset_by_id:{},
+        unresolved_asset_ids:requested,
+        complete:false,
+        read_only:true
+      };
+    }
+
+    if(resolved.status!=='ok'){
+      return {
+        status:resolved.status,
+        available:false,
+        asset_by_id:{},
+        unresolved_asset_ids:requested,
+        complete:false,
+        read_only:true
+      };
+    }
+
+    for(const asset of resolved.assets||[]){
+      assetById[asset.asset_id]=asset;
+    }
+    unresolved.push(...(resolved.unresolved_asset_ids||[]));
+  }
+
+  return {
+    status:'ok',
+    available:true,
+    asset_by_id:assetById,
+    unresolved_asset_ids:unresolved,
+    complete:unresolved.length===0,
+    read_only:true
+  };
+}
+
 function exactResolveBody(value){
   if(!value||typeof value!=='object'||Array.isArray(value))return null;
   const keys=Object.keys(value);
@@ -241,6 +338,8 @@ export function memberPublicAssetResolverHealth(){
     supported_mime_types:[...MIME_TYPES],
     local_path_prefix:LOCAL_PREFIX,
     max_asset_ids_per_request:MAX_ASSET_IDS,
+    internal_batching_supported:true,
+    internal_max_asset_ids:INTERNAL_MAX_ASSET_IDS,
     published_only:true,
     deleted_hidden:true,
     storage_key_exposed:false,
@@ -259,5 +358,6 @@ export const __test={
   normalizeRequestedAssetIds,
   exactResolveBody,
   MAX_ASSET_IDS,
+  INTERNAL_MAX_ASSET_IDS,
   LOCAL_PREFIX
 };
