@@ -1,13 +1,13 @@
-name: Member app identity foundation
+name: Member app foundation
 
 on:
   pull_request:
     branches:
       - main
     paths:
-      - 'src/crm-member-family-identity.mjs'
-      - 'src/crm-member-line-identity.mjs'
-      - 'migrations_managed/20260924_member_family_identity_foundation.sql'
+      - 'src/crm-member-*.mjs'
+      - 'src/member-*.mjs'
+      - 'migrations_managed/20260924_member_*.sql'
       - 'member_tests/**'
       - 'docs/member-app/**'
       - '.github/workflows/member-app-foundation.yml'
@@ -27,7 +27,7 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
 
-      - name: Guard exact Member scope
+      - name: Guard Member-only scope and Production safety
         shell: bash
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
@@ -36,25 +36,32 @@ jobs:
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$HEAD_SHA"
           git cat-file -e "$BASE_SHA^{commit}"
+
           mapfile -t changed < <(git diff --name-only "$BASE_SHA...$HEAD_SHA")
           printf 'CHANGED_FILE=%s\n' "${changed[@]}"
           test "${#changed[@]}" -gt 0
 
           for path in "${changed[@]}"; do
             case "$path" in
-              src/crm-member-family-identity.mjs|              src/crm-member-line-identity.mjs|              migrations_managed/20260924_member_family_identity_foundation.sql|              member_tests/*|              docs/member-app/*|              .github/workflows/member-app-foundation.yml) ;;
+              src/crm-member-*.mjs|src/member-*.mjs|migrations_managed/20260924_member_*.sql|member_tests/*|docs/member-app/*|.github/workflows/member-app-foundation.yml) ;;
               *) echo "::error::Unexpected Member foundation scope: $path"; exit 1 ;;
             esac
           done
 
-          migration='migrations_managed/20260924_member_family_identity_foundation.sql'
-          ! grep -E "DROP[[:space:]]+(TABLE|COLUMN)|ALTER[[:space:]]+TABLE[[:space:]]+customers|customer_identity_(sequence|registry)" "$migration"
-          ! grep -E "\b(INSERT[[:space:]]+INTO|UPDATE|DELETE[[:space:]]+FROM)[[:space:]]+customers\b" src/crm-member-family-identity.mjs src/crm-member-line-identity.mjs
+          for migration in migrations_managed/20260924_member_*.sql; do
+            test -f "$migration" || continue
+            ! grep -E "DROP[[:space:]]+(TABLE|COLUMN)|ALTER[[:space:]]+TABLE[[:space:]]+(customers|customer_reservations|customer_delivery_links)|customer_identity_(sequence|registry)" "$migration"
+            ! grep -E "(INSERT[[:space:]]+INTO|UPDATE|DELETE[[:space:]]+FROM)[[:space:]]+(customers|customer_reservations|customer_delivery_links)" "$migration"
+          done
+
+          if compgen -G 'src/crm-member-*.mjs' > /dev/null || compgen -G 'src/member-*.mjs' > /dev/null; then
+            ! grep -E "(INSERT[[:space:]]+INTO|UPDATE|DELETE[[:space:]]+FROM)[[:space:]]+(customers|customer_reservations|customer_delivery_links)" src/crm-member-*.mjs src/member-*.mjs
+          fi
 
           echo 'MEMBER_SCOPE_GUARD=PASS'
           echo 'PRODUCTION_D1_WRITE=0'
           echo 'PRODUCTION_SCHEMA_APPLY=0'
-          echo 'CUSTOMER_WRITE=0'
+          echo 'CANONICAL_CUSTOMER_WRITE=0'
           echo 'CUSTOMER_ID_GENERATION=0'
           echo 'FAMILY_AUTO_LINK=0'
           echo 'LINE_SEND=0'
@@ -65,18 +72,25 @@ jobs:
         with:
           node-version: '22'
 
-      - name: Syntax
+      - name: Member syntax
         shell: bash
         run: |
           set -euo pipefail
-          node --check src/crm-member-family-identity.mjs
-          node --check src/crm-member-line-identity.mjs
+          for file in src/crm-member-*.mjs src/member-*.mjs; do
+            test -f "$file" || continue
+            node --check "$file"
+          done
           echo 'MEMBER_SYNTAX=PASS'
 
-      - name: Member identity regressions
+      - name: Member regressions
         shell: bash
         run: |
           set -euo pipefail
-          node member_tests/member-family-identity-foundation.test.mjs
-          node member_tests/member-line-identity-foundation.test.mjs
-          echo 'MEMBER_IDENTITY_REGRESSION=PASS'
+          mapfile -t tests < <(find member_tests -maxdepth 1 -type f -name '*.test.mjs' -printf '%p\n' | sort)
+          test "${#tests[@]}" -gt 0
+          for test_file in "${tests[@]}"; do
+            echo "::group::$test_file"
+            node "$test_file"
+            echo '::endgroup::'
+          done
+          echo "MEMBER_TEST_FILES=${#tests[@]} PASS"
