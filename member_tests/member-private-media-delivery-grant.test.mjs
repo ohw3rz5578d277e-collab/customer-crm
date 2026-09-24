@@ -6,6 +6,7 @@ import {
   verifyMemberPrivateMediaDeliveryGrant,
   handleMemberPrivateMediaGrantRequest,
   memberPrivateMediaDeliveryGrantHealth,
+  memberPrivateMediaDeliveryPublicContract,
   __test
 } from '../src/member-private-media-delivery-grant.mjs';
 
@@ -349,6 +350,12 @@ const get=await handleMemberPrivateMediaGrantRequest(
 );
 pass('HTTP grant issue is POST only',get.status===405);
 
+const publicContract=memberPrivateMediaDeliveryPublicContract();
+pass('public delivery contract is source-ready but not active',publicContract.source_contract_ready===true&&publicContract.delivery_ready===false);
+pass('public delivery contract exposes grant/content POST paths only',publicContract.grant.method==='POST'&&publicContract.grant.path==='/api/internal/member/media/grant'&&publicContract.content.method==='POST'&&publicContract.content.path==='/api/internal/member/media/content');
+pass('public delivery contract keeps Production route/storage inactive',publicContract.grant.production_route_wired===false&&publicContract.content.production_route_wired===false&&publicContract.content.production_storage_binding===false&&publicContract.content.production_storage_fetch===false);
+pass('public delivery contract exposes no storage key/signed URL/redirect',publicContract.storage_key_exposed===false&&publicContract.signed_storage_url_exposed===false&&publicContract.external_redirect===false);
+
 const health=memberPrivateMediaDeliveryGrantHealth({});
 pass('health records short-lived token contract',health.token_version==='v1'&&health.token_ttl_seconds===120&&health.clock_skew_seconds===30);
 pass('health records no identity/storage claims inside token',health.token_contains_customer_id===false&&health.token_contains_family_id===false&&health.token_contains_storage_key===false);
@@ -356,5 +363,6 @@ pass('health records exact signed binding inputs',health.signed_binding_inputs.j
 pass('health records issue and verify both reauthorize private media',health.private_media_reauthorization_on_issue===true&&health.private_media_reauthorization_on_verify===true);
 pass('health keeps grant out of URL and binary route inactive',health.content_delivery_method==='POST'&&health.grant_in_url===false&&health.binary_route_implemented===false);
 pass('health records no Production route/storage fetch/write',health.production_route_wired===false&&health.production_storage_fetch===false&&health.production_write===false);
+pass('health records public contract export',health.public_contract_exported===true);
 
 console.log(`MEMBER_PRIVATE_MEDIA_DELIVERY_GRANT=${n}/${n} PASS`);
