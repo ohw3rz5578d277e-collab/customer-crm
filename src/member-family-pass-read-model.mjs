@@ -1,6 +1,6 @@
 import { readMemberFamilyByCustomer } from './crm-member-family-identity.mjs';
 
-const BUILD='member-family-pass-read-model-20260924-01';
+const BUILD='member-family-pass-read-model-20260924-02';
 const CUSTOMER_ID_RE=/^\d{8}$/;
 const MAX_FAMILY_ID=128;
 
@@ -76,14 +76,37 @@ async function authorizeSession(env,session){
   };
 }
 
-export function computeCurrentFamilyPass(memoryCount){
+function normalizeBlackEntitlement(row){
+  if(!row||Number(row.black_lifetime)!==1)return null;
+  const achievedAt=text(row.black_achieved_at);
+  const count=Number(row.qualifying_memory_count);
+  if(!achievedAt||!Number.isInteger(count)||count<10)return null;
+  return {
+    black_lifetime:true,
+    black_achieved_at:achievedAt,
+    qualifying_memory_count:count,
+    achievement_source:text(row.achievement_source)||'published-member-memories'
+  };
+}
+
+export function computeCurrentFamilyPass(memoryCount,{
+  durable_black_entitlement=false,
+  entitlement_schema_applied=false,
+  black_achieved_at=''
+}={}){
   const count=Math.max(0,Math.floor(Number(memoryCount)||0));
+  const durableBlack=durable_black_entitlement===true;
+  const effectiveBlack=durableBlack||count>=10;
+
   let current={code:'UNRANKED',threshold:0};
   for(const tier of TIERS){
     if(count>=tier.threshold)current=tier;
   }
+  if(effectiveBlack){
+    current=TIERS[TIERS.length-1];
+  }
 
-  const next=TIERS.find(tier=>tier.threshold>count)||null;
+  const next=effectiveBlack?null:(TIERS.find(tier=>tier.threshold>count)||null);
   const previousThreshold=current.threshold;
   const nextThreshold=next?.threshold??current.threshold;
   const span=Math.max(1,nextThreshold-previousThreshold);
@@ -102,10 +125,14 @@ export function computeCurrentFamilyPass(memoryCount){
     milestones:TIERS.map(tier=>({
       tier:tier.code,
       threshold:tier.threshold,
-      achieved:count>=tier.threshold
+      achieved:durableBlack?true:count>=tier.threshold
     })),
     black_currently_qualified:count>=10,
-    black_lifetime_persistence_supported:false,
+    black_lifetime_entitled:durableBlack,
+    black_achieved_at:durableBlack?text(black_achieved_at):'',
+    effective_black:effectiveBlack,
+    tier_basis:durableBlack&&count<10?'durable_black_entitlement':'current_memory_count',
+    black_lifetime_persistence_supported:entitlement_schema_applied===true,
     entitlement_enforcement_ready:false
   };
 }
@@ -136,14 +163,39 @@ export async function readMemberFamilyPassForSession(env,session){
     [auth.family_id]
   );
 
+  const entitlementSchemaApplied=await tableExists(env,'member_family_pass_entitlements');
+  let entitlement=null;
+  if(entitlementSchemaApplied){
+    entitlement=normalizeBlackEntitlement(await first(
+      env,
+      `SELECT family_id,black_lifetime,black_achieved_at,qualifying_memory_count,achievement_source
+         FROM member_family_pass_entitlements
+        WHERE family_id=?
+          AND black_lifetime=1
+        LIMIT 1`,
+      [auth.family_id]
+    ));
+  }
+
   const memoryCount=Number(row?.memory_count||0);
-  const pass=computeCurrentFamilyPass(memoryCount);
+  const pass=computeCurrentFamilyPass(memoryCount,{
+    durable_black_entitlement:!!entitlement,
+    entitlement_schema_applied:entitlementSchemaApplied,
+    black_achieved_at:entitlement?.black_achieved_at||''
+  });
 
   return {
     status:'ok',
     family_id:auth.family_id,
     customer_id:auth.customer_id,
     family_pass:pass,
+    entitlement:{
+      schema_applied:entitlementSchemaApplied,
+      durable_black:!!entitlement,
+      black_achieved_at:entitlement?.black_achieved_at||null,
+      qualifying_memory_count:entitlement?.qualifying_memory_count??null,
+      achievement_source:entitlement?.achievement_source||null
+    },
     benefit_contract:{
       black_photo_goods_discount_percent:10,
       applies_to_shooting_fee:false,
@@ -205,7 +257,9 @@ export function memberFamilyPassReadHealth(){
       gold:5,
       black:10
     },
-    black_lifetime_persistence_supported:false,
+    durable_black_entitlement_source_supported:true,
+    entitlement_table:'member_family_pass_entitlements',
+    entitlement_schema_optional_for_backward_compatibility:true,
     black_benefit_enforcement_ready:false,
     black_goods_discount_percent:10,
     black_shooting_fee_discount:false,
@@ -216,5 +270,6 @@ export function memberFamilyPassReadHealth(){
 export const __test={
   TIERS,
   validSession,
+  normalizeBlackEntitlement,
   computeCurrentFamilyPass
 };
