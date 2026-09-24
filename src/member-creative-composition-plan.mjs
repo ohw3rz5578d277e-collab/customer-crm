@@ -319,12 +319,14 @@ export async function planMemberCreativeComposition(env,session,input,{as_of}={}
   if(built.status==='ok'){
     built.plan.browser_execution=browserExecution.contract;
     built.plan.execution.browser_execution_contract_ready=browserExecution.status==='ok';
-    built.plan.execution.browser_composition_implemented=false;
+    built.plan.execution.browser_composition_implemented=
+      browserExecution.contract?.readiness?.browser_renderer_implemented===true;
     built.plan.execution.template_asset_delivery_ready=
       browserExecution.contract?.readiness?.template_public_asset_ready===true;
     built.plan.execution.private_media_delivery_ready=
       browserExecution.contract?.readiness?.private_media_delivery_ready===true;
-    built.plan.execution.ready=false;
+    built.plan.execution.ready=
+      browserExecution.contract?.readiness?.runtime_ready===true;
   }
 
   return {
@@ -421,7 +423,7 @@ export function memberCreativeCompositionPlanHealth(){
     arbitrary_external_url_exposed:false,
     raw_photo_binary_in_plan:false,
     generation_executed:false,
-    browser_composition_implemented:false,
+    browser_composition_implemented:true,
     browser_execution_contract_ready:true,
     browser_output_image_only:true,
     memory_movie_execution_supported:false,
