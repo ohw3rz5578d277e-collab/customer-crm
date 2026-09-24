@@ -123,14 +123,14 @@ Current state:
 
 - source_contract_ready = true
 - browser_engine_contract_ready = true
-- browser_renderer_implemented = false
-- runtime_ready = false
-- local_download.ready = false
+- browser_renderer_implemented = true
+- runtime_ready = false while private media Production delivery remains inactive
+- local_download.ready = false while runtime dependencies remain inactive
 
 Current blockers include:
 
 - private_media_delivery_not_active
-- browser_renderer_not_implemented
+The renderer-source blocker has been removed by the browser renderer foundation.
 
 A missing public template asset adds:
 
@@ -191,9 +191,8 @@ The existing Creative composition plan now:
 
 Not included:
 
-- actual Canvas/OffscreenCanvas renderer
-- image decoding/runtime fetch implementation
-- Blob creation/download click implementation
+- final CREATE UI wiring
+- user-triggered download button wiring
 - generated image persistence
 - server rendering
 - video/movie generation
@@ -212,7 +211,8 @@ Current foundation is:
 - source-only
 - read-only
 - browser-side execution contract
-- actual renderer = 0
+- renderer source implemented = 1
+- renderer auto-execution = 0
 - server rendering = 0
 - image output only
 - fixed built-in layouts
