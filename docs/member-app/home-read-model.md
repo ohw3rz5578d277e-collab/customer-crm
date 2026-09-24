@@ -16,6 +16,7 @@ Current HOME composition uses:
 - TODAY'S MEMORY
 - Creative
 - Shop Pickup
+- NEWS
 - NEXT MEMORY
 
 Final visual UI remains a separate design task.
@@ -166,6 +167,30 @@ Shop schema absence is optional degradation. If the Shop catalog schema is unava
 
 Source-level Shop Pickup activation does **not** activate pricing, inventory, checkout, order creation, payment, Square/WooCommerce integration, BLACK discount enforcement, asset binary delivery, or final SHOP/HOME UI.
 
+### NEWS
+
+Source:
+
+`readMemberNewsForSession`
+
+HOME exposes only the approved read-only NEWS subset:
+
+- up to 3 Owner-featured NEWS items
+- total available NEWS count
+- plain-text title / summary / body
+- logical hero asset IDs
+- optional local navigation paths
+
+HOME explicitly preserves the delivery-disabled state:
+
+- `push_delivery_ready=false`
+- `line_delivery_ready=false`
+- `automatic_contact=false`
+
+NEWS schema absence is optional degradation. If the NEWS catalog schema is unavailable, the rest of authorized HOME data can still render and the NEWS section is reported unavailable.
+
+Source-level NEWS activation does **not** activate push notifications, LINE send, email delivery, automatic campaigns, arbitrary HTML, external redirects, asset binary delivery, or final NEWS/HOME UI.
+
 ### NEXT MEMORY
 
 Source:
@@ -236,12 +261,13 @@ Initial HOME limits:
 - NEXT MEMORY candidate previews: 3
 - Creative template previews: 3
 - Shop Pickup product previews: 3
+- NEWS previews: 3
 
 These are presentation read-model limits, not deletion or storage limits.
 
 ## Module activation state
 
-TODAY'S MEMORY, Creative, and Shop Pickup are now active in the source-level HOME composition.
+TODAY'S MEMORY, Creative, Shop Pickup, and NEWS are now active in the source-level HOME composition.
 
 This means only that the HOME read model can return its already-approved read-only data.
 
@@ -252,11 +278,9 @@ It does **not** mean:
 - push notification activation
 - LINE activation
 
-The remaining future HOME module is still inactive:
+All currently defined HOME content modules now have source-level read composition.
 
-- News
-
-HOME does not invent data for modules whose backend contracts are not yet implemented.
+This still does not activate final customer UI or Production routes.
 
 ## Conceptual HTTP contract
 
@@ -304,7 +328,8 @@ Not included:
 - authoritative Shop pricing / inventory / checkout
 - Shop BLACK benefit enforcement
 - Shop asset binary delivery
-- News feed
+- NEWS push/LINE/email delivery
+- NEWS arbitrary HTML/external redirects
 - favorites
 - commerce discount enforcement
 - LINE draft/send
@@ -338,6 +363,9 @@ Current implementation is:
 - Shop Pickup source composition active
 - Shop Pickup remains presentation-only
 - Shop pricing/checkout/discount enforcement remain disabled
+- NEWS source composition active
+- NEWS remains plain-text only
+- NEWS push/LINE/automatic delivery remain disabled
 - no automatic contact
 - LINE send = 0
 - reservation creation = 0

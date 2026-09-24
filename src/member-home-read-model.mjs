@@ -5,14 +5,16 @@ import { readMemberNextMemoryForSession } from './member-next-memory-read-model.
 import { buildTodaysMemory } from './member-todays-memory-read-model.mjs';
 import { readMemberCreativeCatalogFromAuthorizedMemories } from './member-creative-catalog-read-model.mjs';
 import { readMemberShopCatalogForSession } from './member-shop-pickup-read-model.mjs';
+import { readMemberNewsForSession } from './member-news-read-model.mjs';
 
-const BUILD='member-home-read-model-20260925-04';
+const BUILD='member-home-read-model-20260925-05';
 const CUSTOMER_ID_RE=/^\d{8}$/;
 const MAX_FAMILY_ID=128;
 const RECENT_MEMORY_LIMIT=3;
 const NEXT_MEMORY_CANDIDATE_LIMIT=3;
 const CREATIVE_TEMPLATE_LIMIT=3;
 const SHOP_PICKUP_LIMIT=3;
+const NEWS_LIMIT=3;
 
 const FATAL_SECURITY_STATUSES=new Set([
   'invalid_member_session',
@@ -87,7 +89,8 @@ export function composeMemberHomeModel({
   nextMemory,
   todayMemory,
   creative,
-  shopPickup
+  shopPickup,
+  news
 }){
   const normalized=validSession(session);
   if(!normalized.ok){
@@ -97,7 +100,7 @@ export function composeMemberHomeModel({
     };
   }
 
-  const results=[memories,familyPass,passport,nextMemory,creative,shopPickup];
+  const results=[memories,familyPass,passport,nextMemory,creative,shopPickup,news];
 
   const fatal=fatalComponentStatus(results);
   if(fatal){
@@ -171,6 +174,17 @@ export function composeMemberHomeModel({
       })
     :sectionUnavailable(shopPickup?.status);
 
+  const newsSection=news?.status==='ok'
+    ?sectionAvailable({
+        items:(news.home_news||[]).slice(0,NEWS_LIMIT),
+        available_count:Number(news.available_count||0),
+        push_delivery_ready:news.push_delivery_ready===true,
+        line_delivery_ready:news.line_delivery_ready===true,
+        automatic_contact:news.automatic_contact===true,
+        source:news.source||null
+      })
+    :sectionUnavailable(news?.status);
+
   const nextMemorySection=nextMemory?.status==='ok'
     ?sectionAvailable({
         next_memory:nextMemory.next_memory||null,
@@ -195,6 +209,7 @@ export function composeMemberHomeModel({
     today_memory:todayMemorySection,
     creative:creativeSection,
     shop_pickup:shopPickupSection,
+    news:newsSection,
     next_memory:nextMemorySection
   };
 
@@ -214,6 +229,7 @@ export function composeMemberHomeModel({
       today_memory:todayMemorySection.available?todayMemorySection.data:null,
       creative:creativeSection.available?creativeSection.data:null,
       shop_pickup:shopPickupSection.available?shopPickupSection.data:null,
+      news:newsSection.available?newsSection.data:null,
       next_memory:nextMemorySection.available?nextMemorySection.data:null,
       sections,
       partial:unavailableSections.length>0,
@@ -222,7 +238,7 @@ export function composeMemberHomeModel({
         today_memory:true,
         creative:true,
         shop_pickup:true,
-        news:false
+        news:true
       }
     },
     read_only:true
@@ -238,12 +254,13 @@ export async function readMemberHomeForSession(env,session,{as_of}={}){
     };
   }
 
-  const [memories,familyPass,passport,nextMemory,shopPickup]=await Promise.all([
+  const [memories,familyPass,passport,nextMemory,shopPickup,news]=await Promise.all([
     readMemberMemoriesForSession(env,normalized),
     readMemberFamilyPassForSession(env,normalized),
     readMemberFamilyPassportForSession(env,normalized),
     readMemberNextMemoryForSession(env,normalized,{as_of}),
-    readMemberShopCatalogForSession(env,normalized,{as_of})
+    readMemberShopCatalogForSession(env,normalized,{as_of}),
+    readMemberNewsForSession(env,normalized,{as_of})
   ]);
 
   const todayMemory=memories.status==='ok'
@@ -265,7 +282,8 @@ export async function readMemberHomeForSession(env,session,{as_of}={}){
     nextMemory,
     todayMemory,
     creative,
-    shopPickup
+    shopPickup,
+    news
   });
 }
 
@@ -317,6 +335,7 @@ export function memberHomeReadHealth(){
       'today_memory',
       'creative',
       'shop_pickup',
+      'news',
       'next_memory'
     ],
     component_identity_consistency_required:true,
@@ -333,14 +352,20 @@ export function memberHomeReadHealth(){
     shop_pickup_pricing_authoritative:false,
     shop_pickup_checkout_ready:false,
     shop_pickup_discount_enforcement_ready:false,
+    news_optional_schema_degradation:true,
+    news_plain_text_only:true,
+    news_push_delivery_ready:false,
+    news_line_delivery_ready:false,
+    news_automatic_contact:false,
     recent_memory_limit:RECENT_MEMORY_LIMIT,
     next_memory_candidate_limit:NEXT_MEMORY_CANDIDATE_LIMIT,
     creative_template_limit:CREATIVE_TEMPLATE_LIMIT,
     shop_pickup_limit:SHOP_PICKUP_LIMIT,
+    news_limit:NEWS_LIMIT,
     today_memory_active:true,
     creative_active:true,
     shop_pickup_active:true,
-    news_active:false,
+    news_active:true,
     automatic_contact:false,
     line_send:false,
     reservation_creation:false,
