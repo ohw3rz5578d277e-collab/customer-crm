@@ -13,6 +13,7 @@ Current HOME composition uses:
 - MEMORIES
 - FAMILY PASS
 - FAMILY PASSPORT
+- TODAY'S MEMORY
 - NEXT MEMORY
 
 Final visual UI remains a separate design task.
@@ -98,6 +99,27 @@ HOME can expose the Family-level milestone model already defined in its own cont
 
 HOME does not convert FAMILY PASSPORT into child-specific history.
 
+### TODAY'S MEMORY
+
+Source:
+
+`buildTodaysMemory`
+
+HOME derives TODAY'S MEMORY from the MEMORIES list that HOME has already loaded.
+
+This intentionally avoids a second Member MEMORY database read inside the same HOME request.
+
+HOME exposes the already-approved TODAY'S MEMORY contract:
+
+- exact prior-year month/day anniversary when available
+- honest `この日の思い出` label for exact matches
+- same-month ±7-day fallback only when no exact match exists
+- honest `この頃の思い出` label for fallback
+- no current-year nostalgia match
+- conservative leap-day behavior
+
+If there is no qualifying past MEMORY, the TODAY'S MEMORY section remains available with `today_memory=null` rather than inventing content.
+
 ### NEXT MEMORY
 
 Source:
@@ -169,18 +191,26 @@ Initial HOME limits:
 
 These are presentation read-model limits, not deletion or storage limits.
 
-## Future modules
+## Module activation state
 
-The product HOME direction includes future modules such as:
+TODAY'S MEMORY is now active in the source-level HOME composition.
 
-- TODAY'S MEMORY
+This means only that the HOME read model can return its already-approved read-only data.
+
+It does **not** mean:
+
+- Production route activation
+- final customer UI activation
+- push notification activation
+- LINE activation
+
+The remaining future HOME modules are still inactive:
+
 - Creative
 - Shop Pickup
 - News
 
-This phase deliberately returns them as inactive capability flags.
-
-It does not invent data for modules whose backend contracts are not yet implemented.
+HOME does not invent data for modules whose backend contracts are not yet implemented.
 
 ## Conceptual HTTP contract
 
@@ -197,7 +227,7 @@ The endpoint:
 - ignores client-controlled `as_of`
 - is not Production route-wired
 
-The source-level read function may accept deterministic `as_of` only for tests/internal verification of NEXT MEMORY.
+The source-level read function may accept deterministic `as_of` only for tests/internal verification of NEXT MEMORY and TODAY'S MEMORY.
 
 ## Privacy / exposure boundary
 
@@ -220,7 +250,8 @@ Not included:
 
 - final HOME UI
 - hero visual implementation
-- TODAY'S MEMORY algorithm
+- final TODAY'S MEMORY UI
+- TODAY'S MEMORY push notification
 - Creative generator
 - Shop Pickup
 - News feed
@@ -247,6 +278,9 @@ Current implementation is:
 - identity ambiguity fails closed
 - MEMORIES core required
 - optional NEXT MEMORY schema degradation supported
+- TODAY'S MEMORY source composition active
+- TODAY'S MEMORY derived from the already-loaded MEMORIES result
+- no extra TODAY'S MEMORY database read inside HOME
 - no automatic contact
 - LINE send = 0
 - reservation creation = 0
