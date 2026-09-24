@@ -15,11 +15,13 @@ export function buildMemorySyncPlan({family_id,customer_id,source_memories=[],ex
 
   const existingKeys=new Set();
   const existingFamilyByKey=new Map();
+  const existingCustomerByKey=new Map();
   for(const row of existing_memories||[]){
     const key=keyOf(row);
     if(!key)continue;
     existingKeys.add(key);
     existingFamilyByKey.set(key,text(row?.family_id));
+    existingCustomerByKey.set(key,text(row?.source_customer_id));
   }
 
   const seen=new Set();
@@ -56,6 +58,11 @@ export function buildMemorySyncPlan({family_id,customer_id,source_memories=[],ex
       const existingFamilyId=existingFamilyByKey.get(key);
       if(existingFamilyId&&existingFamilyId!==familyId){
         conflicts.push({source_reservation_id:reservationId,reason:'existing_memory_family_conflict'});
+        continue;
+      }
+      const existingCustomerId=existingCustomerByKey.get(key);
+      if(existingCustomerId&&existingCustomerId!==customerId){
+        conflicts.push({source_reservation_id:reservationId,reason:'existing_memory_customer_conflict'});
         continue;
       }
       already_synced.push({source_reservation_id:reservationId,idempotency_key:key});
