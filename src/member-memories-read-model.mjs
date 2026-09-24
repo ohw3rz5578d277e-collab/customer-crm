@@ -48,6 +48,14 @@ function safeHttpsUrl(value){
   }
 }
 
+function safeDecode(value){
+  try{
+    return decodeURIComponent(value);
+  }catch{
+    return '';
+  }
+}
+
 function validSession(session){
   const familyId=text(session?.family_id);
   const customerId=text(session?.customer_id);
@@ -248,15 +256,21 @@ export async function handleMemberMemoriesReadRequest(request,env,memberSession)
   const session=validSession(memberSession);
   if(!session.ok)return json({ok:false,error:'member_session_required'},401);
 
+  const decodedMemoryId=detailMatch?safeDecode(detailMatch[1]):'';
+  if(detailMatch&&!decodedMemoryId)return json({ok:false,error:'invalid_memory_id'},400);
+
   const result=listPath
     ?await readMemberMemoriesForSession(env,session)
-    :await readMemberMemoryDetailForSession(env,session,decodeURIComponent(detailMatch[1]));
+    :await readMemberMemoryDetailForSession(env,session,decodedMemoryId);
 
   if(result.status==='ok')return json({ok:true,...result});
   if(result.status==='family_access_denied')return json({ok:false,error:'family_access_denied'},403);
   if(result.status==='memory_not_found')return json({ok:false,error:'memory_not_found'},404);
-  if(result.status==='member_memory_schema_not_applied'||result.status==='schema_not_applied'){
+  if(result.status==='member_memory_schema_not_applied'){
     return json({ok:false,error:'member_memory_schema_not_applied'},409);
+  }
+  if(result.status==='schema_not_applied'){
+    return json({ok:false,error:'member_family_schema_not_applied'},409);
   }
   if(result.status==='ambiguous_family_identity')return json({ok:false,error:'ambiguous_family_identity',review_required:true},409);
   if(result.status==='unlinked'||result.status==='family_inactive_or_missing')return json({ok:false,error:result.status},403);
@@ -276,9 +290,10 @@ export function memberMemoriesReadHealth(){
     published_only:true,
     deleted_hidden:true,
     cross_family_fail_closed:true,
+    malformed_memory_id_fail_closed:true,
     private_storage_key_exposed:false,
     production_write:false
   };
 }
 
-export const __test={safeHttpsUrl,validSession,memoryListItem,memoryDetail};
+export const __test={safeHttpsUrl,safeDecode,validSession,memoryListItem,memoryDetail};
