@@ -149,6 +149,45 @@ const baseComponents={
     source:{presentation_catalog_only:true,price_source_connected:false,checkout_source_connected:false},
     read_only:true
   },
+  news:{
+    status:'ok',
+    family_id:familyId,
+    customer_id:customerId,
+    home_news:[
+      {
+        news_id:'news_home_1',
+        news_type:'news',
+        title:'秋のお知らせ',
+        summary:'秋の撮影について',
+        body_text:'ご予約前にご確認ください。',
+        published_at:'2026-09-20',
+        hero_asset_ref:{asset_id:'asset:news:1',storage_key_exposed:false,arbitrary_external_url_exposed:false},
+        navigation:{local_path:'/news/autumn/',local_path_only:true},
+        featured_home:true,
+        delivery:{push_sent:false,line_sent:false,automatic_contact:false},
+        sort_order:1
+      },
+      {
+        news_id:'news_home_2',
+        news_type:'campaign',
+        title:'Family Campaign',
+        summary:'',
+        body_text:'',
+        published_at:'2026-09-18',
+        hero_asset_ref:null,
+        navigation:{local_path:null,local_path_only:true},
+        featured_home:true,
+        delivery:{push_sent:false,line_sent:false,automatic_contact:false},
+        sort_order:2
+      }
+    ],
+    available_count:4,
+    push_delivery_ready:false,
+    line_delivery_ready:false,
+    automatic_contact:false,
+    source:{plain_text_only:true,arbitrary_html:false,arbitrary_external_url:false},
+    read_only:true
+  },
   nextMemory:{
     status:'ok',
     family_id:familyId,
@@ -185,7 +224,8 @@ function compose(overrides={}){
     nextMemory:overrides.nextMemory??baseComponents.nextMemory,
     todayMemory:overrides.todayMemory??baseComponents.todayMemory,
     creative:overrides.creative??baseComponents.creative,
-    shopPickup:overrides.shopPickup??baseComponents.shopPickup
+    shopPickup:overrides.shopPickup??baseComponents.shopPickup,
+    news:overrides.news??baseComponents.news
   });
 }
 
@@ -199,12 +239,14 @@ pass('HOME composes TODAY\'S MEMORY',full.home.today_memory.today_memory.mode===
 pass('HOME composes Creative catalog',full.home.creative.featured_templates.length===2&&full.home.creative.eligible_count===2&&full.home.creative.generation_ready===false);
 pass('HOME composes Shop Pickup presentation catalog',full.home.shop_pickup.products.length===2&&full.home.shop_pickup.available_count===4);
 pass('HOME Shop Pickup keeps commerce disabled',full.home.shop_pickup.pricing_authoritative===false&&full.home.shop_pickup.checkout_ready===false&&full.home.shop_pickup.discount_enforcement_ready===false);
+pass('HOME composes NEWS catalog',full.home.news.items.length===2&&full.home.news.available_count===4);
+pass('HOME NEWS keeps all delivery disabled',full.home.news.push_delivery_ready===false&&full.home.news.line_delivery_ready===false&&full.home.news.automatic_contact===false);
 pass('HOME composes NEXT MEMORY',full.home.next_memory.next_memory.type==='first_birthday');
 pass('HOME caps NEXT MEMORY candidate preview at three',full.home.next_memory.candidates.length===3);
 pass('HOME keeps LINE consultation CTA non-automatic',full.home.next_memory.consultation_cta.channel==='line'&&full.home.next_memory.consultation_cta.automatic_send===false);
 pass('HOME does not claim Family history is child specific',full.home.next_memory.family_history_is_child_specific===false&&full.home.next_memory.child_memory_link_available===false);
 pass('full HOME is not partial',full.home.partial===false&&full.home.unavailable_sections.length===0);
-pass('TODAY\'S MEMORY Creative and Shop Pickup are source-active while News remains inactive',full.home.future_modules.today_memory===true&&full.home.future_modules.creative===true&&full.home.future_modules.shop_pickup===true&&full.home.future_modules.news===false);
+pass('all current HOME content modules are source-active',full.home.future_modules.today_memory===true&&full.home.future_modules.creative===true&&full.home.future_modules.shop_pickup===true&&full.home.future_modules.news===true);
 pass('HOME result is read-only',full.read_only===true);
 
 const degradedNext=compose({
@@ -240,6 +282,12 @@ const degradedShop=compose({
 });
 pass('missing Shop schema degrades Shop Pickup section only',degradedShop.status==='ok'&&degradedShop.home.partial===true&&degradedShop.home.shop_pickup===null);
 pass('degraded Shop Pickup section reports schema reason',degradedShop.home.unavailable_sections.some(x=>x.section==='shop_pickup'&&x.error==='shop_catalog_schema_not_applied'));
+
+const degradedNews=compose({
+  news:{status:'news_catalog_schema_not_applied',home_news:[],items:[],read_only:true}
+});
+pass('missing NEWS schema degrades NEWS section only',degradedNews.status==='ok'&&degradedNews.home.partial===true&&degradedNews.home.news===null);
+pass('degraded NEWS section reports schema reason',degradedNews.home.unavailable_sections.some(x=>x.section==='news'&&x.error==='news_catalog_schema_not_applied'));
 
 const degradedPass=compose({
   familyPass:{
@@ -301,7 +349,8 @@ function makeDb({
   memorySchema=true,
   mediaSchema=true,
   creativeSchema=true,
-  shopSchema=true
+  shopSchema=true,
+  newsSchema=true
 }={}){
   const tables=new Set([
     'customer_family_groups',
@@ -310,7 +359,8 @@ function makeDb({
     ...(memorySchema?['member_memories']:[]),
     ...(mediaSchema?['member_memory_media']:[]),
     ...(creativeSchema?['member_creative_templates']:[]),
-    ...(shopSchema?['member_shop_products']:[])
+    ...(shopSchema?['member_shop_products']:[]),
+    ...(newsSchema?['member_news_items']:[])
   ]);
   const writes=[];
   const seenSql=[];
@@ -487,6 +537,38 @@ function makeDb({
               }
             ]};
           }
+          if(sql.includes('FROM member_news_items')){
+            return {results:[
+              {
+                news_id:'news_home_1',
+                news_type:'news',
+                title:'秋のお知らせ',
+                summary:'秋の撮影について',
+                body_text:'ご予約前にご確認ください。',
+                hero_asset_id:'asset:news:1',
+                local_path:'/news/autumn/',
+                starts_on:'2026-09-01',
+                ends_on:'2026-11-30',
+                published_at:'2026-09-20',
+                featured_home:1,
+                sort_order:1
+              },
+              {
+                news_id:'news_home_2',
+                news_type:'campaign',
+                title:'Family Campaign',
+                summary:'',
+                body_text:'',
+                hero_asset_id:null,
+                local_path:null,
+                starts_on:null,
+                ends_on:null,
+                published_at:'2026-09-18',
+                featured_home:1,
+                sort_order:2
+              }
+            ]};
+          }
           return {results:[]};
         },
         async run(){
@@ -520,7 +602,7 @@ const integratedPartial=await readMemberHomeForSession(
   {family_id:familyId,customer_id:customerId},
   {as_of:'2026-09-24'}
 );
-pass('integrated HOME degrades only NEXT MEMORY when child schema is absent',integratedPartial.status==='ok'&&integratedPartial.home.partial===true&&integratedPartial.home.next_memory===null&&integratedPartial.home.recent_memories.length===3&&integratedPartial.home.today_memory.today_memory?.primary?.memory_id==='mem_today'&&integratedPartial.home.creative.featured_templates.length===2&&integratedPartial.home.shop_pickup.products.length===2);
+pass('integrated HOME degrades only NEXT MEMORY when child schema is absent',integratedPartial.status==='ok'&&integratedPartial.home.partial===true&&integratedPartial.home.next_memory===null&&integratedPartial.home.recent_memories.length===3&&integratedPartial.home.today_memory.today_memory?.primary?.memory_id==='mem_today'&&integratedPartial.home.creative.featured_templates.length===2&&integratedPartial.home.shop_pickup.products.length===2&&integratedPartial.home.news.items.length===2);
 
 const noCreativeDb=makeDb({creativeSchema:false});
 const integratedNoCreative=await readMemberHomeForSession(
@@ -537,6 +619,14 @@ const integratedNoShop=await readMemberHomeForSession(
   {as_of:'2026-09-24'}
 );
 pass('integrated HOME degrades Shop Pickup only when Shop schema is absent',integratedNoShop.status==='ok'&&integratedNoShop.home.partial===true&&integratedNoShop.home.shop_pickup===null&&integratedNoShop.home.recent_memories.length===3);
+
+const noNewsDb=makeDb({newsSchema:false});
+const integratedNoNews=await readMemberHomeForSession(
+  {DB:noNewsDb},
+  {family_id:familyId,customer_id:customerId},
+  {as_of:'2026-09-24'}
+);
+pass('integrated HOME degrades NEWS only when NEWS schema is absent',integratedNoNews.status==='ok'&&integratedNoNews.home.partial===true&&integratedNoNews.home.news===null&&integratedNoNews.home.recent_memories.length===3);
 
 const noMediaDb=makeDb({mediaSchema:false});
 const integratedNoMemory=await readMemberHomeForSession(
@@ -570,14 +660,15 @@ const post=await handleMemberHomeReadRequest(
 pass('HTTP HOME is GET only',post.status===405);
 
 const health=memberHomeReadHealth();
-pass('health records seven composed components',health.components.join(',')==='member_memories,family_pass,family_passport,today_memory,creative,shop_pickup,next_memory');
+pass('health records eight composed components',health.components.join(',')==='member_memories,family_pass,family_passport,today_memory,creative,shop_pickup,news,next_memory');
 pass('health requires component identity consistency',health.component_identity_consistency_required===true&&health.identity_security_failures_fail_closed===true);
 pass('health records MEMORIES as core and NEXT MEMORY optional degradation',health.memories_core_required===true&&health.next_memory_optional_schema_degradation===true);
 pass('health records TODAY\'S MEMORY derives from loaded MEMORIES with no extra DB read',health.today_memory_derived_from_loaded_memories===true&&health.today_memory_extra_db_read===false);
 pass('health records Creative reuses authorized MEMORIES with no extra MEMORY list read',health.creative_uses_authorized_memories===true&&health.creative_extra_memory_db_read===false&&health.creative_optional_schema_degradation===true);
 pass('health records Shop Pickup as optional presentation-only commerce-disabled section',health.shop_pickup_optional_schema_degradation===true&&health.shop_pickup_presentation_only===true&&health.shop_pickup_pricing_authoritative===false&&health.shop_pickup_checkout_ready===false&&health.shop_pickup_discount_enforcement_ready===false);
-pass('health records response limits',health.recent_memory_limit===3&&health.next_memory_candidate_limit===3&&health.creative_template_limit===3&&health.shop_pickup_limit===3);
-pass('health source-activates TODAY\'S MEMORY Creative and Shop Pickup only',health.today_memory_active===true&&health.creative_active===true&&health.shop_pickup_active===true&&health.news_active===false);
+pass('health records NEWS as optional plain-text delivery-disabled section',health.news_optional_schema_degradation===true&&health.news_plain_text_only===true&&health.news_push_delivery_ready===false&&health.news_line_delivery_ready===false&&health.news_automatic_contact===false);
+pass('health records response limits',health.recent_memory_limit===3&&health.next_memory_candidate_limit===3&&health.creative_template_limit===3&&health.shop_pickup_limit===3&&health.news_limit===3);
+pass('health source-activates all current HOME content modules',health.today_memory_active===true&&health.creative_active===true&&health.shop_pickup_active===true&&health.news_active===true);
 pass('health records no contact/send/reservation/write',health.automatic_contact===false&&health.line_send===false&&health.reservation_creation===false&&health.production_write===false);
 pass('health records source-only route state',health.production_route_wired===false&&health.read_only===true&&health.request_customer_id_input===false&&health.request_family_id_input===false&&health.request_as_of_input===false);
 
