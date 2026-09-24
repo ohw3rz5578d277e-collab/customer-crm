@@ -111,7 +111,7 @@ function makeDb({favorite=false}={}){
 async function issuedCookie(db){
   const issued=await issueMemberSessionForVerifiedCustomer(
     {DB:db,MEMBER_SESSION_SECRET:secret},
-    {customer_id:customerId,family_id:familyId,now_seconds:1_800_000_000}
+    {customer_id:customerId,family_id:familyId,now_seconds:Math.floor(Date.now()/1000)}
   );
   assert(issued.status==='ok'&&issued.issued===true,'session issue failed in test');
   return issued.cookie.split(';')[0];
