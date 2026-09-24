@@ -148,7 +148,7 @@ const health=memberFamilyPassReadHealth();
 pass('health records canonical thresholds',health.thresholds.family===1&&health.thresholds.welcome_back===2&&health.thresholds.silver===3&&health.thresholds.gold===5&&health.thresholds.black===10);
 pass('health records server session and explicit Family link requirement',health.session_identity_source==='server_verified_member_session'&&health.explicit_family_link_required===true);
 pass('health records count source and one MEMORY equals one shoot',health.count_source==='published_non_deleted_member_memories'&&health.one_memory_equals_one_shoot===true);
-pass('health does not falsely claim BLACK lifetime persistence',health.black_lifetime_persistence_supported===false);
+pass('health records durable BLACK source support without Production schema apply',health.black_lifetime_persistence_supported===true&&health.production_entitlement_schema_apply_executed===false);
 pass('health records BLACK goods benefit without enabling enforcement',health.black_goods_discount_percent===10&&health.black_shooting_fee_discount===false&&health.black_benefit_enforcement_ready===false);
 pass('health records read-only and no Production route/write',health.read_only===true&&health.production_route_wired===false&&health.production_write===false);
 
