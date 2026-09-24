@@ -20,6 +20,12 @@ const memories=[
   {memory_id:'mem_B',family_id:'fam_B',shoot_date:'2026-02-02',genre:'成人',title:'B Family',amazon_photos_url:'https://example.com/b',published:1,created_at:'2026-02-03',updated_at:'2026-02-03',deleted_at:''}
 ];
 
+const favorites=[
+  {family_id:familyId,customer_id:customerId,memory_id:'mem_A_new',created_at:'2026-09-25T00:00:00Z'},
+  {family_id:familyId,customer_id:'26000999',memory_id:'mem_A_old',created_at:'2026-09-24T00:00:00Z'},
+  {family_id:'fam_B',customer_id:customerId,memory_id:'mem_B',created_at:'2026-09-23T00:00:00Z'}
+];
+
 const media=[
   {media_id:'media_preview',memory_id:'mem_A_new',family_id:familyId,storage_key:'private/a-preview.jpg',media_type:'image',role:'preview',sort_order:1,width:1200,height:800,deleted_at:''},
   {media_id:'media_cover',memory_id:'mem_A_new',family_id:familyId,storage_key:'private/a-cover.jpg',media_type:'image',role:'cover',sort_order:9,width:1200,height:800,deleted_at:''},
@@ -27,10 +33,11 @@ const media=[
   {media_id:'media_b',memory_id:'mem_B',family_id:'fam_B',storage_key:'private/b.jpg',media_type:'image',role:'cover',sort_order:0,width:1200,height:800,deleted_at:''}
 ];
 
-function makeDb({schema=true,familySchema=true}={}){
+function makeDb({schema=true,familySchema=true,favoriteSchema=true}={}){
   const tables=new Set([
     ...(familySchema?['customer_family_groups','customer_family_customer_links']:[]),
-    ...(schema?['member_memories','member_memory_media']:[])
+    ...(schema?['member_memories','member_memory_media']:[]),
+    ...(favoriteSchema?['member_memory_favorites']:[])
   ]);
 
   return {
@@ -69,6 +76,16 @@ function makeDb({schema=true,familySchema=true}={}){
               ?{results:[{family_id:familyId,customer_id:customerId,relation:'owner',access_role:'owner'}]}
               :{results:[]};
           }
+          if(sql.includes('FROM member_memory_favorites')){
+            const [requestedFamily,requestedCustomer]=state.params;
+            return {results:favorites
+              .filter(row=>row.family_id===requestedFamily&&row.customer_id===requestedCustomer)
+              .filter(row=>{
+                const memory=memories.find(item=>item.memory_id===row.memory_id&&item.family_id===row.family_id);
+                return memory?.published===1&&!memory?.deleted_at;
+              })
+              .map(row=>({memory_id:row.memory_id,created_at:row.created_at}))};
+          }
           if(sql.includes('FROM member_memories')){
             const requestedFamily=state.params[0];
             return {results:memories
@@ -102,18 +119,24 @@ pass('cover prefers cover role over lower sort preview',list.memories[0].cover?.
 pass('deleted media is excluded from preview count',list.memories[0].preview_count===2);
 pass('unsafe Amazon URL is not exposed',list.memories.find(x=>x.memory_id==='mem_A_old')?.amazon_photos_available===false);
 pass('list exposes no private storage keys',!JSON.stringify(list).includes('storage_key')&&!JSON.stringify(list).includes('private/a-cover.jpg'));
+pass('list overlays only this Member customer Favorite state',list.memories.find(x=>x.memory_id==='mem_A_new')?.favorite===true&&list.memories.find(x=>x.memory_id==='mem_A_old')?.favorite===false);
+pass('Favorite state remains read-only until mutation phase',list.favorites_available===true&&list.favorite_mutation_ready===false&&list.memories.every(x=>x.favorite_mutable===false));
 
 const detail=await readMemberMemoryDetailForSession(env,{family_id:familyId,customer_id:customerId},'mem_A_new');
 pass('authorized MEMORY detail succeeds',detail.status==='ok'&&detail.memory.memory_id==='mem_A_new');
 pass('detail returns exact-family media only',detail.media.length===2&&detail.media.every(x=>x.media_id!=='media_b'));
 pass('detail exposes Amazon Photos only after family authorization',detail.amazon_link?.provider==='amazon_photos'&&detail.amazon_link?.url==='https://example.com/new');
 pass('detail exposes no private storage keys',!JSON.stringify(detail).includes('storage_key'));
+pass('detail overlays exact Member Favorite state',detail.favorite===true&&detail.favorite_mutable===false&&detail.favorites_available===true);
 
 const otherFamilyMemory=await readMemberMemoryDetailForSession(env,{family_id:familyId,customer_id:customerId},'mem_B');
 pass('another family memory is indistinguishable from missing',otherFamilyMemory.status==='memory_not_found');
 
 const wrongFamily=await readMemberMemoriesForSession(env,{family_id:'fam_B',customer_id:customerId});
 pass('session family mismatch fails closed before MEMORY rows',wrongFamily.status==='family_access_denied'&&wrongFamily.memories.length===0);
+
+const favoriteSchemaMissing=await readMemberMemoriesForSession({DB:makeDb({favoriteSchema:false})},{family_id:familyId,customer_id:customerId});
+pass('missing Favorite schema degrades to false without breaking MEMORIES',favoriteSchemaMissing.status==='ok'&&favoriteSchemaMissing.favorites_available===false&&favoriteSchemaMissing.memories.every(x=>x.favorite===false&&x.favorite_mutable===false));
 
 const schemaMissing=await readMemberMemoriesForSession({DB:makeDb({schema:false})},{family_id:familyId,customer_id:customerId});
 pass('unapplied Member schema fails without writes',schemaMissing.status==='member_memory_schema_not_applied');
@@ -173,6 +196,7 @@ const health=memberMemoriesReadHealth();
 pass('health contract records no route wiring or Production write',health.read_only===true&&health.production_route_wired===false&&health.production_write===false);
 pass('health contract forbids request-supplied identity',health.request_customer_id_input===false&&health.request_family_id_input===false);
 pass('health contract keeps private storage key hidden',health.private_storage_key_exposed===false);
+pass('health contract records optional Favorite overlay and disabled mutation',health.favorite_state_optional_read===true&&health.favorite_schema_absence_degrades_to_false===true&&health.favorite_mutation_ready===false);
 pass('health contract records malformed MEMORY id fail-closed behavior',health.malformed_memory_id_fail_closed===true);
 
 console.log(`MEMBER_MEMORIES_READ_MODEL=${n}/${n} PASS`);
