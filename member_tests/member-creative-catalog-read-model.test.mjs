@@ -199,7 +199,7 @@ const creativeSql=db.seenSql.find(sql=>sql.includes('FROM member_creative_templa
 pass('Creative query requires published templates',creativeSql.includes('published=1'));
 pass('Creative query hides deleted templates',creativeSql.includes("COALESCE(deleted_at,'')=''"));
 pass('Creative query never selects storage_key',!creativeSql.includes('storage_key'));
-pass('Creative query never selects arbitrary URL columns',!/(url|html|javascript|script)/i.test(creativeSql));
+pass('Creative query never selects arbitrary URL or executable-code columns',!/\b(url|html|javascript|script|script_code|external_url|template_url)\b/i.test(creativeSql));
 
 const missingCreative=await readMemberCreativeCatalogForSession(
   {DB:makeDb({creativeSchema:false})},
