@@ -59,8 +59,16 @@ async function tableExists(env,name){
 }
 
 function dateOnly(value){
-  const m=text(value).match(/^(\d{4}-\d{2}-\d{2})/);
-  return m?m[1]:'';
+  const m=text(value).match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if(!m)return '';
+  const y=Number(m[1]),month=Number(m[2]),day=Number(m[3]);
+  const d=new Date(Date.UTC(y,month-1,day));
+  if(
+    d.getUTCFullYear()!==y
+    || d.getUTCMonth()+1!==month
+    || d.getUTCDate()!==day
+  )return '';
+  return `${m[1]}-${m[2]}-${m[3]}`;
 }
 
 function validSession(session){
@@ -223,10 +231,29 @@ function genreEvidenceForType(type,genres=[]){
   return false;
 }
 
+function schoolStageOpportunity(child){
+  const stage=text(child?.school_stage);
+  if(!stage)return null;
+  const base={
+    member_id:text(child?.id),
+    member_name:text(child?.name),
+    age:null,
+    date:'',
+    days:null,
+    source:'school_stage'
+  };
+  if(/年長/.test(stage))return {...base,type:'school_entry_candidate',label:'小学校入学候補'};
+  if(/小学.*6|小6/.test(stage))return {...base,type:'graduation_candidate',label:'小学校卒業候補'};
+  if(/中学.*3|中3/.test(stage))return {...base,type:'graduation_candidate',label:'中学校卒業候補'};
+  if(/高校.*3|高3/.test(stage))return {...base,type:'graduation_candidate',label:'高校卒業候補'};
+  return null;
+}
+
 function dedupeGenericBirthdays(opportunities=[]){
   const specificKeys=new Set(
     opportunities
       .filter(o=>o.type!=='birthday')
+      .filter(o=>text(o.date))
       .map(o=>[text(o.member_id),text(o.date)].join('|'))
   );
 
@@ -268,10 +295,16 @@ function rankCandidates(candidates=[]){
 }
 
 export function buildNextMemoryCandidates(children=[],familyGenres=[],asOf=jstToday()){
-  const raw=buildOpportunities({},children,asOf)
+  const dateBased=buildOpportunities({},children,asOf)
     .filter(o=>ALLOWED_TYPES.has(text(o.type)))
+    .filter(o=>!['school_entry_candidate','graduation_candidate'].includes(text(o.type)))
     .filter(o=>o.days==null||Number(o.days)>=0);
 
+  const stageBased=children
+    .map(schoolStageOpportunity)
+    .filter(Boolean);
+
+  const raw=[...dateBased,...stageBased];
   const deduped=dedupeGenericBirthdays(raw);
   const candidates=rankCandidates(deduped.map(o=>normalizeCandidate(o,familyGenres)));
 
@@ -282,7 +315,13 @@ export function buildNextMemoryCandidates(children=[],familyGenres=[],asOf=jstTo
     family_genre_history:[...familyGenres],
     family_history_is_child_specific:false,
     child_memory_link_available:false,
-    recommendation_basis:'canonical_child_birthdate_school_stage_plus_family_memory_genres',
+    recommendation_basis:'managed_child_birthdate_or_explicit_school_stage_plus_family_memory_genres',
+    school_timing_birthdate_inference:false,
+    consultation_cta:{
+      channel:'line',
+      intent:'consultation',
+      automatic_send:false
+    },
     automatic_contact:false
   };
 }
@@ -391,7 +430,9 @@ export function memberNextMemoryReadHealth(){
     child_memory_link_available:false,
     family_history_is_child_specific:false,
     memory_source:'published_non_deleted_member_memories',
-    shared_opportunity_logic:'crm-customer360-marketing-engine',
+    shared_birthdate_opportunity_logic:'crm-customer360-marketing-engine',
+    school_timing_birthdate_inference:false,
+    school_stage_explicit_only:true,
     marketing_priority_used:false,
     line_draft_used:false,
     automatic_contact:false,
@@ -403,6 +444,7 @@ export function memberNextMemoryReadHealth(){
 export const __test={
   dateOnly,
   genreEvidenceForType,
+  schoolStageOpportunity,
   dedupeGenericBirthdays,
   normalizeCandidate,
   rankCandidates,
