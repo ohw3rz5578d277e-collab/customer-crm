@@ -14,6 +14,7 @@ Current HOME composition uses:
 - FAMILY PASS
 - FAMILY PASSPORT
 - TODAY'S MEMORY
+- Creative
 - NEXT MEMORY
 
 Final visual UI remains a separate design task.
@@ -120,6 +121,26 @@ HOME exposes the already-approved TODAY'S MEMORY contract:
 
 If there is no qualifying past MEMORY, the TODAY'S MEMORY section remains available with `today_memory=null` rather than inventing content.
 
+### Creative
+
+Source:
+
+`readMemberCreativeCatalogFromAuthorizedMemories`
+
+HOME reuses the already-authorized MEMORIES result that was loaded for the HOME core. Creative therefore does not issue a second MEMORIES list read just to calculate template eligibility.
+
+HOME exposes a bounded preview:
+
+- up to 3 templates in Owner-defined catalog order
+- total available template count
+- eligible template count
+- per-template eligibility including `memories_needed`
+- `generation_ready=false`
+
+Creative schema absence is optional degradation. If the catalog schema has not been applied in an environment, the rest of authorized HOME data can still render and HOME reports the Creative section as unavailable.
+
+Source-level Creative activation does **not** activate rendering, photo upload, generated-output storage, asset delivery, or final CREATE/HOME UI.
+
 ### NEXT MEMORY
 
 Source:
@@ -188,12 +209,13 @@ Initial HOME limits:
 
 - recent MEMORIES: 3
 - NEXT MEMORY candidate previews: 3
+- Creative template previews: 3
 
 These are presentation read-model limits, not deletion or storage limits.
 
 ## Module activation state
 
-TODAY'S MEMORY is now active in the source-level HOME composition.
+TODAY'S MEMORY and Creative are now active in the source-level HOME composition.
 
 This means only that the HOME read model can return its already-approved read-only data.
 
@@ -206,7 +228,6 @@ It does **not** mean:
 
 The remaining future HOME modules are still inactive:
 
-- Creative
 - Shop Pickup
 - News
 
@@ -252,7 +273,9 @@ Not included:
 - hero visual implementation
 - final TODAY'S MEMORY UI
 - TODAY'S MEMORY push notification
-- Creative generator
+- Creative rendering / generation
+- Creative asset delivery
+- Creative customer-photo upload
 - Shop Pickup
 - News feed
 - favorites
@@ -281,6 +304,10 @@ Current implementation is:
 - TODAY'S MEMORY source composition active
 - TODAY'S MEMORY derived from the already-loaded MEMORIES result
 - no extra TODAY'S MEMORY database read inside HOME
+- Creative source composition active
+- Creative eligibility derived from the already-authorized MEMORIES result
+- no extra Creative MEMORIES list read inside HOME
+- Creative generation remains disabled
 - no automatic contact
 - LINE send = 0
 - reservation creation = 0

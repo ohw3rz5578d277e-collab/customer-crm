@@ -3,12 +3,14 @@ import { readMemberFamilyPassForSession } from './member-family-pass-read-model.
 import { readMemberFamilyPassportForSession } from './member-family-passport-read-model.mjs';
 import { readMemberNextMemoryForSession } from './member-next-memory-read-model.mjs';
 import { buildTodaysMemory } from './member-todays-memory-read-model.mjs';
+import { readMemberCreativeCatalogFromAuthorizedMemories } from './member-creative-catalog-read-model.mjs';
 
-const BUILD='member-home-read-model-20260924-02';
+const BUILD='member-home-read-model-20260924-03';
 const CUSTOMER_ID_RE=/^\d{8}$/;
 const MAX_FAMILY_ID=128;
 const RECENT_MEMORY_LIMIT=3;
 const NEXT_MEMORY_CANDIDATE_LIMIT=3;
+const CREATIVE_TEMPLATE_LIMIT=3;
 
 const FATAL_SECURITY_STATUSES=new Set([
   'invalid_member_session',
@@ -81,7 +83,8 @@ export function composeMemberHomeModel({
   familyPass,
   passport,
   nextMemory,
-  todayMemory
+  todayMemory,
+  creative
 }){
   const normalized=validSession(session);
   if(!normalized.ok){
@@ -91,7 +94,7 @@ export function composeMemberHomeModel({
     };
   }
 
-  const results=[memories,familyPass,passport,nextMemory];
+  const results=[memories,familyPass,passport,nextMemory,creative];
 
   const fatal=fatalComponentStatus(results);
   if(fatal){
@@ -144,6 +147,16 @@ export function composeMemberHomeModel({
       })
     :sectionUnavailable(todayMemory?.status);
 
+  const creativeSection=creative?.status==='ok'
+    ?sectionAvailable({
+        featured_templates:(creative.templates||[]).slice(0,CREATIVE_TEMPLATE_LIMIT),
+        available_count:Number(creative.available_count||0),
+        eligible_count:Number(creative.eligible_count||0),
+        generation_ready:creative.generation_ready===true,
+        source:creative.source||null
+      })
+    :sectionUnavailable(creative?.status);
+
   const nextMemorySection=nextMemory?.status==='ok'
     ?sectionAvailable({
         next_memory:nextMemory.next_memory||null,
@@ -166,6 +179,7 @@ export function composeMemberHomeModel({
     family_pass:familyPassSection,
     family_passport:passportSection,
     today_memory:todayMemorySection,
+    creative:creativeSection,
     next_memory:nextMemorySection
   };
 
@@ -183,13 +197,14 @@ export function composeMemberHomeModel({
       family_pass:familyPassSection.available?familyPassSection.data:null,
       family_passport:passportSection.available?passportSection.data:null,
       today_memory:todayMemorySection.available?todayMemorySection.data:null,
+      creative:creativeSection.available?creativeSection.data:null,
       next_memory:nextMemorySection.available?nextMemorySection.data:null,
       sections,
       partial:unavailableSections.length>0,
       unavailable_sections:unavailableSections,
       future_modules:{
         today_memory:true,
-        creative:false,
+        creative:true,
         shop_pickup:false,
         news:false
       }
@@ -218,13 +233,21 @@ export async function readMemberHomeForSession(env,session,{as_of}={}){
     ?buildTodaysMemory(memories.memories,as_of)
     :{status:memories.status,today_memory:null,read_only:true};
 
+  const creative=await readMemberCreativeCatalogFromAuthorizedMemories(
+    env,
+    normalized,
+    memories,
+    {as_of}
+  );
+
   return composeMemberHomeModel({
     session:normalized,
     memories,
     familyPass,
     passport,
     nextMemory,
-    todayMemory
+    todayMemory,
+    creative
   });
 }
 
@@ -274,6 +297,7 @@ export function memberHomeReadHealth(){
       'family_pass',
       'family_passport',
       'today_memory',
+      'creative',
       'next_memory'
     ],
     component_identity_consistency_required:true,
@@ -282,10 +306,14 @@ export function memberHomeReadHealth(){
     next_memory_optional_schema_degradation:true,
     today_memory_derived_from_loaded_memories:true,
     today_memory_extra_db_read:false,
+    creative_optional_schema_degradation:true,
+    creative_uses_authorized_memories:true,
+    creative_extra_memory_db_read:false,
     recent_memory_limit:RECENT_MEMORY_LIMIT,
     next_memory_candidate_limit:NEXT_MEMORY_CANDIDATE_LIMIT,
+    creative_template_limit:CREATIVE_TEMPLATE_LIMIT,
     today_memory_active:true,
-    creative_active:false,
+    creative_active:true,
     shop_pickup_active:false,
     news_active:false,
     automatic_contact:false,

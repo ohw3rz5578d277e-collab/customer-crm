@@ -94,6 +94,30 @@ const baseComponents={
     source:{reader:'member_memories_read_model',family_scoped:true},
     read_only:true
   },
+  creative:{
+    status:'ok',
+    family_id:familyId,
+    customer_id:customerId,
+    templates:[
+      {
+        template_id:'tpl_a',creative_type:'wallpaper',title:'Wallpaper',
+        composition:{mode:'single_photo',photo_slots:1,canvas_width:1290,canvas_height:2796,output_mime:'image/png',execution_ready:false,browser_side_preferred:true},
+        asset_ref:{asset_id:'asset:a',preview_asset_id:null,storage_key_exposed:false,arbitrary_url_exposed:false},
+        eligibility:{eligible:true,minimum_memory_count:1,visible_memory_count:4,memories_needed:0},sort_order:1
+      },
+      {
+        template_id:'tpl_b',creative_type:'then_and_now',title:'Then & Now',
+        composition:{mode:'pair_photo',photo_slots:2,canvas_width:1600,canvas_height:1200,output_mime:'image/jpeg',execution_ready:false,browser_side_preferred:true},
+        asset_ref:{asset_id:'asset:b',preview_asset_id:null,storage_key_exposed:false,arbitrary_url_exposed:false},
+        eligibility:{eligible:true,minimum_memory_count:2,visible_memory_count:4,memories_needed:0},sort_order:2
+      }
+    ],
+    available_count:2,
+    eligible_count:2,
+    generation_ready:false,
+    source:{authorized_memory_result_reused:true},
+    read_only:true
+  },
   nextMemory:{
     status:'ok',
     family_id:familyId,
@@ -128,7 +152,8 @@ function compose(overrides={}){
     familyPass:overrides.familyPass??baseComponents.familyPass,
     passport:overrides.passport??baseComponents.passport,
     nextMemory:overrides.nextMemory??baseComponents.nextMemory,
-    todayMemory:overrides.todayMemory??baseComponents.todayMemory
+    todayMemory:overrides.todayMemory??baseComponents.todayMemory,
+    creative:overrides.creative??baseComponents.creative
   });
 }
 
@@ -139,12 +164,13 @@ pass('HOME reports loaded visible MEMORY count without inventing DB total',full.
 pass('HOME composes FAMILY PASS',full.home.family_pass.family_pass.current_tier==='SILVER');
 pass('HOME composes FAMILY PASSPORT',full.home.family_passport.achieved_count===3);
 pass('HOME composes TODAY\'S MEMORY',full.home.today_memory.today_memory.mode==='exact_anniversary'&&full.home.today_memory.today_memory.headline==='この日の思い出');
+pass('HOME composes Creative catalog',full.home.creative.featured_templates.length===2&&full.home.creative.eligible_count===2&&full.home.creative.generation_ready===false);
 pass('HOME composes NEXT MEMORY',full.home.next_memory.next_memory.type==='first_birthday');
 pass('HOME caps NEXT MEMORY candidate preview at three',full.home.next_memory.candidates.length===3);
 pass('HOME keeps LINE consultation CTA non-automatic',full.home.next_memory.consultation_cta.channel==='line'&&full.home.next_memory.consultation_cta.automatic_send===false);
 pass('HOME does not claim Family history is child specific',full.home.next_memory.family_history_is_child_specific===false&&full.home.next_memory.child_memory_link_available===false);
 pass('full HOME is not partial',full.home.partial===false&&full.home.unavailable_sections.length===0);
-pass('TODAY\'S MEMORY is active while other future modules stay inactive',full.home.future_modules.today_memory===true&&full.home.future_modules.creative===false&&full.home.future_modules.shop_pickup===false&&full.home.future_modules.news===false);
+pass('TODAY\'S MEMORY and Creative are source-active while Shop/News remain inactive',full.home.future_modules.today_memory===true&&full.home.future_modules.creative===true&&full.home.future_modules.shop_pickup===false&&full.home.future_modules.news===false);
 pass('HOME result is read-only',full.read_only===true);
 
 const degradedNext=compose({
@@ -168,6 +194,12 @@ const degradedToday=compose({
 });
 pass('TODAY\'S MEMORY internal clock failure can remain section-local',degradedToday.status==='ok'&&degradedToday.home.partial===true&&degradedToday.home.today_memory===null);
 pass('degraded TODAY\'S MEMORY section reports its reason',degradedToday.home.unavailable_sections.some(x=>x.section==='today_memory'&&x.error==='invalid_as_of'));
+
+const degradedCreative=compose({
+  creative:{status:'creative_catalog_schema_not_applied',templates:[],read_only:true}
+});
+pass('missing Creative schema degrades Creative section only',degradedCreative.status==='ok'&&degradedCreative.home.partial===true&&degradedCreative.home.creative===null);
+pass('degraded Creative section reports schema reason',degradedCreative.home.unavailable_sections.some(x=>x.section==='creative'&&x.error==='creative_catalog_schema_not_applied'));
 
 const degradedPass=compose({
   familyPass:{
@@ -227,14 +259,16 @@ pass('invalid Member session is rejected by composer',__test.composeMemberHomeMo
 function makeDb({
   childSchema=true,
   memorySchema=true,
-  mediaSchema=true
+  mediaSchema=true,
+  creativeSchema=true
 }={}){
   const tables=new Set([
     'customer_family_groups',
     'customer_family_customer_links',
     ...(childSchema?['customer_family_members']:[]),
     ...(memorySchema?['member_memories']:[]),
-    ...(mediaSchema?['member_memory_media']:[])
+    ...(mediaSchema?['member_memory_media']:[]),
+    ...(creativeSchema?['member_creative_templates']:[])
   ]);
   const writes=[];
   const seenSql=[];
@@ -339,6 +373,46 @@ function makeDb({
           if(sql.includes('FROM member_memories')){
             return state.params[0]===familyId?{results:memoryRows}:{results:[]};
           }
+          if(sql.includes('FROM member_creative_templates')){
+            return {results:[
+              {
+                template_id:'tpl_home_1',
+                creative_type:'wallpaper',
+                title:'Family Wallpaper',
+                description:'',
+                season_tag:'evergreen',
+                starts_on:null,
+                ends_on:null,
+                photo_slots:1,
+                composition_mode:'single_photo',
+                canvas_width:1290,
+                canvas_height:2796,
+                output_mime:'image/png',
+                asset_id:'asset:home:1',
+                preview_asset_id:null,
+                minimum_memory_count:1,
+                sort_order:1
+              },
+              {
+                template_id:'tpl_home_2',
+                creative_type:'then_and_now',
+                title:'Then & Now',
+                description:'',
+                season_tag:'evergreen',
+                starts_on:null,
+                ends_on:null,
+                photo_slots:2,
+                composition_mode:'pair_photo',
+                canvas_width:1600,
+                canvas_height:1200,
+                output_mime:'image/jpeg',
+                asset_id:'asset:home:2',
+                preview_asset_id:null,
+                minimum_memory_count:2,
+                sort_order:2
+              }
+            ]};
+          }
           return {results:[]};
         },
         async run(){
@@ -362,6 +436,7 @@ pass('integrated HOME reads MEMORIES',integrated.home.recent_memories.length===3
 pass('integrated HOME reads FAMILY PASS',integrated.home.family_pass.family_pass.current_tier==='SILVER');
 pass('integrated HOME reads FAMILY PASSPORT',integrated.home.family_passport.achieved_count===2);
 pass('integrated HOME composes exact TODAY\'S MEMORY from the already-loaded MEMORIES',integrated.home.today_memory.today_memory?.mode==='exact_anniversary'&&integrated.home.today_memory.today_memory?.primary?.memory_id==='mem_today');
+pass('integrated HOME reads Creative catalog from authorized MEMORIES',integrated.home.creative.featured_templates.length===2&&integrated.home.creative.source.authorized_memory_result_reused===true);
 pass('integrated HOME reads NEXT MEMORY from canonical child',integrated.home.next_memory.next_memory?.type==='first_birthday');
 pass('integrated HOME performs zero writes',db.writes.length===0&&integrated.read_only===true);
 
@@ -371,7 +446,15 @@ const integratedPartial=await readMemberHomeForSession(
   {family_id:familyId,customer_id:customerId},
   {as_of:'2026-09-24'}
 );
-pass('integrated HOME degrades only NEXT MEMORY when child schema is absent',integratedPartial.status==='ok'&&integratedPartial.home.partial===true&&integratedPartial.home.next_memory===null&&integratedPartial.home.recent_memories.length===3&&integratedPartial.home.today_memory.today_memory?.primary?.memory_id==='mem_today');
+pass('integrated HOME degrades only NEXT MEMORY when child schema is absent',integratedPartial.status==='ok'&&integratedPartial.home.partial===true&&integratedPartial.home.next_memory===null&&integratedPartial.home.recent_memories.length===3&&integratedPartial.home.today_memory.today_memory?.primary?.memory_id==='mem_today'&&integratedPartial.home.creative.featured_templates.length===2);
+
+const noCreativeDb=makeDb({creativeSchema:false});
+const integratedNoCreative=await readMemberHomeForSession(
+  {DB:noCreativeDb},
+  {family_id:familyId,customer_id:customerId},
+  {as_of:'2026-09-24'}
+);
+pass('integrated HOME degrades Creative only when Creative schema is absent',integratedNoCreative.status==='ok'&&integratedNoCreative.home.partial===true&&integratedNoCreative.home.creative===null&&integratedNoCreative.home.recent_memories.length===3);
 
 const noMediaDb=makeDb({mediaSchema:false});
 const integratedNoMemory=await readMemberHomeForSession(
@@ -405,12 +488,13 @@ const post=await handleMemberHomeReadRequest(
 pass('HTTP HOME is GET only',post.status===405);
 
 const health=memberHomeReadHealth();
-pass('health records five composed components',health.components.join(',')==='member_memories,family_pass,family_passport,today_memory,next_memory');
+pass('health records six composed components',health.components.join(',')==='member_memories,family_pass,family_passport,today_memory,creative,next_memory');
 pass('health requires component identity consistency',health.component_identity_consistency_required===true&&health.identity_security_failures_fail_closed===true);
 pass('health records MEMORIES as core and NEXT MEMORY optional degradation',health.memories_core_required===true&&health.next_memory_optional_schema_degradation===true);
 pass('health records TODAY\'S MEMORY derives from loaded MEMORIES with no extra DB read',health.today_memory_derived_from_loaded_memories===true&&health.today_memory_extra_db_read===false);
-pass('health records response limits',health.recent_memory_limit===3&&health.next_memory_candidate_limit===3);
-pass('health activates TODAY\'S MEMORY source composition only',health.today_memory_active===true&&health.creative_active===false&&health.shop_pickup_active===false&&health.news_active===false);
+pass('health records Creative reuses authorized MEMORIES with no extra MEMORY list read',health.creative_uses_authorized_memories===true&&health.creative_extra_memory_db_read===false&&health.creative_optional_schema_degradation===true);
+pass('health records response limits',health.recent_memory_limit===3&&health.next_memory_candidate_limit===3&&health.creative_template_limit===3);
+pass('health source-activates TODAY\'S MEMORY and Creative only',health.today_memory_active===true&&health.creative_active===true&&health.shop_pickup_active===false&&health.news_active===false);
 pass('health records no contact/send/reservation/write',health.automatic_contact===false&&health.line_send===false&&health.reservation_creation===false&&health.production_write===false);
 pass('health records source-only route state',health.production_route_wired===false&&health.read_only===true&&health.request_customer_id_input===false&&health.request_family_id_input===false&&health.request_as_of_input===false);
 

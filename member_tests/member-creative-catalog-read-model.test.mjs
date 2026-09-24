@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import {
   readMemberCreativeCatalogForSession,
+  readMemberCreativeCatalogFromAuthorizedMemories,
   handleMemberCreativeCatalogReadRequest,
   memberCreativeCatalogHealth,
   __test
@@ -195,6 +196,37 @@ pass('one-MEMORY template is eligible',result.templates.find(x=>x.template_id===
 pass('three-MEMORY template remains visible but locked',result.templates.find(x=>x.template_id==='tpl_two').eligibility.eligible===false);
 pass('read model performs zero writes',db.writes.length===0&&result.read_only===true);
 
+const reusedDb=makeDb();
+const reused=await readMemberCreativeCatalogFromAuthorizedMemories(
+  {DB:reusedDb},
+  {family_id:familyId,customer_id:customerId},
+  {
+    status:'ok',
+    family_id:familyId,
+    customer_id:customerId,
+    memories:[
+      {memory_id:'mem_2'},
+      {memory_id:'mem_1'}
+    ]
+  },
+  {as_of:'2026-09-24'}
+);
+pass('authorized-memory helper reads Creative catalog without re-reading MEMORIES',reused.status==='ok'&&reused.source.authorized_memory_result_reused===true);
+pass('authorized-memory helper uses supplied MEMORY count for eligibility',reused.templates.find(x=>x.template_id==='tpl_two').eligibility.visible_memory_count===2);
+pass('authorized-memory helper performs no member_memories query',!reusedDb.seenSql.some(sql=>sql.includes('FROM member_memories')));
+pass('authorized-memory helper fails closed on Family mismatch',(await readMemberCreativeCatalogFromAuthorizedMemories(
+  {DB:makeDb()},
+  {family_id:familyId,customer_id:customerId},
+  {status:'ok',family_id:'fam_B',customer_id:customerId,memories:[]},
+  {as_of:'2026-09-24'}
+)).status==='component_identity_mismatch');
+pass('authorized-memory helper fails closed on Customer mismatch',(await readMemberCreativeCatalogFromAuthorizedMemories(
+  {DB:makeDb()},
+  {family_id:familyId,customer_id:customerId},
+  {status:'ok',family_id:familyId,customer_id:'26000999',memories:[]},
+  {as_of:'2026-09-24'}
+)).status==='component_identity_mismatch');
+
 const creativeSql=db.seenSql.find(sql=>sql.includes('FROM member_creative_templates'))||'';
 pass('Creative query requires published templates',creativeSql.includes('published=1'));
 pass('Creative query hides deleted templates',creativeSql.includes("COALESCE(deleted_at,'')=''"));
@@ -250,6 +282,7 @@ pass('health records logical asset refs only',health.asset_ref_is_logical_id_onl
 pass('health forbids arbitrary HTML/JS/external URL',health.arbitrary_template_html===false&&health.arbitrary_template_javascript===false&&health.arbitrary_external_url===false);
 pass('health keeps generation/upload/customer photo write disabled',health.generation_ready===false&&health.upload_ready===false&&health.customer_photo_write===false);
 pass('health records browser-side composition preference',health.browser_side_composition_preferred===true);
+pass('health supports reuse of an authorized MEMORY result',health.authorized_memory_result_reuse_supported===true);
 pass('health records no route/send/write',health.production_route_wired===false&&health.automatic_contact===false&&health.line_send===false&&health.production_write===false);
 
 const migration=fs.readFileSync(
