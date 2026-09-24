@@ -118,7 +118,11 @@ pass('resolver preserves requested order for resolved assets',resolved.assets.ma
 pass('resolver reports unresolved logical IDs',resolved.unresolved_asset_ids.join(',')==='asset:missing');
 pass('partial resolution is not marked complete',resolved.complete===false);
 pass('resolver performs zero writes',db.writes.length===0&&resolved.read_only===true);
-pass('resolver output contains no storage key',!JSON.stringify(resolved).includes('storage_key'));
+pass('resolver output contains no private location fields',resolved.assets.every(asset=>
+  !('storage_key' in asset)
+  && !('signed_url' in asset)
+  && !('external_url' in asset)
+));
 pass('resolver query requires published assets',db.seenSql.some(sql=>sql.includes('published=1')));
 pass('resolver query hides deleted assets',db.seenSql.some(sql=>sql.includes("COALESCE(deleted_at,'')=''")));
 
