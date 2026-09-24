@@ -214,7 +214,12 @@ export function buildCreativeCatalog(rows=[],{
   };
 }
 
-export async function readMemberCreativeCatalogForSession(env,session,{as_of}={}){
+export async function readMemberCreativeCatalogFromAuthorizedMemories(
+  env,
+  session,
+  memories,
+  {as_of}={}
+){
   const normalized=validSession(session);
   if(!normalized.ok){
     return {
@@ -224,15 +229,25 @@ export async function readMemberCreativeCatalogForSession(env,session,{as_of}={}
     };
   }
 
-  const memories=await readMemberMemoriesForSession(env,normalized);
-  if(memories.status!=='ok'){
+  if(memories?.status!=='ok'){
     return {
-      status:memories.status,
+      status:text(memories?.status)||'member_memory_unavailable',
       templates:[],
       read_only:true
     };
   }
+
   if(text(memories.family_id)!==normalized.family_id){
+    return {
+      status:'component_identity_mismatch',
+      templates:[],
+      review_required:true,
+      read_only:true
+    };
+  }
+
+  const memoryCustomerId=text(memories.customer_id);
+  if(memoryCustomerId&&memoryCustomerId!==normalized.customer_id){
     return {
       status:'component_identity_mismatch',
       templates:[],
@@ -278,9 +293,29 @@ export async function readMemberCreativeCatalogForSession(env,session,{as_of}={}
       published_only:true,
       deleted_hidden:true,
       family_memory_reader:'member_memories_read_model',
-      bounded_memory_count:true
+      bounded_memory_count:true,
+      authorized_memory_result_reused:true
     }
   };
+}
+
+export async function readMemberCreativeCatalogForSession(env,session,{as_of}={}){
+  const normalized=validSession(session);
+  if(!normalized.ok){
+    return {
+      status:'invalid_member_session',
+      templates:[],
+      read_only:true
+    };
+  }
+
+  const memories=await readMemberMemoriesForSession(env,normalized);
+  return readMemberCreativeCatalogFromAuthorizedMemories(
+    env,
+    normalized,
+    memories,
+    {as_of}
+  );
 }
 
 export async function handleMemberCreativeCatalogReadRequest(request,env,memberSession){
@@ -339,6 +374,7 @@ export function memberCreativeCatalogHealth(){
     customer_photo_write:false,
     automatic_contact:false,
     line_send:false,
+    authorized_memory_result_reuse_supported:true,
     production_write:false
   };
 }
