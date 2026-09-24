@@ -1,3 +1,4 @@
+const CUSTOMER_ID_RE=/^\d{8}$/;
 const text=v=>v==null?'':String(v).trim();
 
 function keyOf(row){
@@ -6,14 +7,19 @@ function keyOf(row){
   return system&&reservation?`${system}:reservation:${reservation}`:'';
 }
 
-export function buildMemorySyncPlan({family_id,source_memories=[],existing_memories=[]}={}){
+export function buildMemorySyncPlan({family_id,customer_id,source_memories=[],existing_memories=[]}={}){
   const familyId=text(family_id);
-  if(!familyId)return {ok:false,error:'family_id_required'};
+  const customerId=text(customer_id);
+  if(!familyId)return {ok:false,error:'family_id_required',write_executed:false};
+  if(!CUSTOMER_ID_RE.test(customerId))return {ok:false,error:'canonical_customer_id_required',write_executed:false};
 
   const existingKeys=new Set();
+  const existingFamilyByKey=new Map();
   for(const row of existing_memories||[]){
     const key=keyOf(row);
-    if(key)existingKeys.add(key);
+    if(!key)continue;
+    existingKeys.add(key);
+    existingFamilyByKey.set(key,text(row?.family_id));
   }
 
   const seen=new Set();
@@ -25,10 +31,15 @@ export function buildMemorySyncPlan({family_id,source_memories=[],existing_memor
   for(const row of source_memories||[]){
     const reservationId=text(row?.source_reservation_id);
     const sourceSystem=text(row?.source_system)||'customer-crm';
-    const key=`${sourceSystem}:reservation:${reservationId}`;
+    const sourceCustomerId=text(row?.source_customer_id);
+    const key=reservationId?`${sourceSystem}:reservation:${reservationId}`:'';
 
     if(row?.sync_eligible!==true){
       skipped.push({source_reservation_id:reservationId,reason:'source_not_sync_eligible'});
+      continue;
+    }
+    if(sourceCustomerId!==customerId){
+      conflicts.push({source_reservation_id:reservationId,reason:'source_customer_id_mismatch'});
       continue;
     }
     if(!reservationId){
@@ -42,6 +53,11 @@ export function buildMemorySyncPlan({family_id,source_memories=[],existing_memor
     seen.add(key);
 
     if(existingKeys.has(key)){
+      const existingFamilyId=existingFamilyByKey.get(key);
+      if(existingFamilyId&&existingFamilyId!==familyId){
+        conflicts.push({source_reservation_id:reservationId,reason:'existing_memory_family_conflict'});
+        continue;
+      }
       already_synced.push({source_reservation_id:reservationId,idempotency_key:key});
       continue;
     }
@@ -49,7 +65,7 @@ export function buildMemorySyncPlan({family_id,source_memories=[],existing_memor
     to_create.push({
       family_id:familyId,
       source_system:sourceSystem,
-      source_customer_id:text(row.source_customer_id),
+      source_customer_id:customerId,
       source_reservation_id:reservationId,
       idempotency_key:key,
       shoot_date:text(row.shoot_date),
@@ -64,6 +80,7 @@ export function buildMemorySyncPlan({family_id,source_memories=[],existing_memor
   return {
     ok:conflicts.length===0,
     family_id:familyId,
+    customer_id:customerId,
     to_create,
     already_synced,
     skipped,
