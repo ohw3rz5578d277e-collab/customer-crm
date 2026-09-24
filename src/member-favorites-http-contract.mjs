@@ -1,5 +1,6 @@
 import { verifyMemberSessionRequest } from './member-session-foundation.mjs';
 import { executeMemberFavoriteMutation } from './member-favorites-write-executor.mjs';
+import { consumeMemberFavoriteMutationRateLimit, memberFavoritesRateLimitHealth } from './member-favorites-rate-limit.mjs';
 
 const BUILD='member-favorites-http-contract-20260925-01';
 const ROUTE_MODE='enabled';
@@ -8,7 +9,7 @@ const encoder=new TextEncoder();
 
 const text=v=>v==null?'':String(v).trim();
 
-function json(data,status=200){
+function json(data,status=200,extraHeaders={}){
   return new Response(JSON.stringify(data),{
     status,
     headers:{
@@ -16,7 +17,8 @@ function json(data,status=200){
       'cache-control':'no-store',
       'x-member-favorites-http-build':BUILD,
       'x-robots-tag':'noindex, nofollow',
-      'referrer-policy':'no-referrer'
+      'referrer-policy':'no-referrer',
+      ...extraHeaders
     }
   });
 }
@@ -135,6 +137,30 @@ export async function handleMemberFavoriteMutationRequest(request,env){
     return json({ok:false,error:parsed.error},status);
   }
 
+  const rate=await consumeMemberFavoriteMutationRateLimit(
+    env,
+    verified.session,
+    {
+      memory_id:parsed.body.memory_id
+    }
+  );
+
+  if(rate.status==='rate_limited'){
+    return json(
+      {ok:false,error:'rate_limited'},
+      429,
+      {'retry-after':String(rate.retry_after_seconds||1)}
+    );
+  }
+
+  if(rate.status==='invalid_memory_id'){
+    return json({ok:false,error:'invalid_memory_id'},400);
+  }
+
+  if(rate.status!=='ok'||rate.allowed!==true){
+    return json({ok:false,error:'favorite_rate_limit_unavailable'},503);
+  }
+
   const result=await executeMemberFavoriteMutation(
     env,
     verified.session,
@@ -163,6 +189,7 @@ export async function handleMemberFavoriteMutationRequest(request,env){
 }
 
 export function memberFavoritesHttpContractHealth(env){
+  const rateLimit=memberFavoritesRateLimitHealth(env);
   return {
     member_favorites_http_contract:true,
     build:BUILD,
@@ -182,6 +209,13 @@ export function memberFavoritesHttpContractHealth(env){
     same_site_cookie_defense:'Lax',
     declarative_desired_state:true,
     executor_write_mode_still_required:true,
+    rate_limit_required:true,
+    rate_limit_mode:rateLimit.mode,
+    rate_limit_default_disabled:rateLimit.default_disabled,
+    rate_limit_window_seconds:rateLimit.fixed_window_seconds,
+    rate_limit_customer_attempts:rateLimit.customer_attempt_limit,
+    rate_limit_memory_attempts:rateLimit.memory_attempt_limit,
+    rate_limit_retry_after_supported:rateLimit.retry_after_supported,
     automatic_write:false,
     line_send:false,
     production_write_enabled:false
