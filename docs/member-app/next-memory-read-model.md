@@ -4,18 +4,19 @@ Baseline: 2026-09-24 JST
 
 ## Purpose
 
-NEXT MEMORY is the read-only Member model that turns canonical child profile dates and Family MEMORY history into a small set of future photography candidates.
+NEXT MEMORY is a read-only Member model that turns canonical managed child profile data and Family MEMORY history into a small set of future photography candidates for later HOME / MY experiences.
 
-Its purpose is to support later HOME / MY experiences such as:
+Initial candidate families include:
 
-- 1st Birthday
 - Half Birthday
-- 七五三
-- 入学・卒業
-- 成人記念
+- 1st Birthday
 - ordinary birthday
+- 七五三
+- 入学
+- 卒業
+- 成人記念
 
-This phase does not send messages, book a shoot, modify CRM data, or render the final customer UI.
+This phase does not send messages, make reservations, change CRM data, apply pricing, or render final customer UI.
 
 ## Identity boundary
 
@@ -24,11 +25,11 @@ The reader accepts identity only from the server-verified Member session:
 - canonical 8-digit Customer ID
 - explicit Family ID
 
-It then revalidates the current Customer -> Family link.
+It revalidates the current Customer -> Family link.
 
-Only canonical Customer IDs explicitly linked to that Family may contribute child-profile evidence.
+Only canonical Customer IDs already explicitly linked to the same Family may contribute child-profile evidence.
 
-It never expands the Family using:
+It never expands Family identity using:
 
 - customer name
 - address
@@ -36,76 +37,102 @@ It never expands the Family using:
 - email
 - LINE display name
 - child name
-- fuzzy similarity
+- birthdate similarity
+- fuzzy matching
 
-## Child profile source
+## Managed child source
 
-Canonical child profile evidence is read from:
+Child evidence is read only from:
 
 `customer_family_members`
 
 Required conditions:
 
-- exact canonical linked `customer_id`
+- exact linked canonical `customer_id`
 - `relation='child'`
 - non-deleted row
 - exact child row ID
 
-The Member model may aggregate child rows from multiple canonical Customer IDs only when those Customer IDs are already explicitly linked to the same Family.
+The Member model may aggregate managed child rows from multiple canonical Customer IDs only when those Customer IDs are already explicitly linked to the same Family.
 
-No Family membership is inferred.
+No legacy `child1_name / child1_birthdate` fallback is used by this Member model.
 
-## Duplicate child IDs
+## Child identity rule
 
-A child row ID is treated as an exact identity key.
+Exact child row ID is the only child identity key used here.
 
-If the same child ID appears under more than one linked Customer with conflicting:
+The model does not deduplicate two different child IDs because they happen to share:
 
-- source Customer ID
-- name
-- birthdate
-- school stage
+- the same name
+- the same birthdate
+- the same school stage
 
-the model fails closed with:
+That avoids accidentally merging siblings or twins.
+
+If the same exact child ID appears under different linked Customer IDs with conflicting source Customer, name, birthdate, or school stage, the model fails closed with:
 
 `ambiguous_child_identity`
 
-It does not deduplicate by child name or birthdate.
+and requires review.
 
-## Shared date/opportunity logic
+## Birthdate-based candidate logic
 
-The model reuses the existing pure date/opportunity logic from:
+The model reuses the existing pure date/opportunity functions in:
 
 `crm-customer360-marketing-engine.mjs`
 
-This avoids creating a second incompatible age/calendar implementation.
+for child events that can be directly derived from a managed birthdate.
 
-Supported Member candidate types are limited to:
+Member-visible date-based candidates are limited to:
 
 - birthday
-- half birthday
-- first birthday
-- shichigosan
-- school entry candidate
-- graduation candidate
-- coming-of-age candidate
+- Half Birthday
+- 1st Birthday
+- 七五三
+- 成人記念
 
-CRM marketing-only concepts such as high-LTV, dormancy, priority scoring, or LINE drafts are not used.
+CRM marketing priority, dormancy, LTV, campaign classes, and LINE draft generation are not used.
 
-## Duplicate event suppression
+## School events are explicit-stage only
 
-A generic birthday should not compete with a more specific milestone on the same child and target date.
+The shared CRM marketing engine also contains age-based school timing estimates.
+
+Those estimates are deliberately **not** used by NEXT MEMORY.
+
+NEXT MEMORY does not conclude that:
+
+- age 6 means school entrance
+- age 12 means elementary-school graduation
+- age 15 means junior-high graduation
+- age 18 means high-school graduation
+
+Instead, school candidates are created only from explicit managed `school_stage` evidence.
+
+Examples:
+
+- `年長` -> 小学校入学候補
+- `小学6年` / `小6` -> 小学校卒業候補
+- `中学3年` / `中3` -> 中学校卒業候補
+- `高校3年` / `高3` -> 高校卒業候補
+
+A school-stage candidate may exist even when birthdate is unavailable.
+
+No target date is invented for these stage-only candidates.
+
+## Generic birthday suppression
+
+A generic birthday candidate is removed when the same exact child and target date already has a more specific milestone.
 
 Examples:
 
 - 1st Birthday + generic birthday on the same date -> keep 1st Birthday
 - 3rd birthday + 七五三 on the same date -> keep 七五三
 
-This keeps the customer-facing candidate list focused.
+This avoids showing duplicate calls to action for one event.
 
-## Family MEMORY evidence
+## Family MEMORY context
 
-Historical photography evidence comes only from:
+Past photography history is read only from:
 
 `member_memories`
 
@@ -115,79 +142,76 @@ and only rows where:
 - `published=1`
 - non-deleted
 
-The current MEMORY schema does not contain canonical `child_id`.
+The current MEMORY schema does not contain canonical child ID.
 
-Therefore the model explicitly reports:
+Therefore NEXT MEMORY explicitly reports:
 
 - `family_history_is_child_specific=false`
 - `child_memory_link_available=false`
 
-Past genres can annotate a candidate as already seen somewhere in the Family history, but they do not prove that the same child has already had that milestone photographed.
+Past Family genres may annotate a candidate as already present somewhere in Family history, but they do not prove that the same child has already completed that event.
 
-For that reason Family history does not automatically suppress a child candidate.
+Family history therefore does not automatically suppress a new child candidate.
 
-Example:
+## Conservative genre evidence
 
-A Family has a past 1st Birthday MEMORY, but there are two children. Without a MEMORY -> child identity link, the model cannot know whether the current 1st Birthday candidate belongs to the same child.
+Family history matching is exact after Unicode/case normalization.
+
+Examples:
+
+- `七五三` matches 七五三 history
+- `七五三後のファミリー` does not
+- generic `バースデー` can annotate an ordinary birthday
+- generic `バースデー` does not prove 1st Birthday history
+
+The genre evidence remains informational only.
 
 ## Candidate output
 
 Each candidate may include:
 
 - event type
-- customer-facing label
-- target date
-- days until
+- label
+- target date, when deterministically known
+- days until, when deterministically known
 - exact child row ID
 - child display name
-- computed age
-- evidence source
+- age from managed birthdate when available
+- source: birthdate or explicit school stage
 - Family-level genre-history match
 - `history_scope='family_not_child'`
 - `candidate_only=true`
 - `automatic_contact=false`
 
-The first sorted candidate becomes:
+Candidates with real upcoming dates are ordered primarily by nearest date.
+
+Undated explicit school-stage candidates remain available without inventing dates.
+
+The first ranked candidate becomes:
 
 `next_memory`
 
-Candidate sorting is primarily by earliest upcoming timing, with more specific milestone types preferred over generic birthday when timing is equal.
+## LINE consultation CTA contract
 
-## Current Family history matching
+NEXT MEMORY may expose a future customer-facing CTA contract:
 
-Genre history matching is conservative and exact after Unicode/case normalization.
+- channel: LINE
+- intent: consultation
+- automatic send: false
 
-Examples:
+This is metadata only.
 
-- `七五三` matches 七五三
-- `七五三後のファミリー` does not
-- `バースデー` can count as generic birthday history
-- `バースデー` does not count as 1st Birthday history
+It does not send LINE, create a LINE draft, or make a reservation.
 
-This is only informational Family-level evidence.
+## No child evidence
 
-## Missing child profile evidence
+If no canonical managed child rows exist:
 
-If the Family has no canonical child rows or no valid birthdates:
+- no child is inferred from names or photos;
+- no age is inferred from MEMORY titles;
+- no recommendation is invented from LINE messages or free-text notes.
 
-- no age-based recommendation is invented;
-- `next_memory` may be null;
-- candidate list may be empty.
-
-The system does not guess child age from:
-
-- customer age
-- MEMORY title
-- photo content
-- child name
-- LINE messages
-- reservation notes
-
-## School stage
-
-Existing shared logic can use explicit `school_stage`, for example 年長, together with canonical child profile evidence.
-
-The Member model does not infer school stage from age alone beyond the already existing shared opportunity logic.
+`next_memory` may be null and candidate list may be empty.
 
 ## Conceptual HTTP contract
 
@@ -199,28 +223,12 @@ The endpoint:
 
 - requires server Member session
 - is GET-only
-- does not accept Customer ID
-- does not accept Family ID
+- does not accept Customer ID from the request
+- does not accept Family ID from the request
 - does not accept client-controlled `as_of`
 - is not Production route-wired
 
-The source-level read function accepts a deterministic `as_of` option for tests and internal verification only.
-
-## No messaging / booking automation
-
-NEXT MEMORY is a suggestion model only.
-
-This phase does not:
-
-- send LINE
-- create a LINE draft
-- contact the customer
-- make a reservation
-- generate a coupon
-- change a price
-- trigger a campaign
-
-The later customer UI may offer a contextual CTA to consultation/LINE, but activation of that route remains separate.
+The source-level read function accepts deterministic `as_of` only for internal tests and verification.
 
 ## Current exclusions
 
@@ -230,11 +238,14 @@ Not included:
 - final MY UI
 - child-specific MEMORY linkage
 - MEMORY -> child write
+- birthdate-based school timing inference
 - automatic contact
 - marketing priority score
 - LINE draft generation
 - LINE send
 - reservation creation
+- coupon creation
+- price changes
 - Production route wiring
 - Production D1 schema apply
 - Production D1 write
@@ -251,10 +262,14 @@ Current implementation is:
 - canonical Customer ID only
 - explicit Family links only
 - exact child IDs only
-- no child-name inference
+- no child-name identity inference
+- no fuzzy child deduplication
 - Family-scoped published MEMORY history only
-- no claim that Family history is child-specific
-- no automatic contact
+- Family history not claimed as child-specific
+- school milestones explicit-stage only
+- birthdate-based school timing inference = 0
+- consultation CTA only
+- automatic contact = 0
 - LINE send = 0
 - Production route wiring = 0
 - Production write = 0
