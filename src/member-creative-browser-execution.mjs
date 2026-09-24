@@ -259,7 +259,8 @@ export function buildMemberCreativeBrowserExecutionContract(plan){
   if(deliveries.some(item=>item.delivery_ready!==true)){
     blockers.push('private_media_delivery_not_active');
   }
-  blockers.push('browser_renderer_not_implemented');
+  // Browser renderer source is implemented, but runtime remains blocked until
+  // every required presentation/private-media dependency is actually active.
 
   return {
     status:'ok',
@@ -306,7 +307,7 @@ export function buildMemberCreativeBrowserExecutionContract(plan){
         metadata_copy:false
       },
       local_download:{
-        ready:false,
+        ready:blockers.length===0,
         filename:downloadName,
         mime_type:outputMime,
         mechanism:'browser_blob_object_url',
@@ -318,8 +319,8 @@ export function buildMemberCreativeBrowserExecutionContract(plan){
         browser_engine_contract_ready:true,
         template_public_asset_ready:!!templateAsset,
         private_media_delivery_ready:deliveries.every(item=>item.delivery_ready===true),
-        browser_renderer_implemented:false,
-        runtime_ready:false,
+        browser_renderer_implemented:true,
+        runtime_ready:blockers.length===0,
         blockers
       },
       privacy:{
@@ -342,7 +343,7 @@ export function memberCreativeBrowserExecutionHealth(){
     source_only:true,
     browser_side_only:true,
     server_rendering:false,
-    browser_renderer_implemented:false,
+    browser_renderer_implemented:true,
     browser_execution_contract_ready:true,
     supported_output_mimes:[...IMAGE_OUTPUT_MIMES],
     video_output_supported:false,
