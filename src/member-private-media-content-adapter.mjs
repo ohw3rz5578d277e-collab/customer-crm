@@ -183,14 +183,6 @@ export async function readAuthorizedMemberPrivateMediaContent(
   storageAdapter,
   {now_seconds}={}
 ){
-  if(!validStorageAdapter(storageAdapter)){
-    return {
-      status:'private_media_storage_adapter_unavailable',
-      delivered:false,
-      storage_fetch_executed:false
-    };
-  }
-
   const verified=await verifyMemberPrivateMediaDeliveryGrant(
     env,
     session,
@@ -211,6 +203,14 @@ export async function readAuthorizedMemberPrivateMediaContent(
   if(text(verified.media?.media_type)!=='image'){
     return {
       status:'private_media_type_not_supported',
+      delivered:false,
+      storage_fetch_executed:false
+    };
+  }
+
+  if(!validStorageAdapter(storageAdapter)){
+    return {
+      status:'private_media_storage_adapter_unavailable',
       delivered:false,
       storage_fetch_executed:false
     };
