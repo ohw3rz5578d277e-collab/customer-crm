@@ -27,14 +27,19 @@ function validSession(session){
 }
 
 function validMediaId(mediaId){
-  const id=text(mediaId);
-  return !!id&&id.length<=MAX_MEDIA_ID&&!/[\u0000-\u001f\u007f]/.test(id);
+  const raw=mediaId==null?'':String(mediaId);
+  if(!raw||raw.length>MAX_MEDIA_ID)return false;
+  if(/[\u0000-\u001f\u007f]/.test(raw))return false;
+  if(raw!==raw.trim())return false;
+  return true;
 }
 
 function validPrivateStorageKey(value){
-  const key=text(value);
-  if(!key||key.length>MAX_STORAGE_KEY)return false;
-  if(/[\u0000-\u001f\u007f]/.test(key))return false;
+  const raw=value==null?'':String(value);
+  if(!raw||raw.length>MAX_STORAGE_KEY)return false;
+  if(/[\u0000-\u001f\u007f]/.test(raw))return false;
+  if(raw!==raw.trim())return false;
+  const key=raw;
   if(/^https?:\/\//i.test(key))return false;
   if(key.startsWith('/'))return false;
   if(key.split('/').some(part=>part==='..'))return false;
