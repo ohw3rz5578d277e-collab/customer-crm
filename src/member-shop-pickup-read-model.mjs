@@ -71,10 +71,12 @@ function validSession(session){
 }
 
 function validShopPath(value){
-  const path=text(value);
-  if(!path||path.length>256)return false;
+  const raw=value==null?'':String(value);
+  if(!raw||raw.length>256)return false;
+  if(/[\u0000-\u001f\u007f]/.test(raw))return false;
+  if(raw!==raw.trim())return false;
+  const path=raw;
   if(!path.startsWith('/')||path.startsWith('//'))return false;
-  if(/[\u0000-\u001f\u007f]/.test(path))return false;
   if(/^[a-z][a-z0-9+.-]*:/i.test(path))return false;
   return true;
 }
@@ -104,7 +106,8 @@ function normalizeProduct(row,{asOf}){
   const description=text(row?.description);
   const seasonTag=text(row?.season_tag)||'evergreen';
   const heroAssetId=text(row?.hero_asset_id);
-  const shopPath=text(row?.shop_path);
+  const rawShopPath=row?.shop_path==null?'':String(row.shop_path);
+  const shopPath=rawShopPath.trim();
   const ctaLabel=text(row?.cta_label)||'商品を見る';
   const featuredHome=Number(row?.featured_home)===1;
   const sortOrder=Number(row?.sort_order||0);
@@ -113,7 +116,7 @@ function normalizeProduct(row,{asOf}){
   if(!PRODUCT_TYPES.has(productType))return null;
   if(!title||title.length>120||description.length>500)return null;
   if(!seasonTag||seasonTag.length>64)return null;
-  if(!validShopPath(shopPath))return null;
+  if(!validShopPath(rawShopPath))return null;
   if(!ctaLabel||ctaLabel.length>40)return null;
 
   const schedule=activeSchedule(row,asOf);
