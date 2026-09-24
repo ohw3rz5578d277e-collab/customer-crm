@@ -39,13 +39,23 @@ It is returned only by the internal authorization function after authorization s
 
 It is not a customer-facing response field.
 
-The current contract rejects storage keys that are:
+The current contract validates raw media IDs and storage keys before normalization.
+
+Media IDs reject:
+
+- empty values;
+- control characters;
+- outer whitespace;
+- values longer than the configured ID limit.
+
+Storage keys reject:
 
 - empty;
 - absolute HTTP/HTTPS URLs;
 - absolute paths;
 - path traversal using `..`;
 - control-character-bearing;
+- outer whitespace;
 - longer than the configured key limit.
 
 This reduces the chance that a later delivery implementation accidentally treats an arbitrary URL or path as trusted storage input.
@@ -123,4 +133,4 @@ Tests cover:
 
 A future media delivery implementation must not resolve or fetch `storage_key` before this authorization succeeds.
 
-Any customer-facing delivery route, private storage binding, signed URL behavior, or Production deployment requires a separate implementation and gate.
+The separate private-media delivery-grant foundation now defines a short-lived HMAC-bound grant without exposing the storage key. Binary delivery/storage binding remains a later implementation and gate.
