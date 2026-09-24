@@ -29,6 +29,9 @@ function db(){
           return null;
         },
         async all(){
+          if(sql.includes('FROM customer_family_customer_links')&&sql.includes('customer_id=?')){
+            return {results:links.filter(x=>x.customer_id===state.params[0]).slice(0,2)};
+          }
           if(sql.includes('FROM customer_family_customer_links')&&sql.includes('family_id=?')){
             return {results:links.filter(x=>x.family_id===state.params[0])};
           }
@@ -50,6 +53,33 @@ pass('name cannot be used as identity lookup',invalid.status==='invalid_customer
 const unknown=await readMemberFamilyByCustomer(env,'26000999');
 pass('unknown exact Customer ID remains unlinked',unknown.status==='unlinked'&&unknown.family===null);
 
+const duplicateEnv={
+  ...env,
+  DB:{
+    prepare(sql){
+      const state={params:[]};
+      const stmt={
+        bind(...params){state.params=params;return stmt},
+        async first(){
+          if(sql.includes('sqlite_master')) return {name:state.params[0]};
+          return null;
+        },
+        async all(){
+          if(sql.includes('customer_id=?')) return {results:[
+            {family_id:'fam_a',customer_id:'26000777',relation:'owner',access_role:'owner'},
+            {family_id:'fam_b',customer_id:'26000777',relation:'member',access_role:'adult'}
+          ]};
+          return {results:[]};
+        },
+        async run(){throw new Error('read-only module must never write')}
+      };
+      return stmt;
+    }
+  }
+};
+const duplicate=await readMemberFamilyByCustomer(duplicateEnv,'26000777');
+pass('duplicate active family links fail closed',duplicate.status==='ambiguous_family_identity'&&duplicate.family===null);
+
 const unauth=await handleMemberFamilyIdentityReadRequest(new Request('https://example.test/api/internal/member-family/customer/26000123'),env);
 pass('internal family read requires token',unauth.status===401);
 const auth=await handleMemberFamilyIdentityReadRequest(new Request('https://example.test/api/internal/member-family/customer/26000123',{headers:{'x-internal-token':'secret'}}),env);
@@ -58,6 +88,7 @@ pass('authorized internal family read succeeds',auth.status===200);
 const health=memberFamilyIdentityHealth();
 pass('foundation is read-only and not production wired',health.read_only===true&&health.production_route_wired===false&&health.production_write===false);
 pass('family auto inference is prohibited',health.family_auto_inference===false&&health.name_match===false&&health.address_match===false);
+pass('duplicate active family links are fail closed',health.duplicate_active_family_link_fail_closed===true);
 
 const migration=fs.readFileSync('migrations_managed/20260924_member_family_identity_foundation.sql','utf8');
 pass('migration is additive and does not alter customers',migration.includes('customer_family_groups')&&migration.includes('customer_family_customer_links')&&!/ALTER\s+TABLE\s+customers/i.test(migration));
