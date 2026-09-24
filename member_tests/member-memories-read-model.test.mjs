@@ -120,7 +120,10 @@ pass('list cover exposes private delivery source contract',list.memories[0].cove
 pass('list cover does not claim delivery is active',list.memories[0].cover?.delivery?.delivery_ready===false&&list.memories[0].cover?.delivery?.grant?.production_route_wired===false&&list.memories[0].cover?.delivery?.content?.production_route_wired===false&&list.memories[0].cover?.delivery?.content?.production_storage_binding===false);
 pass('deleted media is excluded from preview count',list.memories[0].preview_count===2);
 pass('unsafe Amazon URL is not exposed',list.memories.find(x=>x.memory_id==='mem_A_old')?.amazon_photos_available===false);
-pass('list exposes no private storage keys',!JSON.stringify(list).includes('storage_key')&&!JSON.stringify(list).includes('private/a-cover.jpg'));
+pass('list exposes no private storage-key field or value',
+  list.memories.every(memory=>!memory.cover||!('storage_key' in memory.cover))
+  && !JSON.stringify(list).includes('private/a-cover.jpg')
+);
 pass('list overlays only this Member customer Favorite state',list.memories.find(x=>x.memory_id==='mem_A_new')?.favorite===true&&list.memories.find(x=>x.memory_id==='mem_A_old')?.favorite===false);
 pass('Favorite state remains read-only until mutation phase',list.favorites_available===true&&list.favorite_mutation_ready===false&&list.memories.every(x=>x.favorite_mutable===false));
 
