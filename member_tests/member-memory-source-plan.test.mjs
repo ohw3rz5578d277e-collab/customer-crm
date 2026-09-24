@@ -82,7 +82,7 @@ pass('source Customer ID mismatch fails closed',wrongSource.ok===false&&wrongSou
 const wrongFamily=buildMemorySyncPlan({
   family_id:'fam_A',
   customer_id:customerId,
-  source_memories:[source.memories[0]],
+  source_memories:[r1],
   existing_memories:[{family_id:'fam_B',source_system:'customer-crm',source_customer_id:customerId,source_reservation_id:'R-1'}]
 });
 pass('existing MEMORY in another family fails closed',wrongFamily.ok===false&&wrongFamily.conflicts.some(x=>x.reason==='existing_memory_family_conflict'));
@@ -90,7 +90,7 @@ pass('existing MEMORY in another family fails closed',wrongFamily.ok===false&&wr
 const wrongCustomer=buildMemorySyncPlan({
   family_id:'fam_A',
   customer_id:customerId,
-  source_memories:[source.memories[0]],
+  source_memories:[r1],
   existing_memories:[{family_id:'fam_A',source_system:'customer-crm',source_customer_id:'26000999',source_reservation_id:'R-1'}]
 });
 pass('existing MEMORY for another customer fails closed',wrongCustomer.ok===false&&wrongCustomer.conflicts.some(x=>x.reason==='existing_memory_customer_conflict'));
