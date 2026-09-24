@@ -100,11 +100,14 @@ pass('single-photo browser contract succeeds',single.status==='ok'&&single.read_
 pass('contract is browser-side and never server-rendered',single.contract.execution_environment==='browser'&&single.contract.server_rendering===false);
 pass('canvas dimensions and output MIME are exact',single.contract.canvas.width===1290&&single.contract.canvas.height===2796&&single.contract.canvas.output_mime==='image/png');
 pass('template layer uses trusted local public asset only',single.contract.template_layer.asset.public_path==='/member-assets/creative/single.png'&&single.contract.privacy.same_origin_assets_only===true);
+pass('template is fixed as top overlay layer',single.contract.template_layer.role==='overlay'&&single.contract.template_layer.z_index===1000);
+pass('photo layer role/order is deterministic',single.contract.photo_layers[0].role==='photo'&&single.contract.photo_layers[0].z_index===1);
+pass('PNG canvas remains transparent by contract',single.contract.canvas.background==='transparent'&&single.contract.canvas.alpha===true);
 pass('photo layer uses private grant/content contract only',single.contract.photo_layers[0].media.grant.path==='/api/internal/member/media/grant'&&single.contract.photo_layers[0].media.content.path==='/api/internal/member/media/content');
 pass('photo layer does not contain grant value or storage key',!('grant_value' in single.contract.photo_layers[0].media)&&!('storage_key' in single.contract.photo_layers[0].media));
-pass('browser renderer remains explicitly unimplemented',single.contract.readiness.browser_renderer_implemented===false&&single.contract.readiness.runtime_ready===false);
+pass('browser renderer source is implemented but runtime remains blocked',single.contract.readiness.browser_renderer_implemented===true&&single.contract.readiness.runtime_ready===false);
 pass('private media inactive blocks runtime',single.contract.readiness.blockers.includes('private_media_delivery_not_active'));
-pass('renderer absence blocks runtime',single.contract.readiness.blockers.includes('browser_renderer_not_implemented'));
+pass('renderer absence is no longer a runtime blocker',!single.contract.readiness.blockers.includes('browser_renderer_not_implemented'));
 pass('local download is browser-local contract only',single.contract.local_download.mechanism==='browser_blob_object_url'&&single.contract.local_download.ready===false&&single.contract.local_download.server_upload===false&&single.contract.local_download.generated_output_persistence===false);
 pass('download filename is safe and MIME-specific',single.contract.local_download.filename==='Family Wallpaper.png');
 pass('image processing does not copy EXIF/metadata',single.contract.image_processing.exif_preservation===false&&single.contract.image_processing.metadata_copy===false);
@@ -214,7 +217,7 @@ pass('slot-count mismatch fails browser plan',badSlotCount.status==='creative_br
 
 const health=memberCreativeBrowserExecutionHealth();
 pass('health records source-only browser contract',health.member_creative_browser_execution===true&&health.source_only===true&&health.browser_side_only===true&&health.browser_execution_contract_ready===true);
-pass('health keeps actual renderer inactive',health.browser_renderer_implemented===false&&health.server_rendering===false);
+pass('health records renderer source implemented without server rendering',health.browser_renderer_implemented===true&&health.server_rendering===false);
 pass('health limits outputs to image formats and excludes memory movie',health.supported_output_mimes.includes('image/png')&&health.supported_output_mimes.includes('image/jpeg')&&health.supported_output_mimes.includes('image/webp')&&health.video_output_supported===false&&health.memory_movie_supported===false);
 pass('health records no arbitrary HTML/CSS/JS/layout JSON',health.arbitrary_layout_json===false&&health.arbitrary_html===false&&health.arbitrary_css===false&&health.arbitrary_javascript===false);
 pass('health records local-only download and no server writes',health.local_download_mechanism==='browser_blob_object_url'&&health.customer_photo_server_write===false&&health.generated_output_server_write===false);
