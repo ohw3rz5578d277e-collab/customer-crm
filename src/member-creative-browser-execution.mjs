@@ -273,10 +273,13 @@ export function buildMemberCreativeBrowserExecutionContract(plan){
         height,
         output_mime:outputMime,
         color_space:'srgb',
-        alpha:outputMime!=='image/jpeg'
+        alpha:outputMime!=='image/jpeg',
+        background:outputMime==='image/jpeg'?'#ffffff':'transparent'
       },
       template_layer:{
         required:true,
+        role:'overlay',
+        z_index:1000,
         asset:templateAsset,
         draw:{
           x:0,
@@ -289,6 +292,8 @@ export function buildMemberCreativeBrowserExecutionContract(plan){
       },
       photo_layers:layout.slots.map((slot,index)=>({
         ...slot,
+        role:'photo',
+        z_index:index+1,
         media:deliveries[index]
       })),
       layout:{
