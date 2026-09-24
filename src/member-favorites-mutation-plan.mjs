@@ -30,10 +30,11 @@ function validSession(session){
 }
 
 function validMemoryId(memoryId){
-  const id=text(memoryId);
-  return !!id
-    && id.length<=MAX_MEMORY_ID
-    && !/[\u0000-\u001f\u007f]/.test(id);
+  const raw=memoryId==null?'':String(memoryId);
+  if(!raw||raw.length>MAX_MEMORY_ID)return false;
+  if(/[\u0000-\u001f\u007f]/.test(raw))return false;
+  if(raw!==raw.trim())return false;
+  return true;
 }
 
 async function authorizeSession(env,session){
