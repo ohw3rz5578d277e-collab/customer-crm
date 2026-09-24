@@ -1,5 +1,7 @@
 import { readMemberCreativeCatalogForSession } from './member-creative-catalog-read-model.mjs';
 import { authorizeMemberPrivateMediaAccess } from './member-private-media-access.mjs';
+import { memberPrivateMediaDeliveryPublicContract } from './member-private-media-delivery-grant.mjs';
+import { buildMemberCreativeBrowserExecutionContract } from './member-creative-browser-execution.mjs';
 
 const BUILD='member-creative-composition-plan-20260924-01';
 const CUSTOMER_ID_RE=/^\d{8}$/;
@@ -73,7 +75,8 @@ function safeMediaDescriptor(result){
     media_type:text(result?.media?.media_type)||'image',
     role:text(result?.media?.role)||'preview',
     width:result?.media?.width==null?null:Number(result.media.width),
-    height:result?.media?.height==null?null:Number(result.media.height)
+    height:result?.media?.height==null?null:Number(result.media.height),
+    delivery:memberPrivateMediaDeliveryPublicContract()
   };
 }
 
@@ -143,16 +146,19 @@ function buildCompositionPlan(template,mediaDescriptors=[]){
         },
         asset_ref:{
           asset_id:template.asset_ref.asset_id,
-          preview_asset_id:template.asset_ref.preview_asset_id||null
+          preview_asset_id:template.asset_ref.preview_asset_id||null,
+          public_asset:template.asset_ref.public_asset||null,
+          preview_public_asset:template.asset_ref.preview_public_asset||null
         }
       },
       selected_media:mediaDescriptors,
       selected_memory_count:distinctMemoryIds.size,
       execution:{
         ready:false,
-        template_asset_delivery_ready:false,
+        template_asset_delivery_ready:!!template.asset_ref?.public_asset,
         private_media_delivery_ready:false,
         browser_composition_implemented:false,
+        browser_execution_contract_ready:false,
         generated_output_persistence_ready:false
       },
       privacy:{
@@ -306,8 +312,25 @@ export async function planMemberCreativeComposition(env,session,input,{as_of}={}
   }
 
   const built=buildCompositionPlan(template,authorized);
+  const browserExecution=built.status==='ok'
+    ?buildMemberCreativeBrowserExecutionContract(built.plan)
+    :{status:'creative_browser_plan_unavailable',contract:null};
+
+  if(built.status==='ok'){
+    built.plan.browser_execution=browserExecution.contract;
+    built.plan.execution.browser_execution_contract_ready=browserExecution.status==='ok';
+    built.plan.execution.browser_composition_implemented=browserExecution.status==='ok';
+    built.plan.execution.template_asset_delivery_ready=
+      browserExecution.contract?.readiness?.template_public_asset_ready===true;
+    built.plan.execution.private_media_delivery_ready=
+      browserExecution.contract?.readiness?.private_media_delivery_ready===true;
+    built.plan.execution.ready=
+      browserExecution.contract?.readiness?.runtime_ready===true;
+  }
+
   return {
     ...built,
+    browser_execution_status:browserExecution.status,
     family_id:normalizedSession.family_id,
     customer_id:normalizedSession.customer_id,
     template_id:selection.template_id,
@@ -399,7 +422,11 @@ export function memberCreativeCompositionPlanHealth(){
     arbitrary_external_url_exposed:false,
     raw_photo_binary_in_plan:false,
     generation_executed:false,
-    browser_composition_implemented:false,
+    browser_composition_implemented:true,
+    browser_execution_contract_ready:true,
+    browser_output_image_only:true,
+    memory_movie_execution_supported:false,
+    local_download_contract_ready:true,
     customer_photo_write:false,
     generated_output_write:false,
     production_write:false
