@@ -110,6 +110,9 @@ export function validateMemberCreativeBrowserRenderContract(contract){
   if(template.required!==true){
     return {ok:false,error:'template_layer_required'};
   }
+  if(template.role!=='overlay'||Number(template.z_index)!==1000){
+    return {ok:false,error:'invalid_template_layer_role'};
+  }
   if(!validLocalMemberAssetPath(asset.public_path)){
     return {ok:false,error:'invalid_template_asset_path'};
   }
@@ -118,6 +121,9 @@ export function validateMemberCreativeBrowserRenderContract(contract){
   }
   if(!validRect(draw,width,height)){
     return {ok:false,error:'invalid_template_draw_rect'};
+  }
+  if(draw.fit!=='cover'||Number(draw.opacity)!==1){
+    return {ok:false,error:'unsupported_template_transform'};
   }
 
   const layers=Array.isArray(contract.photo_layers)?contract.photo_layers:[];
@@ -129,6 +135,9 @@ export function validateMemberCreativeBrowserRenderContract(contract){
     const layer=layers[index];
     if(Number(layer.index)!==index){
       return {ok:false,error:'invalid_photo_layer_index'};
+    }
+    if(layer.role!=='photo'||Number(layer.z_index)!==index+1){
+      return {ok:false,error:'invalid_photo_layer_role'};
     }
     if(!validRect(layer,width,height)){
       return {ok:false,error:'invalid_photo_layer_rect'};
@@ -144,11 +153,42 @@ export function validateMemberCreativeBrowserRenderContract(contract){
     }
   }
 
-  const filename=text(contract.local_download?.filename);
+  const layout=contract.layout||{};
+  if(
+    layout.arbitrary_layout_json!==false
+    || layout.arbitrary_html!==false
+    || layout.arbitrary_css!==false
+    || layout.arbitrary_javascript!==false
+  ){
+    return {ok:false,error:'unsafe_layout_contract'};
+  }
+
+  const processing=contract.image_processing||{};
+  if(
+    processing.fit!=='cover'
+    || processing.focal_point!=='center'
+    || !Array.isArray(processing.filters)
+    || processing.filters.length!==0
+    || processing.exif_preservation!==false
+    || processing.metadata_copy!==false
+  ){
+    return {ok:false,error:'unsafe_image_processing_contract'};
+  }
+
+  const download=contract.local_download||{};
+  if(
+    download.mechanism!=='browser_blob_object_url'
+    || download.server_upload!==false
+    || download.generated_output_persistence!==false
+  ){
+    return {ok:false,error:'unsafe_download_contract'};
+  }
+
+  const filename=text(download.filename);
   if(!filename||filename.length>120||/[\\/:*?"<>|\u0000-\u001f\u007f]/.test(filename)){
     return {ok:false,error:'invalid_download_filename'};
   }
-  if(text(contract.local_download?.mime_type).toLowerCase()!==outputMime){
+  if(text(download.mime_type).toLowerCase()!==outputMime){
     return {ok:false,error:'download_mime_mismatch'};
   }
 
