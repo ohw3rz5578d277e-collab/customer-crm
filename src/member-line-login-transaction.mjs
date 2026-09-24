@@ -1,4 +1,4 @@
-const BUILD='member-line-login-transaction-20260924-01';
+const BUILD='member-line-login-transaction-20260924-02';
 const AUTHORIZATION_ENDPOINT='https://access.line.me/oauth2/v2.1/authorize';
 const COOKIE_NAME='__Host-mizuno_member_login_tx';
 const TX_MAX_AGE_SECONDS=60*10;
@@ -103,6 +103,22 @@ function validReturnTo(value){
   if(!v.startsWith('/')||v.startsWith('//'))return '';
   if(/[\u0000-\u001f\u007f]/.test(v))return '';
   return v;
+}
+
+function callbackMatchesRedirectUri(actualUrl,configuredRedirectUri){
+  try{
+    const actual=new URL(actualUrl);
+    const expected=new URL(configuredRedirectUri);
+    if(actual.origin!==expected.origin||actual.pathname!==expected.pathname)return false;
+
+    const expectedPairs=[...expected.searchParams.entries()];
+    for(const [key,value] of expectedPairs){
+      if(!actual.searchParams.getAll(key).includes(value))return false;
+    }
+    return true;
+  }catch{
+    return false;
+  }
 }
 
 function cookieValue(request,name){
@@ -261,6 +277,14 @@ export async function verifyMemberLineLoginCallback(request,env,{now_seconds}={}
   const cfg=config(env);
   if(!cfg.ok)return {status:cfg.error,verified:false};
 
+  if(!callbackMatchesRedirectUri(request.url,cfg.redirect_uri)){
+    return {
+      status:'line_login_callback_redirect_mismatch',
+      verified:false,
+      clear_cookie:clearTransactionCookie()
+    };
+  }
+
   const url=new URL(request.url);
   const lineError=text(url.searchParams.get('error'));
   if(lineError){
@@ -338,6 +362,7 @@ export function memberLineLoginTransactionHealth(env){
     nonce_required:true,
     pkce_required:true,
     pkce_method:'S256',
+    callback_redirect_revalidated:true,
     transaction_cookie:COOKIE_NAME,
     cookie_http_only:true,
     cookie_secure:true,
@@ -368,6 +393,7 @@ export const __test={
   TX_MAX_AGE_SECONDS,
   MIN_SECRET_LENGTH,
   validReturnTo,
+  callbackMatchesRedirectUri,
   config,
   verifySignedPayload,
   safeEqualText
