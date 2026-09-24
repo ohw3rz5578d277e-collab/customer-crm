@@ -118,6 +118,37 @@ const baseComponents={
     source:{authorized_memory_result_reused:true},
     read_only:true
   },
+  shopPickup:{
+    status:'ok',
+    family_id:familyId,
+    customer_id:customerId,
+    home_pickup:[
+      {
+        product_id:'album',product_type:'album',title:'Family Album',
+        hero_asset_ref:{asset_id:'asset:album',storage_key_exposed:false,arbitrary_external_url_exposed:false},
+        navigation:{shop_path:'/shop/album/',local_path_only:true,cta_label:'商品を見る'},
+        pricing:{authoritative:false,amount:null,currency:'JPY',source_connected:false},
+        checkout:{ready:false,provider:null},
+        family_pass_benefit:{enforcement_ready:false,discount_amount:null},
+        featured_home:true,sort_order:1
+      },
+      {
+        product_id:'canvas',product_type:'canvas',title:'Canvas',
+        hero_asset_ref:{asset_id:'asset:canvas',storage_key_exposed:false,arbitrary_external_url_exposed:false},
+        navigation:{shop_path:'/shop/canvas/',local_path_only:true,cta_label:'商品を見る'},
+        pricing:{authoritative:false,amount:null,currency:'JPY',source_connected:false},
+        checkout:{ready:false,provider:null},
+        family_pass_benefit:{enforcement_ready:false,discount_amount:null},
+        featured_home:true,sort_order:2
+      }
+    ],
+    available_count:4,
+    pricing_authoritative:false,
+    checkout_ready:false,
+    discount_enforcement_ready:false,
+    source:{presentation_catalog_only:true,price_source_connected:false,checkout_source_connected:false},
+    read_only:true
+  },
   nextMemory:{
     status:'ok',
     family_id:familyId,
@@ -153,7 +184,8 @@ function compose(overrides={}){
     passport:overrides.passport??baseComponents.passport,
     nextMemory:overrides.nextMemory??baseComponents.nextMemory,
     todayMemory:overrides.todayMemory??baseComponents.todayMemory,
-    creative:overrides.creative??baseComponents.creative
+    creative:overrides.creative??baseComponents.creative,
+    shopPickup:overrides.shopPickup??baseComponents.shopPickup
   });
 }
 
@@ -165,12 +197,14 @@ pass('HOME composes FAMILY PASS',full.home.family_pass.family_pass.current_tier=
 pass('HOME composes FAMILY PASSPORT',full.home.family_passport.achieved_count===3);
 pass('HOME composes TODAY\'S MEMORY',full.home.today_memory.today_memory.mode==='exact_anniversary'&&full.home.today_memory.today_memory.headline==='この日の思い出');
 pass('HOME composes Creative catalog',full.home.creative.featured_templates.length===2&&full.home.creative.eligible_count===2&&full.home.creative.generation_ready===false);
+pass('HOME composes Shop Pickup presentation catalog',full.home.shop_pickup.products.length===2&&full.home.shop_pickup.available_count===4);
+pass('HOME Shop Pickup keeps commerce disabled',full.home.shop_pickup.pricing_authoritative===false&&full.home.shop_pickup.checkout_ready===false&&full.home.shop_pickup.discount_enforcement_ready===false);
 pass('HOME composes NEXT MEMORY',full.home.next_memory.next_memory.type==='first_birthday');
 pass('HOME caps NEXT MEMORY candidate preview at three',full.home.next_memory.candidates.length===3);
 pass('HOME keeps LINE consultation CTA non-automatic',full.home.next_memory.consultation_cta.channel==='line'&&full.home.next_memory.consultation_cta.automatic_send===false);
 pass('HOME does not claim Family history is child specific',full.home.next_memory.family_history_is_child_specific===false&&full.home.next_memory.child_memory_link_available===false);
 pass('full HOME is not partial',full.home.partial===false&&full.home.unavailable_sections.length===0);
-pass('TODAY\'S MEMORY and Creative are source-active while Shop/News remain inactive',full.home.future_modules.today_memory===true&&full.home.future_modules.creative===true&&full.home.future_modules.shop_pickup===false&&full.home.future_modules.news===false);
+pass('TODAY\'S MEMORY Creative and Shop Pickup are source-active while News remains inactive',full.home.future_modules.today_memory===true&&full.home.future_modules.creative===true&&full.home.future_modules.shop_pickup===true&&full.home.future_modules.news===false);
 pass('HOME result is read-only',full.read_only===true);
 
 const degradedNext=compose({
@@ -200,6 +234,12 @@ const degradedCreative=compose({
 });
 pass('missing Creative schema degrades Creative section only',degradedCreative.status==='ok'&&degradedCreative.home.partial===true&&degradedCreative.home.creative===null);
 pass('degraded Creative section reports schema reason',degradedCreative.home.unavailable_sections.some(x=>x.section==='creative'&&x.error==='creative_catalog_schema_not_applied'));
+
+const degradedShop=compose({
+  shopPickup:{status:'shop_catalog_schema_not_applied',home_pickup:[],products:[],read_only:true}
+});
+pass('missing Shop schema degrades Shop Pickup section only',degradedShop.status==='ok'&&degradedShop.home.partial===true&&degradedShop.home.shop_pickup===null);
+pass('degraded Shop Pickup section reports schema reason',degradedShop.home.unavailable_sections.some(x=>x.section==='shop_pickup'&&x.error==='shop_catalog_schema_not_applied'));
 
 const degradedPass=compose({
   familyPass:{
@@ -260,7 +300,8 @@ function makeDb({
   childSchema=true,
   memorySchema=true,
   mediaSchema=true,
-  creativeSchema=true
+  creativeSchema=true,
+  shopSchema=true
 }={}){
   const tables=new Set([
     'customer_family_groups',
@@ -268,7 +309,8 @@ function makeDb({
     ...(childSchema?['customer_family_members']:[]),
     ...(memorySchema?['member_memories']:[]),
     ...(mediaSchema?['member_memory_media']:[]),
-    ...(creativeSchema?['member_creative_templates']:[])
+    ...(creativeSchema?['member_creative_templates']:[]),
+    ...(shopSchema?['member_shop_products']:[])
   ]);
   const writes=[];
   const seenSql=[];
@@ -413,6 +455,38 @@ function makeDb({
               }
             ]};
           }
+          if(sql.includes('FROM member_shop_products')){
+            return {results:[
+              {
+                product_id:'album',
+                product_type:'album',
+                title:'Family Album',
+                description:'',
+                season_tag:'evergreen',
+                starts_on:null,
+                ends_on:null,
+                hero_asset_id:'asset:shop:album',
+                shop_path:'/shop/album/',
+                cta_label:'商品を見る',
+                featured_home:1,
+                sort_order:1
+              },
+              {
+                product_id:'canvas',
+                product_type:'canvas',
+                title:'Canvas',
+                description:'',
+                season_tag:'evergreen',
+                starts_on:null,
+                ends_on:null,
+                hero_asset_id:'asset:shop:canvas',
+                shop_path:'/shop/canvas/',
+                cta_label:'商品を見る',
+                featured_home:1,
+                sort_order:2
+              }
+            ]};
+          }
           return {results:[]};
         },
         async run(){
@@ -446,7 +520,7 @@ const integratedPartial=await readMemberHomeForSession(
   {family_id:familyId,customer_id:customerId},
   {as_of:'2026-09-24'}
 );
-pass('integrated HOME degrades only NEXT MEMORY when child schema is absent',integratedPartial.status==='ok'&&integratedPartial.home.partial===true&&integratedPartial.home.next_memory===null&&integratedPartial.home.recent_memories.length===3&&integratedPartial.home.today_memory.today_memory?.primary?.memory_id==='mem_today'&&integratedPartial.home.creative.featured_templates.length===2);
+pass('integrated HOME degrades only NEXT MEMORY when child schema is absent',integratedPartial.status==='ok'&&integratedPartial.home.partial===true&&integratedPartial.home.next_memory===null&&integratedPartial.home.recent_memories.length===3&&integratedPartial.home.today_memory.today_memory?.primary?.memory_id==='mem_today'&&integratedPartial.home.creative.featured_templates.length===2&&integratedPartial.home.shop_pickup.products.length===2);
 
 const noCreativeDb=makeDb({creativeSchema:false});
 const integratedNoCreative=await readMemberHomeForSession(
@@ -455,6 +529,14 @@ const integratedNoCreative=await readMemberHomeForSession(
   {as_of:'2026-09-24'}
 );
 pass('integrated HOME degrades Creative only when Creative schema is absent',integratedNoCreative.status==='ok'&&integratedNoCreative.home.partial===true&&integratedNoCreative.home.creative===null&&integratedNoCreative.home.recent_memories.length===3);
+
+const noShopDb=makeDb({shopSchema:false});
+const integratedNoShop=await readMemberHomeForSession(
+  {DB:noShopDb},
+  {family_id:familyId,customer_id:customerId},
+  {as_of:'2026-09-24'}
+);
+pass('integrated HOME degrades Shop Pickup only when Shop schema is absent',integratedNoShop.status==='ok'&&integratedNoShop.home.partial===true&&integratedNoShop.home.shop_pickup===null&&integratedNoShop.home.recent_memories.length===3);
 
 const noMediaDb=makeDb({mediaSchema:false});
 const integratedNoMemory=await readMemberHomeForSession(
@@ -488,13 +570,14 @@ const post=await handleMemberHomeReadRequest(
 pass('HTTP HOME is GET only',post.status===405);
 
 const health=memberHomeReadHealth();
-pass('health records six composed components',health.components.join(',')==='member_memories,family_pass,family_passport,today_memory,creative,next_memory');
+pass('health records seven composed components',health.components.join(',')==='member_memories,family_pass,family_passport,today_memory,creative,shop_pickup,next_memory');
 pass('health requires component identity consistency',health.component_identity_consistency_required===true&&health.identity_security_failures_fail_closed===true);
 pass('health records MEMORIES as core and NEXT MEMORY optional degradation',health.memories_core_required===true&&health.next_memory_optional_schema_degradation===true);
 pass('health records TODAY\'S MEMORY derives from loaded MEMORIES with no extra DB read',health.today_memory_derived_from_loaded_memories===true&&health.today_memory_extra_db_read===false);
 pass('health records Creative reuses authorized MEMORIES with no extra MEMORY list read',health.creative_uses_authorized_memories===true&&health.creative_extra_memory_db_read===false&&health.creative_optional_schema_degradation===true);
-pass('health records response limits',health.recent_memory_limit===3&&health.next_memory_candidate_limit===3&&health.creative_template_limit===3);
-pass('health source-activates TODAY\'S MEMORY and Creative only',health.today_memory_active===true&&health.creative_active===true&&health.shop_pickup_active===false&&health.news_active===false);
+pass('health records Shop Pickup as optional presentation-only commerce-disabled section',health.shop_pickup_optional_schema_degradation===true&&health.shop_pickup_presentation_only===true&&health.shop_pickup_pricing_authoritative===false&&health.shop_pickup_checkout_ready===false&&health.shop_pickup_discount_enforcement_ready===false);
+pass('health records response limits',health.recent_memory_limit===3&&health.next_memory_candidate_limit===3&&health.creative_template_limit===3&&health.shop_pickup_limit===3);
+pass('health source-activates TODAY\'S MEMORY Creative and Shop Pickup only',health.today_memory_active===true&&health.creative_active===true&&health.shop_pickup_active===true&&health.news_active===false);
 pass('health records no contact/send/reservation/write',health.automatic_contact===false&&health.line_send===false&&health.reservation_creation===false&&health.production_write===false);
 pass('health records source-only route state',health.production_route_wired===false&&health.read_only===true&&health.request_customer_id_input===false&&health.request_family_id_input===false&&health.request_as_of_input===false);
 

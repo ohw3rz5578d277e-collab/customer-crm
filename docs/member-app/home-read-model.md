@@ -15,6 +15,7 @@ Current HOME composition uses:
 - FAMILY PASSPORT
 - TODAY'S MEMORY
 - Creative
+- Shop Pickup
 - NEXT MEMORY
 
 Final visual UI remains a separate design task.
@@ -141,6 +142,30 @@ Creative schema absence is optional degradation. If the catalog schema has not b
 
 Source-level Creative activation does **not** activate rendering, photo upload, generated-output storage, asset delivery, or final CREATE/HOME UI.
 
+### Shop Pickup
+
+Source:
+
+`readMemberShopCatalogForSession`
+
+HOME exposes only the approved presentation-catalog subset:
+
+- up to 3 Owner-featured products
+- total available product count
+- logical hero asset IDs
+- local Shop paths
+- CTA labels
+
+HOME explicitly preserves the commerce-disabled state:
+
+- `pricing_authoritative=false`
+- `checkout_ready=false`
+- `discount_enforcement_ready=false`
+
+Shop schema absence is optional degradation. If the Shop catalog schema is unavailable, the rest of authorized HOME data can still render and the Shop Pickup section is reported unavailable.
+
+Source-level Shop Pickup activation does **not** activate pricing, inventory, checkout, order creation, payment, Square/WooCommerce integration, BLACK discount enforcement, asset binary delivery, or final SHOP/HOME UI.
+
 ### NEXT MEMORY
 
 Source:
@@ -210,12 +235,13 @@ Initial HOME limits:
 - recent MEMORIES: 3
 - NEXT MEMORY candidate previews: 3
 - Creative template previews: 3
+- Shop Pickup product previews: 3
 
 These are presentation read-model limits, not deletion or storage limits.
 
 ## Module activation state
 
-TODAY'S MEMORY and Creative are now active in the source-level HOME composition.
+TODAY'S MEMORY, Creative, and Shop Pickup are now active in the source-level HOME composition.
 
 This means only that the HOME read model can return its already-approved read-only data.
 
@@ -226,9 +252,8 @@ It does **not** mean:
 - push notification activation
 - LINE activation
 
-The remaining future HOME modules are still inactive:
+The remaining future HOME module is still inactive:
 
-- Shop Pickup
 - News
 
 HOME does not invent data for modules whose backend contracts are not yet implemented.
@@ -276,7 +301,9 @@ Not included:
 - Creative rendering / generation
 - Creative asset delivery
 - Creative customer-photo upload
-- Shop Pickup
+- authoritative Shop pricing / inventory / checkout
+- Shop BLACK benefit enforcement
+- Shop asset binary delivery
 - News feed
 - favorites
 - commerce discount enforcement
@@ -308,6 +335,9 @@ Current implementation is:
 - Creative eligibility derived from the already-authorized MEMORIES result
 - no extra Creative MEMORIES list read inside HOME
 - Creative generation remains disabled
+- Shop Pickup source composition active
+- Shop Pickup remains presentation-only
+- Shop pricing/checkout/discount enforcement remain disabled
 - no automatic contact
 - LINE send = 0
 - reservation creation = 0
