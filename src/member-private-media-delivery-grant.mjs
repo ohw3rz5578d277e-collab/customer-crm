@@ -311,6 +311,36 @@ export async function handleMemberPrivateMediaGrantRequest(request,env){
   return json({ok:false,error:result.status||'private_media_delivery_unavailable'},409);
 }
 
+export function memberPrivateMediaDeliveryPublicContract(){
+  return {
+    source_contract_ready:true,
+    delivery_ready:false,
+    grant:{
+      method:'POST',
+      path:'/api/internal/member/media/grant',
+      body_keys:['media_id'],
+      signed_member_session_required:true,
+      same_origin_required:true,
+      ttl_seconds:TOKEN_TTL_SECONDS,
+      production_route_wired:false
+    },
+    content:{
+      method:'POST',
+      path:'/api/internal/member/media/content',
+      body_keys:['media_id','grant'],
+      signed_member_session_required:true,
+      same_origin_required:true,
+      grant_required:true,
+      production_route_wired:false,
+      production_storage_binding:false,
+      production_storage_fetch:false
+    },
+    storage_key_exposed:false,
+    signed_storage_url_exposed:false,
+    external_redirect:false
+  };
+}
+
 export function memberPrivateMediaDeliveryGrantHealth(env){
   return {
     member_private_media_delivery_grant:true,
@@ -340,7 +370,8 @@ export function memberPrivateMediaDeliveryGrantHealth(env){
     binary_route_implemented:false,
     production_route_wired:false,
     production_storage_fetch:false,
-    production_write:false
+    production_write:false,
+    public_contract_exported:true
   };
 }
 

@@ -116,9 +116,14 @@ pass('family-scoped MEMORY list succeeds',list.status==='ok'&&list.family_id===f
 pass('list includes only published non-deleted family MEMORIES',list.memories.length===2&&list.memories.every(x=>x.memory_id.startsWith('mem_A_')));
 pass('list is newest shoot first',list.memories[0].memory_id==='mem_A_new'&&list.memories[1].memory_id==='mem_A_old');
 pass('cover prefers cover role over lower sort preview',list.memories[0].cover?.media_id==='media_cover');
+pass('list cover exposes private delivery source contract',list.memories[0].cover?.delivery?.source_contract_ready===true&&list.memories[0].cover?.delivery?.grant?.path==='/api/internal/member/media/grant'&&list.memories[0].cover?.delivery?.content?.path==='/api/internal/member/media/content');
+pass('list cover does not claim delivery is active',list.memories[0].cover?.delivery?.delivery_ready===false&&list.memories[0].cover?.delivery?.grant?.production_route_wired===false&&list.memories[0].cover?.delivery?.content?.production_route_wired===false&&list.memories[0].cover?.delivery?.content?.production_storage_binding===false);
 pass('deleted media is excluded from preview count',list.memories[0].preview_count===2);
 pass('unsafe Amazon URL is not exposed',list.memories.find(x=>x.memory_id==='mem_A_old')?.amazon_photos_available===false);
-pass('list exposes no private storage keys',!JSON.stringify(list).includes('storage_key')&&!JSON.stringify(list).includes('private/a-cover.jpg'));
+pass('list exposes no private storage-key field or value',
+  list.memories.every(memory=>!memory.cover||!('storage_key' in memory.cover))
+  && !JSON.stringify(list).includes('private/a-cover.jpg')
+);
 pass('list overlays only this Member customer Favorite state',list.memories.find(x=>x.memory_id==='mem_A_new')?.favorite===true&&list.memories.find(x=>x.memory_id==='mem_A_old')?.favorite===false);
 pass('Favorite state remains read-only until mutation phase',list.favorites_available===true&&list.favorite_mutation_ready===false&&list.memories.every(x=>x.favorite_mutable===false));
 
@@ -126,7 +131,9 @@ const detail=await readMemberMemoryDetailForSession(env,{family_id:familyId,cust
 pass('authorized MEMORY detail succeeds',detail.status==='ok'&&detail.memory.memory_id==='mem_A_new');
 pass('detail returns exact-family media only',detail.media.length===2&&detail.media.every(x=>x.media_id!=='media_b'));
 pass('detail exposes Amazon Photos only after family authorization',detail.amazon_link?.provider==='amazon_photos'&&detail.amazon_link?.url==='https://example.com/new');
-pass('detail exposes no private storage keys',!JSON.stringify(detail).includes('storage_key'));
+pass('detail exposes no private storage keys',!JSON.stringify(detail).includes('"storage_key":'));
+pass('detail media exposes source-only delivery contract for every item',detail.media.every(x=>x.delivery?.source_contract_ready===true&&x.delivery?.delivery_ready===false));
+pass('detail delivery contract exposes no signed storage URL/external redirect',detail.media.every(x=>x.delivery?.signed_storage_url_exposed===false&&x.delivery?.external_redirect===false));
 pass('detail overlays exact Member Favorite state',detail.favorite===true&&detail.favorite_mutable===false&&detail.favorites_available===true);
 
 const otherFamilyMemory=await readMemberMemoryDetailForSession(env,{family_id:familyId,customer_id:customerId},'mem_B');
@@ -196,6 +203,8 @@ const health=memberMemoriesReadHealth();
 pass('health contract records no route wiring or Production write',health.read_only===true&&health.production_route_wired===false&&health.production_write===false);
 pass('health contract forbids request-supplied identity',health.request_customer_id_input===false&&health.request_family_id_input===false);
 pass('health contract keeps private storage key hidden',health.private_storage_key_exposed===false);
+pass('health contract records source-only private media delivery contract',health.private_media_delivery_contract_exposed===true&&health.private_media_delivery_source_contract_ready===true&&health.private_media_delivery_ready===false);
+pass('health contract records private media delivery remains Production-inactive',health.private_media_delivery_production_route_wired===false&&health.private_media_delivery_production_storage_binding===false&&health.private_media_delivery_storage_key_exposed===false&&health.private_media_delivery_signed_storage_url_exposed===false&&health.private_media_delivery_external_redirect===false);
 pass('health contract records optional Favorite overlay and disabled mutation',health.favorite_state_optional_read===true&&health.favorite_schema_absence_degrades_to_false===true&&health.favorite_mutation_ready===false);
 pass('health contract records malformed MEMORY id fail-closed behavior',health.malformed_memory_id_fail_closed===true);
 
