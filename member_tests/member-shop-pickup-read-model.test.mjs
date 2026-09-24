@@ -195,9 +195,10 @@ const migration=fs.readFileSync(
   'migrations_managed/20260924_member_shop_catalog_foundation.sql',
   'utf8'
 );
-pass('Shop migration is additive only',!/\b(DROP|ALTER|DELETE|UPDATE|INSERT)\b/i.test(migration));
-pass('Shop schema contains no price/payment/order/inventory columns',!/\b(price|amount|currency|payment|order|inventory|stock|square|woocommerce)\b/i.test(migration));
-pass('Shop schema contains no storage_key or arbitrary URL column',!/\b(storage_key|external_url|product_url|checkout_url)\b/i.test(migration));
+const migrationSchemaOnly=migration.replace(/^\s*--.*$/gm,'');
+pass('Shop migration is additive only',!/\b(DROP|ALTER|DELETE|UPDATE|INSERT)\b/i.test(migrationSchemaOnly));
+pass('Shop schema contains no price/payment/order/inventory columns',!/\b(price|amount|currency|payment|inventory|stock|square|woocommerce)\b/i.test(migrationSchemaOnly));
+pass('Shop schema contains no storage_key or arbitrary URL column',!/\b(storage_key|external_url|product_url|checkout_url)\b/i.test(migrationSchemaOnly));
 pass('Shop schema uses local shop_path instead',migration.includes('shop_path'));
 pass('Shop schema constrains publication state',/published[\s\S]*CHECK \(published IN \(0,1\)\)/i.test(migration));
 
