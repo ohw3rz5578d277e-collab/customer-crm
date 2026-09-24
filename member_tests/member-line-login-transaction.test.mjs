@@ -74,7 +74,9 @@ const wrongState=await verifyMemberLineLoginCallback(
 );
 pass('state mismatch fails closed',wrongState.status==='line_login_state_mismatch'&&wrongState.verified===false);
 
-const tamperedToken=cookieToken.slice(0,-1)+(cookieToken.endsWith('a')?'b':'a');
+const [tamperedPayload,originalSig]=cookieToken.split('.');
+const tamperedSig=(originalSig[0]==='a'?'b':'a')+originalSig.slice(1);
+const tamperedToken=`${tamperedPayload}.${tamperedSig}`;
 const tampered=await verifyMemberLineLoginCallback(
   new Request(callbackUrl.toString(),{headers:{cookie:`${__test.COOKIE_NAME}=${tamperedToken}`}}),
   env,
