@@ -161,16 +161,30 @@ export function buildMemberProductionIntegrationAcceptance({
   const browser=memberBrowserPageHealth();
   const assets=memberPublicAssetDeliveryHealth();
   const api=memberAppHttpCompositionHealth(env);
-  const candidate=buildMemberProductionDefaultOffWiringCandidate(production_entry_source);
-  const inspection=candidate.status==='ok'
-    ?inspectMemberProductionCandidate(candidate.candidate_source)
-    :{};
 
-  const candidateChecks=Object.values(inspection);
-  const candidateReady=
-    candidate.status==='ok'
-    && candidateChecks.length>0
-    && candidateChecks.every(value=>value===true);
+  const currentInspection=inspectMemberProductionCandidate(production_entry_source);
+  const currentInspectionValues=Object.values(currentInspection);
+  const currentDefaultOffApplied=
+    currentInspectionValues.length>0
+    && currentInspectionValues.every(value=>value===true);
+
+  const generatedCandidate=currentDefaultOffApplied
+    ?null
+    :buildMemberProductionDefaultOffWiringCandidate(production_entry_source);
+
+  const generatedInspection=
+    !currentDefaultOffApplied&&generatedCandidate?.status==='ok'
+      ?inspectMemberProductionCandidate(generatedCandidate.candidate_source)
+      :{};
+
+  const generatedValues=Object.values(generatedInspection);
+  const generatedCandidateReady=
+    generatedCandidate?.status==='ok'
+    && generatedValues.length>0
+    && generatedValues.every(value=>value===true);
+
+  const defaultOffReady=currentDefaultOffApplied||generatedCandidateReady;
+  const inspection=currentDefaultOffApplied?currentInspection:generatedInspection;
 
   const sourceReady=
     requestComposition.member_production_request_composition===true
@@ -178,12 +192,12 @@ export function buildMemberProductionIntegrationAcceptance({
     && browser.member_browser_page===true
     && assets.member_public_asset_delivery===true
     && api.member_app_http_composition===true
-    && candidateReady;
+    && defaultOffReady;
 
   const blockers=[];
   if(!sourceReady)blockers.push('MEMBER_PRODUCTION_INTEGRATION_SOURCE_NOT_READY');
-  if(observed?.production_entry_candidate_applied!==true)blockers.push('PRODUCTION_ENTRY_CANDIDATE_NOT_APPLIED');
-  if(observed?.owner_production_entry_modification_authorized!==true)blockers.push('OWNER_PRODUCTION_ENTRY_MODIFICATION_AUTHORIZATION_REQUIRED');
+  if(!currentDefaultOffApplied&&observed?.production_entry_candidate_applied!==true)blockers.push('PRODUCTION_ENTRY_CANDIDATE_NOT_APPLIED');
+  if(!currentDefaultOffApplied&&observed?.owner_production_entry_modification_authorized!==true)blockers.push('OWNER_PRODUCTION_ENTRY_MODIFICATION_AUTHORIZATION_REQUIRED');
   if(observed?.owner_production_route_activation_authorized!==true)blockers.push('OWNER_PRODUCTION_ROUTE_ACTIVATION_AUTHORIZATION_REQUIRED');
   if(observed?.production_route_mode_enabled!==true)blockers.push('MEMBER_PRODUCTION_ROUTE_MODE_NOT_ENABLED');
   if(observed?.member_runtime_dependencies_verified!==true)blockers.push('MEMBER_RUNTIME_DEPENDENCIES_NOT_VERIFIED');
@@ -191,25 +205,18 @@ export function buildMemberProductionIntegrationAcceptance({
   if(observed?.private_media_binding_verified!==true)blockers.push('PRIVATE_MEDIA_BINDING_NOT_VERIFIED');
   if(observed?.read_only_canary_passed!==true)blockers.push('MEMBER_READ_ONLY_CANARY_NOT_PASSED');
 
-  return {
-    status:'ok',
-    build:BUILD,
-    source_only:true,
-    static_acceptance_only:true,
-    source_ready:sourceReady,
-    default_off_candidate_ready:candidateReady,
-    production_activation_ready:false,
-    candidate:{
-      status:candidate.status,
-      failures:candidate.failures,
-      owner_flag_default:false,
-      route_mode_env:ROUTE_MODE_ENV,
-      line_login_approved:false,
-      public_asset_adapter:null,
-      private_media_storage_adapter:null,
-      inspection
-    },
-    acceptance_sequence:[
+  const acceptanceSequence=currentDefaultOffApplied
+    ?[
+      'canonical_default_off_entry_source_already_applied',
+      'verify_existing_crm_regressions_and_member_routes_still_inactive',
+      'configure_and_verify_member_runtime_dependencies_without_route_activation',
+      'fresh_owner_authorize_route_activation_exact_sha_and_scope',
+      'activate_member_route_mode_and_owner_flag_in_exact_release',
+      'run_read_only_member_canary',
+      'activate_optional_private_media_only_under_separate_binding_gate',
+      'keep_favorites_memory_black_and_commerce_write_gates_separate'
+    ]
+    :[
       'merge_source_only_acceptance',
       'fresh_owner_authorize_production_entry_modification_exact_sha',
       'apply_default_off_production_entry_candidate',
@@ -220,10 +227,31 @@ export function buildMemberProductionIntegrationAcceptance({
       'run_read_only_member_canary',
       'activate_optional_private_media_only_under_separate_binding_gate',
       'keep_favorites_memory_black_and_commerce_write_gates_separate'
-    ],
+    ];
+
+  return {
+    status:'ok',
+    build:BUILD,
+    source_only:true,
+    static_acceptance_only:true,
+    source_ready:sourceReady,
+    canonical_source_entry_default_off_applied:currentDefaultOffApplied,
+    default_off_candidate_ready:defaultOffReady,
+    production_activation_ready:false,
+    candidate:{
+      status:currentDefaultOffApplied?'already_applied_default_off':generatedCandidate?.status||'not_ready',
+      failures:currentDefaultOffApplied?[]:[...(generatedCandidate?.failures||[])],
+      owner_flag_default:false,
+      route_mode_env:ROUTE_MODE_ENV,
+      line_login_approved:false,
+      public_asset_adapter:null,
+      private_media_storage_adapter:null,
+      inspection
+    },
+    acceptance_sequence:acceptanceSequence,
     blockers,
     invariant:{
-      production_entry_modified:false,
+      production_entry_mutation_by_acceptance:false,
       production_route_activated:false,
       line_callback_boundary_exception_activated:false,
       production_deploy:false,
@@ -249,6 +277,7 @@ export function memberProductionIntegrationAcceptanceHealth(){
     source_only:true,
     static_acceptance_only:true,
     exact_default_off_candidate_supported:true,
+    canonical_source_entry_default_off_expected:true,
     production_activation_ready:false,
     production_entry_modified:false,
     production_route_activated:false,
