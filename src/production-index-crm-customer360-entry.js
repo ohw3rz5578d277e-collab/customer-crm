@@ -1,4 +1,5 @@
 import app from './production-index-crm-browser-root-entry.js';
+import { handleMemberProductionRequest, memberProductionRouteModeEnabled } from './member-production-request-composition.mjs';
 import todayReadOnlyApp from './production-index-crm-today-dashboard.js';
 import { patchBrowserRootHealth } from './production-index-crm-browser-root-entry.js';
 import { handleCustomer360Request, customer360Health } from './crm-customer360-runtime.mjs';
@@ -251,22 +252,32 @@ function securityJson(data,status){
     headers:{'content-type':'application/json; charset=utf-8','cache-control':'no-store'}
   });
 }
-function isSensitiveProductionPath(pathname){
-  return pathname==='/admin'||pathname.startsWith('/admin/')||pathname.startsWith('/api/')||pathname.startsWith('/__crm/');
+
+const MEMBER_PRODUCTION_OWNER_APPROVED=false;
+function memberProductionBoundaryActive(env){
+  return MEMBER_PRODUCTION_OWNER_APPROVED===true&&memberProductionRouteModeEnabled(env);
 }
-export function enforceProductionRequestBoundary(request){
+function isMemberLineLoginCallbackRequest(request,url){
+  const method=String(request.method||'GET').toUpperCase();
+  return method==='GET'&&url.pathname==='/api/member/login/line/callback';
+}
+function isSensitiveProductionPath(pathname){
+  return pathname==='/admin'||pathname.startsWith('/admin/')||pathname==='/member'||pathname.startsWith('/member/')||pathname.startsWith('/api/')||pathname.startsWith('/__crm/');
+}
+export function enforceProductionRequestBoundary(request,env){
   const method=String(request.method||'GET').toUpperCase();
   if(method==='TRACE'||method==='CONNECT')return securityJson({ok:false,error:'method_not_allowed'},405);
   const url=new URL(request.url);
   if(!isSensitiveProductionPath(url.pathname))return null;
   if(url.searchParams.has('token')||url.searchParams.has('admin_token'))return securityJson({ok:false,error:'url_token_forbidden'},400);
+  const memberLineLoginCallback=memberProductionBoundaryActive(env)&&isMemberLineLoginCallbackRequest(request,url);
   const origin=String(request.headers.get('origin')||'').trim();
-  if(origin){
+  if(origin&&!memberLineLoginCallback){
     try{if(new URL(origin).origin!==url.origin)return securityJson({ok:false,error:'cross_origin_blocked'},403)}
     catch{return securityJson({ok:false,error:'cross_origin_blocked'},403)}
   }
   const fetchSite=String(request.headers.get('sec-fetch-site')||'').toLowerCase();
-  if(fetchSite==='cross-site'&&url.pathname.startsWith('/api/'))return securityJson({ok:false,error:'cross_site_api_blocked'},403);
+  if(fetchSite==='cross-site'&&url.pathname.startsWith('/api/')&&!memberLineLoginCallback)return securityJson({ok:false,error:'cross_site_api_blocked'},403);
   if(fetchSite==='cross-site'&&method!=='GET'&&method!=='HEAD')return securityJson({ok:false,error:'cross_site_write_blocked'},403);
   return null;
 }
@@ -326,8 +337,15 @@ async function handleCustomerCrmRequest(request,env,ctx){
 
 export default {
   async fetch(request,env,ctx){
-    const blocked=enforceProductionRequestBoundary(request);
+    const blocked=enforceProductionRequestBoundary(request,env);
     if(blocked)return hardenProductionResponse(blocked,request);
+    const memberResponse=await handleMemberProductionRequest(request,env,{
+      approved:MEMBER_PRODUCTION_OWNER_APPROVED,
+      line_login_approved:false,
+      public_asset_adapter:null,
+      private_media_storage_adapter:null
+    });
+    if(memberResponse)return hardenProductionResponse(memberResponse,request);
     const response=await handleCustomerCrmRequest(request,env,ctx);
     return hardenProductionResponse(response,request);
   }
