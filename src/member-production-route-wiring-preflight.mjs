@@ -1,4 +1,4 @@
-const BUILD='member-production-route-wiring-preflight-20260925-01';
+const BUILD='member-production-route-wiring-preflight-20260925-02';
 const CALLBACK_PATH='/api/member/login/line/callback';
 const MEMBER_API_PREFIX='/api/member/';
 const MEMBER_PAGE_PATH='/member';
@@ -23,7 +23,11 @@ function hasMemberPageLiteral(source){
 }
 
 function hasMemberAssetLiteral(source){
-  return source.includes(MEMBER_ASSET_PREFIX);
+  return source.includes(MEMBER_ASSET_PREFIX)
+    || (
+      source.includes('member-production-request-composition.mjs')
+      && source.includes('handleMemberProductionRequest')
+    );
 }
 
 function hasCrossSiteApiBlanket(source){
@@ -46,16 +50,25 @@ function hasExactCallbackBoundaryException(source){
 }
 
 function hasCompositionImport(source){
-  return source.includes('member-app-http-composition.mjs')
+  const current=
+    source.includes('member-production-request-composition.mjs')
+    && source.includes('handleMemberProductionRequest');
+  const legacyPlan=
+    source.includes('member-app-http-composition.mjs')
     && source.includes('handleMemberAppHttpRequest');
+  return current||legacyPlan;
 }
 
 function hasCompositionDispatch(source){
-  return source.includes('handleMemberAppHttpRequest(');
+  return source.includes('handleMemberProductionRequest(')
+    || source.includes('handleMemberAppHttpRequest(');
 }
 
 function hasGlobalBoundaryAnchor(source){
-  return source.includes('const blocked=enforceProductionRequestBoundary(request);')
+  const boundaryCall=
+    source.includes('const blocked=enforceProductionRequestBoundary(request,env);')
+    || source.includes('const blocked=enforceProductionRequestBoundary(request);');
+  return boundaryCall
     && source.includes('if(blocked)return hardenProductionResponse(blocked,request);');
 }
 
@@ -68,8 +81,12 @@ function hasResponseHardener(source){
 }
 
 function compositionDispatchAfterBoundaryBeforeCrm(source){
-  const boundary=source.indexOf('const blocked=enforceProductionRequestBoundary(request);');
-  const member=source.indexOf('handleMemberAppHttpRequest(');
+  const currentBoundary=source.indexOf('const blocked=enforceProductionRequestBoundary(request,env);');
+  const legacyBoundary=source.indexOf('const blocked=enforceProductionRequestBoundary(request);');
+  const boundary=currentBoundary>=0?currentBoundary:legacyBoundary;
+  const currentMember=source.indexOf('handleMemberProductionRequest(');
+  const legacyMember=source.indexOf('handleMemberAppHttpRequest(');
+  const member=currentMember>=0?currentMember:legacyMember;
   const crm=source.indexOf('const response=await handleCustomerCrmRequest(request,env,ctx);');
   return boundary>=0&&member>boundary&&crm>member;
 }
