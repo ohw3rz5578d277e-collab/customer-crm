@@ -10,6 +10,7 @@ import { memberMemoryWriteExecutorHealth } from './member-memory-write-executor.
 import { memberPrivateMediaAccessHealth } from './member-private-media-access.mjs';
 import { memberPrivateMediaDeliveryGrantHealth } from './member-private-media-delivery-grant.mjs';
 import { memberPrivateMediaContentAdapterHealth } from './member-private-media-content-adapter.mjs';
+import { memberPrivateMediaHttpRouterHealth } from './member-private-media-http-router.mjs';
 import { memberFavoritesHttpContractHealth } from './member-favorites-http-contract.mjs';
 import { memberFavoritesRateLimitHealth } from './member-favorites-rate-limit.mjs';
 import { memberFavoritesWriteExecutorHealth } from './member-favorites-write-executor.mjs';
@@ -77,6 +78,7 @@ export function buildMemberProductionReadinessPreflight({env={},observed={}}={})
     private_access:memberPrivateMediaAccessHealth(),
     private_grant:memberPrivateMediaDeliveryGrantHealth(env),
     private_content:memberPrivateMediaContentAdapterHealth(env),
+    private_router:memberPrivateMediaHttpRouterHealth(env),
     favorites_http:memberFavoritesHttpContractHealth(env),
     favorites_rate_limit:memberFavoritesRateLimitHealth(env),
     favorites_write:memberFavoritesWriteExecutorHealth(env),
@@ -102,7 +104,8 @@ export function buildMemberProductionReadinessPreflight({env={},observed={}}={})
   const privateSourceReady=
     sourceHealth.private_access.member_private_media_access===true
     && sourceHealth.private_grant.member_private_media_delivery_grant===true
-    && sourceHealth.private_content.member_private_media_content_adapter===true;
+    && sourceHealth.private_content.member_private_media_content_adapter===true
+    && sourceHealth.private_router.member_private_media_http_router===true;
   const favoritesSourceReady=
     sourceHealth.favorites_http.member_favorites_http_contract===true
     && sourceHealth.favorites_rate_limit.member_favorites_rate_limit===true
@@ -185,6 +188,7 @@ export function buildMemberProductionReadinessPreflight({env={},observed={}}={})
       {ok:observedTrue(observed,'private_media_owner_authorized'),blocker:'OWNER_PRIVATE_MEDIA_PRODUCTION_AUTHORIZATION_REQUIRED'}
     ],
     notes:[
+      'Private media source readiness includes authorization, short-lived grant, binary content adapter, and the public private-media router.',
       'Private media requires signed Member session, short-lived grant, exact Family reauthorization, and trusted storage adapter.',
       'No implicit storage binding or external redirect is accepted.'
     ]

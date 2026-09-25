@@ -19,6 +19,7 @@ pass('LINE login transaction config missing is explicit',empty.gates.auth_sessio
 pass('core Family schema is not inferred',empty.gates.read_only_app.blockers.includes('MEMBER_FAMILY_IDENTITY_SCHEMA_NOT_VERIFIED'));
 pass('core MEMORY schema is not inferred',empty.gates.read_only_app.blockers.includes('MEMBER_MEMORY_CORE_SCHEMA_NOT_VERIFIED'));
 pass('historical MEMORY write requires fresh Owner gate',empty.gates.historical_bootstrap.blockers.includes('OWNER_PRODUCTION_D1_WRITE_AUTHORIZATION_REQUIRED'));
+pass('private media source readiness includes public private-media router',empty.source_health.private_media===true&&empty.gates.private_media.source_ready===true);
 pass('private media defaults blocked',empty.gates.private_media.activation_ready===false&&empty.gates.private_media.blockers.length>0);
 pass('Favorites write remains independently multi-gated',empty.gates.favorites_write.activation_ready===false&&empty.gates.favorites_write.blockers.includes('MEMBER_FAVORITES_MUTATION_ROUTE_MODE_NOT_ENABLED')&&empty.gates.favorites_write.blockers.includes('MEMBER_FAVORITES_RATE_LIMIT_MODE_NOT_ENABLED')&&empty.gates.favorites_write.blockers.includes('MEMBER_FAVORITES_WRITE_MODE_NOT_ENABLED'));
 pass('BLACK entitlement is separate from commerce',empty.gates.black_entitlement.source_ready===true&&empty.gates.black_entitlement.required===false&&empty.gates.commerce.source_ready===false);
