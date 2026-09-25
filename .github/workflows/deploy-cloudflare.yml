@@ -433,19 +433,23 @@ jobs:
           const columns=process.env.COLUMN_OUTPUT||'';
           const indexes=process.env.INDEX_OUTPUT||'';
           const sequence=process.env.SEQUENCE_OUTPUT||'';
-          const approved=['20260814_customer_line_message_events.sql','20260818_customer_identity_registry.sql','20260818_customer_identity_sequence.sql','20260828_customer360_family_marketing_foundation.sql','20260903_customer360_profile_auto_enrichment.sql','20260908_customer_media_delivery_links.sql'];
-          const preexisting=new Set(approved.slice(0,3));
-          const family=approved[3],profile=approved[4],media=approved[5];
+          const approvedCrm=['20260814_customer_line_message_events.sql','20260818_customer_identity_registry.sql','20260818_customer_identity_sequence.sql','20260828_customer360_family_marketing_foundation.sql','20260903_customer360_profile_auto_enrichment.sql','20260908_customer_media_delivery_links.sql'];
+          const knownMember=['20260924_member_creative_catalog_foundation.sql','20260924_member_family_identity_foundation.sql','20260924_member_family_pass_entitlement_foundation.sql','20260924_member_favorite_mutation_rate_limit_foundation.sql','20260924_member_memory_core_foundation.sql','20260924_member_memory_favorites_foundation.sql','20260924_member_news_catalog_foundation.sql','20260924_member_public_asset_registry_foundation.sql','20260924_member_shop_catalog_foundation.sql'];
+          const preexisting=new Set(approvedCrm.slice(0,3));
+          const family=approvedCrm[3],profile=approvedCrm[4],media=approvedCrm[5];
           const files=[];
           for(const match of pending.matchAll(/[A-Za-z0-9_.-]+\.sql/g))if(!files.includes(match[0]))files.push(match[0]);
-          const unknown=files.filter(x=>!approved.includes(x));
+          const unknown=files.filter(x=>!approvedCrm.includes(x)&&!knownMember.includes(x));
           if(unknown.length)throw new Error(`BLOCKED_UNEXPECTED_MANAGED_MIGRATION:${unknown.join(',')}`);
-          const oldPending=files.filter(x=>preexisting.has(x));
+          const crmFiles=files.filter(x=>approvedCrm.includes(x));
+          const memberFiles=files.filter(x=>knownMember.includes(x));
+          if(String(process.env.RELEASE_MODE||'').trim()==='deploy'&&memberFiles.length)throw new Error(`BLOCKED_MEMBER_MIGRATIONS_PENDING_SEPARATE_AUTHORIZATION_REQUIRED:${memberFiles.join(',')}`);
+          const oldPending=crmFiles.filter(x=>preexisting.has(x));
           if(oldPending.length)throw new Error(`BLOCKED_PREEXISTING_MANAGED_MIGRATIONS_PENDING:${oldPending.join(',')}`);
           const managedSequence=[family,profile,media];
-          const expectedPending=managedSequence.slice(managedSequence.length-files.length);
-          const validPending=files.length<=managedSequence.length&&files.every((file,index)=>file===expectedPending[index]);
-          if(!validPending)throw new Error(`BLOCKED_UNEXPECTED_MANAGED_MIGRATION_ORDER:${files.join(' -> ')}`);
+          const expectedPending=managedSequence.slice(managedSequence.length-crmFiles.length);
+          const validPending=crmFiles.length<=managedSequence.length&&crmFiles.every((file,index)=>file===expectedPending[index]);
+          if(!validPending)throw new Error(`BLOCKED_UNEXPECTED_MANAGED_MIGRATION_ORDER:${crmFiles.join(' -> ')}`);
           for(const required of ['d1_migrations_managed','customer_identity_registry','customer_identity_sequence'])if(!tables.includes(required))throw new Error(`PREFLIGHT_REQUIRED_TABLE_ABSENT:${required}`);
           if(!columns.includes('customer_id')||!columns.includes('sequence_key')||!columns.includes('last_value'))throw new Error('IDENTITY_SCHEMA_READBACK_INCOMPLETE');
           if(!indexes.includes('idx_customer_identity_registry_customer_id'))throw new Error('IDENTITY_INDEX_READBACK_INCOMPLETE');
@@ -458,22 +462,26 @@ jobs:
           const mediaSchemaPresent=mediaTables.every(t=>tables.includes(t));
           const familyTracked=tracking.includes(family),profileTracked=tracking.includes(profile),mediaTracked=tracking.includes(media);
           let classification,migrationTracking;
-          if(files.length===3){
+          if(crmFiles.length===3){
             classification='CUSTOMER360_MIGRATION_SEQUENCE_PENDING';migrationTracking='FAMILY_PROFILE_MEDIA_NOT_APPLIED';
             if(familyTracked||profileTracked||mediaTracked)throw new Error('INCONSISTENT_REMOTE_MIGRATION_STATE:tracked_but_pending');
-          }else if(files.length===2){
+          }else if(crmFiles.length===2){
             classification='CUSTOMER360_PROFILE_AND_MEDIA_MIGRATIONS_PENDING';migrationTracking='PROFILE_AND_MEDIA_NOT_APPLIED';
-            if(files[0]!==profile||files[1]!==media||profileTracked||mediaTracked||!familyTracked||!familyPresent||!marketingPresent)throw new Error('INCONSISTENT_REMOTE_MIGRATION_STATE:profile_media_pending_preconditions');
-          }else if(files.length===1){
+            if(crmFiles[0]!==profile||crmFiles[1]!==media||profileTracked||mediaTracked||!familyTracked||!familyPresent||!marketingPresent)throw new Error('INCONSISTENT_REMOTE_MIGRATION_STATE:profile_media_pending_preconditions');
+          }else if(crmFiles.length===1){
             classification='CUSTOMER360_MEDIA_MIGRATION_ONLY_PENDING';migrationTracking='MEDIA_NOT_APPLIED';
-            if(files[0]!==media||mediaTracked||!familyTracked||!profileTracked||!familyPresent||!marketingPresent||!profileSchemaPresent)throw new Error('INCONSISTENT_REMOTE_MIGRATION_STATE:media_pending_preconditions');
+            if(crmFiles[0]!==media||mediaTracked||!familyTracked||!profileTracked||!familyPresent||!marketingPresent||!profileSchemaPresent)throw new Error('INCONSISTENT_REMOTE_MIGRATION_STATE:media_pending_preconditions');
           }else if(familyPresent&&marketingPresent&&profileSchemaPresent&&mediaSchemaPresent&&familyTracked&&profileTracked&&mediaTracked){
             classification='ALREADY_APPLIED_CONFIRMED';migrationTracking='PASS';
           }else{
             throw new Error(`INCONSISTENT_REMOTE_MIGRATION_STATE:family=${familyPresent},marketing=${marketingPresent},profileSchema=${profileSchemaPresent},mediaSchema=${mediaSchemaPresent},familyTracked=${familyTracked},profileTracked=${profileTracked},mediaTracked=${mediaTracked}`);
           }
-          fs.appendFileSync(process.env.GITHUB_OUTPUT,`classification=${classification}\nfamily_table=${familyPresent?'PRESENT':'ABSENT'}\nmarketing_table=${marketingPresent?'PRESENT':'ABSENT'}\nprofile_schema=${profileSchemaPresent?'PRESENT':'ABSENT'}\nmedia_schema=${mediaSchemaPresent?'PRESENT':'ABSENT'}\nmigration_tracking=${migrationTracking}\npending_files=${files.join(',')||'NONE'}\n`);
+          fs.appendFileSync(process.env.GITHUB_OUTPUT,`classification=${classification}\nfamily_table=${familyPresent?'PRESENT':'ABSENT'}\nmarketing_table=${marketingPresent?'PRESENT':'ABSENT'}\nprofile_schema=${profileSchemaPresent?'PRESENT':'ABSENT'}\nmedia_schema=${mediaSchemaPresent?'PRESENT':'ABSENT'}\nmigration_tracking=${migrationTracking}\npending_files=${files.join(',')||'NONE'}\ncrm_pending_files=${crmFiles.join(',')||'NONE'}\nmember_pending_files=${memberFiles.join(',')||'NONE'}\nmember_pending_count=${memberFiles.length}\n`);
           console.log(`REMOTE_PENDING_MIGRATIONS=${files.join(' -> ')||'NONE'}`);
+          console.log(`CRM_PENDING_MIGRATIONS=${crmFiles.join(' -> ')||'NONE'}`);
+          console.log(`MEMBER_PENDING_MIGRATIONS=${memberFiles.join(' -> ')||'NONE'}`);
+          console.log(`MEMBER_PENDING_MIGRATION_COUNT=${memberFiles.length}`);
+          console.log('MEMBER_SCHEMA_APPLY=0');
           console.log(`PENDING_CLASSIFICATION=${classification}`);
           console.log(`FAMILY_TABLE=${familyPresent?'PRESENT':'ABSENT'}`);
           console.log(`MARKETING_TABLE=${marketingPresent?'PRESENT':'ABSENT'}`);
@@ -496,6 +504,10 @@ jobs:
           echo "MEDIA_SCHEMA=${{ steps.classify.outputs.media_schema }}"
           echo "MIGRATION_TRACKING=${{ steps.classify.outputs.migration_tracking }}"
           echo "REMOTE_PENDING_MIGRATIONS=${{ steps.classify.outputs.pending_files }}"
+          echo "CRM_PENDING_MIGRATIONS=${{ steps.classify.outputs.crm_pending_files }}"
+          echo "MEMBER_PENDING_MIGRATIONS=${{ steps.classify.outputs.member_pending_files }}"
+          echo "MEMBER_PENDING_MIGRATION_COUNT=${{ steps.classify.outputs.member_pending_count }}"
+          echo 'MEMBER_SCHEMA_APPLY=0'
           echo 'CRM_CUSTOMER360_WRITE_ENABLED=NOT_ENABLED_BY_RELEASE'
           echo 'PRODUCTION_MIGRATION_APPLY=0'
           echo 'PRODUCTION_D1_WRITE=0'
