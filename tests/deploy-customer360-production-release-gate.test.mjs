@@ -33,6 +33,23 @@ assert.ok(workflow.includes('CUSTOMER360_PROFILE_AND_MEDIA_MIGRATIONS_PENDING'),
 assert.ok(workflow.includes('CUSTOMER360_MIGRATION_SEQUENCE_PENDING'),'family->profile->media sequence classification missing');
 assert.ok(workflow.includes('BLOCKED_PREEXISTING_MANAGED_MIGRATIONS_PENDING'),'preexisting migration blocker missing');
 assert.ok(workflow.includes('BLOCKED_UNEXPECTED_MANAGED_MIGRATION'),'unexpected migration blocker missing');
+for(const migration of [
+  '20260924_member_creative_catalog_foundation.sql',
+  '20260924_member_family_identity_foundation.sql',
+  '20260924_member_family_pass_entitlement_foundation.sql',
+  '20260924_member_favorite_mutation_rate_limit_foundation.sql',
+  '20260924_member_memory_core_foundation.sql',
+  '20260924_member_memory_favorites_foundation.sql',
+  '20260924_member_news_catalog_foundation.sql',
+  '20260924_member_public_asset_registry_foundation.sql',
+  '20260924_member_shop_catalog_foundation.sql'
+]) assert.ok(workflow.includes(migration),`known Member pending migration missing: ${migration}`);
+assert.ok(workflow.includes('BLOCKED_MEMBER_MIGRATIONS_PENDING_SEPARATE_AUTHORIZATION_REQUIRED'),'deploy must fail closed while Member migrations are pending');
+assert.ok(workflow.includes('MEMBER_PENDING_MIGRATIONS'),'preflight must report known Member pending migrations');
+assert.ok(workflow.includes('MEMBER_PENDING_MIGRATION_COUNT'),'preflight must report known Member pending migration count');
+assert.ok(workflow.includes('MEMBER_SCHEMA_APPLY=0'),'preflight must explicitly keep Member schema apply disabled');
+assert.ok(workflow.includes("String(process.env.RELEASE_MODE||'').trim()==='deploy'&&memberFiles.length"),'Member pending deploy blocker must be deploy-mode scoped');
+
 assert.ok(workflow.includes('ALREADY_APPLIED_CONFIRMED'),'already-applied classification missing');
 assert.ok(workflow.includes('INCONSISTENT_REMOTE_MIGRATION_STATE'),'inconsistent remote state blocker missing');
 for(const token of ['customer_profile_enrichment','customer_family_member_metadata','customer_field_evidence','customer_notes_history','customer_profile_media','customer_delivery_links','idx_customer_field_evidence_dedupe','idx_customer_delivery_links_customer_date','idx_customer_delivery_links_reservation','PRODUCTION_SCHEMA_READBACK=PASS','EXISTING_CUSTOMERS_PRESERVED=PASS','EXISTING_CUSTOMER_MEDIA_PRESERVED=PASS'])assert.ok(workflow.includes(token),`Production readback token missing: ${token}`);
