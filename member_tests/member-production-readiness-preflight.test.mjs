@@ -17,6 +17,7 @@ pass('Member app HTTP composition is included in source readiness',empty.source_
 pass('Production route wiring plan is source-ready static analysis only',empty.source_health.production_route_wiring_plan===true);
 pass('Production-facing Member request composition is source-ready and default-off',empty.source_health.production_request_composition===true);
 pass('Production integration acceptance is source-ready static-only',empty.source_health.production_integration_acceptance===true);
+pass('Production entry default-off manifest is source-ready exact-candidate-only',empty.source_health.production_entry_default_off_manifest===true);
 pass('main Production activation defaults blocked',empty.main_activation_ready===false);
 pass('Member session secret missing is explicit',empty.gates.auth_session.blockers.includes('MEMBER_SESSION_SECRET_NOT_CONFIGURED'));
 pass('LINE login transaction config missing is explicit',empty.gates.auth_session.blockers.includes('LINE_LOGIN_TRANSACTION_NOT_CONFIGURED'));
