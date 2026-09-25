@@ -186,7 +186,7 @@ function renderToday(vm){
   if(!vm.today_memory)return '';
   const m=vm.today_memory.primary;
   return '<section class="mp-home__today">'
-    +'<div class="mp-home__section-kicker">'+escapeHtml(vm.today_memory.headline)+'</div>'
+    +'<div class="mp-home__section-kicker">TODAY\'S MEMORY</div>'
     +'<div class="mp-home__today-card">'
     +'<div class="mp-home__today-photo"><div class="mp-home__photo-placeholder mp-home__photo-placeholder--hero"><span>MEMORY</span></div></div>'
     +'<div class="mp-home__today-copy">'
