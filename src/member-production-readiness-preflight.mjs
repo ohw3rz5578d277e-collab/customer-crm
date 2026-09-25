@@ -15,6 +15,8 @@ import { memberAppHttpCompositionHealth } from './member-app-http-composition.mj
 import { memberProductionRouteWiringPreflightHealth } from './member-production-route-wiring-preflight.mjs';
 import { memberBrowserPageHealth } from './member-browser-page.mjs';
 import { memberPublicAssetDeliveryHealth } from './member-public-asset-delivery.mjs';
+import { memberProductionRequestCompositionHealth } from './member-production-request-composition.mjs';
+import { memberProductionIntegrationAcceptanceHealth } from './member-production-integration-acceptance.mjs';
 import { memberFavoritesHttpContractHealth } from './member-favorites-http-contract.mjs';
 import { memberFavoritesRateLimitHealth } from './member-favorites-rate-limit.mjs';
 import { memberFavoritesWriteExecutorHealth } from './member-favorites-write-executor.mjs';
@@ -87,6 +89,8 @@ export function buildMemberProductionReadinessPreflight({env={},observed={}}={})
     route_wiring_preflight:memberProductionRouteWiringPreflightHealth(),
     browser_page:memberBrowserPageHealth(),
     public_asset_delivery:memberPublicAssetDeliveryHealth(),
+    production_request_composition:memberProductionRequestCompositionHealth(env),
+    production_integration_acceptance:memberProductionIntegrationAcceptanceHealth(),
     favorites_http:memberFavoritesHttpContractHealth(env),
     favorites_rate_limit:memberFavoritesRateLimitHealth(env),
     favorites_write:memberFavoritesWriteExecutorHealth(env),
@@ -335,7 +339,11 @@ export function buildMemberProductionReadinessPreflight({env={},observed={}}={})
         && sourceHealth.composition.all_source_layers_present===true,
       production_route_wiring_plan:sourceHealth.route_wiring_preflight.member_production_route_wiring_preflight===true
         && sourceHealth.route_wiring_preflight.static_analysis_only===true,
-      browser_delivery:browserDeliverySourceReady
+      browser_delivery:browserDeliverySourceReady,
+      production_request_composition:sourceHealth.production_request_composition.member_production_request_composition===true
+        && sourceHealth.production_request_composition.source_only===true,
+      production_integration_acceptance:sourceHealth.production_integration_acceptance.member_production_integration_acceptance===true
+        && sourceHealth.production_integration_acceptance.static_acceptance_only===true
     },
     migration_inventory:migrationInventory,
     owner_gates:ownerGates,
