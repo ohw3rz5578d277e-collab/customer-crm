@@ -1,0 +1,268 @@
+const BUILD='member-production-readiness-preflight-20260925-01';
+
+const MIGRATIONS=Object.freeze([
+  {name:'20260924_member_family_identity_foundation.sql',role:'core_family_identity'},
+  {name:'20260924_member_memory_core_foundation.sql',role:'core_memory'},
+  {name:'20260924_member_memory_favorites_foundation.sql',role:'favorites'},
+  {name:'20260924_member_favorite_mutation_rate_limit_foundation.sql',role:'favorites_rate_limit'},
+  {name:'20260924_member_family_pass_entitlement_foundation.sql',role:'black_entitlement'},
+  {name:'20260924_member_public_asset_registry_foundation.sql',role:'optional_public_assets'},
+  {name:'20260924_member_creative_catalog_foundation.sql',role:'optional_creative_catalog'},
+  {name:'20260924_member_shop_catalog_foundation.sql',role:'optional_shop_catalog'},
+  {name:'20260924_member_news_catalog_foundation.sql',role:'optional_news_catalog'}
+]);
+
+const CORE_FAMILY='20260924_member_family_identity_foundation.sql';
+const CORE_MEMORY='20260924_member_memory_core_foundation.sql';
+const FAVORITES='20260924_member_memory_favorites_foundation.sql';
+const FAVORITES_RATE_LIMIT='20260924_member_favorite_mutation_rate_limit_foundation.sql';
+const BLACK_ENTITLEMENT='20260924_member_family_pass_entitlement_foundation.sql';
+
+const text=value=>value==null?'':String(value).trim();
+const observedTrue=(observed,key)=>observed?.[key]===true;
+const enabled=(env,key)=>text(env?.[key]).toLowerCase()==='enabled';
+const configured=(env,key)=>text(env?.[key])!=='';
+const strongSecret=(env,key)=>text(env?.[key]).length>=32;
+
+function appliedMigrationSet(observed){
+  const values=Array.isArray(observed?.applied_migrations)?observed.applied_migrations:[];
+  return new Set(values.map(text).filter(Boolean));
+}
+
+function gate({required,source_ready,conditions,notes=[]}){
+  const blockers=conditions.filter(condition=>!condition.ok).map(condition=>condition.blocker);
+  return {
+    required,
+    source_ready,
+    activation_ready:source_ready===true&&blockers.length===0,
+    blockers,
+    notes
+  };
+}
+
+export function buildMemberProductionReadinessPreflight({env={},observed={}}={}){
+  const applied=appliedMigrationSet(observed);
+  const hasMigration=name=>applied.has(name);
+
+  const sourceUi=gate({
+    required:true,
+    source_ready:true,
+    conditions:[],
+    notes:[
+      'Canonical HOME / MEMORIES / CREATE / SHOP / MY source integration is present.',
+      'This gate performs no Production action.'
+    ]
+  });
+
+  const authSession=gate({
+    required:true,
+    source_ready:true,
+    conditions:[
+      {ok:strongSecret(env,'MEMBER_SESSION_SECRET'),blocker:'MEMBER_SESSION_SECRET_NOT_CONFIGURED'},
+      {
+        ok:strongSecret(env,'MEMBER_LINE_LOGIN_TRANSACTION_SECRET')
+          && configured(env,'MEMBER_LINE_LOGIN_CHANNEL_ID')
+          && configured(env,'MEMBER_LINE_LOGIN_REDIRECT_URI'),
+        blocker:'LINE_LOGIN_TRANSACTION_NOT_CONFIGURED'
+      },
+      {ok:observedTrue(observed,'line_external_token_exchange_ready'),blocker:'LINE_TOKEN_EXCHANGE_RUNTIME_NOT_VERIFIED'},
+      {ok:observedTrue(observed,'line_external_id_token_verification_ready'),blocker:'LINE_ID_TOKEN_VERIFICATION_RUNTIME_NOT_VERIFIED'},
+      {ok:observedTrue(observed,'login_routes_wired'),blocker:'MEMBER_LOGIN_ROUTES_NOT_WIRED'},
+      {ok:observedTrue(observed,'member_read_routes_wired'),blocker:'MEMBER_READ_ROUTES_NOT_WIRED'}
+    ],
+    notes:[
+      'Member session, LINE login transaction, and LINE token verification foundations are source-ready.',
+      'Verified LINE subject remains the only login identity source.'
+    ]
+  });
+
+  const readOnlyApp=gate({
+    required:true,
+    source_ready:true,
+    conditions:[
+      {ok:authSession.activation_ready,blocker:'MEMBER_AUTH_SESSION_NOT_ACTIVATION_READY'},
+      {ok:hasMigration(CORE_FAMILY),blocker:'MEMBER_FAMILY_IDENTITY_SCHEMA_NOT_VERIFIED'},
+      {ok:hasMigration(CORE_MEMORY),blocker:'MEMBER_MEMORY_CORE_SCHEMA_NOT_VERIFIED'},
+      {ok:sourceUi.activation_ready,blocker:'MEMBER_SOURCE_UI_NOT_READY'},
+      {ok:observedTrue(observed,'production_member_route_entry_ready'),blocker:'MEMBER_PRODUCTION_ROUTE_ENTRY_NOT_VERIFIED'}
+    ],
+    notes:[
+      'Core read-only activation requires explicit Production schema and route evidence.',
+      'Optional catalog or Favorite schemas may remain unavailable without blocking the basic read-only app.'
+    ]
+  });
+
+  const historicalBootstrap=gate({
+    required:false,
+    source_ready:true,
+    conditions:[
+      {ok:hasMigration(CORE_FAMILY)&&hasMigration(CORE_MEMORY),blocker:'CORE_MEMBER_SCHEMAS_NOT_VERIFIED'},
+      {ok:enabled(env,'MEMBER_MEMORY_WRITE_MODE'),blocker:'MEMBER_MEMORY_WRITE_MODE_NOT_ENABLED'},
+      {ok:observedTrue(observed,'historical_memory_plan_verified'),blocker:'HISTORICAL_MEMORY_PLAN_NOT_VERIFIED'},
+      {ok:observedTrue(observed,'historical_memory_write_owner_authorized'),blocker:'OWNER_PRODUCTION_D1_WRITE_AUTHORIZATION_REQUIRED'}
+    ],
+    notes:[
+      'Bootstrap planning is read-only; activation readiness covers the separately gated historical MEMORY write executor.',
+      'Owner authorization must be fresh and must not be inferred or reused.'
+    ]
+  });
+
+  const privateMedia=gate({
+    required:true,
+    source_ready:true,
+    conditions:[
+      {ok:strongSecret(env,'MEMBER_PRIVATE_MEDIA_DELIVERY_SECRET'),blocker:'MEMBER_PRIVATE_MEDIA_DELIVERY_SECRET_NOT_CONFIGURED'},
+      {ok:enabled(env,'MEMBER_PRIVATE_MEDIA_CONTENT_ROUTE_MODE'),blocker:'MEMBER_PRIVATE_MEDIA_CONTENT_ROUTE_MODE_NOT_ENABLED'},
+      {ok:observedTrue(observed,'private_media_storage_adapter_ready'),blocker:'PRIVATE_MEDIA_TRUSTED_STORAGE_ADAPTER_NOT_VERIFIED'},
+      {ok:observedTrue(observed,'private_media_storage_binding_ready'),blocker:'PRIVATE_MEDIA_PRODUCTION_STORAGE_BINDING_NOT_VERIFIED'},
+      {ok:observedTrue(observed,'private_media_routes_wired'),blocker:'PRIVATE_MEDIA_ROUTES_NOT_WIRED'},
+      {ok:observedTrue(observed,'private_media_owner_authorized'),blocker:'OWNER_PRIVATE_MEDIA_PRODUCTION_AUTHORIZATION_REQUIRED'}
+    ],
+    notes:[
+      'Private media requires signed Member session, short-lived grant, exact Family reauthorization, and trusted storage adapter.',
+      'No implicit storage binding or external redirect is accepted.'
+    ]
+  });
+
+  const favoritesWrite=gate({
+    required:false,
+    source_ready:true,
+    conditions:[
+      {ok:hasMigration(FAVORITES),blocker:'MEMBER_FAVORITES_SCHEMA_NOT_VERIFIED'},
+      {ok:hasMigration(FAVORITES_RATE_LIMIT),blocker:'MEMBER_FAVORITES_RATE_LIMIT_SCHEMA_NOT_VERIFIED'},
+      {ok:observedTrue(observed,'favorite_mutation_route_wired'),blocker:'MEMBER_FAVORITES_MUTATION_ROUTE_NOT_WIRED'},
+      {ok:enabled(env,'MEMBER_FAVORITES_MUTATION_ROUTE_MODE'),blocker:'MEMBER_FAVORITES_MUTATION_ROUTE_MODE_NOT_ENABLED'},
+      {ok:enabled(env,'MEMBER_FAVORITES_RATE_LIMIT_MODE'),blocker:'MEMBER_FAVORITES_RATE_LIMIT_MODE_NOT_ENABLED'},
+      {ok:enabled(env,'MEMBER_FAVORITES_WRITE_MODE'),blocker:'MEMBER_FAVORITES_WRITE_MODE_NOT_ENABLED'},
+      {ok:observedTrue(observed,'favorite_write_owner_authorized'),blocker:'OWNER_FAVORITES_WRITE_AUTHORIZATION_REQUIRED'}
+    ],
+    notes:[
+      'Favorite mutation is optional for basic Member activation and remains independently gated.',
+      'Runtime authorization still requires signed Member session, same-origin POST, exact JSON, and current Family/MEMORY access.'
+    ]
+  });
+
+  const blackEntitlement=gate({
+    required:false,
+    source_ready:true,
+    conditions:[
+      {ok:hasMigration(BLACK_ENTITLEMENT),blocker:'MEMBER_BLACK_ENTITLEMENT_SCHEMA_NOT_VERIFIED'},
+      {ok:observedTrue(observed,'black_exact_family_plan_verified'),blocker:'BLACK_EXACT_FAMILY_PLAN_NOT_VERIFIED'},
+      {ok:Number.isInteger(observed?.black_qualifying_memory_count)&&observed.black_qualifying_memory_count>=10,blocker:'BLACK_QUALIFYING_MEMORY_THRESHOLD_NOT_VERIFIED'},
+      {ok:enabled(env,'MEMBER_FAMILY_PASS_ENTITLEMENT_WRITE_MODE'),blocker:'MEMBER_FAMILY_PASS_ENTITLEMENT_WRITE_MODE_NOT_ENABLED'},
+      {ok:observedTrue(observed,'black_entitlement_write_owner_authorized'),blocker:'OWNER_BLACK_ENTITLEMENT_WRITE_AUTHORIZATION_REQUIRED'}
+    ],
+    notes:[
+      'BLACK entitlement is a durable lifetime status and is separate from commerce discount enforcement.',
+      'The qualifying MEMORY threshold must be explicit current-Family evidence; it is not inferred.'
+    ]
+  });
+
+  const commerce={
+    required:false,
+    source_ready:false,
+    activation_ready:false,
+    blockers:[
+      'AUTHORITATIVE_PRICE_SOURCE_NOT_READY',
+      'CHECKOUT_PAYMENT_PROVIDER_NOT_READY',
+      'BLACK_PHOTO_GOODS_DISCOUNT_ENFORCEMENT_NOT_READY',
+      'OWNER_COMMERCE_ACTIVATION_AUTHORIZATION_REQUIRED'
+    ],
+    notes:[
+      'Member SHOP remains presentation-only.',
+      'BLACK benefit is PHOTO GOODS 10% OFF FOREVER and does not apply to shooting fees.',
+      'Owner commerce authorization alone cannot make this gate ready while source/runtime commerce foundations are incomplete.'
+    ]
+  };
+
+  const gates={
+    source_ui:sourceUi,
+    auth_session:authSession,
+    read_only_app:readOnlyApp,
+    historical_bootstrap:historicalBootstrap,
+    private_media:privateMedia,
+    favorites_write:favoritesWrite,
+    black_entitlement:blackEntitlement,
+    commerce
+  };
+
+  const migrationInventory={
+    explicit_observation_only:true,
+    applied_migrations:[...applied],
+    items:MIGRATIONS.map(item=>({
+      ...item,
+      verified_applied:hasMigration(item.name)
+    }))
+  };
+
+  const ownerGates={
+    historical_memory_write:observedTrue(observed,'historical_memory_write_owner_authorized'),
+    private_media:observedTrue(observed,'private_media_owner_authorized'),
+    favorites_write:observedTrue(observed,'favorite_write_owner_authorized'),
+    black_entitlement_write:observedTrue(observed,'black_entitlement_write_owner_authorized'),
+    commerce_activation:observedTrue(observed,'commerce_owner_authorized'),
+    authorization_policy:'fresh_explicit_exact_scope_only_no_reuse'
+  };
+
+  const invariant={
+    automatic_contact:false,
+    line_send:false,
+    customer_id_generation:false,
+    canonical_crm_write:false,
+    production_deploy_executed:false,
+    production_schema_apply_executed:false,
+    production_write_executed:false
+  };
+
+  const health={
+    source_only:true,
+    production_observation_explicit_input_only:true,
+    secret_values_exposed:false,
+    production_route_mutation:false,
+    schema_apply:false,
+    write:false,
+    deploy:false,
+    line_send:false,
+    customer_id_generation:false
+  };
+
+  return {
+    status:'ok',
+    build:BUILD,
+    source_only:true,
+    main_activation_ready:
+      authSession.activation_ready===true
+      && readOnlyApp.activation_ready===true
+      && privateMedia.activation_ready===true,
+    gates,
+    migration_inventory:migrationInventory,
+    owner_gates:ownerGates,
+    invariant,
+    health
+  };
+}
+
+export function memberProductionReadinessPreflightHealth(){
+  return {
+    member_production_readiness_preflight:true,
+    build:BUILD,
+    source_only:true,
+    production_observation_explicit_input_only:true,
+    secret_values_exposed:false,
+    production_route_mutation:false,
+    schema_apply:false,
+    write:false,
+    deploy:false,
+    line_send:false,
+    customer_id_generation:false,
+    automatic_contact:false,
+    canonical_crm_write:false
+  };
+}
+
+export const __test={
+  MIGRATIONS,
+  appliedMigrationSet,
+  enabled,
+  strongSecret
+};
