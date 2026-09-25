@@ -2,6 +2,8 @@ import { memberAppSourceAcceptanceHealth } from './member-app-source-integration
 import { memberSessionFoundationHealth } from './member-session-foundation.mjs';
 import { memberLineTokenVerificationHealth } from './member-line-token-verification.mjs';
 import { memberLineLoginTransactionHealth } from './member-line-login-transaction.mjs';
+import { memberLineLoginExchangeExecutorHealth } from './member-line-login-exchange-executor.mjs';
+import { memberLineLoginHttpContractHealth } from './member-line-login-http-contract.mjs';
 import { memberBootstrapPlanHealth } from './member-bootstrap-plan.mjs';
 import { memberMemoryWriteExecutorHealth } from './member-memory-write-executor.mjs';
 import { memberPrivateMediaAccessHealth } from './member-private-media-access.mjs';
@@ -66,6 +68,8 @@ export function buildMemberProductionReadinessPreflight({env={},observed={}}={})
     session:memberSessionFoundationHealth(env),
     line_verify:memberLineTokenVerificationHealth(),
     line_transaction:memberLineLoginTransactionHealth(env),
+    line_exchange:memberLineLoginExchangeExecutorHealth(env),
+    line_http:memberLineLoginHttpContractHealth(env),
     bootstrap:memberBootstrapPlanHealth(),
     memory_write:memberMemoryWriteExecutorHealth(env),
     private_access:memberPrivateMediaAccessHealth(),
@@ -82,7 +86,9 @@ export function buildMemberProductionReadinessPreflight({env={},observed={}}={})
   const authSourceReady=
     sourceHealth.session.member_session_foundation===true
     && sourceHealth.line_verify.member_line_token_verification===true
-    && sourceHealth.line_transaction.member_line_login_transaction===true;
+    && sourceHealth.line_transaction.member_line_login_transaction===true
+    && sourceHealth.line_exchange.member_line_login_exchange_executor===true
+    && sourceHealth.line_http.member_line_login_http_contract===true;
   const historicalSourceReady=
     sourceHealth.bootstrap.member_bootstrap_plan===true
     && sourceHealth.memory_write.member_memory_write_executor===true;
@@ -123,7 +129,7 @@ export function buildMemberProductionReadinessPreflight({env={},observed={}}={})
       {ok:observedTrue(observed,'member_read_routes_wired'),blocker:'MEMBER_READ_ROUTES_NOT_WIRED'}
     ],
     notes:[
-      'Member session, LINE login transaction, and LINE token verification foundations are source-ready.',
+      'Member session, LINE login transaction, token verification, guarded exchange executor, and HTTP login contract are source-ready.',
       'Verified LINE subject remains the only login identity source.'
     ]
   });
