@@ -4,6 +4,7 @@ import { memberLineTokenVerificationHealth } from './member-line-token-verificat
 import { memberLineLoginTransactionHealth } from './member-line-login-transaction.mjs';
 import { memberLineLoginExchangeExecutorHealth } from './member-line-login-exchange-executor.mjs';
 import { memberLineLoginHttpContractHealth } from './member-line-login-http-contract.mjs';
+import { memberReadOnlyHttpRouterHealth } from './member-readonly-http-router.mjs';
 import { memberBootstrapPlanHealth } from './member-bootstrap-plan.mjs';
 import { memberMemoryWriteExecutorHealth } from './member-memory-write-executor.mjs';
 import { memberPrivateMediaAccessHealth } from './member-private-media-access.mjs';
@@ -70,6 +71,7 @@ export function buildMemberProductionReadinessPreflight({env={},observed={}}={})
     line_transaction:memberLineLoginTransactionHealth(env),
     line_exchange:memberLineLoginExchangeExecutorHealth(env),
     line_http:memberLineLoginHttpContractHealth(env),
+    read_router:memberReadOnlyHttpRouterHealth(),
     bootstrap:memberBootstrapPlanHealth(),
     memory_write:memberMemoryWriteExecutorHealth(env),
     private_access:memberPrivateMediaAccessHealth(),
@@ -89,6 +91,11 @@ export function buildMemberProductionReadinessPreflight({env={},observed={}}={})
     && sourceHealth.line_transaction.member_line_login_transaction===true
     && sourceHealth.line_exchange.member_line_login_exchange_executor===true
     && sourceHealth.line_http.member_line_login_http_contract===true;
+  const readOnlySourceReady=
+    sourceUiReady
+    && authSourceReady
+    && sourceHealth.read_router.member_readonly_http_router===true
+    && sourceHealth.read_router.read_only===true;
   const historicalSourceReady=
     sourceHealth.bootstrap.member_bootstrap_plan===true
     && sourceHealth.memory_write.member_memory_write_executor===true;
@@ -136,7 +143,7 @@ export function buildMemberProductionReadinessPreflight({env={},observed={}}={})
 
   const readOnlyApp=gate({
     required:true,
-    source_ready:sourceUiReady&&authSourceReady,
+    source_ready:readOnlySourceReady,
     conditions:[
       {ok:authSession.activation_ready,blocker:'MEMBER_AUTH_SESSION_NOT_ACTIVATION_READY'},
       {ok:hasMigration(CORE_FAMILY),blocker:'MEMBER_FAMILY_IDENTITY_SCHEMA_NOT_VERIFIED'},
@@ -145,6 +152,7 @@ export function buildMemberProductionReadinessPreflight({env={},observed={}}={})
       {ok:observedTrue(observed,'production_member_route_entry_ready'),blocker:'MEMBER_PRODUCTION_ROUTE_ENTRY_NOT_VERIFIED'}
     ],
     notes:[
+      'Source readiness includes the five-tab UI, complete auth/session chain, and signed-session read-only HTTP router.',
       'Core read-only activation requires explicit Production schema and route evidence.',
       'Optional catalog or Favorite schemas may remain unavailable without blocking the basic read-only app.'
     ]
@@ -296,6 +304,7 @@ export function buildMemberProductionReadinessPreflight({env={},observed={}}={})
     source_health:{
       five_tab_ui:sourceUiReady,
       auth_session:authSourceReady,
+      read_only_app:readOnlySourceReady,
       historical_bootstrap:historicalSourceReady,
       private_media:privateSourceReady,
       favorites_write:favoritesSourceReady,
