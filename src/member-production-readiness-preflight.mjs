@@ -11,6 +11,7 @@ import { memberPrivateMediaAccessHealth } from './member-private-media-access.mj
 import { memberPrivateMediaDeliveryGrantHealth } from './member-private-media-delivery-grant.mjs';
 import { memberPrivateMediaContentAdapterHealth } from './member-private-media-content-adapter.mjs';
 import { memberPrivateMediaHttpRouterHealth } from './member-private-media-http-router.mjs';
+import { memberAppHttpCompositionHealth } from './member-app-http-composition.mjs';
 import { memberFavoritesHttpContractHealth } from './member-favorites-http-contract.mjs';
 import { memberFavoritesRateLimitHealth } from './member-favorites-rate-limit.mjs';
 import { memberFavoritesWriteExecutorHealth } from './member-favorites-write-executor.mjs';
@@ -79,6 +80,7 @@ export function buildMemberProductionReadinessPreflight({env={},observed={}}={})
     private_grant:memberPrivateMediaDeliveryGrantHealth(env),
     private_content:memberPrivateMediaContentAdapterHealth(env),
     private_router:memberPrivateMediaHttpRouterHealth(env),
+    composition:memberAppHttpCompositionHealth(env),
     favorites_http:memberFavoritesHttpContractHealth(env),
     favorites_rate_limit:memberFavoritesRateLimitHealth(env),
     favorites_write:memberFavoritesWriteExecutorHealth(env),
@@ -92,12 +94,14 @@ export function buildMemberProductionReadinessPreflight({env={},observed={}}={})
     && sourceHealth.line_verify.member_line_token_verification===true
     && sourceHealth.line_transaction.member_line_login_transaction===true
     && sourceHealth.line_exchange.member_line_login_exchange_executor===true
-    && sourceHealth.line_http.member_line_login_http_contract===true;
+    && sourceHealth.line_http.member_line_login_http_contract===true
+    && sourceHealth.composition.line_login_source_ready===true;
   const readOnlySourceReady=
     sourceUiReady
     && authSourceReady
     && sourceHealth.read_router.member_readonly_http_router===true
-    && sourceHealth.read_router.read_only===true;
+    && sourceHealth.read_router.read_only===true
+    && sourceHealth.composition.read_only_source_ready===true;
   const historicalSourceReady=
     sourceHealth.bootstrap.member_bootstrap_plan===true
     && sourceHealth.memory_write.member_memory_write_executor===true;
@@ -105,7 +109,8 @@ export function buildMemberProductionReadinessPreflight({env={},observed={}}={})
     sourceHealth.private_access.member_private_media_access===true
     && sourceHealth.private_grant.member_private_media_delivery_grant===true
     && sourceHealth.private_content.member_private_media_content_adapter===true
-    && sourceHealth.private_router.member_private_media_http_router===true;
+    && sourceHealth.private_router.member_private_media_http_router===true
+    && sourceHealth.composition.private_media_source_ready===true;
   const favoritesSourceReady=
     sourceHealth.favorites_http.member_favorites_http_contract===true
     && sourceHealth.favorites_rate_limit.member_favorites_rate_limit===true
@@ -314,7 +319,9 @@ export function buildMemberProductionReadinessPreflight({env={},observed={}}={})
       favorites_write:favoritesSourceReady,
       black_entitlement:blackSourceReady,
       shop_presentation:sourceHealth.shop.member_shop_pickup_read_model===true
-        && sourceHealth.shop.presentation_catalog_only===true
+        && sourceHealth.shop.presentation_catalog_only===true,
+      composition:sourceHealth.composition.member_app_http_composition===true
+        && sourceHealth.composition.all_source_layers_present===true
     },
     migration_inventory:migrationInventory,
     owner_gates:ownerGates,
