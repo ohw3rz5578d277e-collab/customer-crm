@@ -17,6 +17,7 @@ import { memberBrowserPageHealth } from './member-browser-page.mjs';
 import { memberPublicAssetDeliveryHealth } from './member-public-asset-delivery.mjs';
 import { memberProductionRequestCompositionHealth } from './member-production-request-composition.mjs';
 import { memberProductionIntegrationAcceptanceHealth } from './member-production-integration-acceptance.mjs';
+import { memberProductionEntryDefaultOffManifestHealth } from './member-production-entry-default-off-manifest.mjs';
 import { memberFavoritesHttpContractHealth } from './member-favorites-http-contract.mjs';
 import { memberFavoritesRateLimitHealth } from './member-favorites-rate-limit.mjs';
 import { memberFavoritesWriteExecutorHealth } from './member-favorites-write-executor.mjs';
@@ -91,6 +92,7 @@ export function buildMemberProductionReadinessPreflight({env={},observed={}}={})
     public_asset_delivery:memberPublicAssetDeliveryHealth(),
     production_request_composition:memberProductionRequestCompositionHealth(env),
     production_integration_acceptance:memberProductionIntegrationAcceptanceHealth(),
+    production_entry_default_off_manifest:memberProductionEntryDefaultOffManifestHealth(),
     favorites_http:memberFavoritesHttpContractHealth(env),
     favorites_rate_limit:memberFavoritesRateLimitHealth(env),
     favorites_write:memberFavoritesWriteExecutorHealth(env),
@@ -343,7 +345,9 @@ export function buildMemberProductionReadinessPreflight({env={},observed={}}={})
       production_request_composition:sourceHealth.production_request_composition.member_production_request_composition===true
         && sourceHealth.production_request_composition.source_only===true,
       production_integration_acceptance:sourceHealth.production_integration_acceptance.member_production_integration_acceptance===true
-        && sourceHealth.production_integration_acceptance.static_acceptance_only===true
+        && sourceHealth.production_integration_acceptance.static_acceptance_only===true,
+      production_entry_default_off_manifest:sourceHealth.production_entry_default_off_manifest.member_production_entry_default_off_manifest===true
+        && sourceHealth.production_entry_default_off_manifest.exact_candidate_only===true
     },
     migration_inventory:migrationInventory,
     owner_gates:ownerGates,
