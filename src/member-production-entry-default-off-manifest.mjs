@@ -3,8 +3,8 @@ import {
   inspectMemberProductionCandidate
 } from './member-production-integration-acceptance.mjs';
 
-const BUILD='member-production-entry-default-off-manifest-20260925-01';
-const BASE_MAIN_SHA='bd10e2056918c59a1bf66d13ec4537bd3427c7a4';
+const BUILD='member-production-entry-default-off-manifest-20260925-02';
+const BASE_MAIN_SHA='2e4436757ed364b30dd12a58c8a208f38099cc91';
 const BASE_ENTRY_BLOB_SHA='9791174a5be2aa8861134f6881e2cee451f50966';
 const ENTRY_PATH='src/production-index-crm-customer360-entry.js';
 
