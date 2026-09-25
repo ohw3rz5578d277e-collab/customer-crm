@@ -1,3 +1,18 @@
+import { memberAppSourceAcceptanceHealth } from './member-app-source-integration.mjs';
+import { memberSessionFoundationHealth } from './member-session-foundation.mjs';
+import { memberLineTokenVerificationHealth } from './member-line-token-verification.mjs';
+import { memberLineLoginTransactionHealth } from './member-line-login-transaction.mjs';
+import { memberBootstrapPlanHealth } from './member-bootstrap-plan.mjs';
+import { memberMemoryWriteExecutorHealth } from './member-memory-write-executor.mjs';
+import { memberPrivateMediaAccessHealth } from './member-private-media-access.mjs';
+import { memberPrivateMediaDeliveryGrantHealth } from './member-private-media-delivery-grant.mjs';
+import { memberPrivateMediaContentAdapterHealth } from './member-private-media-content-adapter.mjs';
+import { memberFavoritesHttpContractHealth } from './member-favorites-http-contract.mjs';
+import { memberFavoritesRateLimitHealth } from './member-favorites-rate-limit.mjs';
+import { memberFavoritesWriteExecutorHealth } from './member-favorites-write-executor.mjs';
+import { memberFamilyPassBlackWriteExecutorHealth } from './member-family-pass-black-write-executor.mjs';
+import { memberShopPickupHealth } from './member-shop-pickup-read-model.mjs';
+
 const BUILD='member-production-readiness-preflight-20260925-01';
 
 const MIGRATIONS=Object.freeze([
@@ -44,9 +59,46 @@ export function buildMemberProductionReadinessPreflight({env={},observed={}}={})
   const applied=appliedMigrationSet(observed);
   const hasMigration=name=>applied.has(name);
 
+  // Source readiness is derived from the reviewed module health contracts,
+  // not from repository-file presence or a hard-coded ready flag.
+  const sourceHealth={
+    ui:memberAppSourceAcceptanceHealth(),
+    session:memberSessionFoundationHealth(env),
+    line_verify:memberLineTokenVerificationHealth(),
+    line_transaction:memberLineLoginTransactionHealth(env),
+    bootstrap:memberBootstrapPlanHealth(),
+    memory_write:memberMemoryWriteExecutorHealth(env),
+    private_access:memberPrivateMediaAccessHealth(),
+    private_grant:memberPrivateMediaDeliveryGrantHealth(env),
+    private_content:memberPrivateMediaContentAdapterHealth(env),
+    favorites_http:memberFavoritesHttpContractHealth(env),
+    favorites_rate_limit:memberFavoritesRateLimitHealth(env),
+    favorites_write:memberFavoritesWriteExecutorHealth(env),
+    black_write:memberFamilyPassBlackWriteExecutorHealth(env),
+    shop:memberShopPickupHealth()
+  };
+
+  const sourceUiReady=sourceHealth.ui.all_five_ui_foundations_present===true;
+  const authSourceReady=
+    sourceHealth.session.member_session_foundation===true
+    && sourceHealth.line_verify.member_line_token_verification===true
+    && sourceHealth.line_transaction.member_line_login_transaction===true;
+  const historicalSourceReady=
+    sourceHealth.bootstrap.member_bootstrap_plan===true
+    && sourceHealth.memory_write.member_memory_write_executor===true;
+  const privateSourceReady=
+    sourceHealth.private_access.member_private_media_access===true
+    && sourceHealth.private_grant.member_private_media_delivery_grant===true
+    && sourceHealth.private_content.member_private_media_content_adapter===true;
+  const favoritesSourceReady=
+    sourceHealth.favorites_http.member_favorites_http_contract===true
+    && sourceHealth.favorites_rate_limit.member_favorites_rate_limit===true
+    && sourceHealth.favorites_write.member_favorites_write_executor===true;
+  const blackSourceReady=sourceHealth.black_write.member_family_pass_black_write_executor===true;
+
   const sourceUi=gate({
     required:true,
-    source_ready:true,
+    source_ready:sourceUiReady,
     conditions:[],
     notes:[
       'Canonical HOME / MEMORIES / CREATE / SHOP / MY source integration is present.',
@@ -56,7 +108,7 @@ export function buildMemberProductionReadinessPreflight({env={},observed={}}={})
 
   const authSession=gate({
     required:true,
-    source_ready:true,
+    source_ready:authSourceReady,
     conditions:[
       {ok:strongSecret(env,'MEMBER_SESSION_SECRET'),blocker:'MEMBER_SESSION_SECRET_NOT_CONFIGURED'},
       {
@@ -78,7 +130,7 @@ export function buildMemberProductionReadinessPreflight({env={},observed={}}={})
 
   const readOnlyApp=gate({
     required:true,
-    source_ready:true,
+    source_ready:sourceUiReady&&authSourceReady,
     conditions:[
       {ok:authSession.activation_ready,blocker:'MEMBER_AUTH_SESSION_NOT_ACTIVATION_READY'},
       {ok:hasMigration(CORE_FAMILY),blocker:'MEMBER_FAMILY_IDENTITY_SCHEMA_NOT_VERIFIED'},
@@ -94,7 +146,7 @@ export function buildMemberProductionReadinessPreflight({env={},observed={}}={})
 
   const historicalBootstrap=gate({
     required:false,
-    source_ready:true,
+    source_ready:historicalSourceReady,
     conditions:[
       {ok:hasMigration(CORE_FAMILY)&&hasMigration(CORE_MEMORY),blocker:'CORE_MEMBER_SCHEMAS_NOT_VERIFIED'},
       {ok:enabled(env,'MEMBER_MEMORY_WRITE_MODE'),blocker:'MEMBER_MEMORY_WRITE_MODE_NOT_ENABLED'},
@@ -109,7 +161,7 @@ export function buildMemberProductionReadinessPreflight({env={},observed={}}={})
 
   const privateMedia=gate({
     required:true,
-    source_ready:true,
+    source_ready:privateSourceReady,
     conditions:[
       {ok:strongSecret(env,'MEMBER_PRIVATE_MEDIA_DELIVERY_SECRET'),blocker:'MEMBER_PRIVATE_MEDIA_DELIVERY_SECRET_NOT_CONFIGURED'},
       {ok:enabled(env,'MEMBER_PRIVATE_MEDIA_CONTENT_ROUTE_MODE'),blocker:'MEMBER_PRIVATE_MEDIA_CONTENT_ROUTE_MODE_NOT_ENABLED'},
@@ -126,7 +178,7 @@ export function buildMemberProductionReadinessPreflight({env={},observed={}}={})
 
   const favoritesWrite=gate({
     required:false,
-    source_ready:true,
+    source_ready:favoritesSourceReady,
     conditions:[
       {ok:hasMigration(FAVORITES),blocker:'MEMBER_FAVORITES_SCHEMA_NOT_VERIFIED'},
       {ok:hasMigration(FAVORITES_RATE_LIMIT),blocker:'MEMBER_FAVORITES_RATE_LIMIT_SCHEMA_NOT_VERIFIED'},
@@ -144,7 +196,7 @@ export function buildMemberProductionReadinessPreflight({env={},observed={}}={})
 
   const blackEntitlement=gate({
     required:false,
-    source_ready:true,
+    source_ready:blackSourceReady,
     conditions:[
       {ok:hasMigration(BLACK_ENTITLEMENT),blocker:'MEMBER_BLACK_ENTITLEMENT_SCHEMA_NOT_VERIFIED'},
       {ok:observedTrue(observed,'black_exact_family_plan_verified'),blocker:'BLACK_EXACT_FAMILY_PLAN_NOT_VERIFIED'},
@@ -235,6 +287,16 @@ export function buildMemberProductionReadinessPreflight({env={},observed={}}={})
       && readOnlyApp.activation_ready===true
       && privateMedia.activation_ready===true,
     gates,
+    source_health:{
+      five_tab_ui:sourceUiReady,
+      auth_session:authSourceReady,
+      historical_bootstrap:historicalSourceReady,
+      private_media:privateSourceReady,
+      favorites_write:favoritesSourceReady,
+      black_entitlement:blackSourceReady,
+      shop_presentation:sourceHealth.shop.member_shop_pickup_read_model===true
+        && sourceHealth.shop.presentation_catalog_only===true
+    },
     migration_inventory:migrationInventory,
     owner_gates:ownerGates,
     invariant,
