@@ -3,31 +3,70 @@ import {
   inspectMemberProductionCandidate
 } from './member-production-integration-acceptance.mjs';
 
-const BUILD='member-production-entry-default-off-manifest-20260925-02';
-const BASE_MAIN_SHA='2e4436757ed364b30dd12a58c8a208f38099cc91';
+const BUILD='member-production-entry-default-off-manifest-20260925-03';
 const BASE_ENTRY_BLOB_SHA='9791174a5be2aa8861134f6881e2cee451f50966';
 const ENTRY_PATH='src/production-index-crm-customer360-entry.js';
+const SHA40_RE=/^[0-9a-f]{40}$/;
 
 const text=value=>value==null?'':String(value).trim();
 
+function normalizeSha(value){
+  const normalized=text(value).toLowerCase();
+  return SHA40_RE.test(normalized)?normalized:'';
+}
+
 export function buildMemberProductionEntryDefaultOffManifest({
   production_entry_source='',
-  base_main_sha=BASE_MAIN_SHA,
+  observed_current_main_sha='',
+  expected_current_main_sha='',
   base_entry_blob_sha=BASE_ENTRY_BLOB_SHA
 }={}){
   const source=String(production_entry_source||'');
-  const baselineMatches=
-    text(base_main_sha)===BASE_MAIN_SHA
-    && text(base_entry_blob_sha)===BASE_ENTRY_BLOB_SHA;
+  const observedMain=normalizeSha(observed_current_main_sha);
+  const expectedMain=normalizeSha(expected_current_main_sha);
+  const entryBlob=text(base_entry_blob_sha).toLowerCase();
 
-  if(!baselineMatches){
+  if(!observedMain||!expectedMain){
     return {
-      status:'baseline_mismatch',
+      status:'current_main_sha_required',
       build:BUILD,
       source_only:true,
       baseline_matches:false,
       expected:{
-        main_sha:BASE_MAIN_SHA,
+        main_sha_strategy:'fresh_exact_match_required',
+        entry_blob_sha:BASE_ENTRY_BLOB_SHA,
+        entry_path:ENTRY_PATH
+      },
+      production_write:false
+    };
+  }
+
+  if(observedMain!==expectedMain){
+    return {
+      status:'current_main_sha_mismatch',
+      build:BUILD,
+      source_only:true,
+      baseline_matches:false,
+      observed_current_main_sha:observedMain,
+      expected_current_main_sha:expectedMain,
+      expected:{
+        main_sha_strategy:'fresh_exact_match_required',
+        entry_blob_sha:BASE_ENTRY_BLOB_SHA,
+        entry_path:ENTRY_PATH
+      },
+      production_write:false
+    };
+  }
+
+  if(entryBlob!==BASE_ENTRY_BLOB_SHA){
+    return {
+      status:'entry_blob_mismatch',
+      build:BUILD,
+      source_only:true,
+      baseline_matches:false,
+      exact_main_sha:observedMain,
+      expected:{
+        main_sha_strategy:'fresh_exact_match_required',
         entry_blob_sha:BASE_ENTRY_BLOB_SHA,
         entry_path:ENTRY_PATH
       },
@@ -42,10 +81,11 @@ export function buildMemberProductionEntryDefaultOffManifest({
       build:BUILD,
       source_only:true,
       baseline_matches:true,
+      exact_main_sha:observedMain,
       candidate_status:candidate.status,
       candidate_failures:[...(candidate.failures||[])],
       expected:{
-        main_sha:BASE_MAIN_SHA,
+        main_sha_strategy:'fresh_exact_match_required',
         entry_blob_sha:BASE_ENTRY_BLOB_SHA,
         entry_path:ENTRY_PATH
       },
@@ -65,7 +105,9 @@ export function buildMemberProductionEntryDefaultOffManifest({
     source_only:true,
     baseline_matches:true,
     exact_baseline:{
-      main_sha:BASE_MAIN_SHA,
+      observed_current_main_sha:observedMain,
+      expected_current_main_sha:expectedMain,
+      exact_main_match:true,
       entry_blob_sha:BASE_ENTRY_BLOB_SHA,
       entry_path:ENTRY_PATH
     },
@@ -81,7 +123,9 @@ export function buildMemberProductionEntryDefaultOffManifest({
     },
     future_patch_contract:{
       allowed_primary_path:ENTRY_PATH,
-      generated_from_exact_baseline:true,
+      fresh_current_main_sha_required:true,
+      expected_main_sha_must_match_fresh_observation:true,
+      generated_from_exact_entry_blob:true,
       apply_exact_candidate_only:true,
       manual_edit_after_generation:false,
       owner_authorization_required_before_apply:true,
@@ -124,7 +168,9 @@ export function memberProductionEntryDefaultOffManifestHealth(){
     member_production_entry_default_off_manifest:true,
     build:BUILD,
     source_only:true,
-    baseline_main_sha:BASE_MAIN_SHA,
+    main_sha_strategy:'fresh_exact_match_required',
+    static_main_sha_pinning:false,
+    fresh_main_gate_required:true,
     baseline_entry_blob_sha:BASE_ENTRY_BLOB_SHA,
     entry_path:ENTRY_PATH,
     exact_candidate_only:true,
@@ -137,7 +183,8 @@ export function memberProductionEntryDefaultOffManifestHealth(){
 
 export const __test={
   BUILD,
-  BASE_MAIN_SHA,
   BASE_ENTRY_BLOB_SHA,
-  ENTRY_PATH
+  ENTRY_PATH,
+  SHA40_RE,
+  normalizeSha
 };
