@@ -10,7 +10,7 @@ function pass(name,ok){assert(ok,name);n++;console.log('PASS',name)}
 
 const empty=buildMemberProductionReadinessPreflight();
 pass('default preflight is source-only',empty.status==='ok'&&empty.source_only===true&&empty.health.source_only===true);
-pass('five-tab UI is source-ready',empty.gates.source_ui.source_ready===true&&empty.gates.source_ui.activation_ready===true);
+pass('five-tab UI and browser delivery are source-ready',empty.gates.source_ui.source_ready===true&&empty.gates.source_ui.activation_ready===true&&empty.source_health.browser_delivery===true);
 pass('auth source readiness includes the complete source-only LINE login chain',empty.source_health.auth_session===true&&empty.gates.auth_session.source_ready===true);
 pass('read-only app source readiness includes signed-session public read router',empty.source_health.read_only_app===true&&empty.gates.read_only_app.source_ready===true);
 pass('Member app HTTP composition is included in source readiness',empty.source_health.composition===true);
