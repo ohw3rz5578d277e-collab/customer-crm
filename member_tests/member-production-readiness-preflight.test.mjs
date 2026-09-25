@@ -13,6 +13,7 @@ pass('default preflight is source-only',empty.status==='ok'&&empty.source_only==
 pass('five-tab UI is source-ready',empty.gates.source_ui.source_ready===true&&empty.gates.source_ui.activation_ready===true);
 pass('auth source readiness includes the complete source-only LINE login chain',empty.source_health.auth_session===true&&empty.gates.auth_session.source_ready===true);
 pass('read-only app source readiness includes signed-session public read router',empty.source_health.read_only_app===true&&empty.gates.read_only_app.source_ready===true);
+pass('Member app HTTP composition is included in source readiness',empty.source_health.composition===true);
 pass('main Production activation defaults blocked',empty.main_activation_ready===false);
 pass('Member session secret missing is explicit',empty.gates.auth_session.blockers.includes('MEMBER_SESSION_SECRET_NOT_CONFIGURED'));
 pass('LINE login transaction config missing is explicit',empty.gates.auth_session.blockers.includes('LINE_LOGIN_TRANSACTION_NOT_CONFIGURED'));
