@@ -10,11 +10,11 @@ It does **not** modify the Production Worker entry.
 
 ## Exact baseline
 
-- canonical main SHA: `bd10e2056918c59a1bf66d13ec4537bd3427c7a4`
+- canonical main SHA: `2e4436757ed364b30dd12a58c8a208f38099cc91`
 - Production entry path: `src/production-index-crm-customer360-entry.js`
 - Production entry Git blob SHA: `9791174a5be2aa8861134f6881e2cee451f50966`
 
-If either the baseline main or entry blob changes, this manifest fails closed and the patch candidate must be regenerated from a fresh audited baseline.
+This baseline was refreshed after PR #161 merged. The Production entry blob remained unchanged. If either the baseline main or entry blob changes again, this manifest fails closed and the patch candidate must be regenerated from a fresh audited baseline.
 
 ## Exact candidate rule
 

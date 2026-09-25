@@ -19,6 +19,7 @@ function gitBlobSha(content){
 }
 
 const actualBlob=gitBlobSha(source);
+pass('manifest baseline main is refreshed to post-PR #161 main',__test.BASE_MAIN_SHA==='2e4436757ed364b30dd12a58c8a208f38099cc91');
 pass('canonical Production entry blob matches exact manifest baseline',actualBlob===__test.BASE_ENTRY_BLOB_SHA);
 
 const manifest=buildMemberProductionEntryDefaultOffManifest({
