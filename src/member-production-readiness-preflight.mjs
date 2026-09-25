@@ -13,6 +13,8 @@ import { memberPrivateMediaContentAdapterHealth } from './member-private-media-c
 import { memberPrivateMediaHttpRouterHealth } from './member-private-media-http-router.mjs';
 import { memberAppHttpCompositionHealth } from './member-app-http-composition.mjs';
 import { memberProductionRouteWiringPreflightHealth } from './member-production-route-wiring-preflight.mjs';
+import { memberBrowserPageHealth } from './member-browser-page.mjs';
+import { memberPublicAssetDeliveryHealth } from './member-public-asset-delivery.mjs';
 import { memberFavoritesHttpContractHealth } from './member-favorites-http-contract.mjs';
 import { memberFavoritesRateLimitHealth } from './member-favorites-rate-limit.mjs';
 import { memberFavoritesWriteExecutorHealth } from './member-favorites-write-executor.mjs';
@@ -83,6 +85,8 @@ export function buildMemberProductionReadinessPreflight({env={},observed={}}={})
     private_router:memberPrivateMediaHttpRouterHealth(env),
     composition:memberAppHttpCompositionHealth(env),
     route_wiring_preflight:memberProductionRouteWiringPreflightHealth(),
+    browser_page:memberBrowserPageHealth(),
+    public_asset_delivery:memberPublicAssetDeliveryHealth(),
     favorites_http:memberFavoritesHttpContractHealth(env),
     favorites_rate_limit:memberFavoritesRateLimitHealth(env),
     favorites_write:memberFavoritesWriteExecutorHealth(env),
@@ -90,7 +94,12 @@ export function buildMemberProductionReadinessPreflight({env={},observed={}}={})
     shop:memberShopPickupHealth()
   };
 
-  const sourceUiReady=sourceHealth.ui.all_five_ui_foundations_present===true;
+  const browserDeliverySourceReady=
+    sourceHealth.browser_page.member_browser_page===true
+    && sourceHealth.public_asset_delivery.member_public_asset_delivery===true;
+  const sourceUiReady=
+    sourceHealth.ui.all_five_ui_foundations_present===true
+    && browserDeliverySourceReady;
   const authSourceReady=
     sourceHealth.session.member_session_foundation===true
     && sourceHealth.line_verify.member_line_token_verification===true
@@ -124,7 +133,7 @@ export function buildMemberProductionReadinessPreflight({env={},observed={}}={})
     source_ready:sourceUiReady,
     conditions:[],
     notes:[
-      'Canonical HOME / MEMORIES / CREATE / SHOP / MY source integration is present.',
+      'Canonical HOME / MEMORIES / CREATE / SHOP / MY source integration and browser delivery foundations are present.',
       'This gate performs no Production action.'
     ]
   });
@@ -325,7 +334,8 @@ export function buildMemberProductionReadinessPreflight({env={},observed={}}={})
       composition:sourceHealth.composition.member_app_http_composition===true
         && sourceHealth.composition.all_source_layers_present===true,
       production_route_wiring_plan:sourceHealth.route_wiring_preflight.member_production_route_wiring_preflight===true
-        && sourceHealth.route_wiring_preflight.static_analysis_only===true
+        && sourceHealth.route_wiring_preflight.static_analysis_only===true,
+      browser_delivery:browserDeliverySourceReady
     },
     migration_inventory:migrationInventory,
     owner_gates:ownerGates,
