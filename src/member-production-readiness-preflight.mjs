@@ -12,6 +12,7 @@ import { memberPrivateMediaDeliveryGrantHealth } from './member-private-media-de
 import { memberPrivateMediaContentAdapterHealth } from './member-private-media-content-adapter.mjs';
 import { memberPrivateMediaHttpRouterHealth } from './member-private-media-http-router.mjs';
 import { memberAppHttpCompositionHealth } from './member-app-http-composition.mjs';
+import { memberProductionRouteWiringPreflightHealth } from './member-production-route-wiring-preflight.mjs';
 import { memberFavoritesHttpContractHealth } from './member-favorites-http-contract.mjs';
 import { memberFavoritesRateLimitHealth } from './member-favorites-rate-limit.mjs';
 import { memberFavoritesWriteExecutorHealth } from './member-favorites-write-executor.mjs';
@@ -81,6 +82,7 @@ export function buildMemberProductionReadinessPreflight({env={},observed={}}={})
     private_content:memberPrivateMediaContentAdapterHealth(env),
     private_router:memberPrivateMediaHttpRouterHealth(env),
     composition:memberAppHttpCompositionHealth(env),
+    route_wiring_preflight:memberProductionRouteWiringPreflightHealth(),
     favorites_http:memberFavoritesHttpContractHealth(env),
     favorites_rate_limit:memberFavoritesRateLimitHealth(env),
     favorites_write:memberFavoritesWriteExecutorHealth(env),
@@ -321,7 +323,9 @@ export function buildMemberProductionReadinessPreflight({env={},observed={}}={})
       shop_presentation:sourceHealth.shop.member_shop_pickup_read_model===true
         && sourceHealth.shop.presentation_catalog_only===true,
       composition:sourceHealth.composition.member_app_http_composition===true
-        && sourceHealth.composition.all_source_layers_present===true
+        && sourceHealth.composition.all_source_layers_present===true,
+      production_route_wiring_plan:sourceHealth.route_wiring_preflight.member_production_route_wiring_preflight===true
+        && sourceHealth.route_wiring_preflight.static_analysis_only===true
     },
     migration_inventory:migrationInventory,
     owner_gates:ownerGates,
