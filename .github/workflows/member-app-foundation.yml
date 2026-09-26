@@ -14,6 +14,9 @@ on:
       - '.github/workflows/member-production-schema-preflight.yml'
       - '.github/workflows/dispatch-member-schema-preflight-from-issue.yml'
       - 'tests/member-production-schema-preflight-contract.test.mjs'
+      - '.github/workflows/member-production-schema-apply.yml'
+      - '.github/workflows/dispatch-member-schema-apply-from-issue.yml'
+      - 'tests/member-production-schema-apply-contract.test.mjs'
 
 permissions:
   contents: read
@@ -46,7 +49,7 @@ jobs:
 
           for path in "${changed[@]}"; do
             case "$path" in
-              src/crm-member-*.mjs|src/member-*.mjs|migrations_managed/20260924_member_*.sql|member_tests/*|docs/member-app/*|.github/workflows/member-app-foundation.yml|.github/workflows/member-production-schema-preflight.yml|.github/workflows/dispatch-member-schema-preflight-from-issue.yml|tests/member-production-schema-preflight-contract.test.mjs) ;;
+              src/crm-member-*.mjs|src/member-*.mjs|migrations_managed/20260924_member_*.sql|member_tests/*|docs/member-app/*|.github/workflows/member-app-foundation.yml|.github/workflows/member-production-schema-preflight.yml|.github/workflows/dispatch-member-schema-preflight-from-issue.yml|tests/member-production-schema-preflight-contract.test.mjs|.github/workflows/member-production-schema-apply.yml|.github/workflows/dispatch-member-schema-apply-from-issue.yml|tests/member-production-schema-apply-contract.test.mjs) ;;
               *) echo "::error::Unexpected Member foundation scope: $path"; exit 1 ;;
             esac
           done
