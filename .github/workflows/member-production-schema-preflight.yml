@@ -123,26 +123,7 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           wranglerVersion: '4'
-          command: >-
-            d1 execute customer-crm-db --remote --json --command
-            "SELECT name,type FROM sqlite_master
-             WHERE name IN (
-               'customer_family_groups',
-               'customer_family_customer_links',
-               'member_memories',
-               'member_memory_media',
-               'member_memory_favorites',
-               'member_favorite_mutation_rate_limits',
-               'member_family_pass_entitlements',
-               'member_public_assets',
-               'member_creative_templates',
-               'member_shop_products',
-               'member_news_items'
-             )
-             ORDER BY name;
-             SELECT name FROM d1_migrations_managed
-             WHERE name LIKE '20260924_member_%'
-             ORDER BY name;"
+          command: d1 execute customer-crm-db --remote --json --command "SELECT name,type FROM sqlite_master WHERE name IN ('customer_family_groups','customer_family_customer_links','member_memories','member_memory_media','member_memory_favorites','member_favorite_mutation_rate_limits','member_family_pass_entitlements','member_public_assets','member_creative_templates','member_shop_products','member_news_items') ORDER BY name; SELECT name FROM d1_migrations_managed WHERE name LIKE '20260924_member_%' ORDER BY name;"
 
       - name: Classify exact Member schema state
         shell: bash
