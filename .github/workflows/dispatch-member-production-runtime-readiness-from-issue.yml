@@ -1,0 +1,86 @@
+name: Dispatch Member Production runtime readiness from release-gate issue
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  issues: read
+  actions: write
+
+concurrency:
+  group: member-production-runtime-readiness-dispatch
+  cancel-in-progress: false
+
+jobs:
+  dispatch:
+    name: Validate exact Member runtime readiness command and dispatch
+    if: >-
+      github.event.issue.number == 26 &&
+      github.event.issue.pull_request == null &&
+      github.actor == 'ohw3rz5578d277e-collab' &&
+      github.event.comment.user.login == 'ohw3rz5578d277e-collab' &&
+      startsWith(github.event.comment.body, '/member-runtime-readiness ')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Validate exact Owner command and current main
+        id: gate
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMMAND_BODY: ${{ github.event.comment.body }}
+        run: |
+          set -euo pipefail
+          command_re='^/member-runtime-readiness sha=([0-9a-f]{40})$'
+          [[ "$COMMAND_BODY" =~ $command_re ]] || { echo '::error::INVALID_MEMBER_RUNTIME_READINESS_COMMAND'; exit 1; }
+          expected_sha="${BASH_REMATCH[1]}"
+          current_sha="$(
+            curl --fail --silent --show-error               -H "Authorization: Bearer $GH_TOKEN"               -H 'Accept: application/vnd.github+json'               -H 'X-GitHub-Api-Version: 2022-11-28'               "https://api.github.com/repos/${GITHUB_REPOSITORY}/commits/main"             | python3 -c 'import json,sys; print(json.load(sys.stdin)["sha"])'
+          )"
+          test "$current_sha" = "$expected_sha" || { echo "::error::MAIN_DRIFT expected=$expected_sha current=$current_sha"; exit 1; }
+          echo "expected_sha=$expected_sha" >> "$GITHUB_OUTPUT"
+          echo "MEMBER_RUNTIME_READINESS_AUTHORIZED_SHA=$expected_sha"
+          echo 'PRODUCTION_WRITE=0'
+          echo 'PRODUCTION_DEPLOY=0'
+
+      - name: Refuse during Production deploy or Member runtime readiness
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          for workflow in deploy-cloudflare.yml member-production-runtime-readiness.yml; do
+            for status in queued in_progress; do
+              count="$(
+                curl --fail --silent --show-error                   -H "Authorization: Bearer $GH_TOKEN"                   -H 'Accept: application/vnd.github+json'                   -H 'X-GitHub-Api-Version: 2022-11-28'                   "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/$workflow/runs?status=$status&per_page=1"                 | python3 -c 'import json,sys; print(json.load(sys.stdin)["total_count"])'
+              )"
+              test "$count" = '0' || { echo "::error::PRODUCTION_READINESS_LOCK_OCCUPIED workflow=$workflow status=$status count=$count"; exit 1; }
+            done
+          done
+          echo 'PRODUCTION_READINESS_LOCK=FREE'
+
+      - name: Dispatch read-only Member runtime readiness
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_SHA: ${{ steps.gate.outputs.expected_sha }}
+        run: |
+          set -euo pipefail
+          payload="$(python3 - <<'PY'
+          import json,os
+          print(json.dumps({'ref':'main','inputs':{'expected_sha':os.environ['EXPECTED_SHA']}}))
+          PY
+          )"
+          code="$(
+            curl --silent --show-error               --output /tmp/member-runtime-readiness-dispatch.txt               --write-out '%{http_code}'               --request POST               -H "Authorization: Bearer $GH_TOKEN"               -H 'Accept: application/vnd.github+json'               -H 'X-GitHub-Api-Version: 2022-11-28'               "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/member-production-runtime-readiness.yml/dispatches"               -d "$payload"
+          )"
+          test "$code" = '204' || {
+            cat /tmp/member-runtime-readiness-dispatch.txt >&2 || true
+            echo "::error::MEMBER_RUNTIME_READINESS_DISPATCH_FAILED_HTTP_$code"
+            exit 1
+          }
+          echo "MEMBER_RUNTIME_READINESS_DISPATCHED_SHA=$EXPECTED_SHA"
+          echo 'PRODUCTION_WRITE=0'
+          echo 'PRODUCTION_DEPLOY=0'
