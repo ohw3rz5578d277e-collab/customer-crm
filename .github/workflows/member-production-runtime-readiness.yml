@@ -1,0 +1,294 @@
+name: Member Production runtime readiness
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/member-production-runtime-readiness.yml'
+      - '.github/workflows/dispatch-member-production-runtime-readiness-from-issue.yml'
+      - 'tests/member-production-runtime-readiness-contract.test.mjs'
+      - 'docs/member-app/member-production-runtime-readiness.md'
+      - '.github/workflows/member-app-foundation.yml'
+  workflow_dispatch:
+    inputs:
+      expected_sha:
+        description: Exact current main SHA authorized for read-only Member Production runtime readiness
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: ${{ github.event_name == 'workflow_dispatch' && 'member-production-runtime-readiness' || format('member-runtime-readiness-pr-{0}', github.event.pull_request.number) }}
+  cancel-in-progress: false
+
+jobs:
+  contract:
+    name: Member runtime readiness contract
+    if: ${{ github.event_name == 'pull_request' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact PR head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Assert exact PR head
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Verify Member runtime readiness contract
+        run: node tests/member-production-runtime-readiness-contract.test.mjs
+
+  readiness:
+    name: Exact-SHA read-only Member Production runtime readiness
+    if: ${{ github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      EXPECTED_SHA_RAW: ${{ inputs.expected_sha }}
+    steps:
+      - name: Normalize exact authorized SHA
+        id: auth
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected_sha="$(printf '%s' "$EXPECTED_SHA_RAW" | tr '[:upper:]' '[:lower:]')"
+          [[ "$expected_sha" =~ ^[0-9a-f]{40}$ ]] || { echo '::error::INVALID_EXPECTED_SHA'; exit 1; }
+          echo "expected_sha=$expected_sha" >> "$GITHUB_OUTPUT"
+          echo "MEMBER_RUNTIME_READINESS_AUTHORIZED_SHA=$expected_sha"
+
+      - name: Checkout exact authorized SHA
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.auth.outputs.expected_sha }}
+          fetch-depth: 0
+
+      - name: Exact SHA and current-main gate
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ steps.auth.outputs.expected_sha }}
+        run: |
+          set -euo pipefail
+          actual_sha="$(git rev-parse HEAD)"
+          current_main="$(git ls-remote origin refs/heads/main | awk '{print $1}')"
+          test "$actual_sha" = "$EXPECTED_SHA" || { echo "::error::CHECKOUT_SHA_MISMATCH actual=$actual_sha expected=$EXPECTED_SHA"; exit 1; }
+          test "$current_main" = "$EXPECTED_SHA" || { echo "::error::MAIN_DRIFT current=$current_main expected=$EXPECTED_SHA"; exit 1; }
+          echo 'EXACT_SHA_GATE=PASS'
+          echo "CURRENT_MAIN_SHA=$current_main"
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Verify canonical default-off Member source
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ steps.auth.outputs.expected_sha }}
+        run: |
+          set -euo pipefail
+          node member_tests/member-production-entry-default-off-manifest.test.mjs
+          node member_tests/member-production-readiness-preflight.test.mjs
+          node member_tests/member-production-integration-acceptance.test.mjs
+          node member_tests/member-production-route-wiring-preflight.test.mjs
+          node <<'NODE'
+          const fs=require('fs');
+          const entry=fs.readFileSync('src/production-index-crm-customer360-entry.js','utf8');
+          const cfg=JSON.parse(fs.readFileSync('wrangler.jsonc','utf8'));
+          if(!entry.includes('const MEMBER_PRODUCTION_OWNER_APPROVED=false;')){
+            throw new Error('MEMBER_OWNER_FLAG_NOT_DEFAULT_OFF');
+          }
+          if(String(cfg?.vars?.MEMBER_PRODUCTION_ROUTE_MODE||'').trim().toLowerCase()==='enabled'){
+            throw new Error('MEMBER_PRODUCTION_ROUTE_MODE_MUST_REMAIN_OFF_DURING_READINESS');
+          }
+          if(String(cfg?.vars?.MEMBER_PRIVATE_MEDIA_CONTENT_ROUTE_MODE||'').trim().toLowerCase()==='enabled'){
+            throw new Error('PRIVATE_MEDIA_ROUTE_MODE_MUST_REMAIN_OFF_DURING_READINESS');
+          }
+          console.log('MEMBER_CANONICAL_SOURCE_DEFAULT_OFF=PASS');
+          console.log('MEMBER_PRODUCTION_OWNER_APPROVED=false');
+          console.log('MEMBER_PRODUCTION_ROUTE_MODE=NOT_ENABLED');
+          console.log('MEMBER_PRIVATE_MEDIA_CONTENT_ROUTE_MODE=NOT_ENABLED');
+          NODE
+          echo 'PRODUCTION_DEPLOY=0'
+          echo 'MEMBER_ROUTE_ACTIVATION=0'
+
+      - name: Snapshot canonical Production deploy receipt
+        id: deploy_receipt
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_SHA: ${{ steps.auth.outputs.expected_sha }}
+        run: |
+          set -euo pipefail
+          json="$(
+            curl --fail --silent --show-error               -H "Authorization: Bearer $GH_TOKEN"               -H 'Accept: application/vnd.github+json'               -H 'X-GitHub-Api-Version: 2022-11-28'               "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/workflows/deploy-cloudflare.yml/runs?event=workflow_dispatch&status=completed&per_page=50"
+          )"
+          printf '%s' "$json" > /tmp/member-runtime-deploy-runs.json
+          EXPECTED_SHA="$EXPECTED_SHA" node <<'NODE'
+          const fs=require('fs');
+          const data=JSON.parse(fs.readFileSync('/tmp/member-runtime-deploy-runs.json','utf8'));
+          const rows=Array.isArray(data.workflow_runs)?data.workflow_runs:[];
+          const successful=rows.filter(r=>r?.conclusion==='success');
+          const exact=successful.find(r=>r?.head_sha===process.env.EXPECTED_SHA);
+          const latest=successful[0]||null;
+          console.log('LATEST_COMPLETED_SUCCESS_PRODUCTION_RELEASE_RUN='+(latest?.id||'NONE'));
+          console.log('LATEST_COMPLETED_SUCCESS_PRODUCTION_RELEASE_SHA='+(latest?.head_sha||'NONE'));
+          console.log('EXACT_MAIN_SUCCESS_RELEASE_RECEIPT='+(exact?'PRESENT':'ABSENT'));
+          console.log('PRODUCTION_RUNTIME_EXACT_MAIN_DEPLOY_RECEIPT_VERIFIED='+(exact?'YES':'NO'));
+          NODE
+          rm -f /tmp/member-runtime-deploy-runs.json
+          echo 'PRODUCTION_DEPLOY=0'
+
+      - name: Install Wrangler tooling
+        run: npm install --no-save wrangler@4.36.0
+
+      - name: Confirm Cloudflare authentication
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          npx wrangler whoami >/tmp/member-runtime-whoami.txt
+          test -s /tmp/member-runtime-whoami.txt
+          rm -f /tmp/member-runtime-whoami.txt
+          echo 'CLOUDFLARE_AUTH=PASS'
+
+      - name: Read Production Worker secret names only
+        id: secrets
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          npx wrangler secret list --name customer-crm-api --format json > /tmp/member-runtime-secret-names.json
+          node <<'NODE'
+          const fs=require('fs');
+          const raw=JSON.parse(fs.readFileSync('/tmp/member-runtime-secret-names.json','utf8'));
+          const rows=Array.isArray(raw)?raw:Array.isArray(raw.result)?raw.result:Array.isArray(raw.secrets)?raw.secrets:[];
+          const names=new Set(rows.map(x=>String(x?.name||x?.key||'')).filter(Boolean));
+          const required=[
+            'MEMBER_SESSION_SECRET',
+            'MEMBER_LINE_LOGIN_TRANSACTION_SECRET',
+            'MEMBER_LINE_LOGIN_CHANNEL_SECRET',
+            'MEMBER_PRIVATE_MEDIA_DELIVERY_SECRET'
+          ];
+          const present=required.filter(name=>names.has(name));
+          const missing=required.filter(name=>!names.has(name));
+          console.log('MEMBER_REQUIRED_SECRET_NAME_COUNT='+required.length);
+          console.log('MEMBER_REQUIRED_SECRET_NAMES_PRESENT='+(present.join(',')||'NONE'));
+          console.log('MEMBER_REQUIRED_SECRET_NAMES_MISSING='+(missing.join(',')||'NONE'));
+          console.log('MEMBER_RUNTIME_SECRET_NAMES_READY='+(missing.length===0?'YES':'NO'));
+          console.log('SECRET_VALUES_PRINTED=NO');
+          NODE
+          rm -f /tmp/member-runtime-secret-names.json
+
+      - name: List pending managed Production D1 migrations
+        id: pending
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          wranglerVersion: '4'
+          command: d1 migrations list customer-crm-db --remote
+
+      - name: Read exact Member schema receipt state
+        id: schema
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          wranglerVersion: '4'
+          command: d1 execute customer-crm-db --remote --json --command "SELECT name,type FROM sqlite_master WHERE name IN ('customer_family_groups','customer_family_customer_links','member_memories','member_memory_media','member_memory_favorites','member_favorite_mutation_rate_limits','member_family_pass_entitlements','member_public_assets','member_creative_templates','member_shop_products','member_news_items') ORDER BY name; SELECT name FROM d1_migrations_managed WHERE name LIKE '20260924_member_%' ORDER BY name;"
+
+      - name: Classify read-only Member runtime readiness
+        shell: bash
+        env:
+          PENDING_OUTPUT: ${{ steps.pending.outputs.command-output }}
+          SCHEMA_OUTPUT: ${{ steps.schema.outputs.command-output }}
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const pending=process.env.PENDING_OUTPUT||'';
+          const schema=process.env.SCHEMA_OUTPUT||'';
+          const migrations=[
+            '20260924_member_creative_catalog_foundation.sql',
+            '20260924_member_family_identity_foundation.sql',
+            '20260924_member_family_pass_entitlement_foundation.sql',
+            '20260924_member_favorite_mutation_rate_limit_foundation.sql',
+            '20260924_member_memory_core_foundation.sql',
+            '20260924_member_memory_favorites_foundation.sql',
+            '20260924_member_news_catalog_foundation.sql',
+            '20260924_member_public_asset_registry_foundation.sql',
+            '20260924_member_shop_catalog_foundation.sql'
+          ];
+          const tables=[
+            'customer_family_groups',
+            'customer_family_customer_links',
+            'member_memories',
+            'member_memory_media',
+            'member_memory_favorites',
+            'member_favorite_mutation_rate_limits',
+            'member_family_pass_entitlements',
+            'member_public_assets',
+            'member_creative_templates',
+            'member_shop_products',
+            'member_news_items'
+          ];
+          const pendingFiles=[...pending.matchAll(/[A-Za-z0-9_.-]+\.sql/g)].map(m=>m[0]);
+          const uniquePending=[...new Set(pendingFiles)];
+          const memberPending=uniquePending.filter(x=>migrations.includes(x));
+          const unknownPending=uniquePending.filter(x=>!migrations.includes(x));
+          const presentTables=tables.filter(x=>schema.includes(x));
+          const tracked=migrations.filter(x=>schema.includes(x));
+          if(memberPending.length||unknownPending.length||presentTables.length!==11||tracked.length!==9){
+            throw new Error(
+              'MEMBER_SCHEMA_RUNTIME_RECEIPT_INCONSISTENT:'+
+              'memberPending='+memberPending.length+
+              ',unknownPending='+unknownPending.length+
+              ',tables='+presentTables.length+
+              ',tracked='+tracked.length
+            );
+          }
+          console.log('MEMBER_SCHEMA_RUNTIME_RECEIPT=ALREADY_APPLIED_CONFIRMED');
+          console.log('MEMBER_PENDING_MIGRATION_COUNT=0');
+          console.log('MEMBER_SCHEMA_TABLE_COUNT=11');
+          console.log('MEMBER_SCHEMA_TRACKED_MIGRATION_COUNT=9');
+          console.log('MEMBER_RUNTIME_READINESS_MODE=OBSERVE_ONLY');
+          console.log('MEMBER_PRODUCTION_OWNER_APPROVED_ACTIVATION=0');
+          console.log('MEMBER_PRODUCTION_ROUTE_MODE_ENABLEMENT=0');
+          console.log('MEMBER_SESSION_PRODUCTION_ACTIVATION=0');
+          console.log('LINE_LOGIN_PRODUCTION_ACTIVATION=0');
+          console.log('PRIVATE_MEDIA_PRODUCTION_BINDING_CHANGE=0');
+          console.log('PUBLIC_ASSET_PRODUCTION_BINDING_CHANGE=0');
+          console.log('PRODUCTION_D1_WRITE=0');
+          console.log('PRODUCTION_DEPLOY=0');
+          console.log('CRM_WRITE=0');
+          console.log('LINE_SEND=0');
+          NODE
+
+      - name: Final observation-only declaration
+        run: |
+          echo 'MEMBER_PRODUCTION_RUNTIME_READINESS_OBSERVED=PASS'
+          echo 'MEMBER_RUNTIME_READINESS_MODE=OBSERVE_ONLY'
+          echo 'MEMBER_PRODUCTION_OWNER_APPROVED_ACTIVATION=0'
+          echo 'MEMBER_PRODUCTION_ROUTE_MODE_ENABLEMENT=0'
+          echo 'MEMBER_SESSION_PRODUCTION_ACTIVATION=0'
+          echo 'LINE_LOGIN_PRODUCTION_ACTIVATION=0'
+          echo 'PRIVATE_MEDIA_PRODUCTION_BINDING_CHANGE=0'
+          echo 'PUBLIC_ASSET_PRODUCTION_BINDING_CHANGE=0'
+          echo 'PRODUCTION_D1_WRITE=0'
+          echo 'PRODUCTION_DEPLOY=0'
+          echo 'CRM_WRITE=0'
+          echo 'LINE_SEND=0'
