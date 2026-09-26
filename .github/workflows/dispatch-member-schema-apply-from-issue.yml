@@ -1,0 +1,88 @@
+name: Dispatch Member schema apply from release-gate issue
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  issues: read
+  actions: write
+
+concurrency:
+  group: member-production-schema-apply-dispatch-bridge
+  cancel-in-progress: false
+
+jobs:
+  dispatch:
+    name: Validate Member schema apply command and dispatch
+    if: >-
+      github.event.issue.number == 26 &&
+      github.event.issue.pull_request == null &&
+      github.actor == 'ohw3rz5578d277e-collab' &&
+      github.event.comment.user.login == 'ohw3rz5578d277e-collab' &&
+      startsWith(github.event.comment.body, '/member-schema-apply ')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Validate exact Owner command and current main
+        id: gate
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMMAND_BODY: ${{ github.event.comment.body }}
+          OWNER_COMMENT_ID: ${{ github.event.comment.id }}
+        run: |
+          set -euo pipefail
+          command_re='^/member-schema-apply sha=([0-9a-f]{40}) preflight_run=([0-9]+) confirm=APPLY_MEMBER_SCHEMA$'
+          [[ "$COMMAND_BODY" =~ $command_re ]] || { echo '::error::INVALID_MEMBER_SCHEMA_APPLY_COMMAND'; exit 1; }
+          expected_sha="${BASH_REMATCH[1]}"
+          preflight_run_id="${BASH_REMATCH[2]}"
+          current_sha="$(
+            curl --fail --silent --show-error               -H "Authorization: Bearer $GH_TOKEN"               -H 'Accept: application/vnd.github+json'               -H 'X-GitHub-Api-Version: 2022-11-28'               "https://api.github.com/repos/${GITHUB_REPOSITORY}/commits/main"             | python3 -c 'import json,sys; print(json.load(sys.stdin)["sha"])'
+          )"
+          test "$current_sha" = "$expected_sha" || { echo "::error::MAIN_DRIFT expected=$expected_sha current=$current_sha"; exit 1; }
+          echo "expected_sha=$expected_sha" >> "$GITHUB_OUTPUT"
+          echo "preflight_run_id=$preflight_run_id" >> "$GITHUB_OUTPUT"
+          echo "owner_comment_id=$OWNER_COMMENT_ID" >> "$GITHUB_OUTPUT"
+          echo "MEMBER_SCHEMA_APPLY_AUTHORIZED_SHA=$expected_sha"
+          echo "MEMBER_SCHEMA_APPLY_PREFLIGHT_RUN_ID=$preflight_run_id"
+          echo "MEMBER_SCHEMA_APPLY_OWNER_COMMENT_ID=$OWNER_COMMENT_ID"
+          echo 'PRODUCTION_DEPLOY=0'
+          echo 'MEMBER_ROUTE_ACTIVATION=0'
+
+      - name: Dispatch Member schema-only apply
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_SHA: ${{ steps.gate.outputs.expected_sha }}
+          PREFLIGHT_RUN_ID: ${{ steps.gate.outputs.preflight_run_id }}
+          OWNER_COMMENT_ID: ${{ steps.gate.outputs.owner_comment_id }}
+        run: |
+          set -euo pipefail
+          payload="$(python3 - <<'PY'
+          import json,os
+          print(json.dumps({
+            'ref':'main',
+            'inputs':{
+              'expected_sha':os.environ['EXPECTED_SHA'],
+              'preflight_run_id':os.environ['PREFLIGHT_RUN_ID'],
+              'owner_comment_id':os.environ['OWNER_COMMENT_ID'],
+              'confirmation':'APPLY_MEMBER_SCHEMA'
+            }
+          }))
+          PY
+          )"
+          code="$(
+            curl --silent --show-error               --output /tmp/member-schema-apply-dispatch.txt               --write-out '%{http_code}'               --request POST               -H "Authorization: Bearer $GH_TOKEN"               -H 'Accept: application/vnd.github+json'               -H 'X-GitHub-Api-Version: 2022-11-28'               "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/member-production-schema-apply.yml/dispatches"               -d "$payload"
+          )"
+          test "$code" = '204' || {
+            cat /tmp/member-schema-apply-dispatch.txt >&2 || true
+            echo "::error::MEMBER_SCHEMA_APPLY_DISPATCH_FAILED_HTTP_$code"
+            exit 1
+          }
+          echo "MEMBER_SCHEMA_APPLY_DISPATCHED_SHA=$EXPECTED_SHA"
+          echo "MEMBER_SCHEMA_APPLY_DISPATCHED_PREFLIGHT_RUN=$PREFLIGHT_RUN_ID"
+          echo 'PRODUCTION_DEPLOY=0'
+          echo 'MEMBER_ROUTE_ACTIVATION=0'
