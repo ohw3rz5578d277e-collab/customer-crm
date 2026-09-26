@@ -40,6 +40,9 @@ assert.ok(workflow.includes('wrangler deployments status --name customer-crm-api
 assert.ok(workflow.includes('STAGED_VERSION_DELTA_NOT_EXACTLY_ONE'));
 assert.ok(workflow.includes('PRODUCTION_DEPLOYMENT_CHANGED_DURING_SECRET_STAGE'));
 assert.ok(workflow.includes('STAGED_SECRET_BINDINGS=4'));
+assert.ok(workflow.includes('STAGED_EXISTING_REQUIRED_SECRET_BINDINGS=PASS'));
+assert.ok(workflow.includes('STAGED_REQUIRED_RESOURCE_BINDINGS=PASS'));
+assert.ok(workflow.includes('function canonical(value)'));
 assert.ok(workflow.includes('PRODUCTION_DEPLOYMENT_UNCHANGED=PASS'));
 assert.ok(workflow.includes('TEMP_SECRET_MATERIAL_REMOVED=YES'));
 
