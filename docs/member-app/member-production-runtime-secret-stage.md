@@ -61,9 +61,11 @@ Before staging, the workflow snapshots:
 After `wrangler versions secret bulk`:
 
 1. exactly one new Worker version must exist;
-2. the new version must expose all four secret **names** in version metadata;
-3. active Production deployment status must be byte-for-byte equivalent after JSON parsing;
-4. Production traffic change remains zero.
+2. the new version must expose all four Member secret **names** in version metadata;
+3. existing required CRM/Owner secret binding names must remain present;
+4. required DB/service/rate-limit binding names must remain present;
+5. active Production deployment status must remain semantically identical after canonical JSON comparison;
+6. Production traffic change remains zero.
 
 The staged version ID is safe to record and becomes the only candidate for a later, separately Owner-approved promotion gate.
 
