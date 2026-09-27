@@ -106,4 +106,4 @@ For real Production executions, these workflows share the same GitHub Actions co
 - Member Production schema apply;
 - Member Production runtime secret stage.
 
-Their pull-request contract jobs keep PR-specific concurrency groups. Schema and runtime-stage mutation workflows therefore queue behind the same Production lock instead of relying on a point-in-time status poll before promotion.
+Their pull-request contract jobs keep PR-specific concurrency groups. Production mutation authorization bridges do not intentionally queue work: before dispatch they check the four mutation bridges and mutation target workflows for `queued`, `in_progress`, `waiting`, `pending`, or `requested` runs. If any other mutation is active, the new command fails closed with `PRODUCTION_MUTATION_BUSY_RETRY_REQUIRED`; the Owner must retry with fresh authorization after the mutation window is clear. The shared `customer-crm-production-deploy` concurrency group remains a last-line race guard, not a durable queue.
