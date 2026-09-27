@@ -15,10 +15,20 @@ Merging this source does **not** authorize or perform Production promotion.
 
 ## Fresh Owner authorization required after merge
 
-The only promotion entrypoint is a new exact comment by `ohw3rz5578d277e-collab` on issue #26:
+Production promotion uses two Owner actions on issue #26.
+
+First, obtain a fresh **read-only** active-version snapshot:
 
 ```text
-/member-production-promote sha=<FRESH_CURRENT_MAIN_40_SHA> staged_version=6dd49589-f01d-473f-876a-034563023b0e staging_run=36285531724 confirm=PROMOTE_MEMBER_STAGED_VERSION
+/member-production-promotion-snapshot sha=<FRESH_CURRENT_MAIN_40_SHA>
+```
+
+That command performs no traffic mutation and reports the exact 100%-traffic `ACTIVE_PRODUCTION_VERSION_ID`.
+
+Then create a new promotion authorization that explicitly names the active version being replaced:
+
+```text
+/member-production-promote sha=<FRESH_CURRENT_MAIN_40_SHA> staged_version=6dd49589-f01d-473f-876a-034563023b0e staging_run=36285531724 replace_active_version=<FRESH_ACTIVE_PRODUCTION_VERSION_ID> confirm=PROMOTE_MEMBER_STAGED_VERSION
 ```
 
 There is no manual `workflow_dispatch` trigger on the promotion workflow. The issue-comment bridge validates the command on its first run attempt and calls the promotion workflow as a reusable workflow. Re-running the bridge is rejected.
@@ -33,20 +43,21 @@ Before any traffic mutation the workflow must prove all of the following:
 2. staging source SHA is an ancestor of that current `main`;
 3. invocation is the exact first-attempt Issue #26 bridge run, triggered by the Owner account;
 4. Owner authorization comment is exact, belongs to issue #26, is unedited, and is no more than 15 minutes old;
-5. the durable source receipt proves staging run `36285531724` / job `108525472623` completed SUCCESS at source SHA `41059eb0ca192f29f790abfd4563552581b1a6b8` and produced staged version `6dd49589-f01d-473f-876a-034563023b0e`;
-6. the immutable staged version still exists in Cloudflare and contains the required Member secret bindings;
-7. a fresh active Production deployment snapshot is captured;
-8. the exact staged version is not already active;
-9. the workflow shares the exact `customer-crm-production-deploy` concurrency group with the canonical Production deployment workflow, so the two traffic mutations cannot overlap;
-10. non-serialized Member Production operations are absent;
-11. a second active deployment snapshot immediately before mutation is equal to the first snapshot;
-12. immediately before mutation, current `main`, Owner-comment freshness and non-serialized operation state are checked again.
+5. the checked-in receipt is only supporting evidence; while GitHub still retains run `36285531724`, its live run metadata must independently match SUCCESS, exact source SHA, exact workflow and the exact recorded time window;
+6. Cloudflare's immutable staged-version metadata must independently prove the exact version ID, creation inside the staging run window, the exact source-SHA staging message, and the required Member secret bindings;
+7. the staging-source workflow at `41059eb0...` must contain the exact version-secret staging provenance contract;
+8. the active 100%-traffic Production version must exactly equal the `replace_active_version` named by the fresh Owner authorization;
+9. the exact staged version must not already be active;
+10. the workflow shares the exact `customer-crm-production-deploy` concurrency group with the canonical Production deployment workflow, so traffic mutations cannot overlap;
+11. non-serialized Member Production operations are absent;
+12. a second active deployment snapshot immediately before mutation must be unchanged and must still equal the Owner-authorized active version;
+13. immediately before mutation, current `main`, Owner-comment freshness, the active 100%-traffic version, and non-serialized operation state are checked again.
 
 Any mismatch stops the run before promotion.
 
 ## Durable staging receipt
 
-The promotion path does not depend on retained GitHub Actions job logs. The exact staging evidence already verified from run `36285531724` is stored as a version-controlled receipt. The promotion workflow validates every security-relevant receipt field and then independently verifies the immutable staged Worker version directly against Cloudflare.
+The promotion path does not depend on retained GitHub Actions job logs. The version-controlled receipt is **supporting evidence, not a trust anchor by itself**. While GitHub retains the staging run, live run metadata is revalidated. Independently of log retention, the immutable Cloudflare version must report a creation timestamp inside the exact staging run window and the source-SHA staging message produced by the staging workflow, and its required bindings must still be present.
 
 ## Only mutation in the promotion workflow
 
@@ -77,3 +88,8 @@ It does **not** authorize:
 - Customer ID generation;
 - commerce activation;
 - paid spend.
+
+
+## Sequential rollback protection
+
+The shared concurrency lock prevents overlapping Production traffic mutations. In addition, the Owner must explicitly authorize replacing one exact currently-active Worker version. If any canonical Production deploy changes the 100%-traffic version after the snapshot or before the promotion acquires or uses the lock, the promotion fails closed with an active-version mismatch. A newer completed Production deployment is therefore never replaced implicitly.
