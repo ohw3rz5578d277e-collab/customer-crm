@@ -40,8 +40,10 @@ assert.match(deploy,/concurrency:\s*\n\s*group:\s*\$\{\{\s*github\.event_name\s*
 assert.ok(observer.includes("format('customer360-production-observer-{0}', github.event.workflow_run.id)"));
 assert.ok(!observer.includes("group: customer-crm-production-deploy"));
 assert.ok(observer.includes('cancel-in-progress: false'));
-assert.match(bridge,/group: customer-crm-production-dispatch-bridge/);
+assert.doesNotMatch(bridge,/\nconcurrency:\s*\n/,'Production dispatch bridge must reach busy rejection before any workflow-level queue');
 assert.ok(!bridge.includes('group: customer-crm-production-deploy'));
+assert.ok(bridge.includes('PRODUCTION_MUTATION_BUSY_RETRY_REQUIRED'));
+assert.ok(bridge.includes('PRODUCTION_MUTATION_QUEUE_POLICY=REJECT_AND_RETRY'));
 
 assert.ok(bridge.includes("release_mode='preflight'"));
 assert.ok(bridge.includes("release_mode='deploy'"));
