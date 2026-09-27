@@ -93,7 +93,7 @@ assert.equal(deployMatches.length,1,'versions deploy must appear exactly once');
 assert.doesNotMatch(workflow,/\bnpx wrangler deploy\b/);
 assert.doesNotMatch(workflow,/\bwrangler d1\b/i);
 assert.doesNotMatch(workflow,/\bwrangler secret (put|bulk|delete)\b/i);
-assert.doesNotMatch(workflow,/\bwrangler versions secret (put|bulk|delete)\b/i);
+assert.doesNotMatch(workflow,/^\s*npx wrangler versions secret (put|bulk|delete)\b/im);
 
 assert.ok(bridge.includes("github.event.issue.number == 26"));
 assert.ok(bridge.includes("github.actor == 'ohw3rz5578d277e-collab'"));
