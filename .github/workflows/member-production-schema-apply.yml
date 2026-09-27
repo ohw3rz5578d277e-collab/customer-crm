@@ -33,7 +33,7 @@ permissions:
   issues: read
 
 concurrency:
-  group: ${{ github.event_name == 'workflow_dispatch' && 'member-production-schema-apply' || format('member-schema-apply-pr-{0}', github.event.pull_request.number) }}
+  group: ${{ github.event_name == 'workflow_dispatch' && 'customer-crm-production-deploy' || format('member-schema-apply-pr-{0}', github.event.pull_request.number) }}
   cancel-in-progress: false
 
 jobs:
