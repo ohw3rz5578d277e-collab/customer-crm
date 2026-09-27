@@ -130,6 +130,7 @@ assert.doesNotMatch(bridge,/wrangler\s+versions\s+deploy/i);
 assert.doesNotMatch(bridge,/wrangler\s+deploy\b/i);
 
 for(const mutationBridge of [canonicalDeployBridge,schemaApplyBridge,runtimeSecretStageBridge,bridge]){
+  assert.doesNotMatch(mutationBridge,/\nconcurrency:\s*\n/,'mutation authorization bridge must not queue before busy rejection');
   assert.ok(mutationBridge.includes('PRODUCTION_MUTATION_BUSY_RETRY_REQUIRED'),'busy mutation rejection missing');
   assert.ok(mutationBridge.includes('PRODUCTION_MUTATION_QUEUE_POLICY=REJECT_AND_RETRY'),'reject-and-retry policy missing');
   assert.ok(mutationBridge.includes('dispatch-production-deploy-from-issue.yml'),'canonical bridge mutual exclusion missing');
@@ -163,5 +164,6 @@ console.log('MEMBER_PRODUCTION_VERSION_PROMOTION_INDEPENDENT_CLOUDFLARE_LINEAGE=
 console.log('MEMBER_PRODUCTION_VERSION_PROMOTION_OWNER_AUTHORIZED_REPLACEMENT_VERSION=PASS');
 console.log('MEMBER_PRODUCTION_VERSION_PROMOTION_SHARED_CONCURRENCY=PASS');
 console.log('MEMBER_PRODUCTION_MUTATION_REJECT_AND_RETRY_GATE=PASS');
+console.log('MEMBER_PRODUCTION_MUTATION_BRIDGE_PRECONCURRENCY_REJECTION=PASS');
 console.log('MEMBER_PRODUCTION_VERSION_PROMOTION_FINAL_MAIN_RECHECK=PASS');
 console.log('MEMBER_PRODUCTION_VERSION_PROMOTION_SOURCE_ONLY_PR_GATE=PASS');
