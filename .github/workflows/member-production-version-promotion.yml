@@ -518,7 +518,7 @@ jobs:
           npx wrangler versions deploy "$STAGED_VERSION_ID@100%"             --name customer-crm-api             --message "Owner-gated Member staged-version promotion; current-main=$EXPECTED_SHA; stage-run=$AUTHORIZED_STAGING_RUN_ID"             --yes
           echo "MEMBER_PRODUCTION_PROMOTED_VERSION=$STAGED_VERSION_ID"
 
-      - name: Verify active Production deployment contains exact promoted version
+      - name: Verify exact promoted version receives 100 percent Production traffic
         shell: bash
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -529,10 +529,23 @@ jobs:
           npx wrangler deployments status --name customer-crm-api --json > /tmp/member-promotion-active-after.json
           node <<'NODE'
           const fs=require('fs');
-          const raw=fs.readFileSync('/tmp/member-promotion-active-after.json','utf8');
-          JSON.parse(raw);
-          if(!raw.includes(process.env.STAGED_VERSION_ID))throw new Error('PROMOTED_VERSION_NOT_PRESENT_IN_ACTIVE_DEPLOYMENT');
+          const value=JSON.parse(fs.readFileSync('/tmp/member-promotion-active-after.json','utf8'));
+          const d=Array.isArray(value)?value[0]:value;
+          const versions=Array.isArray(d?.versions)?d.versions:[];
+          const staged=versions.filter(v=>
+            typeof v?.version_id==='string' &&
+            v.version_id.toLowerCase()===process.env.STAGED_VERSION_ID.toLowerCase()
+          );
+          if(staged.length!==1)throw new Error('PROMOTED_VERSION_ACTIVE_ENTRY_COUNT_NOT_EXACTLY_ONE');
+          if(Number(staged[0].percentage)!==100)throw new Error('PROMOTED_VERSION_TRAFFIC_NOT_100_PERCENT');
+          const fullTraffic=versions.filter(v=>Number(v.percentage)===100);
+          if(fullTraffic.length!==1)throw new Error('ACTIVE_PRODUCTION_100_PERCENT_ENTRY_COUNT_NOT_EXACTLY_ONE');
+          if(
+            typeof fullTraffic[0]?.version_id!=='string' ||
+            fullTraffic[0].version_id.toLowerCase()!==process.env.STAGED_VERSION_ID.toLowerCase()
+          )throw new Error('ACTIVE_PRODUCTION_100_PERCENT_VERSION_MISMATCH');
           console.log('ACTIVE_PRODUCTION_PROMOTED_VERSION=PASS');
+          console.log('ACTIVE_PRODUCTION_PROMOTED_VERSION_TRAFFIC_PERCENT=100');
           NODE
 
       - name: Cleanup snapshots
