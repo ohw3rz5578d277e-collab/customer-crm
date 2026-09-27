@@ -9,9 +9,6 @@ permissions:
   issues: read
   actions: write
 
-concurrency:
-  group: member-production-schema-apply-dispatch-bridge
-  cancel-in-progress: false
 
 jobs:
   dispatch:
