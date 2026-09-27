@@ -34,6 +34,14 @@ The supplied stage run must be:
 
 Current main is checked again before any Cloudflare traffic mutation.
 
+The promotion gate also reads the exact successful staging job log and requires all of the following receipts from that same run:
+
+- `MEMBER_RUNTIME_SECRET_STAGED_VERSION_ID=<exact-authorized-version-id>`;
+- `MEMBER_RUNTIME_SECRET_STAGE=PASS`;
+- `PRODUCTION_DEPLOYMENT_UNCHANGED=PASS`.
+
+This binds the exact version candidate to the exact successful staging run rather than validating them independently.
+
 ## Exact staged-version verification
 
 Before promotion, the workflow fetches the exact authorized version with `wrangler versions view` and verifies:
