@@ -9,9 +9,6 @@ permissions:
   issues: read
   actions: read
 
-concurrency:
-  group: member-production-version-promotion-dispatch
-  cancel-in-progress: false
 
 jobs:
   snapshot:
