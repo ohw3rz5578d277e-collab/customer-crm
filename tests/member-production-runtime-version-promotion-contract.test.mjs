@@ -15,6 +15,11 @@ assert.ok(workflow.includes('MAIN_DRIFT current=$current_main expected=$EXPECTED
 assert.ok(workflow.includes('OWNER_AUTHORIZATION_COMMENT=PASS'));
 assert.ok(workflow.includes("'.github/workflows/member-production-runtime-secret-stage.yml'"));
 assert.ok(workflow.includes('MEMBER_RUNTIME_SECRET_STAGE_RECEIPT=PASS'));
+assert.ok(workflow.includes('/actions/runs/$STAGE_RUN_ID/jobs?per_page=100'));
+assert.ok(workflow.includes('/actions/jobs/$stage_job_id/logs'));
+assert.ok(workflow.includes('MEMBER_RUNTIME_SECRET_STAGED_VERSION_ID=$STAGED_VERSION_ID'));
+assert.ok(workflow.includes('STAGE_RUN_STAGED_VERSION_ID=PASS'));
+assert.ok(workflow.includes('STAGE_RUN_PRODUCTION_TRAFFIC_UNCHANGED_RECEIPT=PASS'));
 assert.ok(workflow.includes('const MEMBER_PRODUCTION_OWNER_APPROVED=false;'));
 assert.ok(workflow.includes('MEMBER_PRODUCTION_ROUTE_MODE=NOT_ENABLED'));
 assert.ok(workflow.includes('MEMBER_PRIVATE_MEDIA_CONTENT_ROUTE_MODE=NOT_ENABLED'));
