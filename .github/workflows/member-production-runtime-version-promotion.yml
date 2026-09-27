@@ -216,6 +216,7 @@ jobs:
             /tmp/member-runtime-version-promotion-stage-job.log
 
       - name: Verify latest canonical Production deploy before staging was exact SHA
+        id: pre_stage_deploy
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -297,8 +298,12 @@ jobs:
             grep -F 'PRODUCTION_HEALTH_HTTP_STATUS=200' /tmp/member-runtime-version-promotion-deploy-job.log >/dev/null || { echo '::error::PRE_STAGE_DEPLOY_HEALTH_RECEIPT_MISSING'; exit 1; }
             grep -F 'PRODUCTION_RELEASE_SHA_BODY=PASS' /tmp/member-runtime-version-promotion-deploy-job.log >/dev/null || { echo '::error::PRE_STAGE_DEPLOY_RELEASE_SHA_BODY_RECEIPT_MISSING'; exit 1; }
             grep -F 'PRODUCTION_RELEASE_SHA_HEADER=PASS' /tmp/member-runtime-version-promotion-deploy-job.log >/dev/null || { echo '::error::PRE_STAGE_DEPLOY_RELEASE_SHA_HEADER_RECEIPT_MISSING'; exit 1; }
+            deploy_version_id="$(grep -oE 'Current Version ID: [0-9a-fA-F-]{36}' /tmp/member-runtime-version-promotion-deploy-job.log | tail -1 | awk '{print $4}' | tr '[:upper:]' '[:lower:]')"
+            [[ "$deploy_version_id" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] || { echo '::error::PRE_STAGE_DEPLOY_VERSION_ID_RECEIPT_MISSING'; exit 1; }
+            echo "version_id=$deploy_version_id" >> "$GITHUB_OUTPUT"
             echo "PRE_STAGE_LATEST_PRODUCTION_DEPLOY_RUN_ID=$run_id"
             echo "PRE_STAGE_LATEST_PRODUCTION_DEPLOY_SHA=$run_sha"
+            echo "PRE_STAGE_EXACT_DEPLOY_VERSION_ID=$deploy_version_id"
             echo 'PRE_STAGE_EXACT_SHA_PRODUCTION_DEPLOY_RECEIPT=PASS'
             break
           done < /tmp/member-runtime-version-promotion-deploy-candidates.txt
@@ -353,15 +358,31 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           EXPECTED_SHA: ${{ steps.auth.outputs.expected_sha }}
           STAGED_VERSION_ID: ${{ steps.auth.outputs.staged_version_id }}
+          PRE_STAGE_DEPLOY_VERSION_ID: ${{ steps.pre_stage_deploy.outputs.version_id }}
         run: |
           set -euo pipefail
           npx wrangler versions view "$STAGED_VERSION_ID" --name customer-crm-api --json > /tmp/member-runtime-promotion-staged-version.json
+          npx wrangler versions view "$PRE_STAGE_DEPLOY_VERSION_ID" --name customer-crm-api --json > /tmp/member-runtime-promotion-pre-stage-deploy-version.json
           node <<'NODE'
           const fs=require('fs');
           const raw=fs.readFileSync('/tmp/member-runtime-promotion-staged-version.json','utf8');
           const v=JSON.parse(raw);
+          const deployed=JSON.parse(fs.readFileSync('/tmp/member-runtime-promotion-pre-stage-deploy-version.json','utf8'));
           const text=JSON.stringify(v);
           const expectedMessage='Owner-gated Member runtime secret stage for '+process.env.EXPECTED_SHA;
+          function scriptEtag(x){
+            return String(
+              x?.resources?.script?.etag ||
+              x?.script?.etag ||
+              x?.resources?.script_etag ||
+              x?.script_etag ||
+              ''
+            );
+          }
+          const stagedEtag=scriptEtag(v);
+          const deployedEtag=scriptEtag(deployed);
+          if(!stagedEtag||!deployedEtag)throw new Error('WORKER_SCRIPT_ETAG_MISSING');
+          if(stagedEtag!==deployedEtag)throw new Error('STAGED_SCRIPT_ETAG_DIFFERS_FROM_EXACT_DEPLOY');
           if(!text.includes(expectedMessage))throw new Error('STAGED_VERSION_MESSAGE_SHA_MISMATCH');
           for(const name of [
             'MEMBER_SESSION_SECRET',
@@ -385,6 +406,7 @@ jobs:
             if(!text.includes(name))throw new Error('STAGED_REQUIRED_RESOURCE_BINDING_MISSING:'+name);
           }
           console.log('STAGED_VERSION_EXACT_SHA_MESSAGE=PASS');
+          console.log('STAGED_SCRIPT_ETAG_MATCHES_EXACT_DEPLOY=PASS');
           console.log('STAGED_SECRET_BINDINGS=4');
           console.log('STAGED_EXISTING_REQUIRED_SECRET_BINDINGS=PASS');
           console.log('STAGED_REQUIRED_RESOURCE_BINDINGS=PASS');
@@ -583,6 +605,7 @@ jobs:
         run: |
           rm -f \
             /tmp/member-runtime-promotion-staged-version.json \
+            /tmp/member-runtime-promotion-pre-stage-deploy-version.json \
             /tmp/member-runtime-promotion-deployment-before.json \
             /tmp/member-runtime-promotion-deployment-after.json \
             /tmp/member-runtime-version-promotion-stage-run.json \
