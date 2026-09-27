@@ -22,6 +22,19 @@ After this gate is merged, promotion is allowed only through release-gate issue 
 
 The issue bridge is restricted to the Owner actor and exact command format.
 
+## Exact-SHA lifecycle after this gate is merged
+
+Merging this source-only gate changes `main` to a new commit SHA. Therefore, a secret-bearing version staged against the pre-merge main SHA must **not** be promoted after this PR is merged.
+
+After the gate reaches `main`, the release train must obtain, in order:
+
+1. an exact-new-main canonical Production deploy receipt;
+2. a fresh exact-new-main Member runtime readiness receipt;
+3. a fresh exact-new-main secret-stage run and staged version ID;
+4. a separate fresh exact-new-main Owner promotion authorization.
+
+The current-main and stage-run SHA checks intentionally make any pre-merge staged candidate ineligible once main advances.
+
 ## Required prior receipt
 
 The supplied stage run must be:
