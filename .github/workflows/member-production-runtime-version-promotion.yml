@@ -155,6 +155,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           EXPECTED_SHA: ${{ steps.auth.outputs.expected_sha }}
+          STAGED_VERSION_ID: ${{ steps.auth.outputs.staged_version_id }}
           STAGE_RUN_ID: ${{ steps.auth.outputs.stage_run_id }}
         run: |
           set -euo pipefail
@@ -181,7 +182,39 @@ jobs:
               raise SystemExit('INVALID_RUNTIME_SECRET_STAGE_RECEIPT:'+','.join(bad))
           print('MEMBER_RUNTIME_SECRET_STAGE_RECEIPT=PASS')
           PY
-          rm -f /tmp/member-runtime-version-promotion-stage-run.json
+          curl --fail --silent --show-error \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/runs/$STAGE_RUN_ID/jobs?per_page=100" \
+            > /tmp/member-runtime-version-promotion-stage-jobs.json
+          python3 - <<'PY' > /tmp/member-runtime-version-promotion-stage-job-id.txt
+          import json
+          with open('/tmp/member-runtime-version-promotion-stage-jobs.json', encoding='utf-8') as f:
+              data=json.load(f)
+          matches=[j for j in data.get('jobs',[]) if j.get('name')=='Exact-SHA Member Production runtime secret stage' and j.get('conclusion')=='success']
+          if len(matches)!=1:
+              raise SystemExit('INVALID_RUNTIME_SECRET_STAGE_JOB_RECEIPT:'+str(len(matches)))
+          print(matches[0]['id'])
+          PY
+          stage_job_id="$(cat /tmp/member-runtime-version-promotion-stage-job-id.txt)"
+          [[ "$stage_job_id" =~ ^[0-9]+$ ]] || { echo '::error::INVALID_RUNTIME_SECRET_STAGE_JOB_ID'; exit 1; }
+          curl --fail --silent --show-error --location \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/jobs/$stage_job_id/logs" \
+            > /tmp/member-runtime-version-promotion-stage-job.log
+          grep -F "MEMBER_RUNTIME_SECRET_STAGED_VERSION_ID=$STAGED_VERSION_ID" /tmp/member-runtime-version-promotion-stage-job.log >/dev/null || { echo '::error::STAGE_RUN_VERSION_ID_MISMATCH'; exit 1; }
+          grep -F 'MEMBER_RUNTIME_SECRET_STAGE=PASS' /tmp/member-runtime-version-promotion-stage-job.log >/dev/null || { echo '::error::STAGE_RUN_PASS_RECEIPT_MISSING'; exit 1; }
+          grep -F 'PRODUCTION_DEPLOYMENT_UNCHANGED=PASS' /tmp/member-runtime-version-promotion-stage-job.log >/dev/null || { echo '::error::STAGE_RUN_TRAFFIC_INVARIANT_RECEIPT_MISSING'; exit 1; }
+          echo 'STAGE_RUN_STAGED_VERSION_ID=PASS'
+          echo 'STAGE_RUN_PRODUCTION_TRAFFIC_UNCHANGED_RECEIPT=PASS'
+          rm -f \
+            /tmp/member-runtime-version-promotion-stage-run.json \
+            /tmp/member-runtime-version-promotion-stage-jobs.json \
+            /tmp/member-runtime-version-promotion-stage-job-id.txt \
+            /tmp/member-runtime-version-promotion-stage-job.log
 
       - name: Verify canonical Member source remains default-off
         shell: bash
