@@ -85,7 +85,8 @@ assert.ok(workflow.includes('MEMBER_RUNTIME_VERSION_PROMOTION_COMMAND=PASS'));
 assert.ok(workflow.includes('POST_PROMOTION_STAGED_VERSION_100_PERCENT=PASS'));
 assert.ok(workflow.includes('PRODUCTION_TRAFFIC_TARGET_EXACT=PASS'));
 
-assert.ok(workflow.includes('https://customer-crm-api.ohw3rz5578d277e.workers.dev/health'));
+assert.ok(workflow.includes('PRODUCTION_BASE_URL: https://customer-crm-api.ohw3rz5578d277e.workers.dev'));
+assert.ok(workflow.includes('"$PRODUCTION_BASE_URL/health"'));
 assert.ok(workflow.includes('PRODUCTION_HEALTH_HTTP_STATUS=200'));
 assert.ok(workflow.includes('PRODUCTION_RELEASE_SHA_BODY=PASS'));
 assert.ok(workflow.includes('PRODUCTION_RELEASE_SHA_HEADER=PASS'));
