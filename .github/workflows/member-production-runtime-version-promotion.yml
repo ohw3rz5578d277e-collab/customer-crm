@@ -407,7 +407,11 @@ jobs:
           rm -f \
             /tmp/member-runtime-promotion-staged-version.json \
             /tmp/member-runtime-promotion-deployment-before.json \
-            /tmp/member-runtime-promotion-deployment-after.json
+            /tmp/member-runtime-promotion-deployment-after.json \
+            /tmp/member-runtime-version-promotion-stage-run.json \
+            /tmp/member-runtime-version-promotion-stage-jobs.json \
+            /tmp/member-runtime-version-promotion-stage-job-id.txt \
+            /tmp/member-runtime-version-promotion-stage-job.log
           echo 'TEMP_PROMOTION_SNAPSHOT_MATERIAL_REMOVED=YES'
 
       - name: Final exact-version promotion declaration
