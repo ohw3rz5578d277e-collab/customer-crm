@@ -48,7 +48,7 @@ Before any traffic mutation the workflow must prove all of the following:
 7. the staging-source workflow at `41059eb0...` must contain the exact version-secret staging provenance contract;
 8. the active 100%-traffic Production version must exactly equal the `replace_active_version` named by the fresh Owner authorization;
 9. the exact staged version must not already be active;
-10. the workflow shares the exact `customer-crm-production-deploy` concurrency group with the canonical Production deployment workflow, so traffic mutations cannot overlap;
+10. the promotion workflow, canonical Production deployment, Member Production schema apply, and Member Production runtime secret stage share the exact `customer-crm-production-deploy` concurrency group for real Production executions, so those mutation windows cannot overlap;
 11. non-serialized Member Production operations are absent;
 12. a second active deployment snapshot immediately before mutation must be unchanged and must still equal the Owner-authorized active version;
 13. immediately before mutation, current `main`, Owner-comment freshness, the active 100%-traffic version, and non-serialized operation state are checked again.
@@ -95,3 +95,15 @@ It does **not** authorize:
 ## Sequential rollback protection
 
 The shared concurrency lock prevents overlapping Production traffic mutations. In addition, the Owner must explicitly authorize replacing one exact currently-active Worker version. If any canonical Production deploy changes the 100%-traffic version after the snapshot or before the promotion acquires or uses the lock, the promotion fails closed with an active-version mismatch. A newer completed Production deployment is therefore never replaced implicitly.
+
+
+## Shared Production mutation lock
+
+For real Production executions, these workflows share the same GitHub Actions concurrency group `customer-crm-production-deploy`:
+
+- canonical Cloudflare Production deploy;
+- Member staged-version Production promotion;
+- Member Production schema apply;
+- Member Production runtime secret stage.
+
+Their pull-request contract jobs keep PR-specific concurrency groups. Schema and runtime-stage mutation workflows therefore queue behind the same Production lock instead of relying on a point-in-time status poll before promotion.
