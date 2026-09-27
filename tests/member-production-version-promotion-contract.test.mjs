@@ -4,6 +4,9 @@ import fs from 'node:fs';
 const workflow=fs.readFileSync('.github/workflows/member-production-version-promotion.yml','utf8');
 const bridge=fs.readFileSync('.github/workflows/dispatch-member-production-version-promotion-from-issue.yml','utf8');
 const foundation=fs.readFileSync('.github/workflows/member-app-foundation.yml','utf8');
+const canonicalDeploy=fs.readFileSync('.github/workflows/deploy-cloudflare.yml','utf8');
+const receiptPath='release/member/member-production-runtime-secret-stage-36285531724.json';
+const receipt=JSON.parse(fs.readFileSync(receiptPath,'utf8'));
 
 for(const exact of [
   '41059eb0ca192f29f790abfd4563552581b1a6b8',
@@ -13,20 +16,55 @@ for(const exact of [
 ]){
   assert.ok(workflow.includes(exact), 'workflow missing exact gate: '+exact);
 }
-for(const input of ['expected_sha','staged_version_id','staging_run_id','owner_comment_id','confirmation']){
+assert.ok(workflow.includes('workflow_call:'), 'promotion workflow must be reusable');
+assert.doesNotMatch(workflow,/\bworkflow_dispatch:/, 'manual workflow_dispatch must not exist');
+for(const input of ['expected_sha','staged_version_id','staging_run_id','owner_comment_id','bridge_run_id','bridge_run_attempt','confirmation']){
   assert.ok(workflow.includes(input+':'), 'missing workflow input: '+input);
 }
+
+assert.ok(canonicalDeploy.includes("'customer-crm-production-deploy'"), 'canonical deploy shared concurrency missing');
+assert.ok(workflow.includes("'customer-crm-production-deploy'"), 'promotion must share canonical Production deployment concurrency');
+assert.ok(workflow.includes('cancel-in-progress: false'));
+
 assert.ok(workflow.includes('MAIN_DRIFT current=$current_main expected=$EXPECTED_SHA'));
+assert.ok(workflow.includes('FINAL_MAIN_DRIFT current=$current_main expected=$EXPECTED_SHA'));
 assert.ok(workflow.includes('git merge-base --is-ancestor "$STAGING_SOURCE_SHA" "$EXPECTED_SHA"'));
-assert.ok(workflow.includes('OWNER_PROMOTION_AUTHORIZATION_COMMENT=PASS'));
-assert.ok(workflow.includes('OWNER_COMMENT_EDITED'));
-assert.ok(workflow.includes('OWNER_COMMENT_NOT_FRESH'));
-assert.ok(workflow.includes('age > 900'));
-assert.ok(workflow.includes('OWNER_PROMOTION_AUTHORIZATION_FRESHNESS=PASS'));
-assert.ok(workflow.includes("'.github/workflows/member-production-runtime-secret-stage.yml'"));
-assert.ok(workflow.includes("r.get('conclusion')=='success'"));
-assert.ok(workflow.includes('MEMBER_RUNTIME_SECRET_STAGED_VERSION_ID=$STAGED_VERSION_ID'));
-assert.ok(workflow.includes('MEMBER_STAGED_VERSION_LINEAGE_RECEIPT=PASS'));
+assert.ok(workflow.includes('MEMBER_PROMOTION_ISSUE_BRIDGE_RECEIPT=PASS'));
+assert.ok(workflow.includes("r.get('event')=='issue_comment'"));
+assert.ok(workflow.includes("r.get('run_attempt')==1"));
+assert.ok(workflow.includes("r.get('actor',{}).get('login')=='ohw3rz5578d277e-collab'"));
+assert.ok(workflow.includes('BRIDGE_RERUN_NOT_AUTHORIZED'));
+
+for(const freshness of [
+  'OWNER_COMMENT_EDITED',
+  'OWNER_COMMENT_NOT_FRESH',
+  'age > 900',
+  'OWNER_PROMOTION_AUTHORIZATION_FRESHNESS=PASS',
+  'FINAL_OWNER_COMMENT_EDITED',
+  'FINAL_OWNER_COMMENT_NOT_FRESH',
+  'FINAL_OWNER_PROMOTION_AUTHORIZATION_FRESHNESS=PASS'
+]){
+  assert.ok(workflow.includes(freshness), 'missing freshness gate: '+freshness);
+}
+
+assert.equal(receipt.schema_version,1);
+assert.equal(receipt.worker_name,'customer-crm-api');
+assert.equal(receipt.workflow_path,'.github/workflows/member-production-runtime-secret-stage.yml');
+assert.equal(receipt.run_id,36285531724);
+assert.equal(receipt.job_id,108525472623);
+assert.equal(receipt.source_sha,'41059eb0ca192f29f790abfd4563552581b1a6b8');
+assert.equal(receipt.status,'completed');
+assert.equal(receipt.conclusion,'success');
+assert.equal(receipt.staged_version_id,'6dd49589-f01d-473f-876a-034563023b0e');
+assert.equal(receipt.worker_version_stage,'PASS');
+assert.equal(receipt.production_deployment_unchanged,true);
+assert.equal(receipt.production_traffic_change,0);
+assert.equal(receipt.production_deploy,0);
+assert.ok(workflow.includes(receiptPath));
+assert.ok(workflow.includes('DURABLE_MEMBER_STAGING_SUCCESS_RECEIPT=PASS'));
+assert.ok(workflow.includes('DURABLE_MEMBER_STAGED_VERSION_LINEAGE=PASS'));
+assert.doesNotMatch(workflow,/actions\/jobs\/\$STAGE_JOB_ID\/logs/);
+
 assert.ok(workflow.includes('ACTIVE_PRODUCTION_DEPLOYMENT_FRESH_SNAPSHOT=PASS'));
 assert.ok(workflow.includes('ACTIVE_PRODUCTION_DEPLOYMENT_DRIFTED_BEFORE_PROMOTION'));
 assert.ok(workflow.includes('ACTIVE_PRODUCTION_DEPLOYMENT_STABLE_BEFORE_PROMOTION=PASS'));
@@ -48,20 +86,28 @@ assert.ok(bridge.includes("github.actor == 'ohw3rz5578d277e-collab'"));
 assert.ok(bridge.includes("github.event.comment.user.login == 'ohw3rz5578d277e-collab'"));
 assert.ok(bridge.includes("staged_version=(6dd49589-f01d-473f-876a-034563023b0e)"));
 assert.ok(bridge.includes("staging_run=(36285531724)"));
-assert.ok(bridge.includes('MAIN_DRIFT expected=$expected_sha current=$current_sha'));
-assert.ok(bridge.includes('member-production-version-promotion.yml/dispatches'));
+assert.ok(bridge.includes('PROMOTION_BRIDGE_RERUN_NOT_AUTHORIZED'));
+assert.ok(bridge.includes('github.run_attempt'));
+assert.ok(bridge.includes('uses: ./.github/workflows/member-production-version-promotion.yml'));
+assert.ok(bridge.includes('secrets: inherit'));
+assert.doesNotMatch(bridge,/\/dispatches/);
+assert.doesNotMatch(bridge,/actions:\s*write/);
 assert.doesNotMatch(bridge,/wrangler\s+versions\s+deploy/i);
 assert.doesNotMatch(bridge,/wrangler\s+deploy/i);
 
 for(const path of [
   '.github/workflows/member-production-version-promotion.yml',
   '.github/workflows/dispatch-member-production-version-promotion-from-issue.yml',
-  'tests/member-production-version-promotion-contract.test.mjs'
+  'tests/member-production-version-promotion-contract.test.mjs',
+  receiptPath
 ]){
   assert.ok(foundation.includes(path), 'Member foundation scope missing: '+path);
 }
 
 console.log('MEMBER_PRODUCTION_VERSION_PROMOTION_CONTRACT=PASS');
 console.log('MEMBER_PRODUCTION_VERSION_PROMOTION_OWNER_GATE=PASS');
-console.log('MEMBER_PRODUCTION_VERSION_PROMOTION_FRESH_SNAPSHOT_GATE=PASS');
+console.log('MEMBER_PRODUCTION_VERSION_PROMOTION_SINGLE_USE_BRIDGE=PASS');
+console.log('MEMBER_PRODUCTION_VERSION_PROMOTION_DURABLE_STAGING_RECEIPT=PASS');
+console.log('MEMBER_PRODUCTION_VERSION_PROMOTION_SHARED_CONCURRENCY=PASS');
+console.log('MEMBER_PRODUCTION_VERSION_PROMOTION_FINAL_MAIN_RECHECK=PASS');
 console.log('MEMBER_PRODUCTION_VERSION_PROMOTION_SOURCE_ONLY_PR_GATE=PASS');

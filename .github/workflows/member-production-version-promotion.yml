@@ -7,8 +7,9 @@ on:
       - '.github/workflows/dispatch-member-production-version-promotion-from-issue.yml'
       - 'tests/member-production-version-promotion-contract.test.mjs'
       - 'docs/member-app/member-production-version-promotion.md'
+      - 'release/member/member-production-runtime-secret-stage-36285531724.json'
       - '.github/workflows/member-app-foundation.yml'
-  workflow_dispatch:
+  workflow_call:
     inputs:
       expected_sha:
         description: Exact current main SHA freshly authorized by Owner
@@ -26,10 +27,23 @@ on:
         description: Fresh Owner authorization comment ID from release-gate issue #26
         required: true
         type: string
+      bridge_run_id:
+        description: Exact issue-comment bridge run ID
+        required: true
+        type: string
+      bridge_run_attempt:
+        description: Exact first-attempt bridge run attempt
+        required: true
+        type: string
       confirmation:
         description: Exact promotion confirmation token
         required: true
         type: string
+    secrets:
+      CLOUDFLARE_API_TOKEN:
+        required: true
+      CLOUDFLARE_ACCOUNT_ID:
+        required: true
 
 permissions:
   contents: read
@@ -37,7 +51,7 @@ permissions:
   issues: read
 
 concurrency:
-  group: ${{ github.event_name == 'workflow_dispatch' && 'member-production-version-promotion' || format('member-production-version-promotion-pr-{0}', github.event.pull_request.number) }}
+  group: ${{ github.event_name == 'pull_request' && format('member-production-version-promotion-pr-{0}', github.event.pull_request.number) || 'customer-crm-production-deploy' }}
   cancel-in-progress: false
 
 jobs:
@@ -69,7 +83,7 @@ jobs:
 
   promote:
     name: Owner-gated exact staged version Production promotion
-    if: ${{ github.event_name == 'workflow_dispatch' }}
+    if: ${{ github.event_name != 'pull_request' }}
     runs-on: ubuntu-latest
     timeout-minutes: 25
     env:
@@ -77,10 +91,13 @@ jobs:
       STAGED_VERSION_ID_RAW: ${{ inputs.staged_version_id }}
       STAGING_RUN_ID_RAW: ${{ inputs.staging_run_id }}
       OWNER_COMMENT_ID_RAW: ${{ inputs.owner_comment_id }}
+      BRIDGE_RUN_ID_RAW: ${{ inputs.bridge_run_id }}
+      BRIDGE_RUN_ATTEMPT_RAW: ${{ inputs.bridge_run_attempt }}
       CONFIRMATION_RAW: ${{ inputs.confirmation }}
       STAGING_SOURCE_SHA: 41059eb0ca192f29f790abfd4563552581b1a6b8
       AUTHORIZED_STAGED_VERSION_ID: 6dd49589-f01d-473f-876a-034563023b0e
       AUTHORIZED_STAGING_RUN_ID: '36285531724'
+      DURABLE_STAGING_RECEIPT: release/member/member-production-runtime-secret-stage-36285531724.json
     steps:
       - name: Normalize and validate exact authorization inputs
         id: auth
@@ -93,6 +110,8 @@ jobs:
           [[ "$staged_version_id" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] || { echo '::error::INVALID_STAGED_VERSION_ID'; exit 1; }
           [[ "$STAGING_RUN_ID_RAW" =~ ^[0-9]+$ ]] || { echo '::error::INVALID_STAGING_RUN_ID'; exit 1; }
           [[ "$OWNER_COMMENT_ID_RAW" =~ ^[0-9]+$ ]] || { echo '::error::INVALID_OWNER_COMMENT_ID'; exit 1; }
+          [[ "$BRIDGE_RUN_ID_RAW" =~ ^[0-9]+$ ]] || { echo '::error::INVALID_BRIDGE_RUN_ID'; exit 1; }
+          test "$BRIDGE_RUN_ATTEMPT_RAW" = '1' || { echo '::error::BRIDGE_RERUN_NOT_AUTHORIZED'; exit 1; }
           test "$staged_version_id" = "$AUTHORIZED_STAGED_VERSION_ID" || { echo '::error::UNAUTHORIZED_STAGED_VERSION_ID'; exit 1; }
           test "$STAGING_RUN_ID_RAW" = "$AUTHORIZED_STAGING_RUN_ID" || { echo '::error::UNAUTHORIZED_STAGING_RUN_ID'; exit 1; }
           test "$CONFIRMATION_RAW" = 'PROMOTE_MEMBER_STAGED_VERSION' || { echo '::error::INVALID_PROMOTION_CONFIRMATION'; exit 1; }
@@ -100,9 +119,12 @@ jobs:
           echo "staged_version_id=$staged_version_id" >> "$GITHUB_OUTPUT"
           echo "staging_run_id=$STAGING_RUN_ID_RAW" >> "$GITHUB_OUTPUT"
           echo "owner_comment_id=$OWNER_COMMENT_ID_RAW" >> "$GITHUB_OUTPUT"
+          echo "bridge_run_id=$BRIDGE_RUN_ID_RAW" >> "$GITHUB_OUTPUT"
+          echo 'bridge_run_attempt=1' >> "$GITHUB_OUTPUT"
           echo "MEMBER_PROMOTION_AUTHORIZED_CURRENT_MAIN=$expected_sha"
           echo "MEMBER_PROMOTION_AUTHORIZED_STAGED_VERSION=$staged_version_id"
           echo "MEMBER_PROMOTION_STAGING_RUN=$STAGING_RUN_ID_RAW"
+          echo "MEMBER_PROMOTION_BRIDGE_RUN=$BRIDGE_RUN_ID_RAW"
 
       - name: Checkout exact freshly authorized current main
         uses: actions/checkout@v6
@@ -126,7 +148,35 @@ jobs:
           echo 'CURRENT_MAIN_EXACT_GATE=PASS'
           echo 'STAGING_SOURCE_LINEAGE=PASS'
 
-      - name: Verify fresh Owner authorization comment on issue 26
+      - name: Verify invocation is first-attempt Issue 26 bridge run
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_SHA: ${{ steps.auth.outputs.expected_sha }}
+          BRIDGE_RUN_ID: ${{ steps.auth.outputs.bridge_run_id }}
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error             -H "Authorization: Bearer $GH_TOKEN"             -H 'Accept: application/vnd.github+json'             -H 'X-GitHub-Api-Version: 2022-11-28'             "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/runs/$BRIDGE_RUN_ID"             > /tmp/member-promotion-bridge-run.json
+          python3 - <<'PY'
+          import json, os
+          with open('/tmp/member-promotion-bridge-run.json', encoding='utf-8') as f:
+              r=json.load(f)
+          checks={
+              'id': r.get('id')==int(os.environ['BRIDGE_RUN_ID']),
+              'event': r.get('event')=='issue_comment',
+              'path': r.get('path')=='.github/workflows/dispatch-member-production-version-promotion-from-issue.yml',
+              'head_sha': r.get('head_sha')==os.environ['EXPECTED_SHA'],
+              'run_attempt': r.get('run_attempt')==1,
+              'actor': r.get('actor',{}).get('login')=='ohw3rz5578d277e-collab',
+          }
+          bad=[k for k,v in checks.items() if not v]
+          if bad:
+              raise SystemExit('INVALID_PROMOTION_BRIDGE_RECEIPT:'+','.join(bad))
+          print('MEMBER_PROMOTION_ISSUE_BRIDGE_RECEIPT=PASS')
+          PY
+          rm -f /tmp/member-promotion-bridge-run.json
+
+      - name: Verify fresh unedited Owner authorization comment on issue 26
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -139,6 +189,7 @@ jobs:
           curl --fail --silent --show-error             -H "Authorization: Bearer $GH_TOKEN"             -H 'Accept: application/vnd.github+json'             -H 'X-GitHub-Api-Version: 2022-11-28'             "https://api.github.com/repos/$GITHUB_REPOSITORY/issues/comments/$OWNER_COMMENT_ID"             > /tmp/member-promotion-owner-comment.json
           EXPECTED_BODY="/member-production-promote sha=$EXPECTED_SHA staged_version=$STAGED_VERSION_ID staging_run=$STAGING_RUN_ID confirm=PROMOTE_MEMBER_STAGED_VERSION"           python3 - <<'PY'
           import json, os
+          from datetime import datetime, timezone
           with open('/tmp/member-promotion-owner-comment.json', encoding='utf-8') as f:
               c=json.load(f)
           if c.get('user',{}).get('login')!='ohw3rz5578d277e-collab':
@@ -149,7 +200,6 @@ jobs:
               raise SystemExit('OWNER_COMMENT_ISSUE_MISMATCH')
           if c.get('created_at')!=c.get('updated_at'):
               raise SystemExit('OWNER_COMMENT_EDITED')
-          from datetime import datetime, timezone
           created=datetime.fromisoformat(str(c.get('created_at','')).replace('Z','+00:00'))
           age=(datetime.now(timezone.utc)-created).total_seconds()
           if age < 0 or age > 900:
@@ -159,60 +209,45 @@ jobs:
           PY
           rm -f /tmp/member-promotion-owner-comment.json
 
-      - name: Verify exact SUCCESS staging receipt and staged version lineage
+      - name: Verify durable exact SUCCESS staging receipt
         shell: bash
         env:
-          GH_TOKEN: ${{ github.token }}
           STAGED_VERSION_ID: ${{ steps.auth.outputs.staged_version_id }}
           STAGING_RUN_ID: ${{ steps.auth.outputs.staging_run_id }}
         run: |
           set -euo pipefail
-          curl --fail --silent --show-error             -H "Authorization: Bearer $GH_TOKEN"             -H 'Accept: application/vnd.github+json'             -H 'X-GitHub-Api-Version: 2022-11-28'             "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/runs/$STAGING_RUN_ID"             > /tmp/member-promotion-staging-run.json
-          python3 - <<'PY'
-          import json, os
-          with open('/tmp/member-promotion-staging-run.json', encoding='utf-8') as f:
-              r=json.load(f)
-          checks={
-              'id': r.get('id')==int(os.environ['STAGING_RUN_ID']),
-              'status': r.get('status')=='completed',
-              'conclusion': r.get('conclusion')=='success',
-              'head_sha': r.get('head_sha')==os.environ['STAGING_SOURCE_SHA'],
-              'event': r.get('event')=='workflow_dispatch',
-              'path': r.get('path')=='.github/workflows/member-production-runtime-secret-stage.yml',
+          node <<'NODE'
+          const fs=require('fs');
+          const r=JSON.parse(fs.readFileSync(process.env.DURABLE_STAGING_RECEIPT,'utf8'));
+          const expected={
+            schema_version:1,
+            worker_name:'customer-crm-api',
+            workflow_path:'.github/workflows/member-production-runtime-secret-stage.yml',
+            run_id:Number(process.env.STAGING_RUN_ID),
+            job_id:108525472623,
+            source_sha:process.env.STAGING_SOURCE_SHA,
+            status:'completed',
+            conclusion:'success',
+            staged_version_id:process.env.STAGED_VERSION_ID,
+            worker_version_stage:'PASS',
+            production_deployment_unchanged:true,
+            production_traffic_change:0,
+            production_deploy:0,
+          };
+          for(const [key,value] of Object.entries(expected)){
+            if(r[key]!==value)throw new Error('DURABLE_STAGING_RECEIPT_MISMATCH:'+key);
           }
-          bad=[k for k,v in checks.items() if not v]
-          if bad:
-              raise SystemExit('INVALID_STAGING_RUN_RECEIPT:'+','.join(bad))
-          print('MEMBER_STAGING_RUN_RECEIPT=PASS')
-          PY
+          console.log('DURABLE_MEMBER_STAGING_SUCCESS_RECEIPT=PASS');
+          console.log('DURABLE_MEMBER_STAGED_VERSION_LINEAGE=PASS');
+          NODE
 
-          curl --fail --silent --show-error             -H "Authorization: Bearer $GH_TOKEN"             -H 'Accept: application/vnd.github+json'             -H 'X-GitHub-Api-Version: 2022-11-28'             "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/runs/$STAGING_RUN_ID/jobs?per_page=100"             > /tmp/member-promotion-staging-jobs.json
-          STAGE_JOB_ID="$(
-            python3 - <<'PY'
-          import json
-          with open('/tmp/member-promotion-staging-jobs.json', encoding='utf-8') as f:
-              data=json.load(f)
-          matches=[j for j in data.get('jobs',[]) if j.get('name')=='Exact-SHA Member Production runtime secret stage' and j.get('status')=='completed' and j.get('conclusion')=='success']
-          if len(matches)!=1:
-              raise SystemExit('STAGING_JOB_RECEIPT_NOT_EXACTLY_ONE')
-          print(matches[0]['id'])
-          PY
-          )"
-          [[ "$STAGE_JOB_ID" =~ ^[0-9]+$ ]] || { echo '::error::INVALID_STAGING_JOB_ID'; exit 1; }
-
-          curl --fail --location --silent --show-error             -H "Authorization: Bearer $GH_TOKEN"             -H 'Accept: application/vnd.github+json'             -H 'X-GitHub-Api-Version: 2022-11-28'             "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/jobs/$STAGE_JOB_ID/logs"             > /tmp/member-promotion-staging-job.log
-          grep -Fq "MEMBER_RUNTIME_SECRET_STAGED_VERSION_ID=$STAGED_VERSION_ID" /tmp/member-promotion-staging-job.log || { echo '::error::STAGED_VERSION_NOT_PROVEN_BY_STAGING_LOG'; exit 1; }
-          grep -Fq 'PRODUCTION_DEPLOYMENT_UNCHANGED=PASS' /tmp/member-promotion-staging-job.log || { echo '::error::STAGING_TRAFFIC_UNCHANGED_RECEIPT_MISSING'; exit 1; }
-          echo 'MEMBER_STAGED_VERSION_LINEAGE_RECEIPT=PASS'
-          rm -f /tmp/member-promotion-staging-run.json /tmp/member-promotion-staging-jobs.json /tmp/member-promotion-staging-job.log
-
-      - name: Refuse during conflicting Production operations
+      - name: Refuse during conflicting non-serialized Production operations
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          for workflow in deploy-cloudflare.yml member-production-runtime-readiness.yml member-production-runtime-secret-stage.yml member-production-schema-preflight.yml member-production-schema-apply.yml; do
+          for workflow in member-production-runtime-readiness.yml member-production-runtime-secret-stage.yml member-production-schema-preflight.yml member-production-schema-apply.yml; do
             for status in queued in_progress; do
               count="$(
                 curl --fail --silent --show-error                   -H "Authorization: Bearer $GH_TOKEN"                   -H 'Accept: application/vnd.github+json'                   -H 'X-GitHub-Api-Version: 2022-11-28'                   "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/workflows/$workflow/runs?status=$status&per_page=1"                 | python3 -c 'import json,sys; print(json.load(sys.stdin)["total_count"])'
@@ -220,7 +255,8 @@ jobs:
               test "$count" = '0' || { echo "::error::MEMBER_PROMOTION_LOCK_OCCUPIED workflow=$workflow status=$status count=$count"; exit 1; }
             done
           done
-          echo 'MEMBER_PROMOTION_CONFLICT_LOCK=FREE'
+          echo 'MEMBER_PROMOTION_NON_SERIALIZED_CONFLICT_LOCK=FREE'
+          echo 'CRM_PRODUCTION_DEPLOY_SHARED_CONCURRENCY_LOCK=HELD'
 
       - name: Set up Node
         uses: actions/setup-node@v5
@@ -258,8 +294,7 @@ jobs:
           const fs=require('fs');
           const raw=fs.readFileSync('/tmp/member-promotion-staged-version.json','utf8');
           JSON.parse(raw);
-          const id=process.env.STAGED_VERSION_ID;
-          if(!raw.includes(id))throw new Error('STAGED_VERSION_ID_NOT_PRESENT_IN_VERSION_VIEW');
+          if(!raw.includes(process.env.STAGED_VERSION_ID))throw new Error('STAGED_VERSION_ID_NOT_PRESENT_IN_VERSION_VIEW');
           for(const name of [
             'MEMBER_SESSION_SECRET',
             'MEMBER_LINE_LOGIN_TRANSACTION_SECRET',
@@ -310,6 +345,52 @@ jobs:
           console.log('ACTIVE_PRODUCTION_DEPLOYMENT_STABLE_BEFORE_PROMOTION=PASS');
           NODE
 
+      - name: Final current-main Owner-comment and conflict gate immediately before mutation
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_SHA: ${{ steps.auth.outputs.expected_sha }}
+          STAGED_VERSION_ID: ${{ steps.auth.outputs.staged_version_id }}
+          STAGING_RUN_ID: ${{ steps.auth.outputs.staging_run_id }}
+          OWNER_COMMENT_ID: ${{ steps.auth.outputs.owner_comment_id }}
+        run: |
+          set -euo pipefail
+          current_main="$(git ls-remote origin refs/heads/main | awk '{print $1}')"
+          test "$current_main" = "$EXPECTED_SHA" || { echo "::error::FINAL_MAIN_DRIFT current=$current_main expected=$EXPECTED_SHA"; exit 1; }
+
+          curl --fail --silent --show-error             -H "Authorization: Bearer $GH_TOKEN"             -H 'Accept: application/vnd.github+json'             -H 'X-GitHub-Api-Version: 2022-11-28'             "https://api.github.com/repos/$GITHUB_REPOSITORY/issues/comments/$OWNER_COMMENT_ID"             > /tmp/member-promotion-owner-comment-final.json
+          EXPECTED_BODY="/member-production-promote sha=$EXPECTED_SHA staged_version=$STAGED_VERSION_ID staging_run=$STAGING_RUN_ID confirm=PROMOTE_MEMBER_STAGED_VERSION"           python3 - <<'PY'
+          import json, os
+          from datetime import datetime, timezone
+          with open('/tmp/member-promotion-owner-comment-final.json', encoding='utf-8') as f:
+              c=json.load(f)
+          if c.get('user',{}).get('login')!='ohw3rz5578d277e-collab':
+              raise SystemExit('FINAL_OWNER_COMMENT_ACTOR_MISMATCH')
+          if c.get('body')!=os.environ['EXPECTED_BODY']:
+              raise SystemExit('FINAL_OWNER_COMMENT_BODY_MISMATCH')
+          if not str(c.get('issue_url','')).endswith('/issues/26'):
+              raise SystemExit('FINAL_OWNER_COMMENT_ISSUE_MISMATCH')
+          if c.get('created_at')!=c.get('updated_at'):
+              raise SystemExit('FINAL_OWNER_COMMENT_EDITED')
+          created=datetime.fromisoformat(str(c.get('created_at','')).replace('Z','+00:00'))
+          age=(datetime.now(timezone.utc)-created).total_seconds()
+          if age < 0 or age > 900:
+              raise SystemExit(f'FINAL_OWNER_COMMENT_NOT_FRESH:age_seconds={age:.0f}')
+          print('FINAL_CURRENT_MAIN_GATE=PASS')
+          print('FINAL_OWNER_PROMOTION_AUTHORIZATION_FRESHNESS=PASS')
+          PY
+          rm -f /tmp/member-promotion-owner-comment-final.json
+
+          for workflow in member-production-runtime-readiness.yml member-production-runtime-secret-stage.yml member-production-schema-preflight.yml member-production-schema-apply.yml; do
+            for status in queued in_progress; do
+              count="$(
+                curl --fail --silent --show-error                   -H "Authorization: Bearer $GH_TOKEN"                   -H 'Accept: application/vnd.github+json'                   -H 'X-GitHub-Api-Version: 2022-11-28'                   "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/workflows/$workflow/runs?status=$status&per_page=1"                 | python3 -c 'import json,sys; print(json.load(sys.stdin)["total_count"])'
+              )"
+              test "$count" = '0' || { echo "::error::FINAL_MEMBER_PROMOTION_LOCK_OCCUPIED workflow=$workflow status=$status count=$count"; exit 1; }
+            done
+          done
+          echo 'FINAL_MEMBER_PROMOTION_NON_SERIALIZED_CONFLICT_LOCK=FREE'
+
       - name: Promote only the exact staged version to 100 percent
         shell: bash
         env:
@@ -343,7 +424,7 @@ jobs:
         if: ${{ always() }}
         shell: bash
         run: |
-          rm -f             /tmp/member-promotion-staged-version.json             /tmp/member-promotion-active-before.json             /tmp/member-promotion-active-pre-mutation.json             /tmp/member-promotion-active-after.json
+          rm -f             /tmp/member-promotion-staged-version.json             /tmp/member-promotion-active-before.json             /tmp/member-promotion-active-pre-mutation.json             /tmp/member-promotion-active-after.json             /tmp/member-promotion-owner-comment.json             /tmp/member-promotion-owner-comment-final.json             /tmp/member-promotion-bridge-run.json
           echo 'MEMBER_PROMOTION_TEMP_FILES_REMOVED=YES'
 
       - name: Final promotion declaration
