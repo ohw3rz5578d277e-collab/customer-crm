@@ -5,6 +5,8 @@ const workflow=fs.readFileSync('.github/workflows/member-production-version-prom
 const bridge=fs.readFileSync('.github/workflows/dispatch-member-production-version-promotion-from-issue.yml','utf8');
 const foundation=fs.readFileSync('.github/workflows/member-app-foundation.yml','utf8');
 const canonicalDeploy=fs.readFileSync('.github/workflows/deploy-cloudflare.yml','utf8');
+const schemaApplyWorkflow=fs.readFileSync('.github/workflows/member-production-schema-apply.yml','utf8');
+const runtimeSecretStageWorkflow=fs.readFileSync('.github/workflows/member-production-runtime-secret-stage.yml','utf8');
 const receiptPath='release/member/member-production-runtime-secret-stage-36285531724.json';
 const receipt=JSON.parse(fs.readFileSync(receiptPath,'utf8'));
 
@@ -24,6 +26,10 @@ for(const input of ['expected_sha','staged_version_id','expected_active_version_
 
 assert.ok(canonicalDeploy.includes("'customer-crm-production-deploy'"), 'canonical deploy shared concurrency missing');
 assert.ok(workflow.includes("'customer-crm-production-deploy'"), 'promotion must share canonical Production deployment concurrency');
+assert.ok(schemaApplyWorkflow.includes("github.event_name == 'workflow_dispatch' && 'customer-crm-production-deploy'"), 'schema apply must share Production mutation concurrency');
+assert.ok(runtimeSecretStageWorkflow.includes("github.event_name == 'workflow_dispatch' && 'customer-crm-production-deploy'"), 'runtime stage must share Production mutation concurrency');
+assert.doesNotMatch(schemaApplyWorkflow,/workflow_dispatch' && 'member-production-schema-apply'/);
+assert.doesNotMatch(runtimeSecretStageWorkflow,/workflow_dispatch' && 'member-production-runtime-secret-stage'/);
 assert.ok(workflow.includes('cancel-in-progress: false'));
 
 assert.ok(workflow.includes('MAIN_DRIFT current=$current_main expected=$EXPECTED_SHA'));
