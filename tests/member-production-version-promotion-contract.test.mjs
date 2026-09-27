@@ -27,7 +27,8 @@ for(const input of ['expected_sha','staged_version_id','expected_active_version_
   assert.ok(workflow.includes(input+':'), 'missing workflow input: '+input);
 }
 
-assert.ok(canonicalDeploy.includes("'customer-crm-production-deploy'"), 'canonical deploy shared concurrency missing');
+assert.ok(canonicalDeploy.includes("inputs.mode == 'deploy' && 'customer-crm-production-deploy'"), 'canonical deploy shared mutation concurrency missing');
+assert.ok(canonicalDeploy.includes("format('customer-crm-production-preflight-{0}', github.run_id)"), 'read-only preflight must not occupy mutation concurrency');
 assert.ok(workflow.includes("'customer-crm-production-deploy'"), 'promotion must share canonical Production deployment concurrency');
 assert.ok(schemaApplyWorkflow.includes("github.event_name == 'workflow_dispatch' && 'customer-crm-production-deploy'"), 'schema apply must share Production mutation concurrency');
 assert.ok(runtimeSecretStageWorkflow.includes("github.event_name == 'workflow_dispatch' && 'customer-crm-production-deploy'"), 'runtime stage must share Production mutation concurrency');
