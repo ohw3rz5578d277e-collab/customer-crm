@@ -3,6 +3,9 @@ import fs from 'node:fs';
 
 const workflow=fs.readFileSync('.github/workflows/member-production-version-promotion.yml','utf8');
 const bridge=fs.readFileSync('.github/workflows/dispatch-member-production-version-promotion-from-issue.yml','utf8');
+const canonicalDeployBridge=fs.readFileSync('.github/workflows/dispatch-production-deploy-from-issue.yml','utf8');
+const schemaApplyBridge=fs.readFileSync('.github/workflows/dispatch-member-schema-apply-from-issue.yml','utf8');
+const runtimeSecretStageBridge=fs.readFileSync('.github/workflows/dispatch-member-production-runtime-secret-stage-from-issue.yml','utf8');
 const foundation=fs.readFileSync('.github/workflows/member-app-foundation.yml','utf8');
 const canonicalDeploy=fs.readFileSync('.github/workflows/deploy-cloudflare.yml','utf8');
 const schemaApplyWorkflow=fs.readFileSync('.github/workflows/member-production-schema-apply.yml','utf8');
@@ -123,7 +126,25 @@ assert.ok(bridge.includes('secrets: inherit'));
 assert.doesNotMatch(bridge,/\/dispatches/);
 assert.doesNotMatch(bridge,/actions:\s*write/);
 assert.doesNotMatch(bridge,/wrangler\s+versions\s+deploy/i);
+
 assert.doesNotMatch(bridge,/wrangler\s+deploy\b/i);
+
+for(const mutationBridge of [canonicalDeployBridge,schemaApplyBridge,runtimeSecretStageBridge,bridge]){
+  assert.ok(mutationBridge.includes('PRODUCTION_MUTATION_BUSY_RETRY_REQUIRED'),'busy mutation rejection missing');
+  assert.ok(mutationBridge.includes('PRODUCTION_MUTATION_QUEUE_POLICY=REJECT_AND_RETRY'),'reject-and-retry policy missing');
+  assert.ok(mutationBridge.includes('dispatch-production-deploy-from-issue.yml'),'canonical bridge mutual exclusion missing');
+  assert.ok(mutationBridge.includes('dispatch-member-schema-apply-from-issue.yml'),'schema bridge mutual exclusion missing');
+  assert.ok(mutationBridge.includes('dispatch-member-production-runtime-secret-stage-from-issue.yml'),'runtime-stage bridge mutual exclusion missing');
+  assert.ok(mutationBridge.includes('dispatch-member-production-version-promotion-from-issue.yml'),'promotion bridge mutual exclusion missing');
+  assert.ok(mutationBridge.includes('deploy-cloudflare.yml'),'canonical target conflict check missing');
+  assert.ok(mutationBridge.includes('member-production-schema-apply.yml'),'schema target conflict check missing');
+  assert.ok(mutationBridge.includes('member-production-runtime-secret-stage.yml'),'runtime-stage target conflict check missing');
+  for(const status of ['queued','in_progress','waiting','pending','requested']){
+    assert.ok(mutationBridge.includes(status),'mutation status gate missing: '+status);
+  }
+  assert.ok(mutationBridge.includes('THIS_RUN_ID'),'current bridge run exclusion missing');
+}
+assert.ok(canonicalDeployBridge.includes("steps.gate.outputs.release_mode == 'deploy'"),'canonical preflight must remain outside mutation rejection gate');
 
 for(const path of [
   '.github/workflows/member-production-version-promotion.yml',
@@ -141,5 +162,6 @@ console.log('MEMBER_PRODUCTION_VERSION_PROMOTION_DURABLE_STAGING_RECEIPT=PASS');
 console.log('MEMBER_PRODUCTION_VERSION_PROMOTION_INDEPENDENT_CLOUDFLARE_LINEAGE=PASS');
 console.log('MEMBER_PRODUCTION_VERSION_PROMOTION_OWNER_AUTHORIZED_REPLACEMENT_VERSION=PASS');
 console.log('MEMBER_PRODUCTION_VERSION_PROMOTION_SHARED_CONCURRENCY=PASS');
+console.log('MEMBER_PRODUCTION_MUTATION_REJECT_AND_RETRY_GATE=PASS');
 console.log('MEMBER_PRODUCTION_VERSION_PROMOTION_FINAL_MAIN_RECHECK=PASS');
 console.log('MEMBER_PRODUCTION_VERSION_PROMOTION_SOURCE_ONLY_PR_GATE=PASS');
