@@ -36,12 +36,16 @@ const observer=fs.readFileSync('.github/workflows/customer360-production-first-t
 const deploy=fs.readFileSync('.github/workflows/deploy-cloudflare.yml','utf8');
 const bridge=fs.readFileSync('.github/workflows/dispatch-production-deploy-from-issue.yml','utf8');
 
-assert.match(deploy,/concurrency:\s*\n\s*group:\s*\$\{\{\s*github\.event_name\s*==\s*'workflow_dispatch'\s*&&\s*'customer-crm-production-deploy'\s*\|\|\s*format\('customer-crm-release-pr-\{0\}',\s*github\.event\.pull_request\.number\)\s*\}\}/);
+assert.ok(deploy.includes("github.event_name == 'workflow_dispatch' && inputs.mode == 'deploy' && 'customer-crm-production-deploy'"));
+assert.ok(deploy.includes("format('customer-crm-production-preflight-{0}', github.run_id)"));
+assert.ok(deploy.includes("format('customer-crm-release-pr-{0}', github.event.pull_request.number)"));
 assert.ok(observer.includes("format('customer360-production-observer-{0}', github.event.workflow_run.id)"));
 assert.ok(!observer.includes("group: customer-crm-production-deploy"));
 assert.ok(observer.includes('cancel-in-progress: false'));
-assert.match(bridge,/group: customer-crm-production-dispatch-bridge/);
+assert.doesNotMatch(bridge,/\nconcurrency:\s*\n/,'Production dispatch bridge must reach busy rejection before any workflow-level queue');
 assert.ok(!bridge.includes('group: customer-crm-production-deploy'));
+assert.ok(bridge.includes('PRODUCTION_MUTATION_BUSY_RETRY_REQUIRED'));
+assert.ok(bridge.includes('PRODUCTION_MUTATION_QUEUE_POLICY=REJECT_AND_RETRY'));
 
 assert.ok(bridge.includes("release_mode='preflight'"));
 assert.ok(bridge.includes("release_mode='deploy'"));

@@ -38,7 +38,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.event_name == 'workflow_dispatch' && 'customer-crm-production-deploy' || format('customer-crm-release-pr-{0}', github.event.pull_request.number) }}
+  group: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'deploy' && 'customer-crm-production-deploy' || github.event_name == 'workflow_dispatch' && format('customer-crm-production-preflight-{0}', github.run_id) || format('customer-crm-release-pr-{0}', github.event.pull_request.number) }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
