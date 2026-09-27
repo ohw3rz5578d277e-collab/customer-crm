@@ -77,6 +77,14 @@ jobs:
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
 
+      - name: Verify promotion workflow YAML syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          ruby -e "require 'yaml'; YAML.load_file(ARGV[0])" .github/workflows/member-production-version-promotion.yml
+          ruby -e "require 'yaml'; YAML.load_file(ARGV[0])" .github/workflows/dispatch-member-production-version-promotion-from-issue.yml
+          echo 'MEMBER_PRODUCTION_PROMOTION_WORKFLOW_YAML=PASS'
+
       - name: Set up Node
         uses: actions/setup-node@v5
         with:
