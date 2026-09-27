@@ -69,6 +69,8 @@ npx wrangler versions deploy 6dd49589-f01d-473f-876a-034563023b0e@100% --name cu
 
 The workflow does not use `wrangler deploy`, D1 mutation commands, secret mutation commands, CRM write APIs, LINE send APIs, Customer ID generation, commerce activation, or paid services.
 
+After the promotion command, the workflow parses the fresh active deployment and requires exactly one entry for the staged Worker version at `percentage === 100`. It also requires that this staged version is the only 100%-traffic version before declaring promotion success.
+
 ## Current authorization boundary
 
 The current Owner authorization covers source changes, PR creation, CI, review, and source-only fixes to review findings.
