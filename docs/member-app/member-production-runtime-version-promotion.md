@@ -42,6 +42,16 @@ The promotion gate also reads the exact successful staging job log and requires 
 
 This binds the exact version candidate to the exact successful staging run rather than validating them independently.
 
+The gate also proves build provenance before any traffic change. It finds the latest successful canonical `deploy-cloudflare.yml` deploy that completed before the staging run began and requires:
+
+- `RELEASE_MODE=deploy`;
+- exact authorized/current-main SHA receipts;
+- Production health HTTP 200;
+- release SHA body/header PASS;
+- a concrete Cloudflare `Current Version ID`.
+
+The exact deployed Worker version and the staged secret-bearing version are then read independently with `wrangler versions view --json`. Their Worker script ETags must be present and identical. This proves that staging changed runtime secret bindings without silently switching to different Worker code.
+
 ## Exact staged-version verification
 
 Before promotion, the workflow fetches the exact authorized version with `wrangler versions view` and verifies:
@@ -64,6 +74,13 @@ It refuses promotion unless:
 
 This prevents promotion from overwriting an unexpected gradual or split deployment state.
 
+Before the traffic mutation, the workflow also:
+
+1. requires the canonical Cloudflare Access client ID, Access client secret, and Admin token;
+2. performs an authenticated, no-redirect read-only Production `/health` request;
+3. requires HTTP 200 and the exact authorized SHA in both the health response body and release header;
+4. re-reads `refs/heads/main` immediately before `wrangler versions deploy` and stops if main has drifted.
+
 ## Promotion and post-promotion verification
 
 The only traffic mutation is the exact authorized staged version promoted to 100%.
@@ -73,6 +90,7 @@ Immediately after promotion, the workflow verifies:
 - Production again has exactly one active version;
 - its version ID exactly equals the authorized staged version ID;
 - its traffic percentage is exactly 100%;
+- Production `/health` is queried with the same Cloudflare Access and Admin authentication contract as the canonical Production deploy workflow, without following redirects;
 - Production `/health` returns HTTP 200;
 - the release SHA in the health response body and header matches the exact authorized current-main SHA.
 
