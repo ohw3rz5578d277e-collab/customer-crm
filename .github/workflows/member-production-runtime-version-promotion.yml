@@ -1,0 +1,396 @@
+name: Member Production runtime version promotion
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/member-production-runtime-version-promotion.yml'
+      - '.github/workflows/dispatch-member-production-runtime-version-promotion-from-issue.yml'
+      - 'tests/member-production-runtime-version-promotion-contract.test.mjs'
+      - 'docs/member-app/member-production-runtime-version-promotion.md'
+      - '.github/workflows/member-app-foundation.yml'
+  workflow_dispatch:
+    inputs:
+      expected_sha:
+        description: Exact current main SHA authorized for Member runtime staged-version promotion
+        required: true
+        type: string
+      staged_version_id:
+        description: Exact staged Cloudflare Worker version ID authorized for 100 percent Production traffic
+        required: true
+        type: string
+      stage_run_id:
+        description: Successful exact-SHA Member runtime secret stage run ID
+        required: true
+        type: string
+      owner_comment_id:
+        description: Owner authorization issue comment ID from release-gate issue #26
+        required: true
+        type: string
+      confirmation:
+        description: Exact confirmation token
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+  issues: read
+
+concurrency:
+  group: ${{ github.event_name == 'workflow_dispatch' && 'member-production-runtime-version-promotion' || format('member-runtime-version-promotion-pr-{0}', github.event.pull_request.number) }}
+  cancel-in-progress: false
+
+jobs:
+  contract:
+    name: Member runtime version promotion contract
+    if: ${{ github.event_name == 'pull_request' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact PR head
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+
+      - name: Assert exact PR head
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
+
+      - name: Set up Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+
+      - name: Verify Member runtime version promotion contract
+        run: node tests/member-production-runtime-version-promotion-contract.test.mjs
+
+  promote:
+    name: Exact-SHA exact-version Member Production runtime promotion
+    if: ${{ github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      EXPECTED_SHA_RAW: ${{ inputs.expected_sha }}
+      STAGED_VERSION_ID_RAW: ${{ inputs.staged_version_id }}
+      STAGE_RUN_ID_RAW: ${{ inputs.stage_run_id }}
+      OWNER_COMMENT_ID_RAW: ${{ inputs.owner_comment_id }}
+      CONFIRMATION_RAW: ${{ inputs.confirmation }}
+    steps:
+      - name: Normalize and validate authorization inputs
+        id: auth
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected_sha="$(printf '%s' "$EXPECTED_SHA_RAW" | tr '[:upper:]' '[:lower:]')"
+          staged_version_id="$(printf '%s' "$STAGED_VERSION_ID_RAW" | tr '[:upper:]' '[:lower:]')"
+          [[ "$expected_sha" =~ ^[0-9a-f]{40}$ ]] || { echo '::error::INVALID_EXPECTED_SHA'; exit 1; }
+          [[ "$staged_version_id" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] || { echo '::error::INVALID_STAGED_VERSION_ID'; exit 1; }
+          [[ "$STAGE_RUN_ID_RAW" =~ ^[0-9]+$ ]] || { echo '::error::INVALID_STAGE_RUN_ID'; exit 1; }
+          [[ "$OWNER_COMMENT_ID_RAW" =~ ^[0-9]+$ ]] || { echo '::error::INVALID_OWNER_COMMENT_ID'; exit 1; }
+          test "$CONFIRMATION_RAW" = 'PROMOTE_MEMBER_RUNTIME_VERSION' || { echo '::error::INVALID_MEMBER_RUNTIME_VERSION_PROMOTION_CONFIRMATION'; exit 1; }
+          echo "expected_sha=$expected_sha" >> "$GITHUB_OUTPUT"
+          echo "staged_version_id=$staged_version_id" >> "$GITHUB_OUTPUT"
+          echo "stage_run_id=$STAGE_RUN_ID_RAW" >> "$GITHUB_OUTPUT"
+          echo "owner_comment_id=$OWNER_COMMENT_ID_RAW" >> "$GITHUB_OUTPUT"
+          echo "MEMBER_RUNTIME_VERSION_PROMOTION_AUTHORIZED_SHA=$expected_sha"
+          echo "MEMBER_RUNTIME_VERSION_PROMOTION_STAGED_VERSION_ID=$staged_version_id"
+          echo 'MEMBER_RUNTIME_VERSION_PROMOTION_CONFIRMATION=PASS'
+
+      - name: Checkout exact authorized SHA
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ steps.auth.outputs.expected_sha }}
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Exact SHA and current-main gate
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ steps.auth.outputs.expected_sha }}
+        run: |
+          set -euo pipefail
+          actual_sha="$(git rev-parse HEAD)"
+          current_main="$(git ls-remote origin refs/heads/main | awk '{print $1}')"
+          test "$actual_sha" = "$EXPECTED_SHA" || { echo "::error::CHECKOUT_SHA_MISMATCH actual=$actual_sha expected=$EXPECTED_SHA"; exit 1; }
+          test "$current_main" = "$EXPECTED_SHA" || { echo "::error::MAIN_DRIFT current=$current_main expected=$EXPECTED_SHA"; exit 1; }
+          echo 'EXACT_SHA_GATE=PASS'
+          echo "CURRENT_MAIN_SHA=$current_main"
+
+      - name: Verify Owner authorization comment
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_SHA: ${{ steps.auth.outputs.expected_sha }}
+          STAGED_VERSION_ID: ${{ steps.auth.outputs.staged_version_id }}
+          STAGE_RUN_ID: ${{ steps.auth.outputs.stage_run_id }}
+          OWNER_COMMENT_ID: ${{ steps.auth.outputs.owner_comment_id }}
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/issues/comments/$OWNER_COMMENT_ID" \
+            > /tmp/member-runtime-version-promotion-owner-comment.json
+          EXPECTED_BODY="/member-runtime-version-promote sha=$EXPECTED_SHA version=$STAGED_VERSION_ID stage_run=$STAGE_RUN_ID confirm=PROMOTE_MEMBER_RUNTIME_VERSION" \
+          python3 - <<'PY'
+          import json, os
+          with open('/tmp/member-runtime-version-promotion-owner-comment.json', encoding='utf-8') as f:
+              c=json.load(f)
+          if c.get('user',{}).get('login')!='ohw3rz5578d277e-collab':
+              raise SystemExit('OWNER_COMMENT_ACTOR_MISMATCH')
+          if c.get('body')!=os.environ['EXPECTED_BODY']:
+              raise SystemExit('OWNER_COMMENT_BODY_MISMATCH')
+          if not str(c.get('issue_url','')).endswith('/issues/26'):
+              raise SystemExit('OWNER_COMMENT_ISSUE_MISMATCH')
+          print('OWNER_AUTHORIZATION_COMMENT=PASS')
+          PY
+          rm -f /tmp/member-runtime-version-promotion-owner-comment.json
+
+      - name: Verify successful exact-SHA secret-stage receipt
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_SHA: ${{ steps.auth.outputs.expected_sha }}
+          STAGE_RUN_ID: ${{ steps.auth.outputs.stage_run_id }}
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/runs/$STAGE_RUN_ID" \
+            > /tmp/member-runtime-version-promotion-stage-run.json
+          python3 - <<'PY'
+          import json, os
+          with open('/tmp/member-runtime-version-promotion-stage-run.json', encoding='utf-8') as f:
+              r=json.load(f)
+          checks={
+              'id': r.get('id')==int(os.environ['STAGE_RUN_ID']),
+              'status': r.get('status')=='completed',
+              'conclusion': r.get('conclusion')=='success',
+              'head_sha': r.get('head_sha')==os.environ['EXPECTED_SHA'],
+              'event': r.get('event')=='workflow_dispatch',
+              'path': r.get('path')=='.github/workflows/member-production-runtime-secret-stage.yml',
+          }
+          bad=[k for k,v in checks.items() if not v]
+          if bad:
+              raise SystemExit('INVALID_RUNTIME_SECRET_STAGE_RECEIPT:'+','.join(bad))
+          print('MEMBER_RUNTIME_SECRET_STAGE_RECEIPT=PASS')
+          PY
+          rm -f /tmp/member-runtime-version-promotion-stage-run.json
+
+      - name: Verify canonical Member source remains default-off
+        shell: bash
+        run: |
+          set -euo pipefail
+          node member_tests/member-production-entry-default-off-manifest.test.mjs
+          node member_tests/member-production-route-wiring-preflight.test.mjs
+          node <<'NODE'
+          const fs=require('fs');
+          const entry=fs.readFileSync('src/production-index-crm-customer360-entry.js','utf8');
+          const cfg=JSON.parse(fs.readFileSync('wrangler.jsonc','utf8'));
+          if(!entry.includes('const MEMBER_PRODUCTION_OWNER_APPROVED=false;'))throw new Error('MEMBER_OWNER_FLAG_NOT_DEFAULT_OFF');
+          if(String(cfg?.vars?.MEMBER_PRODUCTION_ROUTE_MODE||'').trim().toLowerCase()==='enabled')throw new Error('MEMBER_PRODUCTION_ROUTE_MODE_ENABLED');
+          if(String(cfg?.vars?.MEMBER_PRIVATE_MEDIA_CONTENT_ROUTE_MODE||'').trim().toLowerCase()==='enabled')throw new Error('PRIVATE_MEDIA_ROUTE_MODE_ENABLED');
+          console.log('MEMBER_CANONICAL_SOURCE_DEFAULT_OFF=PASS');
+          console.log('MEMBER_PRODUCTION_OWNER_APPROVED=false');
+          console.log('MEMBER_PRODUCTION_ROUTE_MODE=NOT_ENABLED');
+          console.log('MEMBER_PRIVATE_MEDIA_CONTENT_ROUTE_MODE=NOT_ENABLED');
+          NODE
+
+      - name: Set up Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+
+      - name: Verify promotion contract
+        run: node tests/member-production-runtime-version-promotion-contract.test.mjs
+
+      - name: Install Wrangler tooling
+        run: npm install --no-save wrangler@4.131.2
+
+      - name: Confirm Cloudflare authentication
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          npx wrangler whoami >/tmp/member-runtime-version-promotion-whoami.txt
+          test -s /tmp/member-runtime-version-promotion-whoami.txt
+          rm -f /tmp/member-runtime-version-promotion-whoami.txt
+          echo 'CLOUDFLARE_AUTH=PASS'
+
+      - name: Verify exact staged version and required bindings
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          EXPECTED_SHA: ${{ steps.auth.outputs.expected_sha }}
+          STAGED_VERSION_ID: ${{ steps.auth.outputs.staged_version_id }}
+        run: |
+          set -euo pipefail
+          npx wrangler versions view "$STAGED_VERSION_ID" --name customer-crm-api --json > /tmp/member-runtime-promotion-staged-version.json
+          node <<'NODE'
+          const fs=require('fs');
+          const raw=fs.readFileSync('/tmp/member-runtime-promotion-staged-version.json','utf8');
+          const v=JSON.parse(raw);
+          const text=JSON.stringify(v);
+          const expectedMessage='Owner-gated Member runtime secret stage for '+process.env.EXPECTED_SHA;
+          if(!text.includes(expectedMessage))throw new Error('STAGED_VERSION_MESSAGE_SHA_MISMATCH');
+          for(const name of [
+            'MEMBER_SESSION_SECRET',
+            'MEMBER_LINE_LOGIN_TRANSACTION_SECRET',
+            'MEMBER_LINE_LOGIN_CHANNEL_SECRET',
+            'MEMBER_PRIVATE_MEDIA_DELIVERY_SECRET'
+          ]){
+            if(!text.includes(name))throw new Error('STAGED_SECRET_BINDING_MISSING:'+name);
+          }
+          for(const name of [
+            'ADMIN_TOKEN',
+            'CRM_INTERNAL_TOKEN',
+            'RESERVATION_INTERNAL_TOKEN',
+            'SYNC_TOKEN',
+            'CRM_OWNER_PASSWORD',
+            'CRM_OWNER_SESSION_SECRET'
+          ]){
+            if(!text.includes(name))throw new Error('STAGED_EXISTING_REQUIRED_SECRET_BINDING_MISSING:'+name);
+          }
+          for(const name of ['DB','LINE_SERVICE','RESERVATION_SERVICE','CRM_OWNER_LOGIN_RATE_LIMITER']){
+            if(!text.includes(name))throw new Error('STAGED_REQUIRED_RESOURCE_BINDING_MISSING:'+name);
+          }
+          console.log('STAGED_VERSION_EXACT_SHA_MESSAGE=PASS');
+          console.log('STAGED_SECRET_BINDINGS=4');
+          console.log('STAGED_EXISTING_REQUIRED_SECRET_BINDINGS=PASS');
+          console.log('STAGED_REQUIRED_RESOURCE_BINDINGS=PASS');
+          console.log('SECRET_VALUES_PRINTED=NO');
+          NODE
+
+      - name: Snapshot active Production deployment and require single-version baseline
+        id: baseline
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          STAGED_VERSION_ID: ${{ steps.auth.outputs.staged_version_id }}
+        run: |
+          set -euo pipefail
+          npx wrangler deployments status --name customer-crm-api --json > /tmp/member-runtime-promotion-deployment-before.json
+          node <<'NODE'
+          const fs=require('fs');
+          const x=JSON.parse(fs.readFileSync('/tmp/member-runtime-promotion-deployment-before.json','utf8'));
+          const d=Array.isArray(x)?x[0]:x;
+          const versions=Array.isArray(d?.versions)?d.versions:[];
+          if(versions.length!==1)throw new Error('PRODUCTION_BASELINE_NOT_SINGLE_VERSION:'+versions.length);
+          const only=versions[0];
+          if(Number(only?.percentage)!==100)throw new Error('PRODUCTION_BASELINE_NOT_100_PERCENT');
+          const id=String(only?.version_id||only?.id||'');
+          if(!id)throw new Error('PRODUCTION_BASELINE_VERSION_ID_MISSING');
+          if(id===process.env.STAGED_VERSION_ID)throw new Error('STAGED_VERSION_ALREADY_ACTIVE');
+          fs.appendFileSync(process.env.GITHUB_OUTPUT,'previous_version_id='+id+'\n');
+          console.log('PRODUCTION_BASELINE_SINGLE_VERSION=PASS');
+          console.log('PRODUCTION_BASELINE_100_PERCENT=PASS');
+          console.log('STAGED_VERSION_NOT_ACTIVE=PASS');
+          console.log('PRE_PROMOTION_PRODUCTION_TRAFFIC_CHANGE=0');
+          NODE
+
+      - name: Promote exact staged version to 100 percent Production traffic
+        id: promote
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          EXPECTED_SHA: ${{ steps.auth.outputs.expected_sha }}
+          STAGED_VERSION_ID: ${{ steps.auth.outputs.staged_version_id }}
+        run: |
+          set -euo pipefail
+          npx wrangler versions deploy "${STAGED_VERSION_ID}@100%" \
+            --name customer-crm-api \
+            --message "Owner-gated Member runtime secret promotion for $EXPECTED_SHA version $STAGED_VERSION_ID" \
+            -y
+          echo 'MEMBER_RUNTIME_VERSION_PROMOTION_COMMAND=PASS'
+
+      - name: Verify exact staged version is now 100 percent active
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          STAGED_VERSION_ID: ${{ steps.auth.outputs.staged_version_id }}
+          PREVIOUS_VERSION_ID: ${{ steps.baseline.outputs.previous_version_id }}
+        run: |
+          set -euo pipefail
+          npx wrangler deployments status --name customer-crm-api --json > /tmp/member-runtime-promotion-deployment-after.json
+          node <<'NODE'
+          const fs=require('fs');
+          const x=JSON.parse(fs.readFileSync('/tmp/member-runtime-promotion-deployment-after.json','utf8'));
+          const d=Array.isArray(x)?x[0]:x;
+          const versions=Array.isArray(d?.versions)?d.versions:[];
+          if(versions.length!==1)throw new Error('POST_PROMOTION_NOT_SINGLE_VERSION:'+versions.length);
+          const only=versions[0];
+          const id=String(only?.version_id||only?.id||'');
+          if(id!==process.env.STAGED_VERSION_ID)throw new Error('POST_PROMOTION_ACTIVE_VERSION_MISMATCH:'+id);
+          if(Number(only?.percentage)!==100)throw new Error('POST_PROMOTION_NOT_100_PERCENT:'+only?.percentage);
+          if(process.env.PREVIOUS_VERSION_ID===process.env.STAGED_VERSION_ID)throw new Error('PREVIOUS_VERSION_EQUALS_STAGED_VERSION');
+          console.log('POST_PROMOTION_SINGLE_VERSION=PASS');
+          console.log('POST_PROMOTION_STAGED_VERSION_100_PERCENT=PASS');
+          console.log('PRODUCTION_TRAFFIC_TARGET_EXACT=PASS');
+          NODE
+
+      - name: Verify Production health and exact release SHA read only
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ steps.auth.outputs.expected_sha }}
+        run: |
+          set -euo pipefail
+          headers="$(mktemp)"
+          body="$(mktemp)"
+          trap 'rm -f "$headers" "$body"' EXIT
+          code="$(curl --silent --show-error --location --dump-header "$headers" --output "$body" --write-out '%{http_code}' https://customer-crm-api.ohw3rz5578d277e.workers.dev/health)"
+          test "$code" = '200' || { echo "::error::PRODUCTION_HEALTH_HTTP_STATUS=$code"; exit 1; }
+          EXPECTED_SHA="$EXPECTED_SHA" BODY_FILE="$body" HEADER_FILE="$headers" node <<'NODE'
+          const fs=require('fs');
+          const expected=process.env.EXPECTED_SHA;
+          const body=fs.readFileSync(process.env.BODY_FILE,'utf8');
+          const headers=fs.readFileSync(process.env.HEADER_FILE,'utf8').toLowerCase();
+          const parsed=JSON.parse(body);
+          const bodyText=JSON.stringify(parsed);
+          if(!bodyText.includes(expected))throw new Error('PRODUCTION_RELEASE_SHA_BODY_MISMATCH');
+          if(!headers.includes(expected.toLowerCase()))throw new Error('PRODUCTION_RELEASE_SHA_HEADER_MISMATCH');
+          console.log('PRODUCTION_HEALTH_HTTP_STATUS=200');
+          console.log('PRODUCTION_HEALTH_JSON_PARSE=PASS');
+          console.log('PRODUCTION_RELEASE_SHA_BODY=PASS');
+          console.log('PRODUCTION_RELEASE_SHA_HEADER=PASS');
+          console.log('POST_PROMOTION_HTTP_READ_ONLY=PASS');
+          NODE
+
+      - name: Cleanup temporary read-only snapshots
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          rm -f \
+            /tmp/member-runtime-promotion-staged-version.json \
+            /tmp/member-runtime-promotion-deployment-before.json \
+            /tmp/member-runtime-promotion-deployment-after.json
+          echo 'TEMP_PROMOTION_SNAPSHOT_MATERIAL_REMOVED=YES'
+
+      - name: Final exact-version promotion declaration
+        if: ${{ success() }}
+        shell: bash
+        run: |
+          echo 'MEMBER_RUNTIME_VERSION_PROMOTION=PASS'
+          echo 'PRODUCTION_TRAFFIC_TARGET=STAGED_VERSION_100_PERCENT'
+          echo 'MEMBER_PRODUCTION_OWNER_APPROVED_ACTIVATION=0'
+          echo 'MEMBER_PRODUCTION_ROUTE_MODE_ENABLEMENT=0'
+          echo 'MEMBER_SESSION_PRODUCTION_ACTIVATION=0'
+          echo 'LINE_LOGIN_PRODUCTION_ACTIVATION=0'
+          echo 'PRIVATE_MEDIA_PRODUCTION_BINDING_CHANGE=0'
+          echo 'PUBLIC_ASSET_PRODUCTION_BINDING_CHANGE=0'
+          echo 'PRODUCTION_D1_WRITE=0'
+          echo 'CRM_WRITE=0'
+          echo 'LINE_SEND=0'
+          echo 'CUSTOMER_ID_GENERATION=0'
+          echo 'COMMERCE_ACTIVATION=0'
