@@ -52,6 +52,38 @@ jobs:
           echo 'PRODUCTION_DEPLOY=0'
           echo 'MEMBER_ROUTE_ACTIVATION=0'
 
+      - name: Reject instead of queueing behind another Production mutation
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          THIS_RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          sleep 2
+          workflows=(
+            dispatch-production-deploy-from-issue.yml
+            dispatch-member-schema-apply-from-issue.yml
+            dispatch-member-production-runtime-secret-stage-from-issue.yml
+            dispatch-member-production-version-promotion-from-issue.yml
+            deploy-cloudflare.yml
+            member-production-schema-apply.yml
+            member-production-runtime-secret-stage.yml
+          )
+          statuses=(queued in_progress waiting pending requested)
+          for workflow in "${workflows[@]}"; do
+            for status in "${statuses[@]}"; do
+              conflicts="$(
+                curl --fail --silent --show-error                   -H "Authorization: Bearer $GH_TOKEN"                   -H 'Accept: application/vnd.github+json'                   -H 'X-GitHub-Api-Version: 2022-11-28'                   "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/workflows/$workflow/runs?status=$status&per_page=100"                 | python3 -c 'import json,os,sys; me=int(os.environ["THIS_RUN_ID"]); runs=json.load(sys.stdin).get("workflow_runs",[]); print(sum(1 for r in runs if int(r.get("id",0))!=me))'
+              )"
+              test "$conflicts" = '0' || {
+                echo "::error::PRODUCTION_MUTATION_BUSY_RETRY_REQUIRED workflow=$workflow status=$status count=$conflicts"
+                exit 1
+              }
+            done
+          done
+          echo 'PRODUCTION_MUTATION_DISPATCH_GATE=FREE'
+          echo 'PRODUCTION_MUTATION_QUEUE_POLICY=REJECT_AND_RETRY'
+
       - name: Dispatch Member schema-only apply
         shell: bash
         env:
