@@ -86,7 +86,13 @@ assert.ok(workflow.includes('STAGED_VERSION_ALREADY_PRESENT_IN_ACTIVE_DEPLOYMENT
 assert.ok(workflow.includes('npx wrangler versions deploy "$STAGED_VERSION_ID@100%"'));
 assert.ok(workflow.includes('--name customer-crm-api'));
 assert.ok(workflow.includes('--yes'));
-assert.ok(workflow.includes('PROMOTED_VERSION_NOT_PRESENT_IN_ACTIVE_DEPLOYMENT'));
+assert.ok(workflow.includes('PROMOTED_VERSION_ACTIVE_ENTRY_COUNT_NOT_EXACTLY_ONE'));
+assert.ok(workflow.includes('PROMOTED_VERSION_TRAFFIC_NOT_100_PERCENT'));
+assert.ok(workflow.includes('ACTIVE_PRODUCTION_100_PERCENT_ENTRY_COUNT_NOT_EXACTLY_ONE'));
+assert.ok(workflow.includes('ACTIVE_PRODUCTION_100_PERCENT_VERSION_MISMATCH'));
+assert.ok(workflow.includes('ACTIVE_PRODUCTION_PROMOTED_VERSION_TRAFFIC_PERCENT=100'));
+assert.ok(workflow.includes("Number(staged[0].percentage)!==100"));
+assert.ok(workflow.includes("fullTraffic.length!==1"));
 
 const deployMatches=workflow.match(/\bnpx wrangler versions deploy\b/g)||[];
 assert.equal(deployMatches.length,1,'versions deploy must appear exactly once');
