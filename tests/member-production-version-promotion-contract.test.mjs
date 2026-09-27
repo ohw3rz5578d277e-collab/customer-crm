@@ -18,7 +18,7 @@ for(const exact of [
 }
 assert.ok(workflow.includes('workflow_call:'), 'promotion workflow must be reusable');
 assert.doesNotMatch(workflow,/\bworkflow_dispatch:/, 'manual workflow_dispatch must not exist');
-for(const input of ['expected_sha','staged_version_id','staging_run_id','owner_comment_id','bridge_run_id','bridge_run_attempt','confirmation']){
+for(const input of ['expected_sha','staged_version_id','expected_active_version_id','staging_run_id','owner_comment_id','bridge_run_id','bridge_run_attempt','confirmation']){
   assert.ok(workflow.includes(input+':'), 'missing workflow input: '+input);
 }
 
@@ -60,12 +60,26 @@ assert.equal(receipt.worker_version_stage,'PASS');
 assert.equal(receipt.production_deployment_unchanged,true);
 assert.equal(receipt.production_traffic_change,0);
 assert.equal(receipt.production_deploy,0);
+assert.equal(receipt.run_created_at_utc,'2026-09-27T01:26:24Z');
+assert.equal(receipt.run_updated_at_utc,'2026-09-27T01:26:51Z');
+assert.equal(receipt.expected_version_message,'Owner-gated Member runtime secret stage for 41059eb0ca192f29f790abfd4563552581b1a6b8');
+assert.match(receipt.authentication_role,/independently validates/);
 assert.ok(workflow.includes(receiptPath));
 assert.ok(workflow.includes('DURABLE_MEMBER_STAGING_SUCCESS_RECEIPT=PASS'));
-assert.ok(workflow.includes('DURABLE_MEMBER_STAGED_VERSION_LINEAGE=PASS'));
+assert.ok(workflow.includes('LIVE_MEMBER_STAGING_RUN_METADATA=PASS'));
+assert.ok(workflow.includes('LIVE_MEMBER_STAGING_RUN_METADATA=NOT_RETAINED'));
+assert.ok(workflow.includes('CLOUDFLARE_STAGED_VERSION_CREATED_WITHIN_RUN_WINDOW=PASS'));
+assert.ok(workflow.includes('CLOUDFLARE_STAGED_VERSION_SOURCE_SHA_MESSAGE=PASS'));
+assert.ok(workflow.includes('INDEPENDENT_MEMBER_STAGED_VERSION_LINEAGE=PASS'));
+assert.ok(workflow.includes('STAGING_SOURCE_WORKFLOW_PROVENANCE_CONTRACT=PASS'));
 assert.doesNotMatch(workflow,/actions\/jobs\/\$STAGE_JOB_ID\/logs/);
 
 assert.ok(workflow.includes('ACTIVE_PRODUCTION_DEPLOYMENT_FRESH_SNAPSHOT=PASS'));
+assert.ok(workflow.includes('OWNER_AUTHORIZED_ACTIVE_VERSION_MATCH=PASS'));
+assert.ok(workflow.includes('CURRENT_ACTIVE_VERSION_NOT_OWNER_AUTHORIZED'));
+assert.ok(workflow.includes('PRE_MUTATION_OWNER_AUTHORIZED_ACTIVE_VERSION_MATCH=PASS'));
+assert.ok(workflow.includes('FINAL_OWNER_AUTHORIZED_ACTIVE_VERSION_MATCH=PASS'));
+assert.ok(workflow.includes('FINAL_ACTIVE_VERSION_NOT_OWNER_AUTHORIZED'));
 assert.ok(workflow.includes('ACTIVE_PRODUCTION_DEPLOYMENT_DRIFTED_BEFORE_PROMOTION'));
 assert.ok(workflow.includes('ACTIVE_PRODUCTION_DEPLOYMENT_STABLE_BEFORE_PROMOTION=PASS'));
 assert.ok(workflow.includes('STAGED_VERSION_ALREADY_PRESENT_IN_ACTIVE_DEPLOYMENT'));
@@ -86,6 +100,10 @@ assert.ok(bridge.includes("github.actor == 'ohw3rz5578d277e-collab'"));
 assert.ok(bridge.includes("github.event.comment.user.login == 'ohw3rz5578d277e-collab'"));
 assert.ok(bridge.includes("staged_version=(6dd49589-f01d-473f-876a-034563023b0e)"));
 assert.ok(bridge.includes("staging_run=(36285531724)"));
+assert.ok(bridge.includes('replace_active_version=([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})'));
+assert.ok(bridge.includes('/member-production-promotion-snapshot '));
+assert.ok(bridge.includes('ACTIVE_PRODUCTION_VERSION_ID='));
+assert.ok(bridge.includes('expected_active_version_id: ${{ needs.validate.outputs.expected_active_version_id }}'));
 assert.ok(bridge.includes('PROMOTION_BRIDGE_RERUN_NOT_AUTHORIZED'));
 assert.ok(bridge.includes('github.run_attempt'));
 assert.ok(bridge.includes('uses: ./.github/workflows/member-production-version-promotion.yml'));
@@ -108,6 +126,8 @@ console.log('MEMBER_PRODUCTION_VERSION_PROMOTION_CONTRACT=PASS');
 console.log('MEMBER_PRODUCTION_VERSION_PROMOTION_OWNER_GATE=PASS');
 console.log('MEMBER_PRODUCTION_VERSION_PROMOTION_SINGLE_USE_BRIDGE=PASS');
 console.log('MEMBER_PRODUCTION_VERSION_PROMOTION_DURABLE_STAGING_RECEIPT=PASS');
+console.log('MEMBER_PRODUCTION_VERSION_PROMOTION_INDEPENDENT_CLOUDFLARE_LINEAGE=PASS');
+console.log('MEMBER_PRODUCTION_VERSION_PROMOTION_OWNER_AUTHORIZED_REPLACEMENT_VERSION=PASS');
 console.log('MEMBER_PRODUCTION_VERSION_PROMOTION_SHARED_CONCURRENCY=PASS');
 console.log('MEMBER_PRODUCTION_VERSION_PROMOTION_FINAL_MAIN_RECHECK=PASS');
 console.log('MEMBER_PRODUCTION_VERSION_PROMOTION_SOURCE_ONLY_PR_GATE=PASS');
