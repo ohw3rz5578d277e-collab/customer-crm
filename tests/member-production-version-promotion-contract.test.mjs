@@ -19,6 +19,10 @@ for(const input of ['expected_sha','staged_version_id','staging_run_id','owner_c
 assert.ok(workflow.includes('MAIN_DRIFT current=$current_main expected=$EXPECTED_SHA'));
 assert.ok(workflow.includes('git merge-base --is-ancestor "$STAGING_SOURCE_SHA" "$EXPECTED_SHA"'));
 assert.ok(workflow.includes('OWNER_PROMOTION_AUTHORIZATION_COMMENT=PASS'));
+assert.ok(workflow.includes('OWNER_COMMENT_EDITED'));
+assert.ok(workflow.includes('OWNER_COMMENT_NOT_FRESH'));
+assert.ok(workflow.includes('age > 900'));
+assert.ok(workflow.includes('OWNER_PROMOTION_AUTHORIZATION_FRESHNESS=PASS'));
 assert.ok(workflow.includes("'.github/workflows/member-production-runtime-secret-stage.yml'"));
 assert.ok(workflow.includes("r.get('conclusion')=='success'"));
 assert.ok(workflow.includes('MEMBER_RUNTIME_SECRET_STAGED_VERSION_ID=$STAGED_VERSION_ID'));

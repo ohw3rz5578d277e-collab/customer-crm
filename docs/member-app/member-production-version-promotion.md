@@ -27,7 +27,7 @@ Before any traffic mutation the workflow must prove all of the following:
 
 1. checkout SHA equals the freshly Owner-authorized current `main`;
 2. staging source SHA is an ancestor of that current `main`;
-3. Owner authorization comment is exact, belongs to issue #26, and was authored by the Owner account;
+3. Owner authorization comment is exact, belongs to issue #26, was authored by the Owner account, is unedited, and is no more than 15 minutes old;
 4. staging run `36285531724` is completed/SUCCESS, is a `workflow_dispatch` run of `member-production-runtime-secret-stage.yml`, and has head `41059eb0ca192f29f790abfd4563552581b1a6b8`;
 5. the successful staging job log proves `MEMBER_RUNTIME_SECRET_STAGED_VERSION_ID=6dd49589-f01d-473f-876a-034563023b0e`;
 6. the immutable staged version still exists in Cloudflare;

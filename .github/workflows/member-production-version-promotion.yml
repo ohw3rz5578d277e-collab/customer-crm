@@ -147,7 +147,15 @@ jobs:
               raise SystemExit('OWNER_COMMENT_BODY_MISMATCH')
           if not str(c.get('issue_url','')).endswith('/issues/26'):
               raise SystemExit('OWNER_COMMENT_ISSUE_MISMATCH')
+          if c.get('created_at')!=c.get('updated_at'):
+              raise SystemExit('OWNER_COMMENT_EDITED')
+          from datetime import datetime, timezone
+          created=datetime.fromisoformat(str(c.get('created_at','')).replace('Z','+00:00'))
+          age=(datetime.now(timezone.utc)-created).total_seconds()
+          if age < 0 or age > 900:
+              raise SystemExit(f'OWNER_COMMENT_NOT_FRESH:age_seconds={age:.0f}')
           print('OWNER_PROMOTION_AUTHORIZATION_COMMENT=PASS')
+          print('OWNER_PROMOTION_AUTHORIZATION_FRESHNESS=PASS')
           PY
           rm -f /tmp/member-promotion-owner-comment.json
 
