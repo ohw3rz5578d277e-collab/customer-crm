@@ -20,12 +20,26 @@ assert.ok(workflow.includes('/actions/jobs/$stage_job_id/logs'));
 assert.ok(workflow.includes('MEMBER_RUNTIME_SECRET_STAGED_VERSION_ID=$STAGED_VERSION_ID'));
 assert.ok(workflow.includes('STAGE_RUN_STAGED_VERSION_ID=PASS'));
 assert.ok(workflow.includes('STAGE_RUN_PRODUCTION_TRAFFIC_UNCHANGED_RECEIPT=PASS'));
+assert.ok(workflow.includes('Verify latest canonical Production deploy before staging was exact SHA'));
+assert.ok(workflow.includes('deploy-cloudflare.yml/runs?event=workflow_dispatch&status=completed&per_page=100'));
+assert.ok(workflow.includes("grep -F 'RELEASE_MODE=deploy'"));
+assert.ok(workflow.includes('LATEST_PRE_STAGE_PRODUCTION_DEPLOY_SHA_MISMATCH'));
+assert.ok(workflow.includes('PRE_STAGE_EXACT_DEPLOY_VERSION_ID='));
+assert.ok(workflow.includes('PRE_STAGE_EXACT_SHA_PRODUCTION_DEPLOY_RECEIPT=PASS'));
+assert.ok(workflow.includes("grep -F 'PRODUCTION_RELEASE_SHA_BODY=PASS'"));
+assert.ok(workflow.includes("grep -F 'PRODUCTION_RELEASE_SHA_HEADER=PASS'"));
 assert.ok(workflow.includes('const MEMBER_PRODUCTION_OWNER_APPROVED=false;'));
 assert.ok(workflow.includes('MEMBER_PRODUCTION_ROUTE_MODE=NOT_ENABLED'));
 assert.ok(workflow.includes('MEMBER_PRIVATE_MEDIA_CONTENT_ROUTE_MODE=NOT_ENABLED'));
 
 assert.ok(workflow.includes('wrangler versions view "$STAGED_VERSION_ID" --name customer-crm-api --json'));
 assert.ok(workflow.includes('STAGED_VERSION_EXACT_SHA_MESSAGE=PASS'));
+assert.ok(workflow.includes('PRE_STAGE_DEPLOY_VERSION_ID: ${{ steps.pre_stage_deploy.outputs.version_id }}'));
+assert.ok(workflow.includes('member-runtime-promotion-pre-stage-deploy-version.json'));
+assert.ok(workflow.includes('function scriptEtag(x)'));
+assert.ok(workflow.includes('WORKER_SCRIPT_ETAG_MISSING'));
+assert.ok(workflow.includes('STAGED_SCRIPT_ETAG_DIFFERS_FROM_EXACT_DEPLOY'));
+assert.ok(workflow.includes('STAGED_SCRIPT_ETAG_MATCHES_EXACT_DEPLOY=PASS'));
 assert.ok(workflow.includes('STAGED_SECRET_BINDINGS=4'));
 assert.ok(workflow.includes('STAGED_EXISTING_REQUIRED_SECRET_BINDINGS=PASS'));
 assert.ok(workflow.includes('STAGED_REQUIRED_RESOURCE_BINDINGS=PASS'));
@@ -39,6 +53,31 @@ assert.ok(workflow.includes('PRODUCTION_BASELINE_SINGLE_VERSION=PASS'));
 assert.ok(workflow.includes('PRODUCTION_BASELINE_100_PERCENT=PASS'));
 assert.ok(workflow.includes('STAGED_VERSION_NOT_ACTIVE=PASS'));
 
+assert.ok(workflow.includes('PRE_PROMOTION_PRODUCTION_AUTH_INPUTS=PASS'));
+for(const header of [
+  'CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID',
+  'CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET',
+  'x-admin-token: $ADMIN_TOKEN',
+  "Accept: application/json"
+]){
+  assert.ok(workflow.includes(header), 'missing authenticated health header: '+header);
+}
+assert.ok(workflow.includes('PRE_PROMOTION_PRODUCTION_HEALTH_HTTP_STATUS=200'));
+assert.ok(workflow.includes('PRE_PROMOTION_RELEASE_SHA_BODY=PASS'));
+assert.ok(workflow.includes('PRE_PROMOTION_RELEASE_SHA_HEADER=PASS'));
+assert.ok(workflow.includes('PRE_PROMOTION_HTTP_READ_ONLY=PASS'));
+assert.ok(workflow.includes('IMMEDIATE_PRE_PROMOTION_MAIN_DRIFT'));
+assert.ok(workflow.includes('IMMEDIATE_PRE_PROMOTION_MAIN_SHA_GATE=PASS'));
+
+const preHealthStart=workflow.indexOf('- name: Verify pre-promotion Production health and exact release SHA read only');
+const preHealthEnd=workflow.indexOf('- name: Recheck current main immediately before traffic mutation');
+assert.ok(preHealthStart>=0 && preHealthEnd>preHealthStart);
+assert.doesNotMatch(workflow.slice(preHealthStart,preHealthEnd),/--location/);
+
+const postHealthStart=workflow.indexOf('- name: Verify post-promotion Production health and exact release SHA read only');
+const cleanupStart=workflow.indexOf('- name: Cleanup temporary read-only snapshots');
+assert.ok(postHealthStart>=0 && cleanupStart>postHealthStart);
+assert.doesNotMatch(workflow.slice(postHealthStart,cleanupStart),/--location/);
 assert.ok(workflow.includes('wrangler versions deploy "${STAGED_VERSION_ID}@100%"'));
 assert.ok(workflow.includes('--name customer-crm-api'));
 assert.ok(workflow.includes('-y'));
