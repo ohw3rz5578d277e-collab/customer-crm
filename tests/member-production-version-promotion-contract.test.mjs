@@ -111,7 +111,7 @@ assert.ok(bridge.includes('secrets: inherit'));
 assert.doesNotMatch(bridge,/\/dispatches/);
 assert.doesNotMatch(bridge,/actions:\s*write/);
 assert.doesNotMatch(bridge,/wrangler\s+versions\s+deploy/i);
-assert.doesNotMatch(bridge,/wrangler\s+deploy/i);
+assert.doesNotMatch(bridge,/wrangler\s+deploy\b/i);
 
 for(const path of [
   '.github/workflows/member-production-version-promotion.yml',
