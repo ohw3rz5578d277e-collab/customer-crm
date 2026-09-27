@@ -107,3 +107,8 @@ For real Production executions, these workflows share the same GitHub Actions co
 - Member Production runtime secret stage.
 
 Their pull-request contract jobs keep PR-specific concurrency groups. Production mutation authorization bridges do not intentionally queue work: before dispatch they check the four mutation bridges and mutation target workflows for `queued`, `in_progress`, `waiting`, `pending`, or `requested` runs. If any other mutation is active, the new command fails closed with `PRODUCTION_MUTATION_BUSY_RETRY_REQUIRED`; the Owner must retry with fresh authorization after the mutation window is clear. The mutation authorization bridges deliberately have no workflow-level concurrency group, so the busy rejection logic executes before GitHub Actions can place same-bridge commands into a lossy pending slot. The shared `customer-crm-production-deploy` concurrency group remains a last-line race guard on the actual mutation workflows, not a durable queue.
+
+
+## Read-only canonical preflight isolation
+
+The canonical `deploy-cloudflare.yml` workflow uses `customer-crm-production-deploy` only when `workflow_dispatch` runs with `mode=deploy`. Read-only `mode=preflight` runs use a unique `customer-crm-production-preflight-<run_id>` group, so a preflight cannot consume or replace the single pending slot used by an authorized Production mutation. Pull-request CI remains on its PR-specific group.
