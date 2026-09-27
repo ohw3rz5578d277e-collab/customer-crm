@@ -211,10 +211,98 @@ jobs:
           echo 'STAGE_RUN_STAGED_VERSION_ID=PASS'
           echo 'STAGE_RUN_PRODUCTION_TRAFFIC_UNCHANGED_RECEIPT=PASS'
           rm -f \
-            /tmp/member-runtime-version-promotion-stage-run.json \
             /tmp/member-runtime-version-promotion-stage-jobs.json \
             /tmp/member-runtime-version-promotion-stage-job-id.txt \
             /tmp/member-runtime-version-promotion-stage-job.log
+
+      - name: Verify latest canonical Production deploy before staging was exact SHA
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_SHA: ${{ steps.auth.outputs.expected_sha }}
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/workflows/deploy-cloudflare.yml/runs?event=workflow_dispatch&status=completed&per_page=100" \
+            > /tmp/member-runtime-version-promotion-deploy-runs.json
+
+          python3 - <<'PY' > /tmp/member-runtime-version-promotion-deploy-candidates.txt
+          import json
+          from datetime import datetime
+
+          def dt(value):
+              if not value:
+                  return None
+              return datetime.fromisoformat(value.replace('Z','+00:00'))
+
+          with open('/tmp/member-runtime-version-promotion-stage-run.json', encoding='utf-8') as f:
+              stage=json.load(f)
+          with open('/tmp/member-runtime-version-promotion-deploy-runs.json', encoding='utf-8') as f:
+              data=json.load(f)
+
+          stage_start=dt(stage.get('run_started_at') or stage.get('created_at'))
+          if stage_start is None:
+              raise SystemExit('STAGE_RUN_START_TIME_MISSING')
+
+          rows=[]
+          for r in data.get('workflow_runs',[]):
+              if r.get('status')!='completed' or r.get('conclusion')!='success':
+                  continue
+              completed=dt(r.get('updated_at'))
+              created=dt(r.get('created_at'))
+              if completed is None or created is None or completed>stage_start:
+                  continue
+              rows.append((created, int(r['id']), str(r.get('head_sha') or '')))
+
+          rows.sort(reverse=True)
+          for _, run_id, head_sha in rows:
+              print(f'{run_id}|{head_sha}')
+          PY
+
+          found=0
+          while IFS='|' read -r run_id run_sha; do
+            [[ "$run_id" =~ ^[0-9]+$ ]] || continue
+            curl --fail --silent --show-error \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H 'Accept: application/vnd.github+json' \
+              -H 'X-GitHub-Api-Version: 2022-11-28' \
+              "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/runs/$run_id/jobs?per_page=100" \
+              > /tmp/member-runtime-version-promotion-deploy-jobs.json
+            deploy_job_id="$(
+              python3 - <<'PY'
+          import json
+          with open('/tmp/member-runtime-version-promotion-deploy-jobs.json', encoding='utf-8') as f:
+              data=json.load(f)
+          matches=[j for j in data.get('jobs',[]) if j.get('name')=='Exact-SHA Production release gate' and j.get('conclusion')=='success']
+          print(matches[0]['id'] if len(matches)==1 else '')
+          PY
+            )"
+            [[ "$deploy_job_id" =~ ^[0-9]+$ ]] || continue
+            curl --fail --silent --show-error --location \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H 'Accept: application/vnd.github+json' \
+              -H 'X-GitHub-Api-Version: 2022-11-28' \
+              "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/jobs/$deploy_job_id/logs" \
+              > /tmp/member-runtime-version-promotion-deploy-job.log
+            if ! grep -F 'RELEASE_MODE=deploy' /tmp/member-runtime-version-promotion-deploy-job.log >/dev/null; then
+              continue
+            fi
+            found=1
+            test "$run_sha" = "$EXPECTED_SHA" || { echo "::error::LATEST_PRE_STAGE_PRODUCTION_DEPLOY_SHA_MISMATCH run=$run_id sha=$run_sha expected=$EXPECTED_SHA"; exit 1; }
+            grep -F "AUTHORIZED_SHA=$EXPECTED_SHA" /tmp/member-runtime-version-promotion-deploy-job.log >/dev/null || { echo '::error::PRE_STAGE_DEPLOY_AUTHORIZED_SHA_RECEIPT_MISSING'; exit 1; }
+            grep -F "CURRENT_MAIN_SHA=$EXPECTED_SHA" /tmp/member-runtime-version-promotion-deploy-job.log >/dev/null || { echo '::error::PRE_STAGE_DEPLOY_CURRENT_MAIN_RECEIPT_MISSING'; exit 1; }
+            grep -F 'PRODUCTION_HEALTH_HTTP_STATUS=200' /tmp/member-runtime-version-promotion-deploy-job.log >/dev/null || { echo '::error::PRE_STAGE_DEPLOY_HEALTH_RECEIPT_MISSING'; exit 1; }
+            grep -F 'PRODUCTION_RELEASE_SHA_BODY=PASS' /tmp/member-runtime-version-promotion-deploy-job.log >/dev/null || { echo '::error::PRE_STAGE_DEPLOY_RELEASE_SHA_BODY_RECEIPT_MISSING'; exit 1; }
+            grep -F 'PRODUCTION_RELEASE_SHA_HEADER=PASS' /tmp/member-runtime-version-promotion-deploy-job.log >/dev/null || { echo '::error::PRE_STAGE_DEPLOY_RELEASE_SHA_HEADER_RECEIPT_MISSING'; exit 1; }
+            echo "PRE_STAGE_LATEST_PRODUCTION_DEPLOY_RUN_ID=$run_id"
+            echo "PRE_STAGE_LATEST_PRODUCTION_DEPLOY_SHA=$run_sha"
+            echo 'PRE_STAGE_EXACT_SHA_PRODUCTION_DEPLOY_RECEIPT=PASS'
+            break
+          done < /tmp/member-runtime-version-promotion-deploy-candidates.txt
+          test "$found" = '1' || { echo '::error::PRE_STAGE_CANONICAL_PRODUCTION_DEPLOY_RECEIPT_NOT_FOUND'; exit 1; }
 
       - name: Verify canonical Member source remains default-off
         shell: bash
@@ -331,6 +419,78 @@ jobs:
           console.log('PRE_PROMOTION_PRODUCTION_TRAFFIC_CHANGE=0');
           NODE
 
+      - name: Verify Production auth inputs before promotion
+        shell: bash
+        env:
+          PRODUCTION_BASE_URL: https://customer-crm-api.ohw3rz5578d277e.workers.dev
+          CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+          ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}
+        run: |
+          set -euo pipefail
+          for v in PRODUCTION_BASE_URL CF_ACCESS_CLIENT_ID CF_ACCESS_CLIENT_SECRET ADMIN_TOKEN; do
+            if [[ -z "${!v}" ]]; then
+              echo "::error::PRODUCTION_AUTH_INPUT_MISSING:$v"
+              exit 1
+            fi
+          done
+          echo 'PRE_PROMOTION_PRODUCTION_AUTH_INPUTS=PASS'
+
+      - name: Verify pre-promotion Production health and exact release SHA read only
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ steps.auth.outputs.expected_sha }}
+          PRODUCTION_BASE_URL: https://customer-crm-api.ohw3rz5578d277e.workers.dev
+          CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+          ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}
+        run: |
+          set -euo pipefail
+          body=/tmp/member-runtime-promotion-health-before.json
+          headers=/tmp/member-runtime-promotion-health-before.headers
+          http_code="$(curl --silent --show-error --max-time 15 \
+            --output "$body" \
+            --dump-header "$headers" \
+            --write-out '%{http_code}' \
+            -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" \
+            -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET" \
+            -H "x-admin-token: $ADMIN_TOKEN" \
+            -H 'Accept: application/json' \
+            "$PRODUCTION_BASE_URL/health")" || {
+              rc=$?
+              echo "::error::PRE_PROMOTION_PRODUCTION_HEALTH_CURL_FAILURE:$rc"
+              exit 1
+            }
+          case "$http_code" in
+            2??) ;;
+            3??) echo "::error::PRE_PROMOTION_PRODUCTION_HEALTH_REDIRECT:$http_code"; exit 1 ;;
+            *) echo "::error::PRE_PROMOTION_PRODUCTION_HEALTH_HTTP_STATUS:$http_code"; exit 1 ;;
+          esac
+          EXPECTED_SHA="$EXPECTED_SHA" BODY_FILE="$body" HEADER_FILE="$headers" node <<'NODE'
+          const fs=require('fs');
+          const expected=process.env.EXPECTED_SHA;
+          const parsed=JSON.parse(fs.readFileSync(process.env.BODY_FILE,'utf8'));
+          const headers=fs.readFileSync(process.env.HEADER_FILE,'utf8').toLowerCase();
+          if(!JSON.stringify(parsed).includes(expected))throw new Error('PRE_PROMOTION_RELEASE_SHA_BODY_MISMATCH');
+          if(!headers.includes(expected.toLowerCase()))throw new Error('PRE_PROMOTION_RELEASE_SHA_HEADER_MISMATCH');
+          console.log('PRE_PROMOTION_PRODUCTION_HEALTH_HTTP_STATUS=200');
+          console.log('PRE_PROMOTION_PRODUCTION_HEALTH_JSON_PARSE=PASS');
+          console.log('PRE_PROMOTION_RELEASE_SHA_BODY=PASS');
+          console.log('PRE_PROMOTION_RELEASE_SHA_HEADER=PASS');
+          console.log('PRE_PROMOTION_HTTP_READ_ONLY=PASS');
+          NODE
+
+      - name: Recheck current main immediately before traffic mutation
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ steps.auth.outputs.expected_sha }}
+        run: |
+          set -euo pipefail
+          current_main="$(git ls-remote origin refs/heads/main | awk '{print $1}')"
+          test "$current_main" = "$EXPECTED_SHA" || { echo "::error::IMMEDIATE_PRE_PROMOTION_MAIN_DRIFT current=$current_main expected=$EXPECTED_SHA"; exit 1; }
+          echo 'IMMEDIATE_PRE_PROMOTION_MAIN_SHA_GATE=PASS'
+          echo "IMMEDIATE_PRE_PROMOTION_MAIN_SHA=$current_main"
+
       - name: Promote exact staged version to 100 percent Production traffic
         id: promote
         shell: bash
@@ -373,25 +533,42 @@ jobs:
           console.log('PRODUCTION_TRAFFIC_TARGET_EXACT=PASS');
           NODE
 
-      - name: Verify Production health and exact release SHA read only
+      - name: Verify post-promotion Production health and exact release SHA read only
         shell: bash
         env:
           EXPECTED_SHA: ${{ steps.auth.outputs.expected_sha }}
+          PRODUCTION_BASE_URL: https://customer-crm-api.ohw3rz5578d277e.workers.dev
+          CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+          ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}
         run: |
           set -euo pipefail
-          headers="$(mktemp)"
-          body="$(mktemp)"
-          trap 'rm -f "$headers" "$body"' EXIT
-          code="$(curl --silent --show-error --location --dump-header "$headers" --output "$body" --write-out '%{http_code}' https://customer-crm-api.ohw3rz5578d277e.workers.dev/health)"
-          test "$code" = '200' || { echo "::error::PRODUCTION_HEALTH_HTTP_STATUS=$code"; exit 1; }
+          body=/tmp/member-runtime-promotion-health-after.json
+          headers=/tmp/member-runtime-promotion-health-after.headers
+          http_code="$(curl --silent --show-error --max-time 15 \
+            --output "$body" \
+            --dump-header "$headers" \
+            --write-out '%{http_code}' \
+            -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" \
+            -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET" \
+            -H "x-admin-token: $ADMIN_TOKEN" \
+            -H 'Accept: application/json' \
+            "$PRODUCTION_BASE_URL/health")" || {
+              rc=$?
+              echo "::error::POST_PROMOTION_PRODUCTION_HEALTH_CURL_FAILURE:$rc"
+              exit 1
+            }
+          case "$http_code" in
+            2??) ;;
+            3??) echo "::error::POST_PROMOTION_PRODUCTION_HEALTH_REDIRECT:$http_code"; exit 1 ;;
+            *) echo "::error::POST_PROMOTION_PRODUCTION_HEALTH_HTTP_STATUS:$http_code"; exit 1 ;;
+          esac
           EXPECTED_SHA="$EXPECTED_SHA" BODY_FILE="$body" HEADER_FILE="$headers" node <<'NODE'
           const fs=require('fs');
           const expected=process.env.EXPECTED_SHA;
-          const body=fs.readFileSync(process.env.BODY_FILE,'utf8');
+          const parsed=JSON.parse(fs.readFileSync(process.env.BODY_FILE,'utf8'));
           const headers=fs.readFileSync(process.env.HEADER_FILE,'utf8').toLowerCase();
-          const parsed=JSON.parse(body);
-          const bodyText=JSON.stringify(parsed);
-          if(!bodyText.includes(expected))throw new Error('PRODUCTION_RELEASE_SHA_BODY_MISMATCH');
+          if(!JSON.stringify(parsed).includes(expected))throw new Error('PRODUCTION_RELEASE_SHA_BODY_MISMATCH');
           if(!headers.includes(expected.toLowerCase()))throw new Error('PRODUCTION_RELEASE_SHA_HEADER_MISMATCH');
           console.log('PRODUCTION_HEALTH_HTTP_STATUS=200');
           console.log('PRODUCTION_HEALTH_JSON_PARSE=PASS');
@@ -411,7 +588,15 @@ jobs:
             /tmp/member-runtime-version-promotion-stage-run.json \
             /tmp/member-runtime-version-promotion-stage-jobs.json \
             /tmp/member-runtime-version-promotion-stage-job-id.txt \
-            /tmp/member-runtime-version-promotion-stage-job.log
+            /tmp/member-runtime-version-promotion-stage-job.log \
+            /tmp/member-runtime-version-promotion-deploy-runs.json \
+            /tmp/member-runtime-version-promotion-deploy-candidates.txt \
+            /tmp/member-runtime-version-promotion-deploy-jobs.json \
+            /tmp/member-runtime-version-promotion-deploy-job.log \
+            /tmp/member-runtime-promotion-health-before.json \
+            /tmp/member-runtime-promotion-health-before.headers \
+            /tmp/member-runtime-promotion-health-after.json \
+            /tmp/member-runtime-promotion-health-after.headers
           echo 'TEMP_PROMOTION_SNAPSHOT_MATERIAL_REMOVED=YES'
 
       - name: Final exact-version promotion declaration
