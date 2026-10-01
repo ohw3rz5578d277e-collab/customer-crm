@@ -13,6 +13,15 @@ export function resolveLineHistoryRecoveryNextPhase({
   currentMainSha=''
 }={}){
   if(completionReceipt&&completionReceipt.complete===true){
+    if(String(completionReceipt.completion_type||'')==='OWNER_DECISIONS_NO_WRITE'){
+      return {
+        stage:'COMPLETE_NO_WRITE',
+        next_phase:'none',
+        next_action:'Owner review is complete and selected no Production backfill actions. Keep the no-write completion receipt with the run artifacts.',
+        production_write_possible:false
+      };
+    }
+
     return {
       stage:'COMPLETE',
       next_phase:'none',

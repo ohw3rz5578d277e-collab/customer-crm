@@ -55,6 +55,7 @@ test "$OUT_DIR" != "/" || { echo "RESULT=STOP_UNSAFE_OUTPUT_DIR"; exit 11; }
 
 PLAN="$OUT_DIR/decision-plan-private.json"
 PREVIEW_DIR="$OUT_DIR/readonly-preview"
+NO_WRITE_RECEIPT="$OUT_DIR/no-write-completion-receipt.json"
 
 echo
 echo "=== 1. Build private local Owner decision plan ==="
@@ -95,12 +96,114 @@ if identity_actions>0 and not preview_ready:
 PY
 
 echo
-echo "=== 3. Prepare exact selected-message READ ONLY preview ==="
+echo "=== 3. Zero-action completion gate ==="
+
+if python3 - "$PLAN" "$NO_WRITE_RECEIPT" "$LOCAL_HEAD" <<'PY'
+import json,sys
+from pathlib import Path
+from datetime import datetime, timezone
+
+plan_path=Path(sys.argv[1])
+receipt_path=Path(sys.argv[2])
+main_sha=str(sys.argv[3])
+
+plan=json.loads(plan_path.read_text(encoding="utf-8"))
+
+groups=int(plan.get("review_queue_groups") or 0)
+submitted=int(plan.get("submitted_decisions") or 0)
+decided=int(plan.get("decided_known_groups") or 0)
+undecided=int(plan.get("undecided_groups") or 0)
+errors=int(plan.get("validation_error_count") or 0)
+actions=int(plan.get("proposed_backfill_identity_actions") or 0)
+physical=int(plan.get("proposed_write_actions") or 0)
+no_write=int(plan.get("accepted_no_write_decisions") or 0)
+preview_ready=bool(plan.get("ready_for_readonly_backfill_preview"))
+write_ready=bool(plan.get("ready_for_separate_write_authorization"))
+
+complete_no_write=(
+    groups>0 and
+    submitted==groups and
+    decided==groups and
+    undecided==0 and
+    errors==0 and
+    actions==0 and
+    physical==0 and
+    no_write==groups and
+    not preview_ready and
+    not write_ready
+)
+
+if not complete_no_write:
+    raise SystemExit(1)
+
+receipt={
+    "complete":True,
+    "completion_type":"OWNER_DECISIONS_NO_WRITE",
+    "completed_at":datetime.now(timezone.utc).isoformat(),
+    "source_main_sha":main_sha,
+    "review_queue_groups":groups,
+    "submitted_decisions":submitted,
+    "accepted_no_write_decisions":no_write,
+    "proposed_backfill_identity_actions":0,
+    "proposed_write_actions":0,
+    "decision_summary":plan.get("decision_summary") or {},
+    "authorization_granted":False,
+    "production_d1_read":0,
+    "production_d1_write":0,
+    "customer_id_generation":0,
+    "customer_update":0,
+    "customer_delete":0,
+    "customer_merge":0,
+    "line_send":0,
+    "worker_deploy":0,
+    "production_deploy":0
+}
+
+receipt_path.write_text(
+    json.dumps(receipt,ensure_ascii=False,indent=2)+"\n",
+    encoding="utf-8"
+)
+
+print("NO_WRITE_COMPLETION_RECEIPT=READY")
+print("REVIEW_QUEUE_GROUPS="+str(groups))
+print("ACCEPTED_NO_WRITE_DECISIONS="+str(no_write))
+print("PROPOSED_BACKFILL_IDENTITY_ACTIONS=0")
+print("PROPOSED_WRITE_ACTIONS=0")
+PY
+then
+  echo
+  echo "=================================================="
+  echo " RESULT=OWNER_BACKFILL_COMPLETE_NO_WRITE"
+  echo "=================================================="
+  echo "NO_WRITE_COMPLETION_RECEIPT=$NO_WRITE_RECEIPT"
+  echo "NEXT=NONE"
+  echo "AUTHORIZATION_GRANTED=NO"
+  echo "APPROVAL_TEXT_GENERATED=0"
+  echo "WRITE_SQL_GENERATED=0"
+  echo "SQL_EXECUTED=0"
+  echo "PRODUCTION_D1_READ=0"
+  echo "PRODUCTION_D1_WRITE=0"
+  echo "CUSTOMER_ID_GENERATION=0"
+  echo "CUSTOMER_UPDATE=0"
+  echo "CUSTOMER_DELETE=0"
+  echo "CUSTOMER_MERGE=0"
+  echo "LINE_SEND=0"
+  echo "WORKER_DEPLOY=0"
+  echo "PRODUCTION_DEPLOY=0"
+  echo "=================================================="
+  exit 0
+fi
+
+echo "ZERO_ACTION_COMPLETION=NO"
+echo "READONLY_PREVIEW_REQUIRED=YES"
+
+echo
+echo "=== 4. Prepare exact selected-message READ ONLY preview ==="
 
 node scripts/prepare-line-history-owner-backfill-preview.mjs   --plan "$PLAN"   --candidates "$CANDIDATES"   --out-dir "$PREVIEW_DIR"
 
 echo
-echo "=== 4. Final preauthorization gate ==="
+echo "=== 5. Final preauthorization gate ==="
 
 python3 - "$PREVIEW_DIR/owner-backfill-preview-summary.json" <<'PY'
 import json,sys
