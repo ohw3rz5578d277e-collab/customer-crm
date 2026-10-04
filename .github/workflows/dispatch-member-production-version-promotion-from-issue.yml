@@ -75,6 +75,7 @@ jobs:
           }
 
           echo "ACTIVE_PRODUCTION_VERSION_ID=$active_version_id"
+          promotion_command="/member-production-promote sha=$EXPECTED_SHA staged_version=6dd49589-f01d-473f-876a-034563023b0e staging_run=36285531724 replace_active_version=$active_version_id confirm=PROMOTE_MEMBER_STAGED_VERSION"
           {
             echo '## Member Production promotion read-only snapshot'
             echo
@@ -85,7 +86,7 @@ jobs:
             echo
             echo 'Fresh promotion command template:'
             echo
-            echo "`/member-production-promote sha=$EXPECTED_SHA staged_version=6dd49589-f01d-473f-876a-034563023b0e staging_run=36285531724 replace_active_version=$active_version_id confirm=PROMOTE_MEMBER_STAGED_VERSION`"
+            printf '`%s`\n' "$promotion_command"
           } >> "$GITHUB_STEP_SUMMARY"
 
           echo 'MEMBER_PROMOTION_SNAPSHOT=PASS'
