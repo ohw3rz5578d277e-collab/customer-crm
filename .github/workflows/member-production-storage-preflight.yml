@@ -184,7 +184,7 @@ jobs:
           echo "active_version_id=$active_version_id" >> "$GITHUB_OUTPUT"
           echo "ACTIVE_PRODUCTION_VERSION_BEFORE=$active_version_id"
 
-      - name: Read account R2 bucket inventory without object access
+      - name: Read every R2 jurisdiction inventory without object access
         id: inventory
         shell: bash
         env:
@@ -197,51 +197,75 @@ jobs:
           test -n "$CLOUDFLARE_API_TOKEN" || { echo '::error::CLOUDFLARE_API_TOKEN_MISSING'; exit 1; }
           test -n "$CLOUDFLARE_ACCOUNT_ID" || { echo '::error::CLOUDFLARE_ACCOUNT_ID_MISSING'; exit 1; }
 
-          code="$(curl --silent --show-error \
-            --output /tmp/member-storage-r2-buckets.json \
-            --write-out '%{http_code}' \
-            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
-            -H 'Content-Type: application/json' \
-            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/r2/buckets?per_page=1000&order=name&direction=asc")"
-          test "$code" = '200' || {
-            echo "::error::R2_BUCKET_INVENTORY_HTTP_$code"
-            exit 1
-          }
+          jurisdictions=(default eu us fedramp fedramp-high)
+          rm -f /tmp/member-storage-r2-buckets-*.json
+          for jurisdiction in "${jurisdictions[@]}"; do
+            code="$(curl --silent --show-error \
+              --output "/tmp/member-storage-r2-buckets-$jurisdiction.json" \
+              --write-out '%{http_code}' \
+              -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+              -H 'Content-Type: application/json' \
+              -H "cf-r2-jurisdiction: $jurisdiction" \
+              "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/r2/buckets?per_page=1000&order=name&direction=asc")"
+            test "$code" = '200' || {
+              echo "::error::R2_BUCKET_INVENTORY_HTTP_${jurisdiction}_$code"
+              exit 1
+            }
+          done
 
           node <<'NODE'
           const crypto=require('crypto');
           const fs=require('fs');
-          const payload=JSON.parse(fs.readFileSync('/tmp/member-storage-r2-buckets.json','utf8'));
-          if(payload?.success!==true)throw new Error('R2_BUCKET_INVENTORY_API_NOT_SUCCESS');
-          const buckets=Array.isArray(payload?.result?.buckets)?payload.result.buckets:[];
-          const cursor=String(payload?.result_info?.cursor||'');
-          if(cursor)throw new Error('R2_BUCKET_INVENTORY_PAGINATION_UNSUPPORTED');
-          const names=buckets.map(b=>String(b?.name||'')).filter(Boolean);
-          if(new Set(names).size!==names.length)throw new Error('R2_BUCKET_INVENTORY_DUPLICATE_NAME');
-          const sorted=[...names].sort();
+          const jurisdictions=['default','eu','us','fedramp','fedramp-high'];
+          const records=[];
+          for(const jurisdiction of jurisdictions){
+            const path=`/tmp/member-storage-r2-buckets-${jurisdiction}.json`;
+            const payload=JSON.parse(fs.readFileSync(path,'utf8'));
+            if(payload?.success!==true)throw new Error('R2_BUCKET_INVENTORY_API_NOT_SUCCESS:'+jurisdiction);
+            const cursor=String(payload?.result_info?.cursor||'');
+            if(cursor)throw new Error('R2_BUCKET_INVENTORY_PAGINATION_UNSUPPORTED:'+jurisdiction);
+            const buckets=Array.isArray(payload?.result?.buckets)?payload.result.buckets:[];
+            for(const bucket of buckets){
+              const name=String(bucket?.name||'');
+              if(!name)continue;
+              records.push({
+                name,
+                observed_jurisdiction:jurisdiction,
+                jurisdiction:String(bucket?.jurisdiction||jurisdiction),
+                location:String(bucket?.location||'unspecified'),
+                storage_class:String(bucket?.storage_class||'unspecified')
+              });
+            }
+          }
+          const keys=records.map(r=>r.observed_jurisdiction+':'+r.name);
+          if(new Set(keys).size!==keys.length)throw new Error('R2_BUCKET_INVENTORY_DUPLICATE_JURISDICTION_NAME');
+          const sorted=[...keys].sort();
           const digest=crypto.createHash('sha256').update(sorted.join('\n')).digest('hex');
           const mode=process.env.MODE;
           const candidate=process.env.CANDIDATE_BUCKET_NAME||'';
+          console.log('R2_JURISDICTIONS_SCANNED='+jurisdictions.join(','));
           console.log('R2_BUCKET_INVENTORY_COUNT='+sorted.length);
           console.log('R2_BUCKET_INVENTORY_SHA256='+digest);
           fs.appendFileSync(process.env.GITHUB_OUTPUT,'bucket_count='+sorted.length+'\n');
           fs.appendFileSync(process.env.GITHUB_OUTPUT,'inventory_sha256='+digest+'\n');
           if(mode==='verify'){
-            const found=buckets.find(b=>String(b?.name||'')===candidate);
-            if(!found)throw new Error('CANDIDATE_R2_BUCKET_NOT_FOUND');
+            const found=records.filter(r=>r.name===candidate);
+            if(found.length===0)throw new Error('CANDIDATE_R2_BUCKET_NOT_FOUND');
+            if(found.length!==1)throw new Error('CANDIDATE_R2_BUCKET_NOT_UNIQUE_ACROSS_JURISDICTIONS');
             const candidateDigest=crypto.createHash('sha256').update(candidate).digest('hex');
             console.log('CANDIDATE_R2_BUCKET_EXISTS=PASS');
             console.log('CANDIDATE_R2_BUCKET_NAME_SHA256='+candidateDigest);
-            console.log('CANDIDATE_R2_BUCKET_JURISDICTION='+String(found?.jurisdiction||'unspecified'));
-            console.log('CANDIDATE_R2_BUCKET_LOCATION='+String(found?.location||'unspecified'));
-            console.log('CANDIDATE_R2_BUCKET_STORAGE_CLASS='+String(found?.storage_class||'unspecified'));
+            console.log('CANDIDATE_R2_BUCKET_OBSERVED_JURISDICTION='+found[0].observed_jurisdiction);
+            console.log('CANDIDATE_R2_BUCKET_JURISDICTION='+found[0].jurisdiction);
+            console.log('CANDIDATE_R2_BUCKET_LOCATION='+found[0].location);
+            console.log('CANDIDATE_R2_BUCKET_STORAGE_CLASS='+found[0].storage_class);
             fs.appendFileSync(process.env.GITHUB_OUTPUT,'candidate_sha256='+candidateDigest+'\n');
           }else{
             console.log('CANDIDATE_R2_BUCKET_EXISTS=NOT_REQUESTED');
           }
           NODE
 
-          rm -f /tmp/member-storage-r2-buckets.json
+          rm -f /tmp/member-storage-r2-buckets-*.json
           echo 'R2_BUCKET_INVENTORY=PASS'
           echo 'R2_OBJECT_READ=0'
           echo 'R2_WRITE=0'
@@ -291,6 +315,7 @@ jobs:
             echo "- CURRENT_MAIN_SHA=$EXPECTED_SHA"
             echo "- MODE=$MODE"
             echo "- ACTIVE_PRODUCTION_VERSION=$ACTIVE_VERSION"
+            echo '- R2_JURISDICTIONS_SCANNED=default,eu,us,fedramp,fedramp-high'
             echo "- R2_BUCKET_COUNT=$BUCKET_COUNT"
             echo "- R2_BUCKET_INVENTORY_SHA256=$INVENTORY_SHA256"
             if [[ "$MODE" == 'verify' ]]; then
