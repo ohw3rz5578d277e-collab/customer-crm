@@ -20,7 +20,7 @@ Before any future binding change, the repository needs durable evidence that:
 4. Cloudflare authentication can perform account-level read-only inventory;
 5. every documented R2 jurisdiction is inspected;
 6. the active 100%-traffic Worker version remains stable during the observation;
-7. a candidate bucket, when explicitly supplied, exists exactly once across the observed jurisdiction inventories.
+7. a candidate bucket, represented only by its SHA-256 name digest in GitHub metadata, exists exactly once across the observed jurisdiction inventories.
 
 ## Jurisdiction-complete inventory
 
@@ -57,11 +57,15 @@ Bucket names are not printed by inventory mode.
 
 ### `verify`
 
+GitHub must never receive the raw candidate bucket name. The Owner computes the SHA-256 of the exact bucket name locally and supplies only the lowercase 64-hex digest.
+
 Command shape:
 
-`/member-production-storage-preflight sha=<40hex> mode=verify candidate_bucket=<exact-bucket-name>`
+`/member-production-storage-preflight sha=<40hex> mode=verify candidate_bucket_sha256=<64hex>`
 
-The workflow requires the explicitly supplied candidate to exist exactly once across all scanned jurisdictions. It records only the candidate name SHA-256 plus non-secret bucket metadata such as observed jurisdiction, reported jurisdiction, location, and storage class.
+The workflow hashes each observed bucket name internally and requires the supplied digest to match exactly one bucket across all scanned jurisdictions. It outputs only the digest plus non-secret bucket metadata such as observed jurisdiction, reported jurisdiction, location, and storage class.
+
+The raw candidate bucket name is not written to the Issue #26 command, workflow input, logs, outputs, or summary by this contract.
 
 This is existence evidence only. It does not mean the candidate is approved for Member data.
 
@@ -73,8 +77,8 @@ The workflow fails closed if:
 - the active 100%-traffic Worker version changes during the inventory;
 - any jurisdiction R2 list response is unsuccessful;
 - any jurisdiction list is paginated beyond the single complete page expected by this gate;
-- verify mode does not find the exact candidate;
-- the same candidate name is ambiguous across observed jurisdictions;
+- verify mode does not find the candidate digest;
+- the candidate digest is ambiguous across observed jurisdictions;
 - canonical Member route flags are unexpectedly enabled;
 - a canonical R2 binding is already declared without review.
 
@@ -82,6 +86,7 @@ The workflow fails closed if:
 
 The preflight performs:
 
+- raw candidate bucket name in GitHub metadata = 0;
 - R2 object read = 0;
 - R2 object write = 0;
 - bucket create/delete/update = 0;
