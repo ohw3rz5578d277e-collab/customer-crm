@@ -1,6 +1,6 @@
 name: Dispatch Member Production storage preflight from release-gate issue
 
-run-name: Production read-only bridge: storage-preflight
+run-name: 'Production read-only bridge: storage-preflight'
 
 on:
   issue_comment:
