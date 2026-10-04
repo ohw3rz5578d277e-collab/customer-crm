@@ -184,32 +184,7 @@ jobs:
                   -H 'Accept: application/vnd.github+json' \
                   -H 'X-GitHub-Api-Version: 2022-11-28' \
                   "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/workflows/$workflow/runs?status=$status&per_page=100" \
-                | WORKFLOW="$workflow" THIS_RUN_ID="$THIS_RUN_ID" python3 -c '
-import json, os, sys
-workflow=os.environ["WORKFLOW"]
-me=int(os.environ["THIS_RUN_ID"])
-runs=json.load(sys.stdin).get("workflow_runs", [])
-def is_mutation(r):
-    if int(r.get("id", 0)) == me:
-        return False
-    event=str(r.get("event", ""))
-    title=str(r.get("display_title", ""))
-    if workflow == "deploy-cloudflare.yml":
-        if event != "workflow_dispatch":
-            return False
-        if title.startswith("CRM Production preflight "):
-            return False
-        return True
-    if workflow in {"member-production-schema-apply.yml", "member-production-runtime-secret-stage.yml"}:
-        return event == "workflow_dispatch"
-    if workflow.startswith("dispatch-"):
-        if title.startswith("Production read-only bridge:") or title == "Production bridge: ignored":
-            return False
-        if title.startswith("Production mutation bridge:"):
-            return True
-        return event == "issue_comment"
-    return True
-print(sum(1 for r in runs if is_mutation(r)))'
+                | WORKFLOW="$workflow" THIS_RUN_ID="$THIS_RUN_ID" python3 -c 'import json,os,sys; w=os.environ["WORKFLOW"]; me=int(os.environ["THIS_RUN_ID"]); runs=json.load(sys.stdin).get("workflow_runs",[]); print(sum(1 for r in runs if int(r.get("id",0))!=me and ((w=="deploy-cloudflare.yml" and r.get("event")=="workflow_dispatch" and not str(r.get("display_title","")).startswith("CRM Production preflight ")) or (w in {"member-production-schema-apply.yml","member-production-runtime-secret-stage.yml"} and r.get("event")=="workflow_dispatch") or (w.startswith("dispatch-") and (str(r.get("display_title","")).startswith("Production mutation bridge:") or (not str(r.get("display_title","")).startswith("Production read-only bridge:") and str(r.get("display_title",""))!="Production bridge: ignored" and r.get("event")=="issue_comment"))))))'
               )"
               test "$conflicts" = '0' || {
                 echo "::error::PRODUCTION_MUTATION_BUSY_RETRY_REQUIRED workflow=$workflow status=$status count=$conflicts"
