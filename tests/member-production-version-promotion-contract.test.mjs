@@ -29,6 +29,8 @@ for(const input of ['expected_sha','staged_version_id','expected_active_version_
 
 assert.ok(canonicalDeploy.includes("inputs.mode == 'deploy' && 'customer-crm-production-deploy'"), 'canonical deploy shared mutation concurrency missing');
 assert.ok(canonicalDeploy.includes("format('customer-crm-production-preflight-{0}', github.run_id)"), 'read-only preflight must not occupy mutation concurrency');
+assert.ok(canonicalDeploy.includes('run-name: >-'),'canonical deploy run-name discriminator missing');
+assert.ok(canonicalDeploy.includes("format('CRM Production {0} {1}', inputs.mode, inputs.expected_sha)"),'canonical deploy mode run-name missing');
 assert.ok(workflow.includes("'customer-crm-production-deploy'"), 'promotion must share canonical Production deployment concurrency');
 assert.ok(schemaApplyWorkflow.includes("github.event_name == 'workflow_dispatch' && 'customer-crm-production-deploy'"), 'schema apply must share Production mutation concurrency');
 assert.ok(runtimeSecretStageWorkflow.includes("github.event_name == 'workflow_dispatch' && 'customer-crm-production-deploy'"), 'runtime stage must share Production mutation concurrency');
@@ -127,13 +129,21 @@ assert.ok(bridge.includes('secrets: inherit'));
 assert.doesNotMatch(bridge,/\/dispatches/);
 assert.doesNotMatch(bridge,/actions:\s*write/);
 assert.doesNotMatch(bridge,/wrangler\s+versions\s+deploy/i);
-
 assert.doesNotMatch(bridge,/wrangler\s+deploy\b/i);
 
 for(const mutationBridge of [canonicalDeployBridge,schemaApplyBridge,runtimeSecretStageBridge,bridge]){
   assert.doesNotMatch(mutationBridge,/\nconcurrency:\s*\n/,'mutation authorization bridge must not queue before busy rejection');
+  assert.ok(mutationBridge.includes('run-name: >-'),'bridge run-name discriminator missing');
+  assert.ok(mutationBridge.includes('Production mutation bridge:'),'mutation bridge label missing');
   assert.ok(mutationBridge.includes('PRODUCTION_MUTATION_BUSY_RETRY_REQUIRED'),'busy mutation rejection missing');
   assert.ok(mutationBridge.includes('PRODUCTION_MUTATION_QUEUE_POLICY=REJECT_AND_RETRY'),'reject-and-retry policy missing');
+  assert.ok(mutationBridge.includes('PRODUCTION_MUTATION_FILTER=ACTUAL_MUTATIONS_ONLY'),'mutation-only filter marker missing');
+  assert.ok(mutationBridge.includes('r.get("event")=="workflow_dispatch"'),'workflow dispatch event classifier missing');
+  assert.ok(mutationBridge.includes('r.get("display_title","")'),'run title classifier missing');
+  assert.ok(mutationBridge.includes('CRM Production preflight '),'canonical preflight exclusion missing');
+  assert.ok(mutationBridge.includes('Production read-only bridge:'),'read-only bridge exclusion missing');
+  assert.ok(mutationBridge.includes('Production bridge: ignored'),'ignored bridge exclusion missing');
+  assert.ok(mutationBridge.includes('r.get("event")=="issue_comment"'),'legacy issue-comment fail-closed classifier missing');
   assert.ok(mutationBridge.includes('dispatch-production-deploy-from-issue.yml'),'canonical bridge mutual exclusion missing');
   assert.ok(mutationBridge.includes('dispatch-member-schema-apply-from-issue.yml'),'schema bridge mutual exclusion missing');
   assert.ok(mutationBridge.includes('dispatch-member-production-runtime-secret-stage-from-issue.yml'),'runtime-stage bridge mutual exclusion missing');
@@ -147,6 +157,14 @@ for(const mutationBridge of [canonicalDeployBridge,schemaApplyBridge,runtimeSecr
   assert.ok(mutationBridge.includes('THIS_RUN_ID'),'current bridge run exclusion missing');
 }
 assert.ok(canonicalDeployBridge.includes("steps.gate.outputs.release_mode == 'deploy'"),'canonical preflight must remain outside mutation rejection gate');
+assert.ok(canonicalDeployBridge.includes('Production read-only bridge: preflight'),'canonical preflight read-only run label missing');
+assert.ok(canonicalDeployBridge.includes('Production mutation bridge: deploy'),'canonical deploy mutation run label missing');
+assert.ok(bridge.includes('Production read-only bridge: version-snapshot'),'promotion snapshot read-only run label missing');
+assert.ok(bridge.includes('Production mutation bridge: version-promotion'),'promotion mutation run label missing');
+assert.ok(runtimeSecretStageBridge.includes('Production mutation bridge: runtime-secret-stage'),'runtime-stage mutation run label missing');
+assert.ok(schemaApplyBridge.includes('Production mutation bridge: schema-apply'),'schema-apply mutation run label missing');
+assert.doesNotMatch(runtimeSecretStageBridge,/MEMBER_RUNTIME_SECRET_STAGE_LOCK_OCCUPIED/,'legacy runtime broad lock must remain removed');
+assert.doesNotMatch(bridge,/MEMBER_PROMOTION_DISPATCH_LOCK_OCCUPIED/,'legacy promotion broad lock must remain removed');
 
 for(const path of [
   '.github/workflows/member-production-version-promotion.yml',
@@ -166,5 +184,8 @@ console.log('MEMBER_PRODUCTION_VERSION_PROMOTION_OWNER_AUTHORIZED_REPLACEMENT_VE
 console.log('MEMBER_PRODUCTION_VERSION_PROMOTION_SHARED_CONCURRENCY=PASS');
 console.log('MEMBER_PRODUCTION_MUTATION_REJECT_AND_RETRY_GATE=PASS');
 console.log('MEMBER_PRODUCTION_MUTATION_BRIDGE_PRECONCURRENCY_REJECTION=PASS');
+console.log('MEMBER_PRODUCTION_MUTATION_FILTER=ACTUAL_MUTATIONS_ONLY_PASS');
+console.log('MEMBER_PRODUCTION_NON_MUTATING_PREFLIGHT_EXCLUSION=PASS');
+console.log('MEMBER_PRODUCTION_PR_CI_BUSY_EXCLUSION=PASS');
 console.log('MEMBER_PRODUCTION_VERSION_PROMOTION_FINAL_MAIN_RECHECK=PASS');
 console.log('MEMBER_PRODUCTION_VERSION_PROMOTION_SOURCE_ONLY_PR_GATE=PASS');
