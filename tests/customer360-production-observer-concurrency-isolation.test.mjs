@@ -4,7 +4,11 @@ import fs from 'node:fs';
 const observer=fs.readFileSync('.github/workflows/customer360-production-first-throw-observability.yml','utf8');
 const deploy=fs.readFileSync('.github/workflows/deploy-cloudflare.yml','utf8');
 
-assert.match(deploy,/concurrency:\s*\n\s*group:\s*\$\{\{\s*github\.event_name\s*==\s*'workflow_dispatch'\s*&&\s*'customer-crm-production-deploy'\s*\|\|\s*format\('customer-crm-release-pr-\{0\}',\s*github\.event\.pull_request\.number\)\s*\}\}/,'canonical Production release must keep its serialization lock while PR CI uses a distinct pending slot');
+const deployConcurrency="group: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'deploy' && 'customer-crm-production-deploy' || github.event_name == 'workflow_dispatch' && format('customer-crm-production-preflight-{0}', github.run_id) || format('customer-crm-release-pr-{0}', github.event.pull_request.number) }}";
+assert.ok(deploy.includes(deployConcurrency),'Production deploy must keep the shared mutation lock while read-only preflight and PR CI use isolated pending slots');
+assert.ok(deploy.includes("inputs.mode == 'deploy' && 'customer-crm-production-deploy'"),'only deploy dispatches may occupy the shared Production mutation lock');
+assert.ok(deploy.includes("format('customer-crm-production-preflight-{0}', github.run_id)"),'read-only Production preflight must use a run-unique non-mutating concurrency slot');
+assert.ok(!deploy.includes("github.event_name == 'workflow_dispatch' && 'customer-crm-production-deploy' ||"),'workflow_dispatch must not blanket-share the Production mutation pending slot');
 assert.ok(observer.includes("format('customer360-production-observer-{0}', github.event.workflow_run.id)"),'each observer must have a run-unique concurrency group');
 assert.ok(!observer.includes('group: customer-crm-production-deploy'),'observer must never occupy the Production deploy concurrency pending slot');
 assert.ok(observer.includes('cancel-in-progress: false'),'observer must not cancel another observer');
@@ -18,5 +22,6 @@ assert.ok(observer.includes('EXACT_MATCH_AFTER_HEALTH'));
 
 console.log('CUSTOMER360_PRODUCTION_OBSERVER_CONCURRENCY_ISOLATION=PASS');
 console.log('PRODUCTION_DEPLOY_LOCK_PRESERVED=PASS');
+console.log('PRODUCTION_PREFLIGHT_PENDING_SLOT_ISOLATION=PASS');
 console.log('OBSERVER_DEPLOY_PENDING_SLOT_INTERFERENCE=0');
 console.log('SUPERSCESSION_WINDOW_GUARD=PRE_AND_POST_VERSION_COMPARE');
