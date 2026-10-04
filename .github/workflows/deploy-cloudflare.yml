@@ -1,5 +1,8 @@
 name: Deploy customer-crm to Cloudflare
 
+run-name: >-
+  ${{ github.event_name == 'workflow_dispatch' && format('CRM Production {0} {1}', inputs.mode, inputs.expected_sha) || format('CRM PR #{0} release checks', github.event.pull_request.number) }}
+
 on:
   pull_request:
     branches:
@@ -618,7 +621,7 @@ jobs:
           const expectedDeliveryLinks=mediaWasPresent?count(mediaBefore,'delivery_link_count'):0;
           if(expectedProfileMedia!==count(after,'profile_media_count'))throw new Error('PROFILE_MEDIA_ROW_COUNT_CHANGED');
           if(expectedDeliveryLinks!==count(after,'delivery_link_count'))throw new Error('DELIVERY_LINK_ROW_COUNT_CHANGED');
-          for(const name of [
+          for(const name of[
             '20260828_customer360_family_marketing_foundation.sql',
             '20260903_customer360_profile_auto_enrichment.sql',
             '20260908_customer_media_delivery_links.sql',
@@ -767,7 +770,7 @@ jobs:
           set -euo pipefail
           node <<'NODE'
           const fs=require('fs');const h=JSON.parse(fs.readFileSync('/tmp/customer-crm-health.json','utf8'));
-          for(const k of [
+          for(const k of[
             'customer360_family_marketing_foundation','customer360_profile_enrichment','customer360_line_profile_extraction',
             'referrer_customer_id_exact_existing_customer_only','customer360_profile_composed_into_detail',
             'customer360_profile_enrichment_schema_available','customer360_family_metadata_available','customer360_field_evidence_available','customer360_notes_history_available'
