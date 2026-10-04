@@ -32,14 +32,14 @@ assert.ok(workflow.includes('R2_BUCKET_INVENTORY_PAGINATION_UNSUPPORTED'));
 assert.ok(workflow.includes('INVENTORY_MODE_FORBIDS_CANDIDATE_BUCKET'));
 assert.ok(workflow.includes('INVALID_CANDIDATE_BUCKET_NAME'));
 
-assert.doesNotMatch(workflow,/wrangler\s+r2\s+object\s+(get|put|delete)/i);
-assert.doesNotMatch(workflow,/wrangler\s+r2\s+bucket\s+(create|delete)/i);
-assert.doesNotMatch(workflow,/wrangler\s+(deploy|versions\s+deploy)/i);
-assert.doesNotMatch(workflow,/wrangler\s+d1\s+execute/i);
+assert.doesNotMatch(workflow,/wrangler\s+r2\s+object\s+(get|put|delete)\b/i);
+assert.doesNotMatch(workflow,/wrangler\s+r2\s+bucket\s+(create|delete)\b/i);
+assert.doesNotMatch(workflow,/wrangler\s+(?:deploy\b|versions\s+deploy\b)/i);
+assert.doesNotMatch(workflow,/wrangler\s+d1\s+execute\b/i);
 assert.doesNotMatch(workflow,/client\/v4\/accounts\/\$CLOUDFLARE_ACCOUNT_ID\/r2\/buckets\/[^?"\s]+\/objects/i);
-assert.doesNotMatch(workflow,/--request\s+(POST|PUT|PATCH|DELETE)/i);
+assert.doesNotMatch(workflow,/--request\s+(POST|PUT|PATCH|DELETE)\b/i);
 
-assert.ok(bridge.includes("run-name: Production read-only bridge: storage-preflight"));
+assert.ok(bridge.includes("run-name: 'Production read-only bridge: storage-preflight'"));
 assert.ok(bridge.includes("github.event.issue.number == 26"));
 assert.ok(bridge.includes("github.actor == 'ohw3rz5578d277e-collab'"));
 assert.ok(bridge.includes("/member-production-storage-preflight "));
