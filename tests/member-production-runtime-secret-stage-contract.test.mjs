@@ -83,8 +83,19 @@ assert.ok(bridge.includes("github.actor == 'ohw3rz5578d277e-collab'"));
 assert.ok(bridge.includes("github.event.comment.user.login == 'ohw3rz5578d277e-collab'"));
 assert.ok(bridge.includes("command_re='^/member-runtime-secret-stage sha=([0-9a-f]{40}) readiness_run=([0-9]+) confirm=STAGE_MEMBER_RUNTIME_SECRETS$'"));
 assert.ok(bridge.includes('MAIN_DRIFT expected=$expected_sha current=$current_sha'));
-assert.ok(bridge.includes('deploy-cloudflare.yml member-production-runtime-readiness.yml member-production-runtime-secret-stage.yml'));
-assert.ok(bridge.includes('MEMBER_RUNTIME_SECRET_STAGE_LOCK_OCCUPIED'));
+assert.ok(bridge.includes('Production mutation bridge: runtime-secret-stage'));
+assert.ok(bridge.includes('PRODUCTION_MUTATION_BUSY_RETRY_REQUIRED'));
+assert.ok(bridge.includes('PRODUCTION_MUTATION_QUEUE_POLICY=REJECT_AND_RETRY'));
+assert.ok(bridge.includes('PRODUCTION_MUTATION_FILTER=ACTUAL_MUTATIONS_ONLY'));
+assert.ok(bridge.includes('deploy-cloudflare.yml'));
+assert.ok(bridge.includes('member-production-schema-apply.yml'));
+assert.ok(bridge.includes('member-production-runtime-secret-stage.yml'));
+assert.ok(bridge.includes('CRM Production preflight '));
+assert.ok(bridge.includes('Production read-only bridge:'));
+assert.ok(bridge.includes('r.get("event")=="workflow_dispatch"'));
+assert.ok(bridge.includes('r.get("event")=="issue_comment"'));
+assert.doesNotMatch(bridge,/MEMBER_RUNTIME_SECRET_STAGE_LOCK_OCCUPIED/);
+assert.doesNotMatch(bridge,/member-production-runtime-readiness\.yml\s+member-production-runtime-secret-stage\.yml/);
 assert.ok(bridge.includes('member-production-runtime-secret-stage.yml/dispatches'));
 assert.ok(bridge.includes('PRODUCTION_DEPLOY=0'));
 assert.ok(bridge.includes('PRODUCTION_TRAFFIC_CHANGE=0'));
@@ -94,4 +105,5 @@ assert.doesNotMatch(bridge,/member-production-runtime-readiness\.yml\/dispatches
 
 console.log('MEMBER_PRODUCTION_RUNTIME_SECRET_STAGE_CONTRACT=PASS');
 console.log('MEMBER_PRODUCTION_RUNTIME_SECRET_STAGE_OWNER_GATE=PASS');
+console.log('MEMBER_PRODUCTION_RUNTIME_SECRET_STAGE_MUTATION_ONLY_BUSY_FILTER=PASS');
 console.log('MEMBER_PRODUCTION_RUNTIME_SECRET_STAGE_NO_TRAFFIC_CHANGE=PASS');

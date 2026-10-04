@@ -3,10 +3,26 @@ import fs from 'node:fs';
 
 const workflow=fs.readFileSync(new URL('../.github/workflows/deploy-cloudflare.yml',import.meta.url),'utf8');
 
-assert.match(
-  workflow,
-  /group:\s*\$\{\{\s*github\.event_name\s*==\s*'workflow_dispatch'\s*&&\s*'customer-crm-production-deploy'\s*\|\|\s*format\('customer-crm-release-pr-\{0\}',\s*github\.event\.pull_request\.number\)\s*\}\}/,
-  'workflow_dispatch must retain the canonical production concurrency group while PR CI uses a distinct group'
+const deployConcurrency="group: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'deploy' && 'customer-crm-production-deploy' || github.event_name == 'workflow_dispatch' && format('customer-crm-production-preflight-{0}', github.run_id) || format('customer-crm-release-pr-{0}', github.event.pull_request.number) }}";
+
+assert.ok(
+  workflow.includes(deployConcurrency),
+  'deploy, preflight, and PR CI must retain isolated production concurrency groups'
+);
+
+assert.ok(
+  workflow.includes("inputs.mode == 'deploy' && 'customer-crm-production-deploy'"),
+  'only deploy dispatches may occupy the canonical production mutation pending slot'
+);
+
+assert.ok(
+  workflow.includes("format('customer-crm-production-preflight-{0}', github.run_id)"),
+  'read-only preflight must use a run-unique non-mutating pending slot'
+);
+
+assert.ok(
+  !workflow.includes("github.event_name == 'workflow_dispatch' && 'customer-crm-production-deploy' ||"),
+  'workflow_dispatch must not blanket-share the canonical production mutation pending slot'
 );
 
 assert.match(
@@ -25,7 +41,10 @@ assert.match(workflow,/if:\s*\$\{\{\s*github\.event_name\s*==\s*'pull_request'\s
 assert.match(workflow,/if:\s*\$\{\{[\s\S]*github\.event_name\s*==\s*'workflow_dispatch'/,'canonical release gate must remain workflow_dispatch-only');
 
 console.log('DEPLOY_RELEASE_CONCURRENCY_ISOLATION=PASS');
+console.log('PRODUCTION_DEPLOY_LOCK_PRESERVED=PASS');
+console.log('PRODUCTION_PREFLIGHT_PENDING_SLOT_ISOLATION=PASS');
 console.log('PRODUCTION_PENDING_SLOT_REPLACEMENT_BY_PR=0');
+console.log('PRODUCTION_PENDING_SLOT_REPLACEMENT_BY_PREFLIGHT=0');
 console.log('PRODUCTION_DEPLOY=0');
 console.log('PRODUCTION_D1_WRITE=0');
 console.log('LINE_SEND=0');

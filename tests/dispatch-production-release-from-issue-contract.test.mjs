@@ -36,6 +36,9 @@ assert.match(source,/['"]expected_sha['"]:os\.environ\['EXPECTED_SHA'\]/,'valida
 assert.match(source,/CONFIRM_PRODUCTION=NOT_REQUIRED_FOR_PREFLIGHT/,'preflight must not require Production confirmation');
 assert.match(source,/CONFIRM_PRODUCTION=true/,'deploy must retain explicit Production confirmation');
 assert.match(source,/BRIDGE_PRODUCTION_WRITE=0/,'bridge must declare no direct Production writes');
+assert.doesNotMatch(source,/\nconcurrency:\s*\n/,'bridge must not queue before mutation busy rejection');
+assert.match(source,/PRODUCTION_MUTATION_BUSY_RETRY_REQUIRED/,'busy mutation retry blocker missing');
+assert.match(source,/PRODUCTION_MUTATION_QUEUE_POLICY=REJECT_AND_RETRY/,'reject-and-retry policy missing');
 
 assert.doesNotMatch(source,/\bwrangler\s+deploy\b/i,'bridge must not directly deploy Worker');
 assert.doesNotMatch(source,/\bd1\s+migrations\s+apply\b/i,'bridge must not apply D1 migrations');

@@ -1,5 +1,8 @@
 name: Dispatch CRM Production release from release-gate issue
 
+run-name: >-
+  ${{ startsWith(github.event.comment.body, '/crm-production-deploy ') && 'Production mutation bridge: deploy' || startsWith(github.event.comment.body, '/crm-production-preflight ') && 'Production read-only bridge: preflight' || 'Production bridge: ignored' }}
+
 on:
   issue_comment:
     types: [created]
@@ -8,10 +11,6 @@ permissions:
   contents: read
   issues: read
   actions: write
-
-concurrency:
-  group: customer-crm-production-dispatch-bridge
-  cancel-in-progress: false
 
 jobs:
   dispatch:
@@ -81,6 +80,45 @@ jobs:
             echo 'CONFIRM_PRODUCTION=true'
           fi
           echo 'BRIDGE_PRODUCTION_WRITE=0'
+
+      - name: Reject deploy instead of queueing behind another Production mutation
+        if: ${{ steps.gate.outputs.release_mode == 'deploy' }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          THIS_RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          sleep 2
+          workflows=(
+            dispatch-production-deploy-from-issue.yml
+            dispatch-member-schema-apply-from-issue.yml
+            dispatch-member-production-runtime-secret-stage-from-issue.yml
+            dispatch-member-production-version-promotion-from-issue.yml
+            deploy-cloudflare.yml
+            member-production-schema-apply.yml
+            member-production-runtime-secret-stage.yml
+          )
+          statuses=(queued in_progress waiting pending requested)
+          for workflow in "${workflows[@]}"; do
+            for status in "${statuses[@]}"; do
+              conflicts="$(
+                curl --fail --silent --show-error \
+                  -H "Authorization: Bearer $GH_TOKEN" \
+                  -H 'Accept: application/vnd.github+json' \
+                  -H 'X-GitHub-Api-Version: 2022-11-28' \
+                  "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/$workflow/runs?status=$status&per_page=100" \
+                | WORKFLOW="$workflow" THIS_RUN_ID="$THIS_RUN_ID" python3 -c 'import json,os,sys; w=os.environ["WORKFLOW"]; me=int(os.environ["THIS_RUN_ID"]); runs=json.load(sys.stdin).get("workflow_runs",[]); print(sum(1 for r in runs if int(r.get("id",0))!=me and ((w=="deploy-cloudflare.yml" and r.get("event")=="workflow_dispatch" and not str(r.get("display_title","")).startswith("CRM Production preflight ")) or (w in {"member-production-schema-apply.yml","member-production-runtime-secret-stage.yml"} and r.get("event")=="workflow_dispatch") or (w.startswith("dispatch-") and (str(r.get("display_title","")).startswith("Production mutation bridge:") or (not str(r.get("display_title","")).startswith("Production read-only bridge:") and str(r.get("display_title",""))!="Production bridge: ignored" and r.get("event")=="issue_comment"))))))'
+              )"
+              test "$conflicts" = '0' || {
+                echo "::error::PRODUCTION_MUTATION_BUSY_RETRY_REQUIRED workflow=$workflow status=$status count=$conflicts"
+                exit 1
+              }
+            done
+          done
+          echo 'PRODUCTION_MUTATION_DISPATCH_GATE=FREE'
+          echo 'PRODUCTION_MUTATION_QUEUE_POLICY=REJECT_AND_RETRY'
+          echo 'PRODUCTION_MUTATION_FILTER=ACTUAL_MUTATIONS_ONLY'
 
       - name: Dispatch existing canonical Production workflow
         shell: bash
