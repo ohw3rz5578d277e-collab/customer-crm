@@ -39,6 +39,14 @@ assert.ok(workflow.includes('ACTIVE_PRODUCTION_VERSION_STABLE=PASS'));
 assert.ok(workflow.includes('CURRENT_MAIN_STABLE=PASS'));
 assert.ok(workflow.includes('R2_BUCKET_INVENTORY_PAGINATION_UNSUPPORTED'));
 
+// The exact inventory shell must be syntax-checked by PR CI. This prevents a nested
+// heredoc in a command substitution from reaching Production read-only execution.
+assert.ok(workflow.includes('- name: Verify inventory shell syntax'));
+assert.ok(workflow.includes('MEMBER_STORAGE_PREFLIGHT_INVENTORY_BASH_SYNTAX=PASS'));
+assert.ok(workflow.includes('bash -n /tmp/member-storage-inventory-step.sh'));
+assert.doesNotMatch(workflow,/error_codes="\$\(node - "\$response_file" <<'NODE'/);
+assert.ok(workflow.includes("error_codes=\"$(node -e 'const fs=require(\"fs\");"));
+
 // R2 inventory must use a dedicated least-privilege token, never the Worker-management token.
 assert.ok(workflow.includes('CLOUDFLARE_R2_READ_API_TOKEN: ${{ secrets.CLOUDFLARE_R2_READ_API_TOKEN }}'));
 assert.ok(workflow.includes('CLOUDFLARE_R2_READ_API_TOKEN_MISSING'));
@@ -52,7 +60,7 @@ assert.doesNotMatch(inventoryStep,/Authorization: Bearer \$CLOUDFLARE_API_TOKEN/
 
 // Failure diagnostics expose Cloudflare numeric error codes only; no response messages/body are printed.
 assert.ok(workflow.includes('CF_CODES_${error_codes}'));
-assert.ok(workflow.includes(".map(value=>String(value?.code??''))"));
+assert.ok(workflow.includes('value?.code'));
 assert.doesNotMatch(workflow,/console\.log\([^\n]*payload\?\.errors[^\n]*message/);
 
 // Postflight Worker/main drift verification must still execute after an R2 inventory failure.
