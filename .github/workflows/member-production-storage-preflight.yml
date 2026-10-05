@@ -61,14 +61,15 @@ jobs:
           ruby -e "require 'yaml'; YAML.load_file(ARGV[0])" .github/workflows/dispatch-member-production-storage-preflight-from-issue.yml
           echo 'MEMBER_STORAGE_PREFLIGHT_WORKFLOW_YAML=PASS'
 
-      - name: Verify inventory shell syntax
+      - name: Verify R2 auth and inventory shell syntax
         shell: bash
         run: |
           set -euo pipefail
-          ruby -e 'require "yaml"; y=YAML.load_file(ARGV[0]); s=y.fetch("jobs").fetch("preflight").fetch("steps").find { |step| step["name"] == "Read every R2 jurisdiction inventory without object access" }; abort "INVENTORY_STEP_NOT_FOUND" unless s; File.write(ARGV[1], s.fetch("run"))' .github/workflows/member-production-storage-preflight.yml /tmp/member-storage-inventory-step.sh
-          bash -n /tmp/member-storage-inventory-step.sh
-          rm -f /tmp/member-storage-inventory-step.sh
-          echo 'MEMBER_STORAGE_PREFLIGHT_INVENTORY_BASH_SYNTAX=PASS'
+          ruby -e 'require "yaml"; y=YAML.load_file(ARGV[0]); steps=y.fetch("jobs").fetch("preflight").fetch("steps"); %w[Verify\ dedicated\ R2\ REST\ API\ token Read\ every\ R2\ jurisdiction\ inventory\ without\ object\ access].each_with_index { |name,i| s=steps.find { |step| step["name"] == name }; abort "R2_STEP_NOT_FOUND:#{name}" unless s; File.write("/tmp/member-storage-r2-step-#{i}.sh", s.fetch("run")) }' .github/workflows/member-production-storage-preflight.yml
+          bash -n /tmp/member-storage-r2-step-0.sh
+          bash -n /tmp/member-storage-r2-step-1.sh
+          rm -f /tmp/member-storage-r2-step-0.sh /tmp/member-storage-r2-step-1.sh
+          echo 'MEMBER_STORAGE_PREFLIGHT_R2_SHELL_SYNTAX=PASS'
 
       - name: Set up Node
         uses: actions/setup-node@v5
@@ -191,6 +192,38 @@ jobs:
           [[ "$active_version_id" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] || { echo '::error::INVALID_CURRENT_ACTIVE_VERSION_ID'; exit 1; }
           echo "active_version_id=$active_version_id" >> "$GITHUB_OUTPUT"
           echo "ACTIVE_PRODUCTION_VERSION_BEFORE=$active_version_id"
+
+      - name: Verify dedicated R2 REST API token
+        id: r2_auth
+        shell: bash
+        env:
+          CLOUDFLARE_R2_READ_API_TOKEN: ${{ secrets.CLOUDFLARE_R2_READ_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_R2_READ_API_TOKEN" || { echo '::error::CLOUDFLARE_R2_READ_API_TOKEN_MISSING'; exit 1; }
+          [[ "$CLOUDFLARE_R2_READ_API_TOKEN" != *[[:space:]]* ]] || { echo '::error::R2_READ_REST_TOKEN_FORMAT_INVALID_WHITESPACE'; exit 1; }
+          verify_file=/tmp/member-storage-r2-token-verify.json
+          code="$(curl --silent --show-error \
+            --output "$verify_file" \
+            --write-out '%{http_code}' \
+            -H "Authorization: Bearer $CLOUDFLARE_R2_READ_API_TOKEN" \
+            -H 'Accept: application/json' \
+            'https://api.cloudflare.com/client/v4/user/tokens/verify')"
+          if [[ "$code" != '200' ]]; then
+            error_codes="$(node -e 'const fs=require("fs"); try { const payload=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); const values=(Array.isArray(payload?.errors)?payload.errors:[]).map(value=>String(value?.code??"")).filter(value=>/^\d+$/.test(value)); process.stdout.write(values.length?[...new Set(values)].join(","):"unknown"); } catch { process.stdout.write("unparseable"); }' "$verify_file")"
+            rm -f "$verify_file"
+            echo "::error::R2_READ_REST_TOKEN_VERIFY_HTTP_${code}_CF_CODES_${error_codes}"
+            exit 1
+          fi
+          node - "$verify_file" <<'NODE'
+          const fs=require('fs');
+          const payload=JSON.parse(fs.readFileSync(process.argv[2],'utf8'));
+          if(payload?.success!==true)throw new Error('R2_READ_REST_TOKEN_VERIFY_API_NOT_SUCCESS');
+          if(String(payload?.result?.status||'')!=='active')throw new Error('R2_READ_REST_TOKEN_NOT_ACTIVE');
+          NODE
+          rm -f "$verify_file"
+          echo 'R2_READ_REST_TOKEN_AUTH=PASS'
+          echo 'R2_READ_REST_TOKEN_VALUE_PRINTED=NO'
 
       - name: Read every R2 jurisdiction inventory without object access
         id: inventory
@@ -318,6 +351,7 @@ jobs:
           EXPECTED_SHA: ${{ steps.gate.outputs.expected_sha }}
           MODE: ${{ steps.gate.outputs.mode }}
           ACTIVE_VERSION: ${{ steps.active_before.outputs.active_version_id }}
+          R2_AUTH_OUTCOME: ${{ steps.r2_auth.outcome }}
           INVENTORY_OUTCOME: ${{ steps.inventory.outcome }}
           BUCKET_COUNT: ${{ steps.inventory.outputs.bucket_count }}
           INVENTORY_SHA256: ${{ steps.inventory.outputs.inventory_sha256 }}
@@ -330,6 +364,7 @@ jobs:
             echo "- CURRENT_MAIN_SHA=$EXPECTED_SHA"
             echo "- MODE=$MODE"
             echo "- ACTIVE_PRODUCTION_VERSION_BEFORE=$ACTIVE_VERSION"
+            echo "- R2_REST_TOKEN_AUTH_OUTCOME=$R2_AUTH_OUTCOME"
             echo "- INVENTORY_OUTCOME=$INVENTORY_OUTCOME"
             if [[ "$INVENTORY_OUTCOME" == 'success' ]]; then
               echo '- R2_JURISDICTIONS_SCANNED=default,eu,us,fedramp,fedramp-high'
@@ -341,6 +376,7 @@ jobs:
               fi
             fi
             echo '- R2_AUTH_SECRET=CLOUDFLARE_R2_READ_API_TOKEN'
+            echo '- R2_AUTH_EXPECTED_CREDENTIAL=Cloudflare REST API token (Bearer), not R2 S3 Access Key ID/Secret Access Key'
             echo '- PRODUCTION_STORAGE_BINDING_CHANGE=0'
             echo '- PRODUCTION_STORAGE_FETCH=0'
             echo '- R2_OBJECT_READ=0'
