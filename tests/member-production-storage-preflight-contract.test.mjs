@@ -39,6 +39,27 @@ assert.ok(workflow.includes('ACTIVE_PRODUCTION_VERSION_STABLE=PASS'));
 assert.ok(workflow.includes('CURRENT_MAIN_STABLE=PASS'));
 assert.ok(workflow.includes('R2_BUCKET_INVENTORY_PAGINATION_UNSUPPORTED'));
 
+// R2 inventory must use a dedicated least-privilege token, never the Worker-management token.
+assert.ok(workflow.includes('CLOUDFLARE_R2_READ_API_TOKEN: ${{ secrets.CLOUDFLARE_R2_READ_API_TOKEN }}'));
+assert.ok(workflow.includes('CLOUDFLARE_R2_READ_API_TOKEN_MISSING'));
+assert.ok(workflow.includes('Authorization: Bearer $CLOUDFLARE_R2_READ_API_TOKEN'));
+assert.ok(workflow.includes('R2_AUTH_SECRET=CLOUDFLARE_R2_READ_API_TOKEN'));
+const inventoryStep=workflow.slice(
+  workflow.indexOf('- name: Read every R2 jurisdiction inventory without object access'),
+  workflow.indexOf('- name: Verify active Production version and main did not drift'),
+);
+assert.doesNotMatch(inventoryStep,/Authorization: Bearer \$CLOUDFLARE_API_TOKEN/);
+
+// Failure diagnostics expose Cloudflare numeric error codes only; no response messages/body are printed.
+assert.ok(workflow.includes('CF_CODES_${error_codes}'));
+assert.ok(workflow.includes(".map(value=>String(value?.code??''))"));
+assert.doesNotMatch(workflow,/console\.log\([^\n]*payload\?\.errors[^\n]*message/);
+
+// Postflight Worker/main drift verification must still execute after an R2 inventory failure.
+assert.ok(workflow.includes("if: ${{ always() && steps.active_before.outcome == 'success' }}"));
+assert.ok(workflow.includes("INVENTORY_OUTCOME: ${{ steps.inventory.outcome }}"));
+assert.ok(workflow.includes('MEMBER_PRODUCTION_STORAGE_PREFLIGHT=FAIL_CLOSED'));
+
 assert.doesNotMatch(workflow,/wrangler\s+r2\s+object\s+(get|put|delete)\b/i);
 assert.doesNotMatch(workflow,/wrangler\s+r2\s+bucket\s+(create|delete)\b/i);
 assert.doesNotMatch(workflow,/wrangler\s+(?:deploy\b|versions\s+deploy\b)/i);

@@ -90,7 +90,6 @@ jobs:
 
           [[ "$expected_sha" =~ ^[0-9a-f]{40}$ ]] || { echo '::error::INVALID_EXPECTED_SHA'; exit 1; }
           [[ "$mode" == 'inventory' || "$mode" == 'verify' ]] || { echo '::error::INVALID_STORAGE_PREFLIGHT_MODE'; exit 1; }
-
           if [[ "$mode" == 'inventory' ]]; then
             test -z "$candidate_sha256" || { echo '::error::INVENTORY_MODE_FORBIDS_CANDIDATE_BUCKET_DIGEST'; exit 1; }
           else
@@ -150,7 +149,7 @@ jobs:
       - name: Install pinned Wrangler tooling
         run: npm install --no-save wrangler@4.131.2
 
-      - name: Confirm Cloudflare authentication
+      - name: Confirm Worker-management Cloudflare authentication
         shell: bash
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -160,7 +159,7 @@ jobs:
           npx wrangler whoami >/tmp/member-storage-preflight-whoami.txt
           test -s /tmp/member-storage-preflight-whoami.txt
           rm -f /tmp/member-storage-preflight-whoami.txt
-          echo 'CLOUDFLARE_AUTH=PASS'
+          echo 'CLOUDFLARE_WORKER_AUTH=PASS'
 
       - name: Snapshot exact active Production version before inventory
         id: active_before
@@ -188,29 +187,44 @@ jobs:
         id: inventory
         shell: bash
         env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_R2_READ_API_TOKEN: ${{ secrets.CLOUDFLARE_R2_READ_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           MODE: ${{ steps.gate.outputs.mode }}
           CANDIDATE_BUCKET_SHA256: ${{ steps.gate.outputs.candidate_bucket_sha256 }}
         run: |
           set -euo pipefail
-          test -n "$CLOUDFLARE_API_TOKEN" || { echo '::error::CLOUDFLARE_API_TOKEN_MISSING'; exit 1; }
+          test -n "$CLOUDFLARE_R2_READ_API_TOKEN" || { echo '::error::CLOUDFLARE_R2_READ_API_TOKEN_MISSING'; exit 1; }
           test -n "$CLOUDFLARE_ACCOUNT_ID" || { echo '::error::CLOUDFLARE_ACCOUNT_ID_MISSING'; exit 1; }
 
           jurisdictions=(default eu us fedramp fedramp-high)
           rm -f /tmp/member-storage-r2-buckets-*.json
           for jurisdiction in "${jurisdictions[@]}"; do
+            response_file="/tmp/member-storage-r2-buckets-$jurisdiction.json"
             code="$(curl --silent --show-error \
-              --output "/tmp/member-storage-r2-buckets-$jurisdiction.json" \
+              --output "$response_file" \
               --write-out '%{http_code}' \
-              -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+              -H "Authorization: Bearer $CLOUDFLARE_R2_READ_API_TOKEN" \
               -H 'Content-Type: application/json' \
               -H "cf-r2-jurisdiction: $jurisdiction" \
               "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/r2/buckets?per_page=1000&order=name&direction=asc")"
-            test "$code" = '200' || {
-              echo "::error::R2_BUCKET_INVENTORY_HTTP_${jurisdiction}_$code"
+            if [[ "$code" != '200' ]]; then
+              error_codes="$(node - "$response_file" <<'NODE'
+              const fs=require('fs');
+              try{
+                const payload=JSON.parse(fs.readFileSync(process.argv[2],'utf8'));
+                const values=(Array.isArray(payload?.errors)?payload.errors:[])
+                  .map(value=>String(value?.code??''))
+                  .filter(value=>/^\d+$/.test(value));
+                process.stdout.write(values.length?[...new Set(values)].join(','):'unknown');
+              }catch{
+                process.stdout.write('unparseable');
+              }
+              NODE
+              )"
+              rm -f "$response_file"
+              echo "::error::R2_BUCKET_INVENTORY_HTTP_${jurisdiction}_${code}_CF_CODES_${error_codes}"
               exit 1
-            }
+            fi
           done
 
           node <<'NODE'
@@ -273,6 +287,7 @@ jobs:
           echo 'PRODUCTION_STORAGE_FETCH=0'
 
       - name: Verify active Production version and main did not drift
+        if: ${{ always() && steps.active_before.outcome == 'success' }}
         shell: bash
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -300,11 +315,13 @@ jobs:
           rm -f /tmp/member-storage-deployment-before.json /tmp/member-storage-deployment-after.json
 
       - name: Summarize read-only evidence
+        if: ${{ always() }}
         shell: bash
         env:
           EXPECTED_SHA: ${{ steps.gate.outputs.expected_sha }}
           MODE: ${{ steps.gate.outputs.mode }}
           ACTIVE_VERSION: ${{ steps.active_before.outputs.active_version_id }}
+          INVENTORY_OUTCOME: ${{ steps.inventory.outcome }}
           BUCKET_COUNT: ${{ steps.inventory.outputs.bucket_count }}
           INVENTORY_SHA256: ${{ steps.inventory.outputs.inventory_sha256 }}
           CANDIDATE_SHA256: ${{ steps.inventory.outputs.candidate_sha256 }}
@@ -315,14 +332,18 @@ jobs:
             echo
             echo "- CURRENT_MAIN_SHA=$EXPECTED_SHA"
             echo "- MODE=$MODE"
-            echo "- ACTIVE_PRODUCTION_VERSION=$ACTIVE_VERSION"
-            echo '- R2_JURISDICTIONS_SCANNED=default,eu,us,fedramp,fedramp-high'
-            echo "- R2_BUCKET_COUNT=$BUCKET_COUNT"
-            echo "- R2_BUCKET_INVENTORY_SHA256=$INVENTORY_SHA256"
-            if [[ "$MODE" == 'verify' ]]; then
-              echo "- CANDIDATE_R2_BUCKET_NAME_SHA256=$CANDIDATE_SHA256"
-              echo '- CANDIDATE_R2_BUCKET_EXISTS=PASS'
+            echo "- ACTIVE_PRODUCTION_VERSION_BEFORE=$ACTIVE_VERSION"
+            echo "- INVENTORY_OUTCOME=$INVENTORY_OUTCOME"
+            if [[ "$INVENTORY_OUTCOME" == 'success' ]]; then
+              echo '- R2_JURISDICTIONS_SCANNED=default,eu,us,fedramp,fedramp-high'
+              echo "- R2_BUCKET_COUNT=$BUCKET_COUNT"
+              echo "- R2_BUCKET_INVENTORY_SHA256=$INVENTORY_SHA256"
+              if [[ "$MODE" == 'verify' ]]; then
+                echo "- CANDIDATE_R2_BUCKET_NAME_SHA256=$CANDIDATE_SHA256"
+                echo '- CANDIDATE_R2_BUCKET_EXISTS=PASS'
+              fi
             fi
+            echo '- R2_AUTH_SECRET=CLOUDFLARE_R2_READ_API_TOKEN'
             echo '- PRODUCTION_STORAGE_BINDING_CHANGE=0'
             echo '- PRODUCTION_STORAGE_FETCH=0'
             echo '- R2_OBJECT_READ=0'
@@ -332,4 +353,8 @@ jobs:
             echo '- PRODUCTION_TRAFFIC_CHANGE=0'
             echo '- PRODUCTION_D1_WRITE=0'
           } >> "$GITHUB_STEP_SUMMARY"
-          echo 'MEMBER_PRODUCTION_STORAGE_PREFLIGHT=PASS'
+          if [[ "$INVENTORY_OUTCOME" == 'success' ]]; then
+            echo 'MEMBER_PRODUCTION_STORAGE_PREFLIGHT=PASS'
+          else
+            echo 'MEMBER_PRODUCTION_STORAGE_PREFLIGHT=FAIL_CLOSED'
+          fi
