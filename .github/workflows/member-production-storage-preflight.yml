@@ -215,13 +215,26 @@ jobs:
             echo "::error::R2_READ_REST_TOKEN_VERIFY_HTTP_${code}_CF_CODES_${error_codes}"
             exit 1
           fi
-          node - "$verify_file" <<'NODE'
+          verify_state="$(node - "$verify_file" <<'NODE'
           const fs=require('fs');
-          const payload=JSON.parse(fs.readFileSync(process.argv[2],'utf8'));
-          if(payload?.success!==true)throw new Error('R2_READ_REST_TOKEN_VERIFY_API_NOT_SUCCESS');
-          if(String(payload?.result?.status||'')!=='active')throw new Error('R2_READ_REST_TOKEN_NOT_ACTIVE');
+          try {
+            const payload=JSON.parse(fs.readFileSync(process.argv[2],'utf8'));
+            if(payload?.success!==true){process.stdout.write('API_NOT_SUCCESS');process.exit(0);}
+            if(String(payload?.result?.status||'')!=='active'){process.stdout.write('NOT_ACTIVE');process.exit(0);}
+            process.stdout.write('PASS');
+          } catch {
+            process.stdout.write('JSON_INVALID');
+          }
           NODE
+          )"
           rm -f "$verify_file"
+          case "$verify_state" in
+            PASS) ;;
+            API_NOT_SUCCESS) echo '::error::R2_READ_REST_TOKEN_VERIFY_API_NOT_SUCCESS'; exit 1 ;;
+            NOT_ACTIVE) echo '::error::R2_READ_REST_TOKEN_NOT_ACTIVE'; exit 1 ;;
+            JSON_INVALID) echo '::error::R2_READ_REST_TOKEN_VERIFY_JSON_INVALID'; exit 1 ;;
+            *) echo '::error::R2_READ_REST_TOKEN_VERIFY_STATE_INVALID'; exit 1 ;;
+          esac
           echo 'R2_READ_REST_TOKEN_AUTH=PASS'
           echo 'R2_READ_REST_TOKEN_VALUE_PRINTED=NO'
 
