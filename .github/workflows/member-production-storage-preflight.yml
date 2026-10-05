@@ -61,6 +61,15 @@ jobs:
           ruby -e "require 'yaml'; YAML.load_file(ARGV[0])" .github/workflows/dispatch-member-production-storage-preflight-from-issue.yml
           echo 'MEMBER_STORAGE_PREFLIGHT_WORKFLOW_YAML=PASS'
 
+      - name: Verify inventory shell syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          ruby -e 'require "yaml"; y=YAML.load_file(ARGV[0]); s=y.fetch("jobs").fetch("preflight").fetch("steps").find { |step| step["name"] == "Read every R2 jurisdiction inventory without object access" }; abort "INVENTORY_STEP_NOT_FOUND" unless s; File.write(ARGV[1], s.fetch("run"))' .github/workflows/member-production-storage-preflight.yml /tmp/member-storage-inventory-step.sh
+          bash -n /tmp/member-storage-inventory-step.sh
+          rm -f /tmp/member-storage-inventory-step.sh
+          echo 'MEMBER_STORAGE_PREFLIGHT_INVENTORY_BASH_SYNTAX=PASS'
+
       - name: Set up Node
         uses: actions/setup-node@v5
         with:
@@ -208,19 +217,7 @@ jobs:
               -H "cf-r2-jurisdiction: $jurisdiction" \
               "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/r2/buckets?per_page=1000&order=name&direction=asc")"
             if [[ "$code" != '200' ]]; then
-              error_codes="$(node - "$response_file" <<'NODE'
-              const fs=require('fs');
-              try{
-                const payload=JSON.parse(fs.readFileSync(process.argv[2],'utf8'));
-                const values=(Array.isArray(payload?.errors)?payload.errors:[])
-                  .map(value=>String(value?.code??''))
-                  .filter(value=>/^\d+$/.test(value));
-                process.stdout.write(values.length?[...new Set(values)].join(','):'unknown');
-              }catch{
-                process.stdout.write('unparseable');
-              }
-              NODE
-              )"
+              error_codes="$(node -e 'const fs=require("fs"); try { const payload=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); const values=(Array.isArray(payload?.errors)?payload.errors:[]).map(value=>String(value?.code??"")).filter(value=>/^\d+$/.test(value)); process.stdout.write(values.length?[...new Set(values)].join(","):"unknown"); } catch { process.stdout.write("unparseable"); }' "$response_file")"
               rm -f "$response_file"
               echo "::error::R2_BUCKET_INVENTORY_HTTP_${jurisdiction}_${code}_CF_CODES_${error_codes}"
               exit 1
