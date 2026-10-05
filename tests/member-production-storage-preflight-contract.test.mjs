@@ -39,19 +39,38 @@ assert.ok(workflow.includes('ACTIVE_PRODUCTION_VERSION_STABLE=PASS'));
 assert.ok(workflow.includes('CURRENT_MAIN_STABLE=PASS'));
 assert.ok(workflow.includes('R2_BUCKET_INVENTORY_PAGINATION_UNSUPPORTED'));
 
-// The exact inventory shell must be syntax-checked by PR CI. This prevents a nested
-// heredoc in a command substitution from reaching Production read-only execution.
-assert.ok(workflow.includes('- name: Verify inventory shell syntax'));
-assert.ok(workflow.includes('MEMBER_STORAGE_PREFLIGHT_INVENTORY_BASH_SYNTAX=PASS'));
-assert.ok(workflow.includes('bash -n /tmp/member-storage-inventory-step.sh'));
+// Both R2 auth and inventory shells must be syntax-checked by PR CI.
+assert.ok(workflow.includes('- name: Verify R2 auth and inventory shell syntax'));
+assert.ok(workflow.includes('MEMBER_STORAGE_PREFLIGHT_R2_SHELL_SYNTAX=PASS'));
+assert.ok(workflow.includes('bash -n /tmp/member-storage-r2-step-0.sh'));
+assert.ok(workflow.includes('bash -n /tmp/member-storage-r2-step-1.sh'));
 assert.doesNotMatch(workflow,/error_codes="\$\(node - "\$response_file" <<'NODE'/);
 assert.ok(workflow.includes("error_codes=\"$(node -e 'const fs=require(\"fs\");"));
 
-// R2 inventory must use a dedicated least-privilege token, never the Worker-management token.
+// R2 inventory must use a dedicated least-privilege Cloudflare REST API token,
+// never the Worker-management token or R2 S3 credentials.
+assert.ok(workflow.includes('- name: Verify dedicated R2 REST API token'));
 assert.ok(workflow.includes('CLOUDFLARE_R2_READ_API_TOKEN: ${{ secrets.CLOUDFLARE_R2_READ_API_TOKEN }}'));
 assert.ok(workflow.includes('CLOUDFLARE_R2_READ_API_TOKEN_MISSING'));
+assert.ok(workflow.includes('R2_READ_REST_TOKEN_FORMAT_INVALID_WHITESPACE'));
+assert.ok(workflow.includes('https://api.cloudflare.com/client/v4/user/tokens/verify'));
+assert.ok(workflow.includes('R2_READ_REST_TOKEN_VERIFY_HTTP_${code}_CF_CODES_${error_codes}'));
+assert.ok(workflow.includes('R2_READ_REST_TOKEN_VERIFY_API_NOT_SUCCESS'));
+assert.ok(workflow.includes('R2_READ_REST_TOKEN_NOT_ACTIVE'));
+assert.ok(workflow.includes('R2_READ_REST_TOKEN_VERIFY_JSON_INVALID'));
+assert.ok(workflow.includes('R2_READ_REST_TOKEN_VERIFY_STATE_INVALID'));
+assert.ok(workflow.includes('R2_READ_REST_TOKEN_AUTH=PASS'));
+assert.ok(workflow.includes('R2_READ_REST_TOKEN_VALUE_PRINTED=NO'));
+assert.ok(workflow.includes('R2_AUTH_EXPECTED_CREDENTIAL=Cloudflare REST API token (Bearer), not R2 S3 Access Key ID/Secret Access Key'));
 assert.ok(workflow.includes('Authorization: Bearer $CLOUDFLARE_R2_READ_API_TOKEN'));
 assert.ok(workflow.includes('R2_AUTH_SECRET=CLOUDFLARE_R2_READ_API_TOKEN'));
+const authStep=workflow.slice(
+  workflow.indexOf('- name: Verify dedicated R2 REST API token'),
+  workflow.indexOf('- name: Read every R2 jurisdiction inventory without object access'),
+);
+assert.ok(authStep.includes("process.stdout.write('JSON_INVALID')"));
+assert.doesNotMatch(authStep,/throw\s+new\s+Error/);
+assert.doesNotMatch(authStep,/console\.(log|error)\([^\n]*payload/);
 const inventoryStep=workflow.slice(
   workflow.indexOf('- name: Read every R2 jurisdiction inventory without object access'),
   workflow.indexOf('- name: Verify active Production version and main did not drift'),
@@ -62,9 +81,11 @@ assert.doesNotMatch(inventoryStep,/Authorization: Bearer \$CLOUDFLARE_API_TOKEN/
 assert.ok(workflow.includes('CF_CODES_${error_codes}'));
 assert.ok(workflow.includes('value?.code'));
 assert.doesNotMatch(workflow,/console\.log\([^\n]*payload\?\.errors[^\n]*message/);
+assert.doesNotMatch(workflow,/cat\s+[^\n]*(r2-token-verify|r2-buckets)/i);
 
-// Postflight Worker/main drift verification must still execute after an R2 inventory failure.
+// Postflight Worker/main drift verification must still execute after an R2 auth or inventory failure.
 assert.ok(workflow.includes("if: ${{ always() && steps.active_before.outcome == 'success' }}"));
+assert.ok(workflow.includes("R2_AUTH_OUTCOME: ${{ steps.r2_auth.outcome }}"));
 assert.ok(workflow.includes("INVENTORY_OUTCOME: ${{ steps.inventory.outcome }}"));
 assert.ok(workflow.includes('MEMBER_PRODUCTION_STORAGE_PREFLIGHT=FAIL_CLOSED'));
 

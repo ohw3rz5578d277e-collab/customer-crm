@@ -13,11 +13,15 @@ It does not select a bucket automatically and it does not create, bind, read fro
 The preflight deliberately separates two Cloudflare credentials:
 
 - `CLOUDFLARE_API_TOKEN` remains the existing Worker-management credential used only for Wrangler authentication and read-only active Worker version snapshots.
-- `CLOUDFLARE_R2_READ_API_TOKEN` is reserved for R2 bucket inventory only.
+- `CLOUDFLARE_R2_READ_API_TOKEN` is reserved for Cloudflare REST API token verification and R2 bucket inventory only.
 
-The R2 token must be least-privilege and limited to Cloudflare's `Workers R2 Storage Read` permission for the intended account. The workflow does not fall back to the Worker-management token for R2 inventory.
+The R2 credential must be a **Cloudflare REST API bearer token** with least-privilege `Workers R2 Storage Read` permission for the intended account. It is not an R2 S3-compatible `Access Key ID` or `Secret Access Key`. R2 S3 credentials use AWS Signature Version 4 and are not valid substitutes for the `Authorization: Bearer <token>` contract used by `GET /user/tokens/verify` and `GET /accounts/{account_id}/r2/buckets`.
 
-This repository change does **not** create, rotate, stage, or modify either secret. Until `CLOUDFLARE_R2_READ_API_TOKEN` is separately provisioned under fresh Owner authorization, the inventory step fails closed with `CLOUDFLARE_R2_READ_API_TOKEN_MISSING`.
+Before any bucket request, the workflow calls Cloudflare's read-only `GET /user/tokens/verify` endpoint with the dedicated token and requires an active token. It emits only PASS or sanitized HTTP/numeric Cloudflare error codes; token IDs, token values, response messages, and response bodies are not printed.
+
+The workflow does not fall back to the Worker-management token for R2 verification or inventory.
+
+This repository change does **not** create, rotate, stage, or modify either secret. If `CLOUDFLARE_R2_READ_API_TOKEN` is absent, contains whitespace, is not accepted as a Cloudflare REST bearer token, or is not active, the preflight fails closed before bucket inventory.
 
 ## Why this exists
 
@@ -29,10 +33,11 @@ Before any future binding change, the repository needs durable evidence that:
 2. the Member Production route and private-media route remain disabled;
 3. no canonical `r2_buckets` binding has silently appeared in `wrangler.jsonc`;
 4. Worker-management authentication can read the current Production deployment state;
-5. a dedicated least-privilege R2 read token can perform account-level bucket inventory;
-6. every documented R2 jurisdiction is inspected;
-7. the active 100%-traffic Worker version remains stable during the observation;
-8. a candidate bucket, represented only by its SHA-256 name digest in GitHub metadata, exists exactly once across the observed jurisdiction inventories.
+5. the dedicated R2 credential is an active Cloudflare REST API bearer token;
+6. that least-privilege token can perform account-level bucket inventory;
+7. every documented R2 jurisdiction is inspected;
+8. the active 100%-traffic Worker version remains stable during the observation;
+9. a candidate bucket, represented only by its SHA-256 name digest in GitHub metadata, exists exactly once across the observed jurisdiction inventories.
 
 ## Jurisdiction-complete inventory
 
@@ -44,7 +49,7 @@ The preflight queries each supported List Buckets jurisdiction independently:
 - `fedramp`
 - `fedramp-high`
 
-Each request is an account-level `GET /accounts/{account_id}/r2/buckets` with the matching `cf-r2-jurisdiction` header and the dedicated R2 read token.
+Each request is an account-level `GET /accounts/{account_id}/r2/buckets` with the matching `cf-r2-jurisdiction` header and the dedicated R2 REST read token. Cloudflare's current List Buckets API documents all five values, including `default`, as supported values for this optional header.
 
 The workflow fails closed if any jurisdiction request does not succeed or if a response requires pagination beyond the single complete page supported by this gate.
 
@@ -58,7 +63,7 @@ Command shape:
 
 `/member-production-storage-preflight sha=<40hex> mode=inventory`
 
-The workflow retrieves only account-level bucket metadata.
+The workflow first verifies the dedicated REST API token, then retrieves only account-level bucket metadata.
 
 On success it outputs:
 
@@ -90,6 +95,7 @@ The workflow fails closed if:
 - main no longer equals the authorized SHA;
 - the active 100%-traffic Worker version changes during the observation;
 - the dedicated R2 read secret is absent;
+- the dedicated R2 secret contains whitespace or is not accepted as an active Cloudflare REST bearer token;
 - any jurisdiction R2 list response is unsuccessful;
 - any jurisdiction list is paginated beyond the single complete page expected by this gate;
 - verify mode does not find the candidate digest;
@@ -97,13 +103,14 @@ The workflow fails closed if:
 - canonical Member route flags are unexpectedly enabled;
 - a canonical R2 binding is already declared without review.
 
-The active Worker version and main SHA postflight check runs with `always()` after a successful pre-inventory snapshot, so an R2 inventory failure cannot suppress the drift evidence.
+The active Worker version and main SHA postflight check runs with `always()` after a successful pre-inventory snapshot, so an R2 token verification or inventory failure cannot suppress the drift evidence.
 
 ## Privacy and mutation boundary
 
 The preflight performs:
 
 - raw candidate bucket name in GitHub metadata = 0;
+- token value / token ID logging = 0;
 - R2 object read = 0;
 - R2 object write = 0;
 - bucket create/delete/update = 0;
@@ -124,8 +131,8 @@ The preflight performs:
 
 ## Next gate
 
-A successful inventory or candidate verification is not authorization to edit `wrangler.jsonc` or activate Member routes.
+A successful token verification, inventory, or candidate verification is not authorization to edit `wrangler.jsonc` or activate Member routes.
 
-Before retrying inventory, `CLOUDFLARE_R2_READ_API_TOKEN` must be separately created/staged with only `Workers R2 Storage Read` permission under fresh Owner authorization. Secret values must never be printed or pasted into Issue #26.
+If token verification returns Cloudflare code `9106`, the credential staged in `CLOUDFLARE_R2_READ_API_TOKEN` must be rechecked as a Cloudflare REST API bearer token rather than an R2 S3 `Access Key ID` / `Secret Access Key`. Any secret replacement or token creation remains a separate Owner-authorized operation.
 
 Any future R2 binding change must use a separately reviewed exact bucket and binding name, remain default-off first, and receive fresh Owner exact-SHA/scope authorization before any Production deployment or route activation.
