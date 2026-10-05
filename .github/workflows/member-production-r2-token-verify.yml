@@ -60,6 +60,10 @@ jobs:
           grep -Fq "$expected_verify" "$FILE"
           ! grep -Fq "$forbidden_accounts" "$FILE"
           ! grep -Fq "$forbidden_header" "$FILE"
+          grep -Fq 'R2_READ_REST_TOKEN_TYPE=USER_API_TOKEN' "$FILE"
+          grep -Fq 'R2_READ_REST_TOKEN_TYPE_ACCOUNT_OWNED_NOT_ALLOWED' "$FILE"
+          grep -Fq 'R2_READ_REST_TOKEN_TYPE_USER_API_KEY_NOT_ALLOWED' "$FILE"
+          grep -Fq 'R2_READ_REST_TOKEN_TYPE_LEGACY_OR_UNKNOWN' "$FILE"
           echo 'MEMBER_R2_TOKEN_VERIFY_ONLY_BOUNDARY=PASS'
 
   verify:
@@ -154,6 +158,12 @@ jobs:
           set -euo pipefail
           test -n "$CLOUDFLARE_R2_READ_API_TOKEN" || { echo '::error::CLOUDFLARE_R2_READ_API_TOKEN_MISSING'; exit 1; }
           [[ "$CLOUDFLARE_R2_READ_API_TOKEN" != *[[:space:]]* ]] || { echo '::error::R2_READ_REST_TOKEN_FORMAT_INVALID_WHITESPACE'; exit 1; }
+          case "$CLOUDFLARE_R2_READ_API_TOKEN" in
+            cfut_*) echo 'R2_READ_REST_TOKEN_TYPE=USER_API_TOKEN' ;;
+            cfat_*) echo '::error::R2_READ_REST_TOKEN_TYPE_ACCOUNT_OWNED_NOT_ALLOWED'; exit 1 ;;
+            cfk_*) echo '::error::R2_READ_REST_TOKEN_TYPE_USER_API_KEY_NOT_ALLOWED'; exit 1 ;;
+            *) echo '::error::R2_READ_REST_TOKEN_TYPE_LEGACY_OR_UNKNOWN'; exit 1 ;;
+          esac
           verify_file=/tmp/member-r2-token-verify.json
           code="$(curl --silent --show-error \
             --output "$verify_file" \
