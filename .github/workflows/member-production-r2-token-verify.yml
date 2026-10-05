@@ -1,0 +1,255 @@
+name: Member Production R2 REST token verify only
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/member-production-r2-token-verify.yml'
+      - '.github/workflows/dispatch-member-production-r2-token-verify-from-issue.yml'
+  workflow_dispatch:
+    inputs:
+      expected_sha:
+        description: Exact current main SHA to inspect read-only
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.event_name == 'pull_request' && format('member-production-r2-token-verify-pr-{0}', github.event.pull_request.number) || format('member-production-r2-token-verify-{0}', github.run_id) }}
+  cancel-in-progress: false
+
+jobs:
+  contract:
+    name: Member Production R2 token verify-only contract
+    if: ${{ github.event_name == 'pull_request' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact PR head
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+
+      - name: Assert exact PR head
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
+
+      - name: Verify YAML and shell syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          ruby -e "require 'yaml'; YAML.load_file(ARGV[0])" .github/workflows/member-production-r2-token-verify.yml
+          ruby -e "require 'yaml'; YAML.load_file(ARGV[0])" .github/workflows/dispatch-member-production-r2-token-verify-from-issue.yml
+          ruby -e 'require "yaml"; y=YAML.load_file(ARGV[0]); steps=y.fetch("jobs").fetch("verify").fetch("steps"); s=steps.find { |step| step["name"] == "Verify dedicated R2 REST API token only" }; abort "VERIFY_STEP_NOT_FOUND" unless s; File.write(ARGV[1], s.fetch("run"))' .github/workflows/member-production-r2-token-verify.yml /tmp/member-r2-token-verify-step.sh
+          bash -n /tmp/member-r2-token-verify-step.sh
+          rm -f /tmp/member-r2-token-verify-step.sh
+          echo 'MEMBER_R2_TOKEN_VERIFY_SHELL_SYNTAX=PASS'
+
+      - name: Assert verify-only boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          FILE=.github/workflows/member-production-r2-token-verify.yml
+          expected_verify='https://api.cloudflare.com/client/v4/user/'"tokens/verify"
+          forbidden_accounts='/client/v4/'"accounts/"
+          forbidden_header='cf-r2-'"jurisdiction"
+          grep -Fq "$expected_verify" "$FILE"
+          ! grep -Fq "$forbidden_accounts" "$FILE"
+          ! grep -Fq "$forbidden_header" "$FILE"
+          echo 'MEMBER_R2_TOKEN_VERIFY_ONLY_BOUNDARY=PASS'
+
+  verify:
+    name: Exact-SHA Member Production R2 token verify only
+    if: ${{ github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      EXPECTED_SHA_RAW: ${{ inputs.expected_sha }}
+    steps:
+      - name: Normalize exact SHA
+        id: gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected_sha="$(printf '%s' "$EXPECTED_SHA_RAW" | tr '[:upper:]' '[:lower:]')"
+          [[ "$expected_sha" =~ ^[0-9a-f]{40}$ ]] || { echo '::error::INVALID_EXPECTED_SHA'; exit 1; }
+          echo "expected_sha=$expected_sha" >> "$GITHUB_OUTPUT"
+          echo "MEMBER_R2_TOKEN_VERIFY_SHA=$expected_sha"
+          echo 'R2_INVENTORY=0'
+          echo 'R2_OBJECT_READ=0'
+          echo 'R2_WRITE=0'
+          echo 'BUCKET_MUTATION=0'
+          echo 'PRODUCTION_STORAGE_BINDING_CHANGE=0'
+          echo 'PRODUCTION_STORAGE_FETCH=0'
+          echo 'PRODUCTION_DEPLOY=0'
+          echo 'PRODUCTION_TRAFFIC_CHANGE=0'
+          echo 'PRODUCTION_D1_WRITE=0'
+
+      - name: Checkout exact inspected SHA
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ steps.gate.outputs.expected_sha }}
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Exact current-main gate
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ steps.gate.outputs.expected_sha }}
+        run: |
+          set -euo pipefail
+          actual_sha="$(git rev-parse HEAD)"
+          current_main="$(git ls-remote origin refs/heads/main | awk '{print $1}')"
+          test "$actual_sha" = "$EXPECTED_SHA" || { echo "::error::CHECKOUT_SHA_MISMATCH actual=$actual_sha expected=$EXPECTED_SHA"; exit 1; }
+          test "$current_main" = "$EXPECTED_SHA" || { echo "::error::MAIN_DRIFT current=$current_main expected=$EXPECTED_SHA"; exit 1; }
+          echo 'CURRENT_MAIN_EXACT_GATE=PASS'
+
+      - name: Install pinned Wrangler tooling
+        run: npm install --no-save wrangler@4.131.2
+
+      - name: Confirm Worker-management Cloudflare authentication
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          npx wrangler whoami >/tmp/member-r2-token-verify-whoami.txt
+          test -s /tmp/member-r2-token-verify-whoami.txt
+          rm -f /tmp/member-r2-token-verify-whoami.txt
+          echo 'CLOUDFLARE_WORKER_AUTH=PASS'
+
+      - name: Snapshot exact active Production version before token verify
+        id: active_before
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          npx wrangler deployments status --name customer-crm-api --json > /tmp/member-r2-token-verify-before.json
+          active_version_id="$(node - /tmp/member-r2-token-verify-before.json <<'NODE'
+          const fs=require('fs');
+          const value=JSON.parse(fs.readFileSync(process.argv[2],'utf8'));
+          const d=Array.isArray(value)?value[0]:value;
+          const active=(d?.versions||[]).filter(v=>Number(v.percentage)===100);
+          if(active.length!==1||typeof active[0].version_id!=='string')process.exit(2);
+          process.stdout.write(active[0].version_id.toLowerCase());
+          NODE
+          )" || { echo '::error::CURRENT_ACTIVE_PRODUCTION_VERSION_UNAVAILABLE'; exit 1; }
+          [[ "$active_version_id" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] || { echo '::error::INVALID_CURRENT_ACTIVE_VERSION_ID'; exit 1; }
+          echo "active_version_id=$active_version_id" >> "$GITHUB_OUTPUT"
+          echo "ACTIVE_PRODUCTION_VERSION_BEFORE=$active_version_id"
+
+      - name: Verify dedicated R2 REST API token only
+        id: r2_auth
+        shell: bash
+        env:
+          CLOUDFLARE_R2_READ_API_TOKEN: ${{ secrets.CLOUDFLARE_R2_READ_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_R2_READ_API_TOKEN" || { echo '::error::CLOUDFLARE_R2_READ_API_TOKEN_MISSING'; exit 1; }
+          [[ "$CLOUDFLARE_R2_READ_API_TOKEN" != *[[:space:]]* ]] || { echo '::error::R2_READ_REST_TOKEN_FORMAT_INVALID_WHITESPACE'; exit 1; }
+          verify_file=/tmp/member-r2-token-verify.json
+          code="$(curl --silent --show-error \
+            --output "$verify_file" \
+            --write-out '%{http_code}' \
+            -H "Authorization: Bearer $CLOUDFLARE_R2_READ_API_TOKEN" \
+            -H 'Accept: application/json' \
+            'https://api.cloudflare.com/client/v4/user/tokens/verify')"
+          if [[ "$code" != '200' ]]; then
+            error_codes="$(node -e 'const fs=require("fs"); try { const payload=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); const values=(Array.isArray(payload?.errors)?payload.errors:[]).map(value=>String(value?.code??"")).filter(value=>/^\d+$/.test(value)); process.stdout.write(values.length?[...new Set(values)].join(","):"unknown"); } catch { process.stdout.write("unparseable"); }' "$verify_file")"
+            rm -f "$verify_file"
+            echo "::error::R2_READ_REST_TOKEN_VERIFY_HTTP_${code}_CF_CODES_${error_codes}"
+            exit 1
+          fi
+          verify_state="$(node - "$verify_file" <<'NODE'
+          const fs=require('fs');
+          try {
+            const payload=JSON.parse(fs.readFileSync(process.argv[2],'utf8'));
+            if(payload?.success!==true){process.stdout.write('API_NOT_SUCCESS');process.exit(0);}
+            if(String(payload?.result?.status||'')!=='active'){process.stdout.write('NOT_ACTIVE');process.exit(0);}
+            process.stdout.write('PASS');
+          } catch {
+            process.stdout.write('JSON_INVALID');
+          }
+          NODE
+          )"
+          rm -f "$verify_file"
+          case "$verify_state" in
+            PASS) ;;
+            API_NOT_SUCCESS) echo '::error::R2_READ_REST_TOKEN_VERIFY_API_NOT_SUCCESS'; exit 1 ;;
+            NOT_ACTIVE) echo '::error::R2_READ_REST_TOKEN_NOT_ACTIVE'; exit 1 ;;
+            JSON_INVALID) echo '::error::R2_READ_REST_TOKEN_VERIFY_JSON_INVALID'; exit 1 ;;
+            *) echo '::error::R2_READ_REST_TOKEN_VERIFY_STATE_INVALID'; exit 1 ;;
+          esac
+          echo 'R2_READ_REST_TOKEN_AUTH=PASS'
+          echo 'R2_READ_REST_TOKEN_VALUE_PRINTED=NO'
+          echo 'R2_INVENTORY=0'
+
+      - name: Verify active Production version and main did not drift
+        if: ${{ always() && steps.active_before.outcome == 'success' }}
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          EXPECTED_SHA: ${{ steps.gate.outputs.expected_sha }}
+          ACTIVE_BEFORE: ${{ steps.active_before.outputs.active_version_id }}
+        run: |
+          set -euo pipefail
+          npx wrangler deployments status --name customer-crm-api --json > /tmp/member-r2-token-verify-after.json
+          active_after="$(node - /tmp/member-r2-token-verify-after.json <<'NODE'
+          const fs=require('fs');
+          const value=JSON.parse(fs.readFileSync(process.argv[2],'utf8'));
+          const d=Array.isArray(value)?value[0]:value;
+          const active=(d?.versions||[]).filter(v=>Number(v.percentage)===100);
+          if(active.length!==1||typeof active[0].version_id!=='string')process.exit(2);
+          process.stdout.write(active[0].version_id.toLowerCase());
+          NODE
+          )" || { echo '::error::ACTIVE_VERSION_AFTER_TOKEN_VERIFY_UNAVAILABLE'; exit 1; }
+          test "$active_after" = "$ACTIVE_BEFORE" || { echo "::error::ACTIVE_PRODUCTION_VERSION_DRIFT before=$ACTIVE_BEFORE after=$active_after"; exit 1; }
+          current_main="$(git ls-remote origin refs/heads/main | awk '{print $1}')"
+          test "$current_main" = "$EXPECTED_SHA" || { echo "::error::MAIN_DRIFT_AFTER_TOKEN_VERIFY expected=$EXPECTED_SHA current=$current_main"; exit 1; }
+          echo "ACTIVE_PRODUCTION_VERSION_AFTER=$active_after"
+          echo 'ACTIVE_PRODUCTION_VERSION_STABLE=PASS'
+          echo 'CURRENT_MAIN_STABLE=PASS'
+          rm -f /tmp/member-r2-token-verify-before.json /tmp/member-r2-token-verify-after.json
+
+      - name: Summarize verify-only evidence
+        if: ${{ always() }}
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ steps.gate.outputs.expected_sha }}
+          ACTIVE_VERSION: ${{ steps.active_before.outputs.active_version_id }}
+          R2_AUTH_OUTCOME: ${{ steps.r2_auth.outcome }}
+        run: |
+          set -euo pipefail
+          {
+            echo '## Member Production R2 REST token verify only'
+            echo
+            echo "- CURRENT_MAIN_SHA=$EXPECTED_SHA"
+            echo "- ACTIVE_PRODUCTION_VERSION_BEFORE=$ACTIVE_VERSION"
+            echo "- R2_REST_TOKEN_AUTH_OUTCOME=$R2_AUTH_OUTCOME"
+            echo '- R2_AUTH_SECRET=CLOUDFLARE_R2_READ_API_TOKEN'
+            echo '- R2_AUTH_EXPECTED_CREDENTIAL=Cloudflare User API Token (Bearer)'
+            echo '- R2_INVENTORY=0'
+            echo '- R2_BUCKET_METADATA_LIST_GET=0'
+            echo '- R2_OBJECT_READ=0'
+            echo '- R2_WRITE=0'
+            echo '- BUCKET_MUTATION=0'
+            echo '- PRODUCTION_STORAGE_BINDING_CHANGE=0'
+            echo '- PRODUCTION_STORAGE_FETCH=0'
+            echo '- MEMBER_ROUTE_ACTIVATION=0'
+            echo '- PRODUCTION_DEPLOY=0'
+            echo '- PRODUCTION_TRAFFIC_CHANGE=0'
+            echo '- PRODUCTION_D1_WRITE=0'
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [[ "$R2_AUTH_OUTCOME" == 'success' ]]; then
+            echo 'MEMBER_PRODUCTION_R2_TOKEN_VERIFY=PASS'
+          else
+            echo 'MEMBER_PRODUCTION_R2_TOKEN_VERIFY=FAIL_CLOSED'
+          fi
