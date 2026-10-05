@@ -55,12 +55,22 @@ assert.ok(workflow.includes('CLOUDFLARE_R2_READ_API_TOKEN_MISSING'));
 assert.ok(workflow.includes('R2_READ_REST_TOKEN_FORMAT_INVALID_WHITESPACE'));
 assert.ok(workflow.includes('https://api.cloudflare.com/client/v4/user/tokens/verify'));
 assert.ok(workflow.includes('R2_READ_REST_TOKEN_VERIFY_HTTP_${code}_CF_CODES_${error_codes}'));
+assert.ok(workflow.includes('R2_READ_REST_TOKEN_VERIFY_API_NOT_SUCCESS'));
 assert.ok(workflow.includes('R2_READ_REST_TOKEN_NOT_ACTIVE'));
+assert.ok(workflow.includes('R2_READ_REST_TOKEN_VERIFY_JSON_INVALID'));
+assert.ok(workflow.includes('R2_READ_REST_TOKEN_VERIFY_STATE_INVALID'));
 assert.ok(workflow.includes('R2_READ_REST_TOKEN_AUTH=PASS'));
 assert.ok(workflow.includes('R2_READ_REST_TOKEN_VALUE_PRINTED=NO'));
 assert.ok(workflow.includes('R2_AUTH_EXPECTED_CREDENTIAL=Cloudflare REST API token (Bearer), not R2 S3 Access Key ID/Secret Access Key'));
 assert.ok(workflow.includes('Authorization: Bearer $CLOUDFLARE_R2_READ_API_TOKEN'));
 assert.ok(workflow.includes('R2_AUTH_SECRET=CLOUDFLARE_R2_READ_API_TOKEN'));
+const authStep=workflow.slice(
+  workflow.indexOf('- name: Verify dedicated R2 REST API token'),
+  workflow.indexOf('- name: Read every R2 jurisdiction inventory without object access'),
+);
+assert.ok(authStep.includes("process.stdout.write('JSON_INVALID')"));
+assert.doesNotMatch(authStep,/throw\s+new\s+Error/);
+assert.doesNotMatch(authStep,/console\.(log|error)\([^\n]*payload/);
 const inventoryStep=workflow.slice(
   workflow.indexOf('- name: Read every R2 jurisdiction inventory without object access'),
   workflow.indexOf('- name: Verify active Production version and main did not drift'),
