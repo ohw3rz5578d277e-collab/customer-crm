@@ -15,6 +15,12 @@ assert.ok(workflow.includes("cf-r2-jurisdiction: default"));
 assert.ok(workflow.includes("github.actor == 'github-actions[bot]'"));
 assert.ok(workflow.includes("github.triggering_actor == 'github-actions[bot]'"));
 assert.ok(!workflow.includes("github.actor == 'ohw3rz5578d277e-collab'"));
+assert.ok(workflow.includes('CLOUDFLARE_R2_READ_API_TOKEN: ${{ secrets.CLOUDFLARE_R2_READ_API_TOKEN }}'));
+assert.equal((workflow.match(/Authorization: Bearer \$CLOUDFLARE_R2_READ_API_TOKEN/g)||[]).length,2);
+assert.equal((workflow.match(/Authorization: Bearer \$CLOUDFLARE_API_TOKEN/g)||[]).length,1);
+assert.ok(workflow.includes('R2_BUCKET_PREFLIGHT_TOKEN=READ_ONLY'));
+assert.ok(workflow.includes('R2_BUCKET_POSTCHECK_TOKEN=READ_ONLY'));
+assert.ok(workflow.includes('R2_BUCKET_CREATE_TOKEN=WRITE'));
 assert.ok(workflow.includes('BUCKET_CREATE_AUTHORIZED_COUNT=1'));
 assert.ok(workflow.includes('BUCKET_UPDATE_AUTHORIZED=0'));
 assert.ok(workflow.includes('BUCKET_DELETE_AUTHORIZED=0'));
@@ -32,4 +38,5 @@ assert.ok(doc.includes('must not delete, recreate, patch, rename, or retry the b
 console.log('MEMBER_R2_BUCKET_CREATE_GATE_CONTRACT=PASS');
 console.log('ISSUE_BRIDGE_BOT_ACTOR_GATE=PASS');
 console.log('ISSUE_BRIDGE_REPLAY_GUARD=PASS');
+console.log('R2_READ_WRITE_TOKEN_SPLIT=PASS');
 console.log(`CANONICAL_BUCKET_SHA256=${digest}`);
