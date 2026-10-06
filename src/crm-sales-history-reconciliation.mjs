@@ -1,4 +1,4 @@
-export const SALES_RECONCILIATION_BUILD='crm-sales-local-reconciliation-20261006-04';
+export const SALES_RECONCILIATION_BUILD='crm-sales-local-reconciliation-20261006-05';
 export const CURRENT_CUSTOMER_ID_RE=/^\d{8}$/;
 export const LINE_USER_ID_RE=/^U[0-9a-fA-F]{20,}$/;
 
@@ -15,6 +15,7 @@ export function normalizeReconciliationDate(v){
 }
 function uniqueByCustomerId(rows){const m=new Map();for(const r of rows||[]){const id=text(r?.customer_id);if(id&&!m.has(id))m.set(id,r)}return [...m.values()]}
 function pushIndex(map,key,row){if(!key)return;if(!map.has(key))map.set(key,[]);map.get(key).push(row)}
+function rawSalesRowHasData(raw={}){return [raw.name,raw.shoot_date,raw.genre,raw.status,raw.repeat_flag,raw.sales_customer_id,raw.line_user_id].some(v=>text(v)!=='')}
 
 export function normalizeSalesRecord(raw={}){
   const name=text(raw.name);
@@ -24,11 +25,12 @@ export function normalizeSalesRecord(raw={}){
 export function analyzeSalesHistory(records=[]){
   const errors=[],valid=[];
   for(let i=0;i<records.length;i++){
-    const row=normalizeSalesRecord(records[i]);
-    if(!row.name_key&&!text(records[i]?.shoot_date))continue;
+    const raw=records[i]||{};
+    if(!rawSalesRowHasData(raw))continue;
+    const row=normalizeSalesRecord(raw);
     if(!row.name_key){errors.push({index:i,error:'sales_customer_name_required'});continue}
-    if(!text(records[i]?.shoot_date)){errors.push({index:i,error:'sales_shoot_date_required',name:row.name});continue}
-    if(!row.shoot_date){errors.push({index:i,error:'sales_invalid_shoot_date',name:row.name,value:text(records[i]?.shoot_date)});continue}
+    if(!text(raw.shoot_date)){errors.push({index:i,error:'sales_shoot_date_required',name:row.name});continue}
+    if(!row.shoot_date){errors.push({index:i,error:'sales_invalid_shoot_date',name:row.name,value:text(raw.shoot_date)});continue}
     valid.push(row);
   }
 
@@ -131,5 +133,5 @@ export function reconcileSalesHistory({salesAnalysis,customerMaster=[],productio
 }
 
 export function salesReconciliationHealth(){
-  return {sales_reconciliation_build:SALES_RECONCILIATION_BUILD,sales_reconciliation_local_only:true,sales_reconciliation_read_only:true,sales_reconciliation_same_name_same_date_dedupe:true,sales_reconciliation_repeat_rule:'same_normalized_name_distinct_shoot_dates>=2',sales_reconciliation_safe_target_requires_identity_on_every_grouped_source_row:true,sales_reconciliation_source_identity_conflicts_fail_closed:true,sales_reconciliation_cross_identifier_consistency_required:true,sales_reconciliation_sales_customer_id_exact_auto_target_only:true,sales_reconciliation_sales_line_user_id_exact_auto_target_only:true,sales_reconciliation_auto_target_requires_canonical_customer_id:true,sales_reconciliation_production_name_exact_review_only:true,sales_reconciliation_customer_master_exact_review_only:true,sales_reconciliation_line_body_exact_name_review_only:true,sales_reconciliation_line_body_auto_link:false,sales_reconciliation_fuzzy_auto_link:false,sales_reconciliation_unmatched_auto_create:false,sales_reconciliation_customer_merge:false,sales_reconciliation_customer_id_generation:false,sales_reconciliation_production_network_access:false,sales_reconciliation_production_read:false,sales_reconciliation_production_write:false};
+  return {sales_reconciliation_build:SALES_RECONCILIATION_BUILD,sales_reconciliation_local_only:true,sales_reconciliation_read_only:true,sales_reconciliation_same_name_same_date_dedupe:true,sales_reconciliation_repeat_rule:'same_normalized_name_distinct_shoot_dates>=2',sales_reconciliation_safe_target_requires_identity_on_every_grouped_source_row:true,sales_reconciliation_source_identity_conflicts_fail_closed:true,sales_reconciliation_cross_identifier_consistency_required:true,sales_reconciliation_populated_nameless_rows_fail_closed:true,sales_reconciliation_sales_customer_id_exact_auto_target_only:true,sales_reconciliation_sales_line_user_id_exact_auto_target_only:true,sales_reconciliation_auto_target_requires_canonical_customer_id:true,sales_reconciliation_production_name_exact_review_only:true,sales_reconciliation_customer_master_exact_review_only:true,sales_reconciliation_line_body_exact_name_review_only:true,sales_reconciliation_line_body_auto_link:false,sales_reconciliation_fuzzy_auto_link:false,sales_reconciliation_unmatched_auto_create:false,sales_reconciliation_customer_merge:false,sales_reconciliation_customer_id_generation:false,sales_reconciliation_production_network_access:false,sales_reconciliation_production_read:false,sales_reconciliation_production_write:false};
 }
