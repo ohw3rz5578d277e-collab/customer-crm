@@ -211,17 +211,20 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_R2_READ_API_TOKEN: ${{ secrets.CLOUDFLARE_R2_READ_API_TOKEN }}
+          CLOUDFLARE_R2_WRITE_API_TOKEN: ${{ secrets.CLOUDFLARE_R2_WRITE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           set -euo pipefail
           test -n "$CLOUDFLARE_API_TOKEN" || { echo '::error::CLOUDFLARE_API_TOKEN_MISSING'; exit 1; }
           test -n "$CLOUDFLARE_R2_READ_API_TOKEN" || { echo '::error::CLOUDFLARE_R2_READ_API_TOKEN_MISSING'; exit 1; }
+          test -n "$CLOUDFLARE_R2_WRITE_API_TOKEN" || { echo '::error::CLOUDFLARE_R2_WRITE_API_TOKEN_MISSING'; exit 1; }
           test -n "$CLOUDFLARE_ACCOUNT_ID" || { echo '::error::CLOUDFLARE_ACCOUNT_ID_MISSING'; exit 1; }
           npx wrangler whoami >/tmp/member-r2-create-whoami.txt
           test -s /tmp/member-r2-create-whoami.txt
           rm -f /tmp/member-r2-create-whoami.txt
           echo 'CLOUDFLARE_AUTH=PASS'
           echo 'R2_READ_TOKEN_PRESENT=PASS'
+          echo 'R2_WRITE_TOKEN_PRESENT=PASS'
           echo 'TOKEN_VALUE_PRINTED=NO'
 
       - name: Snapshot active Production version before bucket create
@@ -313,18 +316,19 @@ jobs:
         id: create
         shell: bash
         env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_R2_WRITE_API_TOKEN: ${{ secrets.CLOUDFLARE_R2_WRITE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           CANDIDATE_SHA: ${{ steps.gate.outputs.candidate_sha }}
         run: |
           set -euo pipefail
+          test -n "$CLOUDFLARE_R2_WRITE_API_TOKEN" || { echo '::error::CLOUDFLARE_R2_WRITE_API_TOKEN_MISSING'; exit 1; }
           response=/tmp/member-r2-create-response.json
           body=/tmp/member-r2-create-body.json
           cleanup(){ rm -f "$response" "$body"; }
           trap cleanup EXIT
           node -e 'require("fs").writeFileSync(process.argv[1],JSON.stringify({name:"customer-crm-member-private-media",storageClass:"Standard"}))' "$body"
           echo 'R2_BUCKET_CREATE_REQUEST_COUNT=1'
-          code="$(curl --silent --show-error --output "$response" --write-out '%{http_code}' --request POST -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -H 'Content-Type: application/json' -H 'Accept: application/json' -H 'cf-r2-jurisdiction: default' "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/r2/buckets" --data-binary "@$body")"
+          code="$(curl --silent --show-error --output "$response" --write-out '%{http_code}' --request POST -H "Authorization: Bearer $CLOUDFLARE_R2_WRITE_API_TOKEN" -H 'Content-Type: application/json' -H 'Accept: application/json' -H 'cf-r2-jurisdiction: default' "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/r2/buckets" --data-binary "@$body")"
           [[ "$code" = '200' || "$code" = '201' ]] || { echo "::error::R2_BUCKET_CREATE_HTTP_$code"; exit 1; }
           CANDIDATE_SHA="$CANDIDATE_SHA" node - "$response" <<'NODE'
           const fs=require('fs');
