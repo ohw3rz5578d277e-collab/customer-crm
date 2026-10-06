@@ -210,15 +210,18 @@ jobs:
         shell: bash
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_R2_READ_API_TOKEN: ${{ secrets.CLOUDFLARE_R2_READ_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           set -euo pipefail
           test -n "$CLOUDFLARE_API_TOKEN" || { echo '::error::CLOUDFLARE_API_TOKEN_MISSING'; exit 1; }
+          test -n "$CLOUDFLARE_R2_READ_API_TOKEN" || { echo '::error::CLOUDFLARE_R2_READ_API_TOKEN_MISSING'; exit 1; }
           test -n "$CLOUDFLARE_ACCOUNT_ID" || { echo '::error::CLOUDFLARE_ACCOUNT_ID_MISSING'; exit 1; }
           npx wrangler whoami >/tmp/member-r2-create-whoami.txt
           test -s /tmp/member-r2-create-whoami.txt
           rm -f /tmp/member-r2-create-whoami.txt
           echo 'CLOUDFLARE_AUTH=PASS'
+          echo 'R2_READ_TOKEN_PRESENT=PASS'
           echo 'TOKEN_VALUE_PRINTED=NO'
 
       - name: Snapshot active Production version before bucket create
@@ -247,15 +250,16 @@ jobs:
       - name: Preflight canonical bucket absence
         shell: bash
         env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_R2_READ_API_TOKEN: ${{ secrets.CLOUDFLARE_R2_READ_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           CANDIDATE_SHA: ${{ steps.gate.outputs.candidate_sha }}
         run: |
           set -euo pipefail
+          test -n "$CLOUDFLARE_R2_READ_API_TOKEN" || { echo '::error::CLOUDFLARE_R2_READ_API_TOKEN_MISSING'; exit 1; }
           response=/tmp/member-r2-create-preflight.json
           cleanup(){ rm -f "$response"; }
           trap cleanup EXIT
-          code="$(curl --silent --show-error --output "$response" --write-out '%{http_code}' -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -H 'Accept: application/json' -H 'cf-r2-jurisdiction: default' "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/r2/buckets?per_page=1000&order=name&direction=asc")"
+          code="$(curl --silent --show-error --output "$response" --write-out '%{http_code}' -H "Authorization: Bearer $CLOUDFLARE_R2_READ_API_TOKEN" -H 'Accept: application/json' -H 'cf-r2-jurisdiction: default' "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/r2/buckets?per_page=1000&order=name&direction=asc")"
           test "$code" = '200' || { echo "::error::R2_BUCKET_PREFLIGHT_HTTP_$code"; exit 1; }
           CANDIDATE_SHA="$CANDIDATE_SHA" node - "$response" <<'NODE'
           const fs=require('fs');
@@ -273,6 +277,7 @@ jobs:
           if(matches!==0)throw new Error(`R2_CANONICAL_BUCKET_ALREADY_EXISTS_MATCHES_${matches}`);
           console.log(`R2_BUCKET_PREFLIGHT_COUNT=${names.length}`);
           console.log('R2_CANONICAL_BUCKET_ABSENT=PASS');
+          console.log('R2_BUCKET_PREFLIGHT_TOKEN=READ_ONLY');
           console.log('RAW_BUCKET_NAMES_PRINTED=NO');
           NODE
           cleanup
@@ -337,6 +342,7 @@ jobs:
           console.log('CREATED_BUCKET_JURISDICTION=default');
           console.log('CREATED_BUCKET_STORAGE_CLASS=Standard');
           console.log(`CREATED_BUCKET_LOCATION=${location}`);
+          console.log('R2_BUCKET_CREATE_TOKEN=WRITE');
           console.log('RAW_BUCKET_NAME_PRINTED=NO');
           NODE
           cleanup
@@ -345,15 +351,16 @@ jobs:
       - name: Verify exact-one-match after creation
         shell: bash
         env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_R2_READ_API_TOKEN: ${{ secrets.CLOUDFLARE_R2_READ_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           CANDIDATE_SHA: ${{ steps.gate.outputs.candidate_sha }}
         run: |
           set -euo pipefail
+          test -n "$CLOUDFLARE_R2_READ_API_TOKEN" || { echo '::error::CLOUDFLARE_R2_READ_API_TOKEN_MISSING'; exit 1; }
           response=/tmp/member-r2-create-postcheck.json
           cleanup(){ rm -f "$response"; }
           trap cleanup EXIT
-          code="$(curl --silent --show-error --output "$response" --write-out '%{http_code}' -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -H 'Accept: application/json' -H 'cf-r2-jurisdiction: default' "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/r2/buckets?per_page=1000&order=name&direction=asc")"
+          code="$(curl --silent --show-error --output "$response" --write-out '%{http_code}' -H "Authorization: Bearer $CLOUDFLARE_R2_READ_API_TOKEN" -H 'Accept: application/json' -H 'cf-r2-jurisdiction: default' "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/r2/buckets?per_page=1000&order=name&direction=asc")"
           test "$code" = '200' || { echo "::error::R2_BUCKET_POSTCHECK_HTTP_$code"; exit 1; }
           CANDIDATE_SHA="$CANDIDATE_SHA" node - "$response" <<'NODE'
           const fs=require('fs');
@@ -374,6 +381,7 @@ jobs:
           if(String(b.storage_class||'')!=='Standard')throw new Error('R2_BUCKET_POSTCHECK_STORAGE_CLASS_MISMATCH');
           console.log('R2_BUCKET_POSTCHECK_EXACT_ONE_MATCH=PASS');
           console.log(`R2_BUCKET_POSTCHECK_COUNT=${p.result.buckets.length}`);
+          console.log('R2_BUCKET_POSTCHECK_TOKEN=READ_ONLY');
           console.log('RAW_BUCKET_NAMES_PRINTED=NO');
           NODE
           cleanup
