@@ -1,0 +1,425 @@
+name: Member Production R2 bucket create
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/member-production-r2-bucket-create.yml'
+      - '.github/workflows/dispatch-member-production-r2-bucket-create-from-issue.yml'
+      - 'member_tests/member-production-r2-bucket-create-gate.test.mjs'
+      - 'docs/member-app/member-production-r2-bucket-create.md'
+      - '.github/workflows/member-app-foundation.yml'
+  workflow_dispatch:
+    inputs:
+      expected_sha:
+        description: Exact current main SHA authorized for one bucket create
+        required: true
+        type: string
+      candidate_bucket_sha256:
+        description: SHA-256 of the exact canonical bucket name
+        required: true
+        type: string
+      jurisdiction:
+        description: Exact authorized R2 jurisdiction
+        required: true
+        type: string
+      owner_ack:
+        description: Exact one-time Owner authorization receipt
+        required: true
+        type: string
+      source_comment_id:
+        description: Issue #26 Owner authorization comment ID
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  issues: read
+
+concurrency:
+  group: ${{ github.event_name == 'pull_request' && format('member-r2-bucket-create-pr-{0}', github.event.pull_request.number) || 'member-r2-bucket-create-production' }}
+  cancel-in-progress: false
+
+jobs:
+  contract:
+    name: Member R2 bucket create contract
+    if: ${{ github.event_name == 'pull_request' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact PR head
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+
+      - name: Assert exact PR head
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
+
+      - name: Verify bucket-create YAML syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          ruby -e "require 'yaml'; YAML.load_file(ARGV[0])" .github/workflows/member-production-r2-bucket-create.yml
+          ruby -e "require 'yaml'; YAML.load_file(ARGV[0])" .github/workflows/dispatch-member-production-r2-bucket-create-from-issue.yml
+          echo 'MEMBER_R2_BUCKET_CREATE_YAML=PASS'
+
+      - name: Verify bucket-create contract
+        run: node member_tests/member-production-r2-bucket-create-gate.test.mjs
+
+  create_bucket:
+    name: Exact-SHA one-time Member private R2 bucket create
+    if: ${{ github.event_name == 'workflow_dispatch' && github.actor == 'ohw3rz5578d277e-collab' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      EXPECTED_SHA_RAW: ${{ inputs.expected_sha }}
+      CANDIDATE_BUCKET_SHA256_RAW: ${{ inputs.candidate_bucket_sha256 }}
+      JURISDICTION_RAW: ${{ inputs.jurisdiction }}
+      OWNER_ACK_RAW: ${{ inputs.owner_ack }}
+      SOURCE_COMMENT_ID_RAW: ${{ inputs.source_comment_id }}
+      CANONICAL_BUCKET_NAME: customer-crm-member-private-media
+      CANONICAL_BUCKET_SHA256: 6f1f7fa25143081a302fcd148a52ae660195b2a31cf93a55f9ed39cf2e25f388
+    steps:
+      - name: Validate exact one-time Owner inputs
+        id: gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected_sha="$(printf '%s' "$EXPECTED_SHA_RAW" | tr '[:upper:]' '[:lower:]')"
+          candidate_sha="$(printf '%s' "$CANDIDATE_BUCKET_SHA256_RAW" | tr '[:upper:]' '[:lower:]')"
+          jurisdiction="$JURISDICTION_RAW"
+          owner_ack="$OWNER_ACK_RAW"
+          source_comment_id="$SOURCE_COMMENT_ID_RAW"
+
+          [[ "$expected_sha" =~ ^[0-9a-f]{40}$ ]] || { echo '::error::INVALID_EXPECTED_SHA'; exit 1; }
+          [[ "$candidate_sha" =~ ^[0-9a-f]{64}$ ]] || { echo '::error::INVALID_BUCKET_SHA256'; exit 1; }
+          [[ "$source_comment_id" =~ ^[0-9]+$ ]] || { echo '::error::INVALID_SOURCE_COMMENT_ID'; exit 1; }
+          test "$candidate_sha" = "$CANONICAL_BUCKET_SHA256" || { echo '::error::NONCANONICAL_BUCKET_DIGEST'; exit 1; }
+          test "$jurisdiction" = 'default' || { echo '::error::NONCANONICAL_R2_JURISDICTION'; exit 1; }
+          expected_ack="AUTHORIZE_MEMBER_R2_BUCKET_CREATE:${expected_sha}:${candidate_sha}:default"
+          test "$owner_ack" = "$expected_ack" || { echo '::error::OWNER_ACK_MISMATCH'; exit 1; }
+
+          echo "expected_sha=$expected_sha" >> "$GITHUB_OUTPUT"
+          echo "candidate_sha=$candidate_sha" >> "$GITHUB_OUTPUT"
+          echo "jurisdiction=$jurisdiction" >> "$GITHUB_OUTPUT"
+          echo "owner_ack=$owner_ack" >> "$GITHUB_OUTPUT"
+          echo "source_comment_id=$source_comment_id" >> "$GITHUB_OUTPUT"
+          echo "AUTHORIZED_MAIN_SHA=$expected_sha"
+          echo "AUTHORIZED_BUCKET_SHA256=$candidate_sha"
+          echo "AUTHORIZED_JURISDICTION=$jurisdiction"
+          echo "SOURCE_AUTHORIZATION_COMMENT_ID=$source_comment_id"
+          echo 'BUCKET_CREATE_AUTHORIZED_COUNT=1'
+          echo 'BUCKET_UPDATE_AUTHORIZED=0'
+          echo 'BUCKET_DELETE_AUTHORIZED=0'
+          echo 'R2_OBJECT_READ=0'
+          echo 'R2_OBJECT_WRITE=0'
+          echo 'R2_OBJECT_LIST=0'
+          echo 'R2_OBJECT_DELETE=0'
+          echo 'PRODUCTION_STORAGE_BINDING_CHANGE=0'
+          echo 'PRODUCTION_STORAGE_FETCH=0'
+          echo 'MEMBER_ROUTE_ACTIVATION=0'
+          echo 'PRIVATE_MEDIA_ROUTE_ACTIVATION=0'
+          echo 'PRODUCTION_DEPLOY=0'
+          echo 'PRODUCTION_TRAFFIC_CHANGE=0'
+          echo 'PRODUCTION_D1_WRITE=0'
+          echo 'CRM_WRITE=0'
+          echo 'LINE_SEND=0'
+          echo 'CUSTOMER_ID_GENERATION=0'
+
+      - name: Verify exact Issue #26 Owner authorization receipt
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_SHA: ${{ steps.gate.outputs.expected_sha }}
+          CANDIDATE_SHA: ${{ steps.gate.outputs.candidate_sha }}
+          OWNER_ACK: ${{ steps.gate.outputs.owner_ack }}
+          SOURCE_COMMENT_ID: ${{ steps.gate.outputs.source_comment_id }}
+        run: |
+          set -euo pipefail
+          response=/tmp/member-r2-create-owner-receipt.json
+          cleanup(){ rm -f "$response"; }
+          trap cleanup EXIT
+          code="$(curl --silent --show-error --output "$response" --write-out '%{http_code}' -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' -H 'X-GitHub-Api-Version: 2022-11-28' "https://api.github.com/repos/${GITHUB_REPOSITORY}/issues/comments/$SOURCE_COMMENT_ID")"
+          test "$code" = '200' || { echo "::error::OWNER_RECEIPT_COMMENT_HTTP_$code"; exit 1; }
+          EXPECTED_BODY="/member-production-r2-bucket-create sha=$EXPECTED_SHA bucket_sha256=$CANDIDATE_SHA jurisdiction=default owner_ack=$OWNER_ACK" SOURCE_COMMENT_ID="$SOURCE_COMMENT_ID" node - "$response" <<'NODE'
+          const fs=require('fs');
+          const p=JSON.parse(fs.readFileSync(process.argv[2],'utf8'));
+          if(String(p?.id||'')!==process.env.SOURCE_COMMENT_ID)throw new Error('OWNER_RECEIPT_COMMENT_ID_MISMATCH');
+          if(String(p?.user?.login||'')!=='ohw3rz5578d277e-collab')throw new Error('OWNER_RECEIPT_AUTHOR_MISMATCH');
+          const expectedIssue=`https://api.github.com/repos/${process.env.GITHUB_REPOSITORY}/issues/26`;
+          if(String(p?.issue_url||'')!==expectedIssue)throw new Error('OWNER_RECEIPT_NOT_ISSUE_26');
+          if(String(p?.body||'')!==process.env.EXPECTED_BODY)throw new Error('OWNER_RECEIPT_BODY_MISMATCH');
+          console.log('ISSUE_26_OWNER_AUTHORIZATION_RECEIPT=PASS');
+          console.log(`SOURCE_AUTHORIZATION_COMMENT_ID=${process.env.SOURCE_COMMENT_ID}`);
+          console.log('OWNER_RECEIPT_BODY_PRINTED=NO');
+          NODE
+          cleanup
+          trap - EXIT
+
+      - name: Checkout exact authorized main
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ steps.gate.outputs.expected_sha }}
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Exact current-main gate
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ steps.gate.outputs.expected_sha }}
+        run: |
+          set -euo pipefail
+          actual_sha="$(git rev-parse HEAD)"
+          current_main="$(git ls-remote origin refs/heads/main | awk '{print $1}')"
+          test "$actual_sha" = "$EXPECTED_SHA" || { echo "::error::CHECKOUT_SHA_MISMATCH actual=$actual_sha expected=$EXPECTED_SHA"; exit 1; }
+          test "$current_main" = "$EXPECTED_SHA" || { echo "::error::MAIN_DRIFT current=$current_main expected=$EXPECTED_SHA"; exit 1; }
+          echo 'CURRENT_MAIN_EXACT_GATE=PASS'
+
+      - name: Verify canonical Member storage remains default-off
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const fs=require('fs');
+          const entry=fs.readFileSync('src/production-index-crm-customer360-entry.js','utf8');
+          const cfg=JSON.parse(fs.readFileSync('wrangler.jsonc','utf8'));
+          const doc=fs.readFileSync('docs/member-app/member-production-r2-provisioning-plan.md','utf8');
+          const scopes=[['default',cfg],...Object.entries(cfg?.env||{}).map(([name,value])=>[`env.${name}`,value])];
+          if(!entry.includes('const MEMBER_PRODUCTION_OWNER_APPROVED=false;'))throw new Error('MEMBER_OWNER_FLAG_NOT_DEFAULT_OFF');
+          if(!entry.includes('public_asset_adapter:null'))throw new Error('PUBLIC_ASSET_ADAPTER_NOT_DEFAULT_NULL');
+          if(!entry.includes('private_media_storage_adapter:null'))throw new Error('PRIVATE_MEDIA_ADAPTER_NOT_DEFAULT_NULL');
+          for(const [name,scope] of scopes){
+            if(Array.isArray(scope?.r2_buckets)&&scope.r2_buckets.length)throw new Error(`R2_BINDING_ALREADY_DECLARED:${name}`);
+            if(String(scope?.vars?.MEMBER_PRODUCTION_ROUTE_MODE||'').trim().toLowerCase()==='enabled')throw new Error(`MEMBER_ROUTE_ENABLED:${name}`);
+            if(String(scope?.vars?.MEMBER_PRIVATE_MEDIA_CONTENT_ROUTE_MODE||'').trim().toLowerCase()==='enabled')throw new Error(`PRIVATE_MEDIA_ROUTE_ENABLED:${name}`);
+          }
+          if(!doc.includes('Proposed bucket name: `customer-crm-member-private-media`'))throw new Error('CANONICAL_BUCKET_PLAN_MISSING');
+          if(!doc.includes('Authorized jurisdiction target after separate Owner approval: `default`'))throw new Error('CANONICAL_JURISDICTION_PLAN_MISSING');
+          if(!doc.includes('Public access: disabled'))throw new Error('PUBLIC_ACCESS_DEFAULT_OFF_PLAN_MISSING');
+          console.log('MEMBER_CANONICAL_STORAGE_DEFAULT_OFF=PASS');
+          console.log('CANONICAL_R2_BINDING_DECLARED=NO');
+          NODE
+
+      - name: Install pinned Wrangler tooling
+        run: npm install --no-save wrangler@4.131.2
+
+      - name: Confirm Cloudflare authentication
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN" || { echo '::error::CLOUDFLARE_API_TOKEN_MISSING'; exit 1; }
+          test -n "$CLOUDFLARE_ACCOUNT_ID" || { echo '::error::CLOUDFLARE_ACCOUNT_ID_MISSING'; exit 1; }
+          npx wrangler whoami >/tmp/member-r2-create-whoami.txt
+          test -s /tmp/member-r2-create-whoami.txt
+          rm -f /tmp/member-r2-create-whoami.txt
+          echo 'CLOUDFLARE_AUTH=PASS'
+          echo 'TOKEN_VALUE_PRINTED=NO'
+
+      - name: Snapshot active Production version before bucket create
+        id: active_before
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          npx wrangler deployments status --name customer-crm-api --json > /tmp/member-r2-create-worker-before.json
+          active_version_id="$(node - /tmp/member-r2-create-worker-before.json <<'NODE'
+          const fs=require('fs');
+          const value=JSON.parse(fs.readFileSync(process.argv[2],'utf8'));
+          const d=Array.isArray(value)?value[0]:value;
+          const active=(d?.versions||[]).filter(v=>Number(v.percentage)===100);
+          if(active.length!==1||typeof active[0].version_id!=='string')process.exit(2);
+          process.stdout.write(active[0].version_id.toLowerCase());
+          NODE
+          )" || { echo '::error::CURRENT_ACTIVE_PRODUCTION_VERSION_UNAVAILABLE'; exit 1; }
+          [[ "$active_version_id" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] || { echo '::error::INVALID_CURRENT_ACTIVE_VERSION_ID'; exit 1; }
+          echo "active_version_id=$active_version_id" >> "$GITHUB_OUTPUT"
+          echo "ACTIVE_PRODUCTION_VERSION_BEFORE=$active_version_id"
+          rm -f /tmp/member-r2-create-worker-before.json
+
+      - name: Preflight canonical bucket absence
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CANDIDATE_SHA: ${{ steps.gate.outputs.candidate_sha }}
+        run: |
+          set -euo pipefail
+          response=/tmp/member-r2-create-preflight.json
+          cleanup(){ rm -f "$response"; }
+          trap cleanup EXIT
+          code="$(curl --silent --show-error --output "$response" --write-out '%{http_code}' -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -H 'Accept: application/json' -H 'cf-r2-jurisdiction: default' "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/r2/buckets?per_page=1000&order=name&direction=asc")"
+          test "$code" = '200' || { echo "::error::R2_BUCKET_PREFLIGHT_HTTP_$code"; exit 1; }
+          CANDIDATE_SHA="$CANDIDATE_SHA" node - "$response" <<'NODE'
+          const fs=require('fs');
+          const crypto=require('crypto');
+          const p=JSON.parse(fs.readFileSync(process.argv[2],'utf8'));
+          if(p?.success!==true||!Array.isArray(p?.result?.buckets))throw new Error('R2_BUCKET_PREFLIGHT_MALFORMED');
+          const cursor=String(p?.result_info?.cursor??p?.result?.cursor??'').trim();
+          if(cursor)throw new Error('R2_BUCKET_PREFLIGHT_PAGINATION_FORBIDDEN');
+          const digest=v=>crypto.createHash('sha256').update(v).digest('hex');
+          const names=p.result.buckets.map(b=>{
+            if(typeof b?.name!=='string'||!b.name)throw new Error('R2_BUCKET_PREFLIGHT_NAME_MISSING');
+            return b.name;
+          });
+          const matches=names.filter(name=>digest(name)===process.env.CANDIDATE_SHA).length;
+          if(matches!==0)throw new Error(`R2_CANONICAL_BUCKET_ALREADY_EXISTS_MATCHES_${matches}`);
+          console.log(`R2_BUCKET_PREFLIGHT_COUNT=${names.length}`);
+          console.log('R2_CANONICAL_BUCKET_ABSENT=PASS');
+          console.log('RAW_BUCKET_NAMES_PRINTED=NO');
+          NODE
+          cleanup
+          trap - EXIT
+
+      - name: Reconfirm main and active Worker immediately before mutation
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ steps.gate.outputs.expected_sha }}
+          ACTIVE_BEFORE: ${{ steps.active_before.outputs.active_version_id }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          current_main="$(git ls-remote origin refs/heads/main | awk '{print $1}')"
+          test "$current_main" = "$EXPECTED_SHA" || { echo "::error::PRE_MUTATION_MAIN_DRIFT current=$current_main expected=$EXPECTED_SHA"; exit 1; }
+          npx wrangler deployments status --name customer-crm-api --json > /tmp/member-r2-create-worker-premutation.json
+          active_now="$(node - /tmp/member-r2-create-worker-premutation.json <<'NODE'
+          const fs=require('fs');
+          const value=JSON.parse(fs.readFileSync(process.argv[2],'utf8'));
+          const d=Array.isArray(value)?value[0]:value;
+          const active=(d?.versions||[]).filter(v=>Number(v.percentage)===100);
+          if(active.length!==1||typeof active[0].version_id!=='string')process.exit(2);
+          process.stdout.write(active[0].version_id.toLowerCase());
+          NODE
+          )" || { rm -f /tmp/member-r2-create-worker-premutation.json; echo '::error::ACTIVE_PRODUCTION_VERSION_PRE_MUTATION_UNAVAILABLE'; exit 1; }
+          rm -f /tmp/member-r2-create-worker-premutation.json
+          test "$active_now" = "$ACTIVE_BEFORE" || { echo "::error::PRE_MUTATION_ACTIVE_WORKER_DRIFT before=$ACTIVE_BEFORE now=$active_now"; exit 1; }
+          echo 'PRE_MUTATION_MAIN_DRIFT=NO'
+          echo 'PRE_MUTATION_ACTIVE_WORKER_DRIFT=NO'
+
+      - name: Create exactly one canonical private-media bucket
+        id: create
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CANDIDATE_SHA: ${{ steps.gate.outputs.candidate_sha }}
+        run: |
+          set -euo pipefail
+          response=/tmp/member-r2-create-response.json
+          body=/tmp/member-r2-create-body.json
+          cleanup(){ rm -f "$response" "$body"; }
+          trap cleanup EXIT
+          node -e 'require("fs").writeFileSync(process.argv[1],JSON.stringify({name:"customer-crm-member-private-media",storageClass:"Standard"}))' "$body"
+          echo 'R2_BUCKET_CREATE_REQUEST_COUNT=1'
+          code="$(curl --silent --show-error --output "$response" --write-out '%{http_code}' --request POST -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -H 'Content-Type: application/json' -H 'Accept: application/json' -H 'cf-r2-jurisdiction: default' "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/r2/buckets" --data-binary "@$body")"
+          [[ "$code" = '200' || "$code" = '201' ]] || { echo "::error::R2_BUCKET_CREATE_HTTP_$code"; exit 1; }
+          CANDIDATE_SHA="$CANDIDATE_SHA" node - "$response" <<'NODE'
+          const fs=require('fs');
+          const crypto=require('crypto');
+          const p=JSON.parse(fs.readFileSync(process.argv[2],'utf8'));
+          if(p?.success!==true||typeof p?.result!=='object'||p.result===null)throw new Error('R2_BUCKET_CREATE_RESPONSE_MALFORMED');
+          if(typeof p.result.name!=='string'||!p.result.name)throw new Error('R2_BUCKET_CREATE_NAME_MISSING');
+          const actual=crypto.createHash('sha256').update(p.result.name).digest('hex');
+          if(actual!==process.env.CANDIDATE_SHA)throw new Error('R2_BUCKET_CREATE_DIGEST_MISMATCH');
+          if(String(p.result.jurisdiction||'')!=='default')throw new Error('R2_BUCKET_CREATE_JURISDICTION_MISMATCH');
+          if(String(p.result.storage_class||'')!=='Standard')throw new Error('R2_BUCKET_CREATE_STORAGE_CLASS_MISMATCH');
+          const location=String(p.result.location||'unknown');
+          if(!/^(apac|eeur|enam|weur|wnam|oc|unknown)$/.test(location))throw new Error('R2_BUCKET_CREATE_LOCATION_UNEXPECTED');
+          console.log(`CREATED_BUCKET_SHA256=${actual}`);
+          console.log('CREATED_BUCKET_JURISDICTION=default');
+          console.log('CREATED_BUCKET_STORAGE_CLASS=Standard');
+          console.log(`CREATED_BUCKET_LOCATION=${location}`);
+          console.log('RAW_BUCKET_NAME_PRINTED=NO');
+          NODE
+          cleanup
+          trap - EXIT
+
+      - name: Verify exact-one-match after creation
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CANDIDATE_SHA: ${{ steps.gate.outputs.candidate_sha }}
+        run: |
+          set -euo pipefail
+          response=/tmp/member-r2-create-postcheck.json
+          cleanup(){ rm -f "$response"; }
+          trap cleanup EXIT
+          code="$(curl --silent --show-error --output "$response" --write-out '%{http_code}' -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -H 'Accept: application/json' -H 'cf-r2-jurisdiction: default' "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/r2/buckets?per_page=1000&order=name&direction=asc")"
+          test "$code" = '200' || { echo "::error::R2_BUCKET_POSTCHECK_HTTP_$code"; exit 1; }
+          CANDIDATE_SHA="$CANDIDATE_SHA" node - "$response" <<'NODE'
+          const fs=require('fs');
+          const crypto=require('crypto');
+          const p=JSON.parse(fs.readFileSync(process.argv[2],'utf8'));
+          if(p?.success!==true||!Array.isArray(p?.result?.buckets))throw new Error('R2_BUCKET_POSTCHECK_MALFORMED');
+          const cursor=String(p?.result_info?.cursor??p?.result?.cursor??'').trim();
+          if(cursor)throw new Error('R2_BUCKET_POSTCHECK_PAGINATION_FORBIDDEN');
+          const digest=v=>crypto.createHash('sha256').update(v).digest('hex');
+          const matches=[];
+          for(const bucket of p.result.buckets){
+            if(typeof bucket?.name!=='string'||!bucket.name)throw new Error('R2_BUCKET_POSTCHECK_NAME_MISSING');
+            if(digest(bucket.name)===process.env.CANDIDATE_SHA)matches.push(bucket);
+          }
+          if(matches.length!==1)throw new Error(`R2_BUCKET_POSTCHECK_MATCH_COUNT_${matches.length}`);
+          const b=matches[0];
+          if(String(b.jurisdiction||'')!=='default')throw new Error('R2_BUCKET_POSTCHECK_JURISDICTION_MISMATCH');
+          if(String(b.storage_class||'')!=='Standard')throw new Error('R2_BUCKET_POSTCHECK_STORAGE_CLASS_MISMATCH');
+          console.log('R2_BUCKET_POSTCHECK_EXACT_ONE_MATCH=PASS');
+          console.log(`R2_BUCKET_POSTCHECK_COUNT=${p.result.buckets.length}`);
+          console.log('RAW_BUCKET_NAMES_PRINTED=NO');
+          NODE
+          cleanup
+          trap - EXIT
+
+      - name: Verify active Production version and main remained stable
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          ACTIVE_BEFORE: ${{ steps.active_before.outputs.active_version_id }}
+          EXPECTED_SHA: ${{ steps.gate.outputs.expected_sha }}
+        run: |
+          set -euo pipefail
+          npx wrangler deployments status --name customer-crm-api --json > /tmp/member-r2-create-worker-after.json
+          active_after="$(node - /tmp/member-r2-create-worker-after.json <<'NODE'
+          const fs=require('fs');
+          const value=JSON.parse(fs.readFileSync(process.argv[2],'utf8'));
+          const d=Array.isArray(value)?value[0]:value;
+          const active=(d?.versions||[]).filter(v=>Number(v.percentage)===100);
+          if(active.length!==1||typeof active[0].version_id!=='string')process.exit(2);
+          process.stdout.write(active[0].version_id.toLowerCase());
+          NODE
+          )" || { rm -f /tmp/member-r2-create-worker-after.json; echo '::error::ACTIVE_PRODUCTION_VERSION_AFTER_UNAVAILABLE'; exit 1; }
+          rm -f /tmp/member-r2-create-worker-after.json
+          test "$active_after" = "$ACTIVE_BEFORE" || { echo "::error::ACTIVE_PRODUCTION_VERSION_DRIFT before=$ACTIVE_BEFORE after=$active_after"; exit 1; }
+          current_main="$(git ls-remote origin refs/heads/main | awk '{print $1}')"
+          test "$current_main" = "$EXPECTED_SHA" || { echo "::error::MAIN_DRIFT_AFTER_CREATE current=$current_main expected=$EXPECTED_SHA"; exit 1; }
+          echo "ACTIVE_PRODUCTION_VERSION_AFTER=$active_after"
+          echo 'ACTIVE_PRODUCTION_VERSION_DRIFT=NO'
+          echo 'MAIN_DRIFT=NO'
+          echo 'MEMBER_R2_BUCKET_CREATE=SUCCESS'
+          echo 'BUCKET_CREATE_COUNT=1'
+          echo 'BUCKET_UPDATE_COUNT=0'
+          echo 'BUCKET_DELETE_COUNT=0'
+          echo 'R2_OBJECT_READ=0'
+          echo 'R2_OBJECT_WRITE=0'
+          echo 'R2_OBJECT_LIST=0'
+          echo 'R2_OBJECT_DELETE=0'
+          echo 'PRODUCTION_STORAGE_BINDING_CHANGE=0'
+          echo 'PRODUCTION_STORAGE_FETCH=0'
+          echo 'MEMBER_ROUTE_ACTIVATION=0'
+          echo 'PRIVATE_MEDIA_ROUTE_ACTIVATION=0'
+          echo 'PRODUCTION_DEPLOY=0'
+          echo 'PRODUCTION_TRAFFIC_CHANGE=0'
+          echo 'PRODUCTION_D1_WRITE=0'
+          echo 'CRM_WRITE=0'
+          echo 'LINE_SEND=0'
+          echo 'CUSTOMER_ID_GENERATION=0'
