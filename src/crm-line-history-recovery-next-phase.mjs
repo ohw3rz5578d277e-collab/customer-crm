@@ -73,9 +73,19 @@ export function isValidOwnerWriteCompletionReceipt(receipt,currentMainSha=''){
   const exactRows=exactInt(receipt.exact_physical_insert_rows);
   const blockerCount=exactInt(receipt.blocker_count);
   const remainingRows=exactInt(receipt.post_preview_would_insert_rows);
+  const reportedRows=exactInt(receipt.reported_change_rows);
   if(exactRows===null||exactRows<1)return false;
   if(blockerCount!==0||remainingRows!==0)return false;
   if(!Array.isArray(receipt.blockers)||receipt.blockers.length!==0)return false;
+  if(reportedRows===null||reportedRows<0)return false;
+
+  if(receipt.change_metadata_found===true){
+    if(reportedRows!==exactRows)return false;
+  }else if(receipt.change_metadata_found===false){
+    if(reportedRows!==0)return false;
+  }else{
+    return false;
+  }
 
   const safety=receipt.safety;
   if(!safety||typeof safety!=='object'||Array.isArray(safety))return false;
