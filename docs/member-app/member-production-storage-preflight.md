@@ -35,7 +35,7 @@ Before any future binding change, the repository needs durable evidence that:
 4. Worker-management authentication can read the current Production deployment state;
 5. the dedicated R2 credential is an active Cloudflare REST API bearer token;
 6. that least-privilege token can perform account-level bucket inventory for the **Owner-authorized jurisdiction subset only**;
-7. no unapproved jurisdiction is silently added by the workflow;
+7. no unapproved jurisdiction is silently added or normalized by the workflow;
 8. the active 100%-traffic Worker version remains stable during the observation;
 9. a candidate bucket, represented only by its SHA-256 name digest in GitHub metadata, exists exactly once across the authorized jurisdiction inventories.
 
@@ -51,7 +51,7 @@ Supported jurisdiction values remain:
 
 The preflight no longer assumes that every account can access all five. Each execution must include an explicit `jurisdictions=` argument.
 
-The value is a comma-separated subset in canonical order:
+The value is an **exact lowercase** comma-separated subset in canonical order:
 
 `default,eu,us,fedramp,fedramp-high`
 
@@ -61,9 +61,9 @@ Examples:
 - FedRAMP-only scope: `jurisdictions=fedramp,fedramp-high`
 - one jurisdiction only: `jurisdictions=default`
 
-There is intentionally no shorthand such as `all`, `standard`, `auto`, or an omitted/default scope. Unknown values, duplicates, whitespace, or non-canonical ordering fail closed before any Cloudflare bucket request.
+There is intentionally no shorthand such as `all`, `standard`, `auto`, or an omitted/default scope. Unknown values, uppercase/mixed-case spellings, duplicates, whitespace, leading/trailing commas, empty comma-separated entries, or non-canonical ordering fail closed before any Cloudflare bucket request. The workflow does not lowercase or otherwise normalize the submitted jurisdiction string before authorization evidence is recorded.
 
-The workflow queries only the explicit subset. Each request is an account-level `GET /accounts/{account_id}/r2/buckets` with the matching `cf-r2-jurisdiction` header and the dedicated R2 REST read token.
+The workflow queries only the exact explicit subset. Each request is an account-level `GET /accounts/{account_id}/r2/buckets` with the matching `cf-r2-jurisdiction` header and the dedicated R2 REST read token.
 
 The workflow fails closed if any authorized jurisdiction request does not succeed or if a response requires pagination beyond the single complete page supported by this gate.
 
@@ -118,6 +118,8 @@ The workflow fails closed if:
 - the dedicated R2 read secret is absent;
 - the dedicated R2 secret contains whitespace or is not accepted as an active Cloudflare REST bearer token;
 - `jurisdictions` is missing or contains whitespace;
+- jurisdiction casing is not exact lowercase canonical form;
+- the jurisdiction string contains a leading/trailing comma or an empty entry;
 - a jurisdiction value is unsupported;
 - the same jurisdiction is repeated;
 - jurisdictions are not listed in canonical order;
