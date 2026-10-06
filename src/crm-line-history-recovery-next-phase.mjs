@@ -44,12 +44,10 @@ function hasValidWriteReceiptHashChain(receipt,artifactDigests=null){
     if(!exactDigest(receipt?.[key]))return false;
   }
 
-  if(artifactDigests!==null&&artifactDigests!==undefined){
-    if(!artifactDigests||typeof artifactDigests!=='object'||Array.isArray(artifactDigests))return false;
-    for(const key of WRITE_RECEIPT_DIGEST_FIELDS){
-      if(!exactDigest(artifactDigests[key]))return false;
-      if(String(receipt[key])!==String(artifactDigests[key]))return false;
-    }
+  if(!artifactDigests||typeof artifactDigests!=='object'||Array.isArray(artifactDigests))return false;
+  for(const key of WRITE_RECEIPT_DIGEST_FIELDS){
+    if(!exactDigest(artifactDigests[key]))return false;
+    if(String(receipt[key])!==String(artifactDigests[key]))return false;
   }
 
   return true;
