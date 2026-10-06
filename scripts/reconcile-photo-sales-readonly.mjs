@@ -5,6 +5,8 @@ import {
   reconcileSalesHistory,
   SALES_RECONCILIATION_BUILD
 } from '../src/crm-sales-history-reconciliation.mjs';
+import { parseProductionSnapshotText } from '../src/crm-sales-snapshot.mjs';
+import { safeCsvCell, escapeHtml } from '../src/crm-sales-output-safety.mjs';
 
 function arg(name){const i=process.argv.indexOf(name);return i>=0?String(process.argv[i+1]||''):''}
 function required(name){const value=arg(name);if(!value)throw new Error('missing_argument:'+name);return value}
@@ -17,51 +19,6 @@ function unwrapRows(value){
   }
   return [];
 }
-function scanJsonObjects(text){
-  const out=[];
-  for(let start=0;start<text.length;start++){
-    if(text[start]!=='{'&&text[start]!=='[')continue;
-    let depth=0,inString=false,escaped=false;
-    for(let i=start;i<text.length;i++){
-      const c=text[i];
-      if(inString){if(escaped)escaped=false;else if(c==='\\')escaped=true;else if(c==='"')inString=false;continue}
-      if(c==='"'){inString=true;continue}
-      if(c==='{'||c==='[')depth++;
-      else if(c==='}'||c===']'){
-        depth--;
-        if(depth===0){
-          try{out.push(JSON.parse(text.slice(start,i+1)));start=i}catch{}
-          break;
-        }
-      }
-    }
-  }
-  return out;
-}
-function collectCustomerRows(value,out=[]){
-  if(Array.isArray(value)){for(const item of value)collectCustomerRows(item,out);return out}
-  if(!value||typeof value!=='object')return out;
-  if(Object.prototype.hasOwnProperty.call(value,'customer_id')&&Object.prototype.hasOwnProperty.call(value,'name'))out.push(value);
-  if(Array.isArray(value.results))for(const row of value.results)collectCustomerRows(row,out);
-  else for(const item of Object.values(value))collectCustomerRows(item,out);
-  return out;
-}
-function readProductionSnapshot(file){
-  const raw=fs.readFileSync(file,'utf8').replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g,'');
-  let objects=[];
-  try{objects=[JSON.parse(raw)]}catch{objects=scanJsonObjects(raw)}
-  const rows=[],seen=new Set();
-  for(const obj of objects){
-    for(const row of collectCustomerRows(obj)){
-      const id=String(row?.customer_id||'').trim();
-      if(!id||seen.has(id))continue;
-      seen.add(id);rows.push(row);
-    }
-  }
-  return rows;
-}
-function csvCell(v){const s=Array.isArray(v)?v.join(' | '):String(v??'');return '"'+s.replaceAll('"','""')+'"'}
-function esc(v){return String(v??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#39;')}
 
 const salesRecordsPath=required('--sales-records');
 const customerMasterPath=required('--customer-master');
@@ -69,14 +26,14 @@ const productionCustomersPath=required('--production-customers');
 const outDir=required('--out-dir');
 const lineEvidencePath=arg('--line-evidence');
 
-for(const file of [salesRecordsPath,customerMasterPath,productionCustomersPath])if(!fs.existsSync(file))throw new Error('input_file_missing:'+file);
+for(const file of [salesRecordsPath,customerMasterPath,productionCustomersPath])if(!fs.existsSync(file))throw new Error('input_file_missing');
 if(lineEvidencePath&&!fs.existsSync(lineEvidencePath))throw new Error('line_evidence_file_missing');
 fs.mkdirSync(outDir,{recursive:true});
 
 const salesRecords=unwrapRows(readJson(salesRecordsPath));
 const customerMaster=unwrapRows(readJson(customerMasterPath));
 const lineEvidence=lineEvidencePath?(readJson(lineEvidencePath).evidence_rows||[]):[];
-const productionCustomers=readProductionSnapshot(productionCustomersPath);
+const productionCustomers=parseProductionSnapshotText(fs.readFileSync(productionCustomersPath,'utf8'));
 
 if(!salesRecords.length)throw new Error('sales_records_empty');
 if(!customerMaster.length)throw new Error('customer_master_empty');
@@ -100,7 +57,8 @@ const summary={
   line_review_evidence_count:result.review_evidence_count,safe_existing_target_count:result.safe_existing_target_count,unresolved_count:result.unresolved_count,
   production_duplicate_name_groups:result.production_duplicate_name_groups,production_duplicate_line_user_id_groups:result.production_duplicate_line_user_id_groups,
   classification_counts:result.classification_counts,automatic_customer_creation:false,automatic_customer_merge:false,fuzzy_auto_link:false,line_body_auto_link:false,
-  name_only_unmatched_auto_create:false,customer_id_generation:false,production_network_access:false,production_d1_read:false,production_d1_write:false
+  name_only_unmatched_auto_create:false,customer_id_generation:false,production_network_access:false,production_d1_read:false,production_d1_write:false,
+  production_snapshot_parse:'strict_complete_json'
 };
 fs.writeFileSync(path.join(outDir,'summary.json'),JSON.stringify(summary,null,2)+'\n');
 
@@ -108,13 +66,13 @@ const headers=['sales_name','shoot_count','shoot_dates','years','is_repeater','d
 const csv=[headers.join(',')];
 for(const row of result.rows){
   const record={sales_name:row.name,shoot_count:row.shoot_count,shoot_dates:row.shoot_dates,years:row.years,is_repeater:row.is_repeater?'YES':'NO',duplicate_same_day_rows:row.duplicate_same_day_rows,classification:row.classification,target_customer_id:row.target_customer_id,safe_existing_target:row.safe_existing_target?'YES':'NO',production_exact_match_count:row.production_exact_match_count,customer_master_exact_match_count:row.customer_master_exact_match_count,line_body_exact_name_evidence_count:row.line_body_exact_name_evidence_count,evidence:row.evidence};
-  csv.push(headers.map(h=>csvCell(record[h])).join(','));
+  csv.push(headers.map(h=>safeCsvCell(record[h])).join(','));
 }
 fs.writeFileSync(path.join(outDir,'review.csv'),'\ufeff'+csv.join('\n')+'\n');
 
-const body=result.rows.map(row=>`<tr><td>${esc(row.name)}</td><td>${row.shoot_count}</td><td>${esc(row.shoot_dates.join(' / '))}</td><td>${esc(row.years.join(', '))}</td><td>${row.is_repeater?'リピーター候補':'初回候補'}</td><td>${esc(row.classification)}</td><td>${esc(row.target_customer_id)}</td><td>${row.safe_existing_target?'既存顧客候補':'自動処理禁止'}</td><td>${row.line_body_exact_name_evidence_count}</td><td>${esc(row.evidence)}</td></tr>`).join('');
-const classList=Object.entries(result.classification_counts).sort(([a],[b])=>a.localeCompare(b)).map(([k,v])=>`<li><b>${esc(k)}</b>: ${v}</li>`).join('');
-const html=`<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>売上管理 × CRM local-only照合</title><style>body{font-family:-apple-system,BlinkMacSystemFont,"Helvetica Neue",Arial,sans-serif;margin:24px;line-height:1.5;color:#171717}h1{font-size:24px}.notice{border:1px solid #bbb;border-radius:10px;padding:12px 14px;background:#fafafa}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px;margin:14px 0}.card{border:1px solid #ddd;border-radius:8px;padding:10px}table{border-collapse:collapse;width:100%;font-size:12px}th,td{border:1px solid #ddd;padding:6px;vertical-align:top}th{position:sticky;top:0;background:white}</style></head><body><h1>売上管理 × Customer Master × Production snapshot</h1><div class="notice">LOCAL ONLY照合です。このツール自身はProductionへ接続しません。名前だけでの自動統合、新規顧客作成、Customer ID生成、顧客merge、Production D1 read/writeは行いません。</div><div class="grid"><div class="card">売上行<br><b>${analysis.source_row_count}</b></div><div class="card">売上顧客<br><b>${analysis.customer_count}</b></div><div class="card">同日重複行<br><b>${analysis.duplicate_same_day_rows}</b></div><div class="card">リピーター候補<br><b>${analysis.repeater_count}</b></div><div class="card">既存顧客安全候補<br><b>${result.safe_existing_target_count}</b></div><div class="card">LINE追加証拠<br><b>${result.review_evidence_count}</b></div><div class="card">未解決<br><b>${result.unresolved_count}</b></div></div><h2>分類</h2><ul>${classList}</ul><h2>顧客別</h2><table><thead><tr><th>売上管理名</th><th>撮影回数</th><th>撮影日</th><th>年</th><th>リピート</th><th>分類</th><th>既存Customer ID候補</th><th>処理</th><th>LINE証拠数</th><th>根拠</th></tr></thead><tbody>${body}</tbody></table></body></html>`;
+const body=result.rows.map(row=>`<tr><td>${escapeHtml(row.name)}</td><td>${row.shoot_count}</td><td>${escapeHtml(row.shoot_dates.join(' / '))}</td><td>${escapeHtml(row.years.join(', '))}</td><td>${row.is_repeater?'リピーター候補':'初回候補'}</td><td>${escapeHtml(row.classification)}</td><td>${escapeHtml(row.target_customer_id)}</td><td>${row.safe_existing_target?'既存顧客候補':'自動処理禁止'}</td><td>${row.line_body_exact_name_evidence_count}</td><td>${escapeHtml(row.evidence)}</td></tr>`).join('');
+const classList=Object.entries(result.classification_counts).sort(([a],[b])=>a.localeCompare(b)).map(([k,v])=>`<li><b>${escapeHtml(k)}</b>: ${v}</li>`).join('');
+const html=`<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>売上管理 × CRM local-only照合</title><style>body{font-family:-apple-system,BlinkMacSystemFont,"Helvetica Neue",Arial,sans-serif;margin:24px;line-height:1.5;color:#171717}h1{font-size:24px}.notice{border:1px solid #bbb;border-radius:10px;padding:12px 14px;background:#fafafa}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px;margin:14px 0}.card{border:1px solid #ddd;border-radius:8px;padding:10px}table{border-collapse:collapse;width:100%;font-size:12px}th,td{border:1px solid #ddd;padding:6px;vertical-align:top}th{position:sticky;top:0;background:white}</style></head><body><h1>売上管理 × Customer Master × Production snapshot</h1><div class="notice">LOCAL ONLY照合です。このツール自身はProductionへ接続しません。Production snapshotは完全なJSONのみ受理します。名前だけでの自動統合、新規顧客作成、Customer ID生成、顧客merge、Production D1 read/writeは行いません。</div><div class="grid"><div class="card">売上行<br><b>${analysis.source_row_count}</b></div><div class="card">売上顧客<br><b>${analysis.customer_count}</b></div><div class="card">同日重複行<br><b>${analysis.duplicate_same_day_rows}</b></div><div class="card">リピーター候補<br><b>${analysis.repeater_count}</b></div><div class="card">既存顧客安全候補<br><b>${result.safe_existing_target_count}</b></div><div class="card">LINE追加証拠<br><b>${result.review_evidence_count}</b></div><div class="card">未解決<br><b>${result.unresolved_count}</b></div></div><h2>分類</h2><ul>${classList}</ul><h2>顧客別</h2><table><thead><tr><th>売上管理名</th><th>撮影回数</th><th>撮影日</th><th>年</th><th>リピート</th><th>分類</th><th>既存Customer ID候補</th><th>処理</th><th>LINE証拠数</th><th>根拠</th></tr></thead><tbody>${body}</tbody></table></body></html>`;
 fs.writeFileSync(path.join(outDir,'review.html'),html);
 
 console.log('RESULT=SALES_CRM_LOCAL_RECONCILIATION_COMPLETE');
@@ -129,6 +87,7 @@ console.log('LINE_NAME_EVIDENCE_ROWS='+result.line_name_evidence_rows);
 console.log('SAFE_EXISTING_TARGETS='+result.safe_existing_target_count);
 console.log('UNRESOLVED='+result.unresolved_count);
 for(const [key,value] of Object.entries(result.classification_counts).sort())console.log('CLASS_'+key+'='+value);
+console.log('PRODUCTION_SNAPSHOT_PARSE=STRICT_COMPLETE_JSON');
 console.log('AUTOMATIC_CUSTOMER_CREATION=0');
 console.log('CUSTOMER_ID_GENERATION=0');
 console.log('CUSTOMER_MERGE=0');
