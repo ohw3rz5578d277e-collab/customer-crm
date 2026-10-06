@@ -51,6 +51,8 @@ function writeReceipt(mainSha='a'.repeat(40)){
     source_main_sha:mainSha,
     authorization_scope:'CUSTOMER_LINE_MESSAGES_INSERT_ONLY',
     exact_physical_insert_rows:2,
+    change_metadata_found:true,
+    reported_change_rows:2,
     post_preview_would_insert_rows:0,
     blocker_count:0,
     blockers:[],
@@ -173,12 +175,23 @@ expectStage({
   currentMainSha:exactMainSha
 },'COMPLETE','none',false);
 
+const validWriteNoMetadata={
+  ...validWrite,
+  change_metadata_found:false,
+  reported_change_rows:0
+};
+assert.equal(isValidOwnerWriteCompletionReceipt(validWriteNoMetadata,exactMainSha),true);
+
 for(const bad of [
   {complete:true},
   {...validWrite,planner:'legacy'},
   {...validWrite,source_main_sha:'b'.repeat(40)},
   {...validWrite,blocker_count:1,blockers:['X']},
   {...validWrite,post_preview_would_insert_rows:1},
+  {...validWrite,change_metadata_found:true,reported_change_rows:0},
+  {...validWrite,change_metadata_found:true,reported_change_rows:3},
+  {...validWrite,change_metadata_found:false,reported_change_rows:2},
+  {...validWrite,change_metadata_found:'true'},
   {...validWrite,safety:{...validWrite.safety,line_send:1}}
 ]){
   assert.equal(isValidOwnerWriteCompletionReceipt(bad,exactMainSha),false);
@@ -265,6 +278,7 @@ console.log('LINE_HISTORY_RECOVERY_NEXT_PHASE_PREAUTH=PASS');
 console.log('LINE_HISTORY_RECOVERY_NEXT_PHASE_NO_WRITE_RECEIPT=PASS');
 console.log('LINE_HISTORY_RECOVERY_NEXT_PHASE_DECISION_SUMMARY=PASS');
 console.log('LINE_HISTORY_RECOVERY_NEXT_PHASE_WRITE_RECEIPT=PASS');
+console.log('LINE_HISTORY_RECOVERY_NEXT_PHASE_WRITE_CHANGE_COUNT=PASS');
 console.log('LINE_HISTORY_RECOVERY_NEXT_PHASE_D1_PREVIEW=PASS');
 console.log('LINE_HISTORY_RECOVERY_NEXT_PHASE_STALE_PACKET=PASS');
 console.log('LINE_HISTORY_RECOVERY_NEXT_PHASE_EXACT_APPROVAL=PASS');
