@@ -79,8 +79,8 @@ function recognizedNoWriteReceipt(p){
   return !!(
     raw&&
     raw.complete===true&&
-    text(raw.receipt_format)==='customer-crm-line-history-no-write-completion-v1'&&
-    text(raw.completion_type)==='OWNER_DECISIONS_NO_WRITE'
+    String(raw.receipt_format||'')==='customer-crm-line-history-no-write-completion-v1'&&
+    String(raw.completion_type||'')==='OWNER_DECISIONS_NO_WRITE'
   );
 }
 function preauthDirFromFile(p){
