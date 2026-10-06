@@ -37,32 +37,54 @@ function assertNoCanaryOutput(result,label){
   }
 }
 
-const IDENT='(?:"(?:""|[^"])+"|`(?:``|[^`])+`|\\[(?:\\]\\]|[^\\]])+\\]|[A-Za-z_][A-Za-z0-9_$]*)';
-const QUALIFIED_IDENT=`${IDENT}(?:\\s*\\.\\s*${IDENT}){0,2}`;
-const OR_CONFLICT='(?:OR\\s+(?:ROLLBACK|ABORT|FAIL|IGNORE|REPLACE)\\s+)?';
-const UPDATE_QUALIFIERS=`(?:(?:\\s+AS\\s+${IDENT})|(?:\\s+INDEXED\\s+BY\\s+${IDENT})|(?:\\s+NOT\\s+INDEXED))*`;
+const BLOCK_COMMENT='/\\*(?:[^*]|\\*(?!\\/))*\\*/';
+const SQL_SEPARATOR_ATOM=`(?:\\s|${BLOCK_COMMENT}|--[^\\r\\n]*(?:\\r\\n|\\r|\\n|$))`;
+const SQL_SEP=`(?:${SQL_SEPARATOR_ATOM})+`;
+const SQL_GAP=`(?:${SQL_SEPARATOR_ATOM})*`;
+const IDENT="(?:\"(?:\"\"|[^\"])+\"|`(?:``|[^`])+`|'(?:''|[^'])+'|\\[(?:\\]\\]|[^\\]])+\\]|[A-Za-z_][A-Za-z0-9_$]*)";
+const QUALIFIED_IDENT=`${IDENT}(?:${SQL_GAP}\\.${SQL_GAP}${IDENT}){0,2}`;
+const OR_CONFLICT=`(?:OR${SQL_SEP}(?:ROLLBACK|ABORT|FAIL|IGNORE|REPLACE)${SQL_SEP})?`;
+const UPDATE_QUALIFIERS=`(?:(?:${SQL_SEP}AS${SQL_SEP}${IDENT})|(?:${SQL_SEP}INDEXED${SQL_SEP}BY${SQL_SEP}${IDENT})|(?:${SQL_SEP}NOT${SQL_SEP}INDEXED))*`;
+const CREATE_MODIFIERS=`(?:(?:TEMP|TEMPORARY|UNIQUE|VIRTUAL)${SQL_SEP})*`;
 const SQL_MUTATION_PATTERNS=[
-  new RegExp(`\\bINSERT\\s+${OR_CONFLICT}INTO\\s+${QUALIFIED_IDENT}`,'i'),
-  new RegExp(`\\bUPDATE\\s+${OR_CONFLICT}${QUALIFIED_IDENT}${UPDATE_QUALIFIERS}\\s+SET\\b`,'i'),
-  new RegExp(`\\bDELETE\\s+FROM\\s+${QUALIFIED_IDENT}`,'i'),
-  /\bCREATE\s+(?:(?:TEMP|TEMPORARY|UNIQUE|VIRTUAL)\s+)*(?:TABLE|INDEX|TRIGGER|VIEW)\b/i,
-  /\bALTER\s+TABLE\b/i,
-  /\bDROP\s+(?:TABLE|INDEX|TRIGGER|VIEW)\b/i,
-  /\bREPLACE\s+(?:INTO\s+)?/i,
-  /\bTRUNCATE(?:\s+TABLE)?\b/i,
-  /\bUPSERT\s+/i,
-  /\b(?:PRAGMA|VACUUM|REINDEX|ANALYZE)\b/i,
-  /\b(?:ATTACH|DETACH)\s+(?:DATABASE\s+)?/i
+  new RegExp(`\\bINSERT${SQL_SEP}${OR_CONFLICT}INTO${SQL_SEP}${QUALIFIED_IDENT}`,'i'),
+  new RegExp(`\\bUPDATE${SQL_SEP}${OR_CONFLICT}${QUALIFIED_IDENT}${UPDATE_QUALIFIERS}${SQL_SEP}SET\\b`,'i'),
+  new RegExp(`\\bDELETE${SQL_SEP}FROM${SQL_SEP}${QUALIFIED_IDENT}`,'i'),
+  new RegExp(`\\bCREATE${SQL_SEP}${CREATE_MODIFIERS}(?:TABLE|INDEX|TRIGGER|VIEW)\\b`,'i'),
+  new RegExp(`\\bALTER${SQL_SEP}TABLE${SQL_SEP}${QUALIFIED_IDENT}`,'i'),
+  new RegExp(`\\bDROP${SQL_SEP}(?:TABLE|INDEX|TRIGGER|VIEW)${SQL_SEP}(?:IF${SQL_SEP}EXISTS${SQL_SEP})?${QUALIFIED_IDENT}`,'i'),
+  new RegExp(`\\bREPLACE${SQL_SEP}(?:INTO${SQL_SEP})?${QUALIFIED_IDENT}`,'i'),
+  new RegExp(`\\bTRUNCATE${SQL_SEP}(?:TABLE${SQL_SEP})?${QUALIFIED_IDENT}`,'i'),
+  new RegExp(`\\bUPSERT${SQL_SEP}${QUALIFIED_IDENT}`,'i'),
+  /\bPRAGMA\b/i,
+  /\bVACUUM\b/i,
+  /\bREINDEX\b/i,
+  /\bANALYZE\b/i,
+  new RegExp(`\\bATTACH${SQL_SEP}(?:DATABASE${SQL_SEP})?`,'i'),
+  new RegExp(`\\bDETACH${SQL_SEP}(?:DATABASE${SQL_SEP})?`,'i')
 ];
-const normalizeSqlForScan=value=>String(value)
-  .replace(/\/\*[\s\S]*?\*\//g,' ')
-  .replace(/--[^\r\n]*(?:\r?\n|$)/g,' ');
+function normalizeSqlForScan(value){
+  let out=String(value??'');
+  out=out.replace(/\\(?:\r\n|\r|\n|\u2028|\u2029)/g,'');
+  for(let i=0;i<2;i++){
+    out=out
+      .replace(/\\\"/g,'\"')
+      .replace(/\\'/g,"'")
+      .replace(/\\`/g,'`')
+      .replace(/\\\[/g,'[')
+      .replace(/\\\]/g,']')
+      .replace(/\\n/g,'\n')
+      .replace(/\\r/g,'\r')
+      .replace(/\\t/g,'\t');
+  }
+  return out;
+}
 const hasMutationSql=value=>SQL_MUTATION_PATTERNS.some(re=>re.test(normalizeSqlForScan(value)));
 
 const JS_GAP='(?:(?:\\s)|(?:/\\*[\\s\\S]*?\\*/)|(?://[^\\r\\n]*(?:\\r?\\n|$)))*';
 const NETWORK_BUILTIN='(?:http|https|http2|net|tls|dns(?:/promises)?|dgram)';
 const NETWORK_SPECIFIER=`(?:(?:node:)?${NETWORK_BUILTIN}|cloudflare:sockets|undici|axios|got|node-fetch)`;
-const NETWORK_MODULE_RE=new RegExp(`(?:\\bfrom${JS_GAP}|\\brequire${JS_GAP}\\(${JS_GAP}|\\bimport${JS_GAP}\\(${JS_GAP}|\\bimport${JS_GAP})(['"\\x60])${NETWORK_SPECIFIER}\\1`,'i');
+const NETWORK_MODULE_RE=new RegExp(`(?:\\bfrom${JS_GAP}|\\brequire${JS_GAP}\\(${JS_GAP}|\\bimport${JS_GAP}\\(${JS_GAP}|\\bimport${JS_GAP})(['\"\\x60])${NETWORK_SPECIFIER}\\1`,'i');
 const hasNetworkSurface=value=>[
   NETWORK_MODULE_RE,
   new RegExp(`\\bprocess${JS_GAP}\\.${JS_GAP}getBuiltinModule${JS_GAP}\\(`,'i'),
@@ -254,15 +276,18 @@ try{
     'UPDATE customers SET name=1',
     "UPDATE/**/customers/**/SET name='new'",
     "UPDATE--comment\ncustomers--comment\nSET name='new'",
+    String.raw`const sql="UPDATE--x\ncustomers--x\nSET name='new'";`,
     'UPDATE main.customers SET name=1',
     'UPDATE customers AS c SET name=1',
     'UPDATE customers INDEXED BY idx SET name=1',
     'DELETE FROM main.customers',
     'DELETE/**/FROM/**/main.customers',
     'DELETE--comment\nFROM--comment\nmain.customers',
+    String.raw`const sql="DELETE--x\nFROM--x\nmain.customers";`,
     'CREATE TABLE t(x INTEGER)',
     'CREATE/**/UNIQUE/**/INDEX idx ON customers(customer_id)',
     'CREATE--comment\nUNIQUE--comment\nINDEX idx ON customers(customer_id)',
+    String.raw`const sql="CREATE--x\nUNIQUE--x\nINDEX idx ON customers(customer_id)";`,
     'CREATE UNIQUE INDEX idx ON customers(customer_id)',
     'CREATE VIRTUAL TABLE v USING fts5(x)',
     'ALTER TABLE customers ADD COLUMN x TEXT',
@@ -309,6 +334,7 @@ try{
   console.log(`PRODUCTION_IDENTITY_SNAPSHOT_SQL_GUARD=${mutationFixtures.length}/${mutationFixtures.length}_PASS`);
   console.log('PRODUCTION_IDENTITY_SNAPSHOT_SQL_COMMENT_SEPARATOR=PASS');
   console.log('PRODUCTION_IDENTITY_SNAPSHOT_SQL_LINE_COMMENT_SEPARATOR=PASS');
+  console.log('PRODUCTION_IDENTITY_SNAPSHOT_SQL_ESCAPED_NEWLINE_SOURCE=PASS');
   console.log('PRODUCTION_IDENTITY_SNAPSHOT_PRIVATE_CANARIES=0');
   console.log('PRODUCTION_IDENTITY_SNAPSHOT_LOCAL_ONLY=PASS');
   console.log('PRODUCTION_D1_READ=0');
