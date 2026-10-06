@@ -37,6 +37,33 @@ function assertNoCanaryOutput(result,label){
   }
 }
 
+function decodeJsCodePointEscape(match,hex){
+  const cp=Number.parseInt(hex,16);
+  if(!Number.isInteger(cp)||cp<0||cp>0x10ffff)return match;
+  return String.fromCodePoint(cp);
+}
+function normalizeJsSourceEscapes(value){
+  let out=String(value??'');
+  out=out.replace(/\\(?:\r\n|\r|\n|\u2028|\u2029)/g,'');
+  for(let i=0;i<2;i++){
+    out=out
+      .replace(/\\x([0-9a-fA-F]{2})/g,decodeJsCodePointEscape)
+      .replace(/\\u\{([0-9a-fA-F]{1,6})\}/g,decodeJsCodePointEscape)
+      .replace(/\\u([0-9a-fA-F]{4})/g,decodeJsCodePointEscape)
+      .replace(/\\\"/g,'\"')
+      .replace(/\\'/g,"'")
+      .replace(/\\`/g,'`')
+      .replace(/\\\[/g,'[')
+      .replace(/\\\]/g,']')
+      .replace(/\\n/g,'\n')
+      .replace(/\\r/g,'\r')
+      .replace(/\\t/g,'\t')
+      .replace(/\\f/g,'\f')
+      .replace(/\\v/g,'\v');
+  }
+  return out;
+}
+
 const BLOCK_COMMENT='/\\*(?:[^*]|\\*(?!\\/))*\\*/';
 const SQL_SEPARATOR_ATOM=`(?:\\s|${BLOCK_COMMENT}|--[^\\r\\n]*(?:\\r\\n|\\r|\\n|$))`;
 const SQL_SEP=`(?:${SQL_SEPARATOR_ATOM})+`;
@@ -63,37 +90,15 @@ const SQL_MUTATION_PATTERNS=[
   new RegExp(`\\bATTACH${SQL_SEP}(?:DATABASE${SQL_SEP})?`,'i'),
   new RegExp(`\\bDETACH${SQL_SEP}(?:DATABASE${SQL_SEP})?`,'i')
 ];
-function decodeJsCodePointEscape(match,hex){
-  const cp=Number.parseInt(hex,16);
-  if(!Number.isInteger(cp)||cp<0||cp>0x10ffff)return match;
-  return String.fromCodePoint(cp);
-}
-function normalizeSqlForScan(value){
-  let out=String(value??'');
-  out=out.replace(/\\(?:\r\n|\r|\n|\u2028|\u2029)/g,'');
-  for(let i=0;i<2;i++){
-    out=out
-      .replace(/\\x([0-9a-fA-F]{2})/g,decodeJsCodePointEscape)
-      .replace(/\\u\{([0-9a-fA-F]{1,6})\}/g,decodeJsCodePointEscape)
-      .replace(/\\u([0-9a-fA-F]{4})/g,decodeJsCodePointEscape)
-      .replace(/\\\"/g,'\"')
-      .replace(/\\'/g,"'")
-      .replace(/\\`/g,'`')
-      .replace(/\\\[/g,'[')
-      .replace(/\\\]/g,']')
-      .replace(/\\n/g,'\n')
-      .replace(/\\r/g,'\r')
-      .replace(/\\t/g,'\t');
-  }
-  return out;
-}
-const hasMutationSql=value=>SQL_MUTATION_PATTERNS.some(re=>re.test(normalizeSqlForScan(value)));
+const hasMutationSql=value=>SQL_MUTATION_PATTERNS.some(re=>re.test(normalizeJsSourceEscapes(value)));
 
-const JS_GAP='(?:(?:\\s)|(?:/\\*[\\s\\S]*?\\*/)|(?://[^\\r\\n]*(?:\\r?\\n|$)))*';
+const JS_LINE_TERMINATOR='(?:\\r\\n|\\r|\\n|\\u2028|\\u2029|$)';
+const JS_LINE_COMMENT=`//[^\\r\\n\\u2028\\u2029]*${JS_LINE_TERMINATOR}`;
+const JS_GAP=`(?:\\s|${BLOCK_COMMENT}|${JS_LINE_COMMENT})*`;
 const NETWORK_BUILTIN='(?:http|https|http2|net|tls|dns(?:/promises)?|dgram)';
 const NETWORK_SPECIFIER=`(?:(?:node:)?${NETWORK_BUILTIN}|cloudflare:sockets|undici|axios|got|node-fetch)`;
 const NETWORK_MODULE_RE=new RegExp(`(?:\\bfrom${JS_GAP}|\\brequire${JS_GAP}\\(${JS_GAP}|\\bimport${JS_GAP}\\(${JS_GAP}|\\bimport${JS_GAP})(['\"\\x60])${NETWORK_SPECIFIER}\\1`,'i');
-const hasNetworkSurface=value=>[
+const NETWORK_PATTERNS=[
   NETWORK_MODULE_RE,
   new RegExp(`\\bprocess${JS_GAP}\\.${JS_GAP}getBuiltinModule${JS_GAP}\\(`,'i'),
   new RegExp(`\\bcreateRequire${JS_GAP}\\(`,'i'),
@@ -103,7 +108,11 @@ const hasNetworkSurface=value=>[
   /https?:\/\//i,
   /\b(?:curl|wget)\b/i,
   /child_process/i
-].some(re=>re.test(value));
+];
+const hasNetworkSurface=value=>{
+  const normalized=normalizeJsSourceEscapes(value);
+  return NETWORK_PATTERNS.some(re=>re.test(normalized));
+};
 
 try{
   const rows=[
@@ -246,6 +255,12 @@ try{
     "await import/*comment*/('node:http2')",
     'await import(`node:https`)',
     'const netTemplate = require(`node:net`)',
+    String.raw`await import('node:\u0068ttps')`,
+    String.raw`await import('node:\x68ttps')`,
+    String.raw`const netEscaped = require('node:\u{6e}et')`,
+    "await import//separator\r('node:https')",
+    `await import//separator${String.fromCharCode(0x2028)}('node:https')`,
+    `await import//separator${String.fromCharCode(0x2029)}('node:https')`,
     "const net = require('net')",
     "const tls = require/*comment*/('node:tls')",
     "await import('node:tls')",
@@ -291,6 +306,8 @@ try{
     String.raw`const sql="UPDATE--x\u000Dcustomers--x\u000DSET name='new'";`,
     String.raw`const sql="UPDATE--x\u{a}customers--x\u{a}SET name='new'";`,
     String.raw`const sql="UPDATE--x\u{D}customers--x\u{D}SET name='new'";`,
+    String.raw`const sql="UPDATE\fcustomers\fSET name='new'";`,
+    String.raw`const sql="UPDATE\vcustomers\vSET name='new'";`,
     'UPDATE main.customers SET name=1',
     'UPDATE customers AS c SET name=1',
     'UPDATE customers INDEXED BY idx SET name=1',
@@ -345,11 +362,14 @@ try{
   console.log(`PRODUCTION_IDENTITY_SNAPSHOT_NETWORK_GUARD=${networkFixtures.length}/${networkFixtures.length}_PASS`);
   console.log('PRODUCTION_IDENTITY_SNAPSHOT_NETWORK_COMMENT_SEPARATOR=PASS');
   console.log('PRODUCTION_IDENTITY_SNAPSHOT_NETWORK_TEMPLATE_LITERAL=PASS');
+  console.log('PRODUCTION_IDENTITY_SNAPSHOT_NETWORK_ESCAPED_SPECIFIER=PASS');
+  console.log('PRODUCTION_IDENTITY_SNAPSHOT_NETWORK_LINE_TERMINATORS=PASS');
   console.log(`PRODUCTION_IDENTITY_SNAPSHOT_SQL_GUARD=${mutationFixtures.length}/${mutationFixtures.length}_PASS`);
   console.log('PRODUCTION_IDENTITY_SNAPSHOT_SQL_COMMENT_SEPARATOR=PASS');
   console.log('PRODUCTION_IDENTITY_SNAPSHOT_SQL_LINE_COMMENT_SEPARATOR=PASS');
   console.log('PRODUCTION_IDENTITY_SNAPSHOT_SQL_ESCAPED_NEWLINE_SOURCE=PASS');
   console.log('PRODUCTION_IDENTITY_SNAPSHOT_SQL_HEX_UNICODE_ESCAPE_SOURCE=PASS');
+  console.log('PRODUCTION_IDENTITY_SNAPSHOT_SQL_FORM_FEED_SOURCE=PASS');
   console.log('PRODUCTION_IDENTITY_SNAPSHOT_PRIVATE_CANARIES=0');
   console.log('PRODUCTION_IDENTITY_SNAPSHOT_LOCAL_ONLY=PASS');
   console.log('PRODUCTION_D1_READ=0');
