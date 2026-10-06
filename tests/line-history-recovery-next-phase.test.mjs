@@ -5,6 +5,7 @@ import {
   isValidOwnerWriteCompletionReceipt,
   resolveLineHistoryRecoveryNextPhase
 } from '../src/crm-line-history-recovery-next-phase.mjs';
+import { buildLineHistoryRecoveryNextCommand } from '../src/crm-line-history-recovery-next-command.mjs';
 
 function expectStage(input,stage,nextPhase,writePossible=false){
   const r=resolveLineHistoryRecoveryNextPhase(input);
@@ -241,6 +242,18 @@ expectStage({
   approvalFilePresent:true
 },'APPROVED_WRITE_READY','approved-write',true);
 
+const completeNoWriteCommand=buildLineHistoryRecoveryNextCommand({
+  stage:'COMPLETE_NO_WRITE',
+  preauthDir:'/private/preauth',
+  d1PreviewDir:'/private/d1',
+  approvalFile:'/private/approval'
+});
+assert.equal(completeNoWriteCommand.command,'');
+assert.equal(completeNoWriteCommand.ready,false);
+assert.equal(completeNoWriteCommand.reason,'NO_NEXT_COMMAND');
+assert.equal(completeNoWriteCommand.requires_owner_approval,false);
+assert.equal(completeNoWriteCommand.production_write,false);
+
 const cli=fs.readFileSync('scripts/inspect-line-history-recovery-status.mjs','utf8');
 assert.doesNotMatch(cli,/\bwrangler\b/i);
 assert.doesNotMatch(cli,/child_process/i);
@@ -283,4 +296,5 @@ console.log('LINE_HISTORY_RECOVERY_NEXT_PHASE_D1_PREVIEW=PASS');
 console.log('LINE_HISTORY_RECOVERY_NEXT_PHASE_STALE_PACKET=PASS');
 console.log('LINE_HISTORY_RECOVERY_NEXT_PHASE_EXACT_APPROVAL=PASS');
 console.log('LINE_HISTORY_RECOVERY_NEXT_PHASE_COMPLETE=PASS');
+console.log('LINE_HISTORY_RECOVERY_NEXT_COMMAND_NO_WRITE=PASS');
 console.log('LINE_HISTORY_RECOVERY_STATUS_LOCAL_ONLY=PASS');
