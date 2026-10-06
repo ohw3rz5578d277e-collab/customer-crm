@@ -4,29 +4,12 @@ import {parseProductionSnapshotText} from '../src/crm-sales-snapshot.mjs';
 function arg(name){const i=process.argv.indexOf(name);return i>=0?process.argv[i+1]:''}
 function text(v){return v==null?'':String(v).trim()}
 function fail(code){console.error(`RESULT=STOP_${code}`);process.exit(1)}
-function stripAnsi(s){return String(s??'').replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g,'')}
+function stripTransportNoise(s){return String(s??'').replace(/^\uFEFF/,'').replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g,'').trim()}
 
-function extractJson(raw){
-  const source=stripAnsi(raw);
-  const decandidates=[];
-  for(let i=0;i<source.length;i++){
-    const ch=source[i];
-    if(ch!=='['&&ch!=='{')continue;
-    try{
-      const parsed=JSON.parse(source.slice(i));
-      return parsed;
-    }catch{}
-    decandidates.push(i);
-  }
-  for(const i of decandidates){
-    const tail=source.slice(i);
-    for(let j=tail.length;j>1;j--){
-      const end=tail[j-1];
-      if(end!==']'&&end!=='}')continue;
-      try{return JSON.parse(tail.slice(0,j))}catch{}
-    }
-  }
-  fail('WRANGLER_JSON_PARSE');
+function parseExactJson(raw){
+  const source=stripTransportNoise(raw);
+  if(!source)fail('INPUT_JSON_EMPTY');
+  try{return JSON.parse(source)}catch{fail('INPUT_JSON_INVALID')}
 }
 
 function rowsFromParsed(raw){
@@ -49,7 +32,7 @@ if(!input||!output||!sourceSha)fail('ARGS_REQUIRED');
 if(!/^[0-9a-f]{40}$/.test(sourceSha))fail('SOURCE_SHA_INVALID');
 if(!fs.existsSync(input))fail('INPUT_MISSING');
 
-const parsed=extractJson(fs.readFileSync(input,'utf8'));
+const parsed=parseExactJson(fs.readFileSync(input,'utf8'));
 const rawRows=rowsFromParsed(parsed);
 if(!rawRows.length)fail('CUSTOMER_ROWS_EMPTY');
 
