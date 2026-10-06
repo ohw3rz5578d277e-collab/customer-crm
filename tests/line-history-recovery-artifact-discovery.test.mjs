@@ -76,6 +76,45 @@ try{
   assert.equal(found.safety.command_execution,false);
   assert.equal(found.safety.production_d1_write,0);
 
+  fs.rmSync(path.join(preauth,'readonly-preview'),{recursive:true,force:true});
+  fs.writeFileSync(
+    path.join(preauth,'no-write-completion-receipt.json'),
+    JSON.stringify({
+      receipt_format:'customer-crm-line-history-no-write-completion-v1',
+      complete:true,
+      completion_type:'OWNER_DECISIONS_NO_WRITE',
+      source_main_sha:'a'.repeat(40)
+    })
+  );
+
+  const noWriteFound=discoverLineHistoryRecoveryArtifacts({roots:[root]});
+  assert.equal(noWriteFound.preauth_dir.path,preauth);
+  assert.equal(noWriteFound.preauth_dir.ambiguous,false);
+  assert.equal(noWriteFound.d1_preview_dir.path,'');
+  assert.equal(noWriteFound.d1_preview_dir.count,0);
+
+  fs.writeFileSync(
+    path.join(preauth,'no-write-completion-receipt.json'),
+    JSON.stringify({
+      receipt_format:'customer-crm-line-history-no-write-completion-v1',
+      complete:true,
+      completion_type:'BROKEN'
+    })
+  );
+  const malformedNoWrite=discoverLineHistoryRecoveryArtifacts({roots:[root]});
+  assert.equal(malformedNoWrite.preauth_dir.path,'');
+  assert.equal(malformedNoWrite.preauth_dir.count,0);
+
+  fs.writeFileSync(
+    path.join(preauth,'no-write-completion-receipt.json'),
+    JSON.stringify({
+      receipt_format:'customer-crm-line-history-no-write-completion-v1',
+      complete:true,
+      completion_type:'OWNER_DECISIONS_NO_WRITE',
+      source_main_sha:'a'.repeat(40)
+    })
+  );
+
   const different=path.join(root,'other');
   fs.mkdirSync(different,{recursive:true});
   fs.writeFileSync(path.join(different,'candidate-snapshot.json'),JSON.stringify([{message_key:'different'}]));
@@ -101,11 +140,14 @@ try{
   assert.match(operator,/APPROVAL_FILE_AUTO_DISCOVERY=NO/);
   assert.match(operator,/STOP_AUTO_DISCOVER_STATUS_ONLY/);
   assert.match(operator,/\[ -z "\$CANDIDATES" \] && CANDIDATES=/);
+  assert.match(operator,/\[ -z "\$PREAUTH_DIR" \] && PREAUTH_DIR=/);
   assert.match(operator,/\[ -z "\$D1_PREVIEW_DIR" \] && D1_PREVIEW_DIR=/);
   assert.doesNotMatch(operator,/\[ -z "\$APPROVAL_FILE" \] && APPROVAL_FILE=/);
 
   console.log('LINE_HISTORY_DISCOVERY_CANDIDATE_EQUIVALENCE=PASS');
   console.log('LINE_HISTORY_DISCOVERY_RECOVERY_LINEAGE=PASS');
+  console.log('LINE_HISTORY_DISCOVERY_NO_WRITE_PREAUTH=PASS');
+  console.log('LINE_HISTORY_DISCOVERY_MALFORMED_NO_WRITE_REJECTED=PASS');
   console.log('LINE_HISTORY_DISCOVERY_APPROVAL_EXCLUDED=PASS');
   console.log('LINE_HISTORY_DISCOVERY_LOCAL_READONLY=PASS');
   console.log('LINE_HISTORY_DISCOVERY_OPERATOR_STATUS_ONLY=PASS');
