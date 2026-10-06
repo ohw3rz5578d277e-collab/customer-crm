@@ -110,6 +110,18 @@ try{
     JSON.stringify({
       receipt_format:'customer-crm-line-history-no-write-completion-v1',
       complete:true,
+      completion_type:' OWNER_DECISIONS_NO_WRITE '
+    })
+  );
+  const paddedNoWrite=discoverLineHistoryRecoveryArtifacts({roots:[root]});
+  assert.equal(paddedNoWrite.preauth_dir.path,'');
+  assert.equal(paddedNoWrite.preauth_dir.count,0);
+
+  fs.writeFileSync(
+    path.join(preauth,'no-write-completion-receipt.json'),
+    JSON.stringify({
+      receipt_format:'customer-crm-line-history-no-write-completion-v1',
+      complete:true,
       completion_type:'OWNER_DECISIONS_NO_WRITE',
       source_main_sha:'a'.repeat(40)
     })
@@ -148,6 +160,7 @@ try{
   console.log('LINE_HISTORY_DISCOVERY_RECOVERY_LINEAGE=PASS');
   console.log('LINE_HISTORY_DISCOVERY_NO_WRITE_PREAUTH=PASS');
   console.log('LINE_HISTORY_DISCOVERY_MALFORMED_NO_WRITE_REJECTED=PASS');
+  console.log('LINE_HISTORY_DISCOVERY_PADDED_TYPE_REJECTED=PASS');
   console.log('LINE_HISTORY_DISCOVERY_APPROVAL_EXCLUDED=PASS');
   console.log('LINE_HISTORY_DISCOVERY_LOCAL_READONLY=PASS');
   console.log('LINE_HISTORY_DISCOVERY_OPERATOR_STATUS_ONLY=PASS');
