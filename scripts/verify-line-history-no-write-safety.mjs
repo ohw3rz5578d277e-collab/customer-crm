@@ -11,41 +11,45 @@ const NO_WRITE_FILES = [
   'scripts/run-line-history-owner-authorization-prep.sh'
 ];
 
+const SQL_SEP = '(?:(?:\\s+)|(?:/\\*[\\s\\S]*?\\*/)|(?:--[^\\r\\n]*\\r?\\n))+';
+const SQL_GAP = '(?:(?:\\s*)|(?:/\\*[\\s\\S]*?\\*/)|(?:--[^\\r\\n]*\\r?\\n))*';
 const IDENT = '(?:"(?:""|[^"])+"|`(?:``|[^`])+`|\'(?:\'\'|[^\'])+\'|\\[(?:\\]\\]|[^\\]])+\\]|[A-Za-z_][A-Za-z0-9_$]*)';
-const QUALIFIED_IDENT = `${IDENT}(?:\\s*\\.\\s*${IDENT}){0,2}`;
-const OR_CONFLICT = '(?:OR\\s+(?:ROLLBACK|ABORT|FAIL|IGNORE|REPLACE)\\s+)?';
-const UPDATE_QUALIFIERS = `(?:(?:\\s+AS\\s+${IDENT})|(?:\\s+INDEXED\\s+BY\\s+${IDENT})|(?:\\s+NOT\\s+INDEXED))*`;
-const CREATE_MODIFIERS = '(?:(?:TEMP|TEMPORARY|UNIQUE|VIRTUAL)\\s+)*';
+const QUALIFIED_IDENT = `${IDENT}(?:${SQL_GAP}\\.${SQL_GAP}${IDENT}){0,2}`;
+const OR_CONFLICT = `(?:OR${SQL_SEP}(?:ROLLBACK|ABORT|FAIL|IGNORE|REPLACE)${SQL_SEP})?`;
+const UPDATE_QUALIFIERS = `(?:(?:${SQL_SEP}AS${SQL_SEP}${IDENT})|(?:${SQL_SEP}INDEXED${SQL_SEP}BY${SQL_SEP}${IDENT})|(?:${SQL_SEP}NOT${SQL_SEP}INDEXED))*`;
+const CREATE_MODIFIERS = `(?:(?:TEMP|TEMPORARY|UNIQUE|VIRTUAL)${SQL_SEP})*`;
 
 const MUTATION_PATTERNS = [
-  new RegExp(`\\bINSERT\\s+${OR_CONFLICT}INTO\\s+${QUALIFIED_IDENT}`, 'i'),
-  new RegExp(`\\bUPDATE\\s+${OR_CONFLICT}${QUALIFIED_IDENT}${UPDATE_QUALIFIERS}\\s+SET\\b`, 'i'),
-  new RegExp(`\\bDELETE\\s+FROM\\s+${QUALIFIED_IDENT}`, 'i'),
-  new RegExp(`\\bCREATE\\s+${CREATE_MODIFIERS}(?:TABLE|INDEX|TRIGGER|VIEW)\\b`, 'i'),
-  new RegExp(`\\bALTER\\s+TABLE\\s+${QUALIFIED_IDENT}`, 'i'),
-  new RegExp(`\\bDROP\\s+(?:TABLE|INDEX|TRIGGER|VIEW)\\s+(?:IF\\s+EXISTS\\s+)?${QUALIFIED_IDENT}`, 'i'),
-  new RegExp(`\\bREPLACE\\s+(?:INTO\\s+)?${QUALIFIED_IDENT}`, 'i'),
-  new RegExp(`\\bTRUNCATE\\s+(?:TABLE\\s+)?${QUALIFIED_IDENT}`, 'i'),
-  new RegExp(`\\bUPSERT\\s+${QUALIFIED_IDENT}`, 'i'),
+  new RegExp(`\\bINSERT${SQL_SEP}${OR_CONFLICT}INTO${SQL_SEP}${QUALIFIED_IDENT}`, 'i'),
+  new RegExp(`\\bUPDATE${SQL_SEP}${OR_CONFLICT}${QUALIFIED_IDENT}${UPDATE_QUALIFIERS}${SQL_SEP}SET\\b`, 'i'),
+  new RegExp(`\\bDELETE${SQL_SEP}FROM${SQL_SEP}${QUALIFIED_IDENT}`, 'i'),
+  new RegExp(`\\bCREATE${SQL_SEP}${CREATE_MODIFIERS}(?:TABLE|INDEX|TRIGGER|VIEW)\\b`, 'i'),
+  new RegExp(`\\bALTER${SQL_SEP}TABLE${SQL_SEP}${QUALIFIED_IDENT}`, 'i'),
+  new RegExp(`\\bDROP${SQL_SEP}(?:TABLE|INDEX|TRIGGER|VIEW)${SQL_SEP}(?:IF${SQL_SEP}EXISTS${SQL_SEP})?${QUALIFIED_IDENT}`, 'i'),
+  new RegExp(`\\bREPLACE${SQL_SEP}(?:INTO${SQL_SEP})?${QUALIFIED_IDENT}`, 'i'),
+  new RegExp(`\\bTRUNCATE${SQL_SEP}(?:TABLE${SQL_SEP})?${QUALIFIED_IDENT}`, 'i'),
+  new RegExp(`\\bUPSERT${SQL_SEP}${QUALIFIED_IDENT}`, 'i'),
   /\bPRAGMA\b/i,
   /\bVACUUM\b/i,
   /\bREINDEX\b/i,
   /\bANALYZE\b/i,
-  /\bATTACH\s+(?:DATABASE\s+)?/i,
-  /\bDETACH\s+(?:DATABASE\s+)?/i
+  new RegExp(`\\bATTACH${SQL_SEP}(?:DATABASE${SQL_SEP})?`, 'i'),
+  new RegExp(`\\bDETACH${SQL_SEP}(?:DATABASE${SQL_SEP})?`, 'i')
 ];
 
-const NETWORK_MODULE_SPECIFIER = /(?:\bfrom\s*|\brequire\s*\(\s*|\bimport\s*\(\s*|\bimport\s*)['"](?:(?:node:)?(?:http|https|http2|net|tls|dgram|dns(?:\/promises)?)|cloudflare:sockets|undici|axios|got|node-fetch|ws)['"]/i;
+const JS_GAP = '(?:(?:\\s)|(?:/\\*[\\s\\S]*?\\*/)|(?://[^\\r\\n]*(?:\\r?\\n|$)))*';
+const NETWORK_MODULE = '(?:(?:node:)?(?:http|https|http2|net|tls|dgram|dns(?:/promises)?)|cloudflare:sockets|undici|axios|got|node-fetch|ws)';
+const NETWORK_MODULE_SPECIFIER = new RegExp(`(?:\\bfrom${JS_GAP}|\\brequire${JS_GAP}\\(${JS_GAP}|\\bimport${JS_GAP}\\(${JS_GAP}|\\bimport${JS_GAP})['\"]${NETWORK_MODULE}['\"]`, 'i');
 const PRODUCTION_EXECUTION_PATTERNS = [
   /\bwrangler\b/i,
   /\bd1\s+execute\b/i,
   /--execute-production-write\b/i,
   NETWORK_MODULE_SPECIFIER,
-  /\bprocess\.getBuiltinModule\s*\(/i,
-  /\bcreateRequire\s*\(/i,
-  /\bfetch\s*\(/i,
-  /\bWebSocket\s*\(/i,
-  /\bEventSource\s*\(/i,
+  new RegExp(`\\bprocess${JS_GAP}\\.${JS_GAP}getBuiltinModule${JS_GAP}\\(`, 'i'),
+  new RegExp(`\\bcreateRequire${JS_GAP}\\(`, 'i'),
+  new RegExp(`\\bfetch${JS_GAP}\\(`, 'i'),
+  new RegExp(`\\bWebSocket${JS_GAP}\\(`, 'i'),
+  new RegExp(`\\bEventSource${JS_GAP}\\(`, 'i'),
   /\b(?:curl|wget)\b/i,
   /child_process/i,
   /https?:\/\//i,
@@ -78,9 +82,7 @@ function normalizeSqlSource(text) {
       .replace(/\\r/g, '\r')
       .replace(/\\t/g, '\t');
   }
-  return out
-    .replace(/\/\*[\s\S]*?\*\//g, ' ')
-    .replace(/--[^\r\n]*(?:\r?\n|$)/g, '\n');
+  return out;
 }
 
 function mutationMatch(text) {
@@ -116,6 +118,9 @@ const mutationSamples = [
   'UPDATE\ncustomers SET x=1',
   'UPDATE/*comment*/ "customers" SET x=1',
   'UPDATE--comment\ncustomers SET x=1',
+  'const marker = "--"; const sql = "UPDATE customers SET x=1";',
+  'const marker = "/*"; const sql = "CREATE TABLE t(x INTEGER)";',
+  'const marker = "*/"; const sql = "DELETE FROM t";',
   String.raw`const sql = "UPDATE \"customer\"\"history\" SET x=1";`,
   String.raw`const sql = "UPDATE\ncustomers SET x=1";`,
   'DELETE FROM t',
@@ -162,7 +167,10 @@ const allowedSamples = [
   'function analyzeSalesHistory(records) {}',
   'const pragmaLabel = "metadata";',
   'const reindexRequired = false;',
-  'const comment = "UPDATE documentation only";'
+  'const comment = "UPDATE documentation only";',
+  'const marker = "--";',
+  'const marker = "/*";',
+  'const marker = "*/";'
 ];
 
 for (const sample of allowedSamples) {
@@ -173,15 +181,18 @@ const executionSamples = [
   "import https from 'https'",
   "import 'node:http2'",
   "const http2 = require('http2')",
+  "const http2 = require /* comment */ ('node:http2')",
   "await import('node:dgram')",
+  "await import /* comment */ ('node:dgram')",
+  "import /* comment */ 'node:https'",
   "import {lookup} from 'dns/promises'",
   "import tls from 'node:tls'",
   "import {connect} from 'cloudflare:sockets'",
   "import {request} from 'undici'",
-  "process.getBuiltinModule('node:https')",
-  "createRequire(import.meta.url)('node:http2')",
-  "fetch(destination)",
-  "new WebSocket(destination)",
+  "process /* comment */ . getBuiltinModule /* comment */ ('node:https')",
+  "createRequire /* comment */ (import.meta.url)('node:http2')",
+  "fetch /* comment */ (destination)",
+  "new WebSocket /* comment */ (destination)",
   "curl $DESTINATION"
 ];
 for (const sample of executionSamples) {
@@ -192,7 +203,8 @@ const executionAllowedSamples = [
   "const httpsLabel='offline';",
   "const networkStatus='DISABLED';",
   "const http2Enabled=false;",
-  "const fetchRequired=false;"
+  "const fetchRequired=false;",
+  "const marker='require /* comment */';"
 ];
 for (const sample of executionAllowedSamples) {
   if (executionMatch(sample)) fail('NETWORK_DENY_LIST_FALSE_POSITIVE', JSON.stringify(sample));
@@ -228,11 +240,13 @@ console.log(`NETWORK_DENY_LIST_SELF_TEST=${executionSamples.length}/${executionS
 console.log(`NETWORK_DENY_LIST_FALSE_POSITIVE_SELF_TEST=${executionAllowedSamples.length}/${executionAllowedSamples.length}_PASS`);
 console.log('SQL_MUTATION_DENY_LIST_SOURCE_ESCAPE_NORMALIZATION=PASS');
 console.log('SQL_MUTATION_DENY_LIST_COMMENT_SEPARATOR_NORMALIZATION=PASS');
+console.log('SQL_MUTATION_DENY_LIST_QUOTED_COMMENT_MARKER_PRESERVATION=PASS');
 console.log('SQL_MUTATION_DENY_LIST_MULTILINE_SELF_TEST=PASS');
 console.log('SQL_MUTATION_DENY_LIST_QUOTED_IDENTIFIER_SELF_TEST=PASS');
 console.log('SQL_MUTATION_DENY_LIST_ESCAPED_IDENTIFIER_SELF_TEST=PASS');
 console.log('SQL_MUTATION_DENY_LIST_SQLITE_CREATE_MODIFIER_SELF_TEST=PASS');
 console.log('SQL_MUTATION_DENY_LIST_SQLITE_CONTROL_STATEMENT_SELF_TEST=PASS');
+console.log('NETWORK_MODULE_COMMENT_SEPARATOR_SELF_TEST=PASS');
 console.log('NO_WRITE_NETWORK_EXECUTION_SURFACE=0');
 console.log('DECISION_PLAN_NO_WRITE_CONTRACT=PASS');
 console.log('PRODUCTION_D1_READ=0');
