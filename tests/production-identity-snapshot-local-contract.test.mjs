@@ -56,19 +56,17 @@ const SQL_MUTATION_PATTERNS=[
 ];
 const hasMutationSql=value=>SQL_MUTATION_PATTERNS.some(re=>re.test(value));
 
+const JS_GAP='(?:(?:\\s)|(?:/\\*[\\s\\S]*?\\*/)|(?://[^\\r\\n]*(?:\\r?\\n|$)))*';
 const NETWORK_BUILTIN='(?:http|https|http2|net|tls|dns(?:/promises)?|dgram)';
-const NETWORK_MODULE_RE=new RegExp(`(?:\\bfrom\\s*|\\brequire\\s*\\(\\s*|\\bimport\\s*\\(\\s*|\\bimport\\s*)['\"](?:node:)?${NETWORK_BUILTIN}['\"]`,'i');
-const CLOUDFLARE_SOCKET_RE=/(?:\bfrom\s*|\brequire\s*\(\s*|\bimport\s*\(\s*|\bimport\s*)['"]cloudflare:sockets['"]/i;
-const THIRD_PARTY_NETWORK_RE=/(?:\bfrom\s*|\brequire\s*\(\s*|\bimport\s*\(\s*|\bimport\s*)['"](?:undici|axios|got|node-fetch)['"]/i;
+const NETWORK_SPECIFIER=`(?:(?:node:)?${NETWORK_BUILTIN}|cloudflare:sockets|undici|axios|got|node-fetch)`;
+const NETWORK_MODULE_RE=new RegExp(`(?:\\bfrom${JS_GAP}|\\brequire${JS_GAP}\\(${JS_GAP}|\\bimport${JS_GAP}\\(${JS_GAP}|\\bimport${JS_GAP})['\"]${NETWORK_SPECIFIER}['\"]`,'i');
 const hasNetworkSurface=value=>[
   NETWORK_MODULE_RE,
-  CLOUDFLARE_SOCKET_RE,
-  THIRD_PARTY_NETWORK_RE,
-  /\bprocess\.getBuiltinModule\s*\(/i,
-  /\bcreateRequire\s*\(/i,
-  /\bfetch\s*\(/i,
-  /\bWebSocket\s*\(/i,
-  /\bEventSource\s*\(/i,
+  new RegExp(`\\bprocess${JS_GAP}\\.${JS_GAP}getBuiltinModule${JS_GAP}\\(`,'i'),
+  new RegExp(`\\bcreateRequire${JS_GAP}\\(`,'i'),
+  new RegExp(`\\bfetch${JS_GAP}\\(`,'i'),
+  new RegExp(`\\bWebSocket${JS_GAP}\\(`,'i'),
+  new RegExp(`\\bEventSource${JS_GAP}\\(`,'i'),
   /https?:\/\//i,
   /\b(?:curl|wget)\b/i,
   /child_process/i
@@ -113,7 +111,7 @@ try{
     {results:rows,success:true}
   ],'failed-wrapper');
   assert.notEqual(failedWrapper.result.status,0);
-  assert.match(failedWrapper.result.stderr,/STOP_WRAPPER_ENTRY_UNSUCCESSFUL/);
+  assert.match(failedWrapper.result.stderr,/STOP_WRAPPER_ENTRY_ERROR_PRESENT|STOP_WRAPPER_ENTRY_UNSUCCESSFUL/);
   assertNoCanaryOutput(failedWrapper.result,'failed-wrapper');
 
   const malformedWrapper=run([
@@ -123,6 +121,19 @@ try{
   assert.notEqual(malformedWrapper.result.status,0);
   assert.match(malformedWrapper.result.stderr,/STOP_WRAPPER_ENTRY_RESULTS_REQUIRED/);
   assertNoCanaryOutput(malformedWrapper.result,'malformed-wrapper');
+
+  const errorWrapperCases=[
+    [{results:rows,error:'query failed'}],
+    [{results:rows,success:true,error:null}],
+    {results:rows,error:''},
+    {result:{results:rows,success:true,error:'contradictory'}}
+  ];
+  for(const [index,value] of errorWrapperCases.entries()){
+    const errorWrapper=run(value,`error-wrapper-${index}`);
+    assert.notEqual(errorWrapper.result.status,0,`error-bearing wrapper ${index} should fail closed`);
+    assert.match(errorWrapper.result.stderr,/STOP_WRAPPER_ENTRY_ERROR_PRESENT/);
+    assertNoCanaryOutput(errorWrapper.result,`error-wrapper-${index}`);
+  }
 
   for(const field of ['customer_id','line_user_id','name','deleted_at']){
     const incomplete={...rows[0]};
@@ -181,10 +192,14 @@ try{
   const networkFixtures=[
     "import https from 'https'",
     "import 'https'",
+    "import/*comment*/'node:http'",
+    "import {} from/*comment*/'node:http2'",
     "import http from 'node:http'",
     "import {connect} from 'node:http2'",
     "await import('http2')",
+    "await import/*comment*/('node:http2')",
     "const net = require('net')",
+    "const tls = require/*comment*/('node:tls')",
     "await import('node:tls')",
     "import {lookup} from 'dns'",
     "import {resolve} from 'node:dns/promises'",
@@ -194,8 +209,10 @@ try{
     "import {request} from 'undici'",
     "import 'node-fetch'",
     "process.getBuiltinModule('https')",
+    "process/*comment*/.getBuiltinModule/*comment*/('node:http2')",
     "createRequire(import.meta.url)('node:https')",
-    "fetch('https://example.invalid')",
+    "createRequire/*comment*/(import.meta.url)('node:https')",
+    "fetch/*comment*/('https://example.invalid')",
     "new WebSocket('wss://example.invalid')",
     "curl https://example.invalid"
   ];
@@ -206,7 +223,8 @@ try{
     "const httpsLabel='offline';",
     "const networkStatus='DISABLED';",
     "const fetchRequired=false;",
-    "const createRequireLabel='disabled';"
+    "const createRequireLabel='disabled';",
+    "const marker='import/*comment*/';"
   ];
   for(const fixture of networkAllowedFixtures){
     assert.equal(hasNetworkSurface(fixture),false,`network guard false-positive ${fixture}`);
@@ -253,6 +271,7 @@ try{
   console.log('PRODUCTION_IDENTITY_SNAPSHOT_DIRECT_ROWS=PASS');
   console.log('PRODUCTION_IDENTITY_SNAPSHOT_BOM_TOLERANCE=PASS');
   console.log('PRODUCTION_IDENTITY_SNAPSHOT_WRAPPER_INTEGRITY_FAIL_CLOSED=PASS');
+  console.log('PRODUCTION_IDENTITY_SNAPSHOT_WRAPPER_ERROR_FIELD_FAIL_CLOSED=PASS');
   console.log('PRODUCTION_IDENTITY_SNAPSHOT_REQUIRED_IDENTITY_FIELDS=PASS');
   console.log('PRODUCTION_IDENTITY_SNAPSHOT_DELETED_IDENTITY_PRESERVED=PASS');
   console.log('PRODUCTION_IDENTITY_SNAPSHOT_DUPLICATE_FAIL_CLOSED=PASS');
@@ -260,6 +279,7 @@ try{
   console.log('PRODUCTION_IDENTITY_SNAPSHOT_GARBAGE_FAIL_CLOSED=PASS');
   console.log('PRODUCTION_IDENTITY_SNAPSHOT_SHA_BOUND=PASS');
   console.log(`PRODUCTION_IDENTITY_SNAPSHOT_NETWORK_GUARD=${networkFixtures.length}/${networkFixtures.length}_PASS`);
+  console.log('PRODUCTION_IDENTITY_SNAPSHOT_NETWORK_COMMENT_SEPARATOR=PASS');
   console.log(`PRODUCTION_IDENTITY_SNAPSHOT_SQL_GUARD=${mutationFixtures.length}/${mutationFixtures.length}_PASS`);
   console.log('PRODUCTION_IDENTITY_SNAPSHOT_PRIVATE_CANARIES=0');
   console.log('PRODUCTION_IDENTITY_SNAPSHOT_LOCAL_ONLY=PASS');
