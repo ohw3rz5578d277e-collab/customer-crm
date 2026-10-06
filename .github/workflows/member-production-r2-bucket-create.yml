@@ -71,7 +71,7 @@ jobs:
 
   create_bucket:
     name: Exact-SHA one-time Member private R2 bucket create
-    if: ${{ github.event_name == 'workflow_dispatch' && github.actor == 'ohw3rz5578d277e-collab' }}
+    if: ${{ github.event_name == 'workflow_dispatch' && github.actor == 'github-actions[bot]' && github.triggering_actor == 'github-actions[bot]' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
