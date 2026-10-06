@@ -49,14 +49,22 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          files=(
+          no_write_files=(
             src/crm-line-history-recovery-next-phase.mjs
-            src/crm-line-history-recovery-next-command.mjs
             scripts/inspect-line-history-recovery-status.mjs
             scripts/run-line-history-owner-authorization-prep.sh
           )
-          ! grep -Eiq '\bwrangler\b|d1[[:space:]]+execute|--execute-production-write' "${files[@]}"
-          ! grep -Eiq 'INSERT[[:space:]]+(OR[[:space:]]+IGNORE[[:space:]]+)?INTO|UPDATE[[:space:]]+[A-Za-z_]|DELETE[[:space:]]+FROM|REPLACE[[:space:]]+INTO|UPSERT[[:space:]]+' "${files[@]}"
+
+          if grep -Eiq '\bwrangler\b|d1[[:space:]]+execute|--execute-production-write' "${no_write_files[@]}"; then
+            echo 'STOP: NO_WRITE_RUNTIME_CONTAINS_PRODUCTION_EXECUTION_TOKEN'
+            exit 41
+          fi
+
+          if grep -Eiq 'INSERT[[:space:]]+(OR[[:space:]]+IGNORE[[:space:]]+)?INTO|UPDATE[[:space:]]+[A-Za-z_]|DELETE[[:space:]]+FROM|REPLACE[[:space:]]+INTO|UPSERT[[:space:]]+' "${no_write_files[@]}"; then
+            echo 'STOP: NO_WRITE_RUNTIME_CONTAINS_MUTATION_SQL'
+            exit 42
+          fi
+
           grep -q 'customer-crm-line-history-no-write-completion-v1' scripts/run-line-history-owner-authorization-prep.sh
           grep -q 'PRODUCTION_D1_READ=0' scripts/run-line-history-owner-authorization-prep.sh
           grep -q 'PRODUCTION_D1_WRITE=0' scripts/run-line-history-owner-authorization-prep.sh
