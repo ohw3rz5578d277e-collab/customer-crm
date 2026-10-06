@@ -26,6 +26,13 @@ for(const marker of [
   'DISPATCHED_SOURCE_COMMENT_ID=$SOURCE_COMMENT_ID'
 ]) assert.ok(bridge.includes(marker),`bridge missing source receipt marker: ${marker}`);
 
+const sourceIdValidationIndex=bridge.indexOf('[[ "$SOURCE_COMMENT_ID" =~ ^[0-9]+$ ]]');
+const commandMatchIndex=bridge.indexOf('[[ "$COMMAND_BODY" =~ $command_re ]]');
+const commandCaptureIndex=bridge.indexOf('expected_sha="${BASH_REMATCH[1]}"');
+assert.ok(sourceIdValidationIndex>=0,'source comment id validation missing');
+assert.ok(commandMatchIndex>sourceIdValidationIndex,'source comment id must be validated before command regex so BASH_REMATCH captures stay intact');
+assert.ok(commandCaptureIndex>commandMatchIndex,'command captures must be read immediately after the command regex');
+
 const receiptIndex=workflow.indexOf('Verify exact Issue #26 Owner authorization receipt');
 const preflightIndex=workflow.indexOf('Preflight canonical bucket absence');
 const preMutationIndex=workflow.indexOf('Reconfirm main and active Worker immediately before mutation');
@@ -38,3 +45,4 @@ assert.equal((workflow.match(/--request POST/g)||[]).length,1,'exactly one bucke
 console.log('MEMBER_R2_BUCKET_CREATE_HARDENING=PASS');
 console.log('ISSUE_26_RECEIPT_REQUIRED=YES');
 console.log('PRE_MUTATION_DRIFT_RECHECK=YES');
+console.log('BRIDGE_BASH_REMATCH_CAPTURE_ORDER=PASS');
