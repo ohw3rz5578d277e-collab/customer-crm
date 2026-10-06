@@ -3,11 +3,12 @@ set -euo pipefail
 
 EXPECTED_SHA="${1:-}"
 OWNER_ACK="${2:-}"
-OUT_FILE="${3:-}"
 
 ACCOUNT_ID="799b203a471e51a791129a5ca97a9b2b"
 WRANGLER_VERSION="4.107.0"
 EXPECTED_SQL='SELECT customer_id, line_user_id, name, deleted_at FROM customers ORDER BY customer_id;'
+PRIVATE_DIR="${HOME}/.customer-crm-private"
+OUT_FILE="${PRIVATE_DIR}/production-customer-identity-snapshot-${EXPECTED_SHA}.json"
 
 stop(){ echo "RESULT=STOP_$1"; exit "${2:-1}"; }
 
@@ -15,18 +16,19 @@ stop(){ echo "RESULT=STOP_$1"; exit "${2:-1}"; }
 [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]] || stop "EXPECTED_SHA_INVALID" 11
 EXPECTED_ACK="AUTHORIZE_PRODUCTION_CUSTOMER_IDENTITY_SNAPSHOT_READ:${EXPECTED_SHA}"
 [ "$OWNER_ACK" = "$EXPECTED_ACK" ] || stop "OWNER_ACK_MISMATCH" 12
-[ -n "$OUT_FILE" ] || stop "OUTPUT_PATH_REQUIRED" 13
 
 command -v git >/dev/null 2>&1 || stop "GIT_MISSING" 14
 command -v node >/dev/null 2>&1 || stop "NODE_MISSING" 15
 command -v npx >/dev/null 2>&1 || stop "NPX_MISSING" 16
 command -v python3 >/dev/null 2>&1 || stop "PYTHON3_MISSING" 17
+command -v shasum >/dev/null 2>&1 || stop "SHASUM_MISSING" 18
 
 NODE_MAJOR="$(node -p 'process.versions.node.split(".")[0]')"
-[ "$NODE_MAJOR" = "22" ] || stop "NODE_22_REQUIRED" 18
+[ "$NODE_MAJOR" = "22" ] || stop "NODE_22_REQUIRED" 19
 
 LOCAL_HEAD="$(git rev-parse HEAD)"
 REMOTE_MAIN="$(git ls-remote origin refs/heads/main | awk '{print $1}')"
+REPO_ROOT="$(cd "$(git rev-parse --show-toplevel)" && pwd)"
 [ "$LOCAL_HEAD" = "$EXPECTED_SHA" ] || stop "LOCAL_HEAD_MISMATCH" 20
 [ "$REMOTE_MAIN" = "$EXPECTED_SHA" ] || stop "MAIN_DRIFT" 21
 
@@ -38,15 +40,20 @@ grep -Eq '"database_name"[[:space:]]*:[[:space:]]*"customer-crm-db"' wrangler.js
 grep -Eq '"database_id"[[:space:]]*:[[:space:]]*"1ae3e0d9-72c0-47ad-8fc1-fed9d15ec70f"' wrangler.jsonc || stop "DB_ID_CHANGED" 26
 node --check scripts/build-production-identity-snapshot.mjs
 
-OUT_DIR="$(dirname "$OUT_FILE")"
-mkdir -p "$OUT_DIR"
-OUT_DIR="$(cd "$OUT_DIR" && pwd)"
-OUT_FILE="$OUT_DIR/$(basename "$OUT_FILE")"
-[ "$OUT_FILE" != "/" ] || stop "UNSAFE_OUTPUT_PATH" 27
-[ ! -e "$OUT_FILE" ] || stop "OUTPUT_ALREADY_EXISTS" 28
-
 umask 077
+mkdir -p "$PRIVATE_DIR"
+chmod 700 "$PRIVATE_DIR"
+PRIVATE_DIR="$(cd "$PRIVATE_DIR" && pwd)"
+OUT_FILE="${PRIVATE_DIR}/production-customer-identity-snapshot-${EXPECTED_SHA}.json"
+case "$PRIVATE_DIR/" in
+  "$REPO_ROOT/"*) stop "PRIVATE_DIR_INSIDE_REPOSITORY" 27 ;;
+esac
+DIR_MODE="$(stat -f '%Lp' "$PRIVATE_DIR")"
+[ "$DIR_MODE" = "700" ] || stop "PRIVATE_DIR_MODE_NOT_700" 28
+[ ! -e "$OUT_FILE" ] || stop "OUTPUT_ALREADY_EXISTS" 29
+
 TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/crm-production-identity-read.XXXXXX")"
+chmod 700 "$TMP_DIR"
 RAW="$TMP_DIR/production-customer-identity.raw.json"
 cleanup(){ rm -rf "$TMP_DIR"; }
 trap cleanup EXIT
@@ -64,6 +71,7 @@ echo "PRIVATE_VALUES_PRINTED=0"
 echo "MAIN_SHA_GUARD=PASS"
 echo "OWNER_ACK_GATE=PASS"
 echo "PRODUCTION_D1_TARGET_GUARD=PASS"
+echo "PRIVATE_DIR_MODE=700"
 
 echo
 echo "=== Execute exactly one Production D1 SELECT ==="
@@ -136,6 +144,7 @@ FILE_MODE="$(stat -f '%Lp' "$OUT_FILE")"
 
 echo "SNAPSHOT_SHA256=$SNAPSHOT_SHA256"
 echo "SNAPSHOT_FILE_MODE=600"
+echo "SNAPSHOT_LOCAL_PATH=$OUT_FILE"
 echo "RAW_D1_RESULT_DELETED_ON_EXIT=YES"
 echo "GITHUB_ARTIFACT_UPLOAD=0"
 echo "PRIVATE_CUSTOMER_VALUES_PRINTED=0"
