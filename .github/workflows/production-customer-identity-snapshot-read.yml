@@ -1,0 +1,172 @@
+name: Production customer identity snapshot read
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_sha:
+        description: Exact current main SHA authorized for the one-time Production D1 identity snapshot read
+        required: true
+        type: string
+      owner_ack:
+        description: Exact Owner acknowledgement bound to expected_sha
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-customer-identity-snapshot-read
+  cancel-in-progress: false
+
+jobs:
+  read:
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      github.actor == 'ohw3rz5578d277e-collab' &&
+      github.triggering_actor == 'ohw3rz5578d277e-collab' &&
+      github.run_attempt == 1
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      EXPECTED_SHA: ${{ inputs.expected_sha }}
+      OWNER_ACK: ${{ inputs.owner_ack }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      WRANGLER_VERSION: '4.107.0'
+
+    steps:
+      - name: Checkout exact authorized main SHA
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.expected_sha }}
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Exact-main and Owner authorization gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = 'refs/heads/main' || { echo 'STOP: WORKFLOW_REF_NOT_MAIN'; exit 10; }
+          [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo 'STOP: EXPECTED_SHA_INVALID'; exit 11; }
+          LOCAL_HEAD="$(git rev-parse HEAD)"
+          REMOTE_MAIN="$(git ls-remote origin refs/heads/main | awk '{print $1}')"
+          test "$LOCAL_HEAD" = "$EXPECTED_SHA" || { echo 'STOP: CHECKOUT_SHA_MISMATCH'; exit 12; }
+          test "$REMOTE_MAIN" = "$EXPECTED_SHA" || { echo 'STOP: MAIN_DRIFT'; exit 13; }
+          test "$GITHUB_SHA" = "$EXPECTED_SHA" || { echo 'STOP: DISPATCH_SHA_MISMATCH'; exit 14; }
+          EXPECTED_ACK="AUTHORIZE_PRODUCTION_CUSTOMER_IDENTITY_SNAPSHOT_READ:${EXPECTED_SHA}"
+          test "$OWNER_ACK" = "$EXPECTED_ACK" || { echo 'STOP: OWNER_ACK_MISMATCH'; exit 15; }
+          test "$GITHUB_RUN_ATTEMPT" = '1' || { echo 'STOP: REPLAY_NOT_ALLOWED'; exit 16; }
+          echo "AUTHORIZED_MAIN_SHA=$EXPECTED_SHA"
+          echo 'OWNER_AUTHORIZATION_GATE=PASS'
+          echo 'REPLAY_GUARD=PASS'
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+
+      - name: Assert fixed Production D1 target and local normalizer
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f wrangler.jsonc || { echo 'STOP: WRANGLER_CONFIG_MISSING'; exit 20; }
+          test -f scripts/build-production-identity-snapshot.mjs || { echo 'STOP: SNAPSHOT_BUILDER_MISSING'; exit 21; }
+          grep -Eq '"binding"[[:space:]]*:[[:space:]]*"DB"' wrangler.jsonc || { echo 'STOP: DB_BINDING_CHANGED'; exit 22; }
+          grep -Eq '"database_name"[[:space:]]*:[[:space:]]*"customer-crm-db"' wrangler.jsonc || { echo 'STOP: DB_NAME_CHANGED'; exit 23; }
+          node --check scripts/build-production-identity-snapshot.mjs
+          echo 'PRODUCTION_D1_TARGET_GUARD=PASS'
+          echo 'SNAPSHOT_BUILDER_SYNTAX=PASS'
+
+      - name: Execute exact Production customer identity SELECT
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN" || { echo 'STOP: CLOUDFLARE_API_TOKEN_MISSING'; exit 30; }
+          test -n "$CLOUDFLARE_ACCOUNT_ID" || { echo 'STOP: CLOUDFLARE_ACCOUNT_ID_MISSING'; exit 31; }
+          RAW="$RUNNER_TEMP/production-customer-identity.raw.json"
+          SQL='SELECT customer_id, line_user_id, name, deleted_at FROM customers ORDER BY customer_id;'
+          npx --yes "wrangler@${WRANGLER_VERSION}" d1 execute DB \
+            --remote \
+            --json \
+            --command "$SQL" \
+            >"$RAW"
+          node - "$RAW" <<'NODE'
+          const fs=require('fs');
+          const raw=JSON.parse(fs.readFileSync(process.argv[2],'utf8'));
+          const blocks=Array.isArray(raw)?raw:[raw];
+          if(!blocks.length)throw new Error('D1_RESULT_EMPTY');
+          let count=0;
+          for(const block of blocks){
+            if(!block||typeof block!=='object'||Array.isArray(block))throw new Error('D1_RESULT_BLOCK_INVALID');
+            if(Object.prototype.hasOwnProperty.call(block,'error'))throw new Error('D1_RESULT_ERROR_PRESENT');
+            if(block.success!==true)throw new Error('D1_RESULT_UNSUCCESSFUL');
+            if(!Array.isArray(block.results))throw new Error('D1_RESULTS_REQUIRED');
+            if(Number(block.meta?.rows_written??0)!==0)throw new Error('D1_ROWS_WRITTEN_NONZERO');
+            if(block.meta?.changed_db===true)throw new Error('D1_CHANGED_DB_TRUE');
+            for(const row of block.results){
+              if(!row||typeof row!=='object'||Array.isArray(row))throw new Error('D1_ROW_INVALID');
+              for(const key of ['customer_id','line_user_id','name','deleted_at']){
+                if(!Object.prototype.hasOwnProperty.call(row,key))throw new Error('D1_IDENTITY_FIELD_MISSING:'+key);
+              }
+              count++;
+            }
+          }
+          if(count<1)throw new Error('D1_CUSTOMER_ROWS_EMPTY');
+          console.log('PRODUCTION_D1_SELECT=PASS');
+          console.log('PRODUCTION_D1_ROWS_WRITTEN=0');
+          console.log('PRODUCTION_D1_CHANGED_DB=0');
+          console.log(`PRODUCTION_IDENTITY_ROW_COUNT=${count}`);
+          console.log('PRIVATE_CUSTOMER_VALUES_PRINTED=0');
+          NODE
+
+      - name: Build canonical private identity snapshot locally on runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          RAW="$RUNNER_TEMP/production-customer-identity.raw.json"
+          OUT="$RUNNER_TEMP/production-customer-identity-snapshot.json"
+          node scripts/build-production-identity-snapshot.mjs \
+            --input "$RAW" \
+            --output "$OUT" \
+            --source-sha "$EXPECTED_SHA"
+          test -s "$OUT" || { echo 'STOP: SNAPSHOT_OUTPUT_MISSING'; exit 40; }
+          SHA256="$(sha256sum "$OUT" | awk '{print $1}')"
+          [[ "$SHA256" =~ ^[0-9a-f]{64}$ ]] || { echo 'STOP: SNAPSHOT_SHA256_INVALID'; exit 41; }
+          echo "SNAPSHOT_SHA256=$SHA256"
+          echo 'SNAPSHOT_PRIVATE_ARTIFACT_READY=PASS'
+          echo 'RAW_D1_RESULT_UPLOAD=0'
+
+      - name: Upload canonical private snapshot only
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-customer-identity-snapshot-${{ inputs.expected_sha }}
+          path: ${{ runner.temp }}/production-customer-identity-snapshot.json
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 9
+
+      - name: Final read-only receipt
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo 'RESULT=PRODUCTION_CUSTOMER_IDENTITY_SNAPSHOT_READ_COMPLETE'
+          echo "EXACT_MAIN_SHA=$EXPECTED_SHA"
+          echo 'PRODUCTION_D1_READ=1'
+          echo 'PRODUCTION_D1_WRITE=0'
+          echo 'PRODUCTION_FETCH=0'
+          echo 'R2_ACCESS=0'
+          echo 'CRM_MUTATION=0'
+          echo 'LINE_SEND=0'
+          echo 'CUSTOMER_ID_GENERATION=0'
+          echo 'CUSTOMER_CREATE_UPDATE_DELETE_MERGE=0'
+          echo 'WORKER_DEPLOY=0'
+          echo 'PRODUCTION_DEPLOY=0'
+          echo 'WORKER_ACTIVATION=0'
+          echo 'ROUTE_CHANGE=0'
+          echo 'SECRET_CHANGE=0'
+          echo 'SECURITY_POLICY_CHANGE=0'
+          echo 'TRAFFIC_CHANGE=0'
+          echo 'COMMERCE_ACTIVATION=0'
+          echo 'PAID_SPEND=0'
+          echo 'RAW_D1_RESULT_UPLOAD=0'
+          echo 'PRIVATE_SNAPSHOT_ARTIFACT_RETENTION_DAYS=1'
