@@ -41,7 +41,7 @@ const MUTATION_PATTERNS = [
 
 const JS_GAP = `(?:\\s|${BLOCK_COMMENT}|//[^\\r\\n]*(?:\\r?\\n|$))*`;
 const NETWORK_MODULE = '(?:(?:node:)?(?:http|https|http2|net|tls|dgram|dns(?:/promises)?)|cloudflare:sockets|undici|axios|got|node-fetch|ws)';
-const NETWORK_MODULE_SPECIFIER = new RegExp(`(?:\\bfrom${JS_GAP}|\\brequire${JS_GAP}\\(${JS_GAP}|\\bimport${JS_GAP}\\(${JS_GAP}|\\bimport${JS_GAP})['\"]${NETWORK_MODULE}['\"]`, 'i');
+const NETWORK_MODULE_SPECIFIER = new RegExp(`(?:\\bfrom${JS_GAP}|\\brequire${JS_GAP}\\(${JS_GAP}|\\bimport${JS_GAP}\\(${JS_GAP}|\\bimport${JS_GAP})(['"\\x60])${NETWORK_MODULE}\\1`, 'i');
 const PRODUCTION_EXECUTION_PATTERNS = [
   /\bwrangler\b/i,
   /\bd1\s+execute\b/i,
@@ -203,6 +203,9 @@ const executionSamples = [
   "await import('node:dgram')",
   "await import /* comment */ ('node:dgram')",
   "import /* comment */ 'node:https'",
+  'await import(`node:http2`)',
+  'const https = require(`node:https`)',
+  'import `node:dgram`',
   "import {lookup} from 'dns/promises'",
   "import tls from 'node:tls'",
   "import {connect} from 'cloudflare:sockets'",
@@ -269,6 +272,7 @@ console.log('SQL_MUTATION_DENY_LIST_ESCAPED_IDENTIFIER_SELF_TEST=PASS');
 console.log('SQL_MUTATION_DENY_LIST_SQLITE_CREATE_MODIFIER_SELF_TEST=PASS');
 console.log('SQL_MUTATION_DENY_LIST_SQLITE_CONTROL_STATEMENT_SELF_TEST=PASS');
 console.log('NETWORK_MODULE_COMMENT_SEPARATOR_SELF_TEST=PASS');
+console.log('NETWORK_MODULE_TEMPLATE_LITERAL_SELF_TEST=PASS');
 console.log('NO_WRITE_NETWORK_EXECUTION_SURFACE=0');
 console.log('DECISION_PLAN_NO_WRITE_CONTRACT=PASS');
 console.log('PRODUCTION_D1_READ=0');
