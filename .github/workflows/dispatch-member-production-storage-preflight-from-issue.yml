@@ -35,12 +35,35 @@ jobs:
           COMMAND_BODY: ${{ github.event.comment.body }}
         run: |
           set -euo pipefail
-          command_re='^/member-production-storage-preflight sha=([0-9a-f]{40}) mode=(inventory|verify)( candidate_bucket_sha256=([0-9a-f]{64}))?$'
+          command_re='^/member-production-storage-preflight sha=([0-9a-f]{40}) mode=(inventory|verify) jurisdictions=([a-z,-]+)( candidate_bucket_sha256=([0-9a-f]{64}))?$'
           [[ "$COMMAND_BODY" =~ $command_re ]] || { echo '::error::INVALID_MEMBER_STORAGE_PREFLIGHT_COMMAND'; exit 1; }
 
           expected_sha="${BASH_REMATCH[1]}"
           mode="${BASH_REMATCH[2]}"
-          candidate_sha256="${BASH_REMATCH[4]:-}"
+          jurisdictions="${BASH_REMATCH[3]}"
+          candidate_sha256="${BASH_REMATCH[5]:-}"
+
+          test -n "$jurisdictions" || { echo '::error::R2_JURISDICTIONS_REQUIRED'; exit 1; }
+          [[ "$jurisdictions" =~ ^(default|eu|us|fedramp|fedramp-high)(,(default|eu|us|fedramp|fedramp-high))*$ ]] || { echo '::error::INVALID_R2_JURISDICTIONS_FORMAT'; exit 1; }
+          IFS=',' read -r -a jurisdiction_parts <<< "$jurisdictions"
+          last_index=-1
+          declare -A seen=()
+          for jurisdiction in "${jurisdiction_parts[@]}"; do
+            case "$jurisdiction" in
+              default) index=0 ;;
+              eu) index=1 ;;
+              us) index=2 ;;
+              fedramp) index=3 ;;
+              fedramp-high) index=4 ;;
+              *) echo '::error::INVALID_R2_JURISDICTION'; exit 1 ;;
+            esac
+            [[ -z "${seen[$jurisdiction]:-}" ]] || { echo '::error::DUPLICATE_R2_JURISDICTION'; exit 1; }
+            (( index > last_index )) || { echo '::error::R2_JURISDICTIONS_NOT_CANONICAL_ORDER'; exit 1; }
+            seen[$jurisdiction]=1
+            last_index=$index
+          done
+          rejoined_jurisdictions="$(IFS=,; printf '%s' "${jurisdiction_parts[*]}")"
+          test "$rejoined_jurisdictions" = "$jurisdictions" || { echo '::error::R2_JURISDICTIONS_REJOIN_MISMATCH'; exit 1; }
 
           if [[ "$mode" == 'inventory' ]]; then
             test -z "$candidate_sha256" || { echo '::error::INVENTORY_MODE_FORBIDS_CANDIDATE_BUCKET_DIGEST'; exit 1; }
@@ -60,9 +83,11 @@ jobs:
 
           echo "expected_sha=$expected_sha" >> "$GITHUB_OUTPUT"
           echo "mode=$mode" >> "$GITHUB_OUTPUT"
+          echo "jurisdictions=$jurisdictions" >> "$GITHUB_OUTPUT"
           echo "candidate_bucket_sha256=$candidate_sha256" >> "$GITHUB_OUTPUT"
           echo "MEMBER_STORAGE_PREFLIGHT_AUTHORIZED_SHA=$expected_sha"
           echo "MEMBER_STORAGE_PREFLIGHT_MODE=$mode"
+          echo "R2_JURISDICTIONS_AUTHORIZED=$jurisdictions"
           echo 'CANDIDATE_BUCKET_NAME_EXPOSED=NO'
           echo 'PRODUCTION_STORAGE_BINDING_CHANGE=0'
           echo 'PRODUCTION_STORAGE_FETCH=0'
@@ -78,6 +103,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           EXPECTED_SHA: ${{ steps.gate.outputs.expected_sha }}
           MODE: ${{ steps.gate.outputs.mode }}
+          JURISDICTIONS: ${{ steps.gate.outputs.jurisdictions }}
           CANDIDATE_BUCKET_SHA256: ${{ steps.gate.outputs.candidate_bucket_sha256 }}
         run: |
           set -euo pipefail
@@ -88,6 +114,7 @@ jobs:
               'inputs':{
                   'expected_sha':os.environ['EXPECTED_SHA'],
                   'mode':os.environ['MODE'],
+                  'jurisdictions':os.environ['JURISDICTIONS'],
                   'candidate_bucket_sha256':os.environ.get('CANDIDATE_BUCKET_SHA256','')
               }
           }))
@@ -112,6 +139,7 @@ jobs:
           rm -f /tmp/member-storage-preflight-dispatch.txt
           echo "MEMBER_STORAGE_PREFLIGHT_DISPATCHED_SHA=$EXPECTED_SHA"
           echo "MEMBER_STORAGE_PREFLIGHT_DISPATCHED_MODE=$MODE"
+          echo "R2_JURISDICTIONS_DISPATCHED=$JURISDICTIONS"
           echo 'CANDIDATE_BUCKET_NAME_EXPOSED=NO'
           echo 'PRODUCTION_STORAGE_BINDING_CHANGE=0'
           echo 'PRODUCTION_STORAGE_FETCH=0'
