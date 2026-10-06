@@ -26,8 +26,14 @@ const mainSha=arg('--main-sha');
 const resumeTriage=resumeDir?path.join(resumeDir,'final-triage.json'):'';
 const reviewQueue=resumeDir?path.join(resumeDir,'owner-review-queue.json'):'';
 const preauthSummary=preauthDir?path.join(preauthDir,'readonly-preview','owner-backfill-preview-summary.json'):'';
+const noWriteReceipt=preauthDir?path.join(preauthDir,'no-write-completion-receipt.json'):'';
 const packetPath=d1PreviewDir?path.join(d1PreviewDir,'write-authorization-packet.json'):'';
-const inferredReceipt=d1PreviewDir?path.join(d1PreviewDir,'approved-insert-run','completion-receipt.json'):'';
+const approvedWriteReceipt=d1PreviewDir?path.join(d1PreviewDir,'approved-insert-run','completion-receipt.json'):'';
+const inferredReceipt=exists(approvedWriteReceipt)
+  ?approvedWriteReceipt
+  :exists(noWriteReceipt)
+    ?noWriteReceipt
+    :'';
 const completionReceiptPath=completionReceiptArg||inferredReceipt;
 
 const queue=readJson(reviewQueue);
