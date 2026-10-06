@@ -13,11 +13,15 @@ function parseExactJson(raw){
   try{return JSON.parse(source)}catch{fail('INPUT_JSON_INVALID')}
 }
 
-function validateWrapperEntry(item){
+function validateWrapperStatus(item){
   if(!item||typeof item!=='object'||Array.isArray(item))fail('WRAPPER_ENTRY_INVALID');
-  if(!Array.isArray(item.results))fail('WRAPPER_ENTRY_RESULTS_REQUIRED');
   if(owns(item,'error'))fail('WRAPPER_ENTRY_ERROR_PRESENT');
   if(owns(item,'success')&&item.success!==true)fail('WRAPPER_ENTRY_UNSUCCESSFUL');
+}
+
+function validateWrapperEntry(item){
+  validateWrapperStatus(item);
+  if(!Array.isArray(item.results))fail('WRAPPER_ENTRY_RESULTS_REQUIRED');
   return item.results;
 }
 
@@ -35,7 +39,8 @@ function rowsFromParsed(raw){
   if(raw&&typeof raw==='object'&&!Array.isArray(raw)&&Array.isArray(raw.results)){
     return validateWrapperEntry(raw);
   }
-  if(raw&&typeof raw==='object'&&!Array.isArray(raw)&&raw.result){
+  if(raw&&typeof raw==='object'&&!Array.isArray(raw)&&owns(raw,'result')){
+    validateWrapperStatus(raw);
     return validateWrapperEntry(raw.result);
   }
   fail('INPUT_SHAPE_INVALID');
