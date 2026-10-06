@@ -1,0 +1,118 @@
+name: Dispatch Member Production R2 bucket digest index from release-gate issue
+
+run-name: 'Production read-only bridge: r2-bucket-digest-index'
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  issues: read
+  actions: write
+
+concurrency:
+  group: member-production-r2-bucket-digest-index-dispatch
+  cancel-in-progress: false
+
+jobs:
+  dispatch:
+    name: Validate exact Member R2 digest index command and dispatch
+    if: >-
+      github.event.issue.number == 26 &&
+      github.event.issue.pull_request == null &&
+      github.actor == 'ohw3rz5578d277e-collab' &&
+      github.event.comment.user.login == 'ohw3rz5578d277e-collab' &&
+      startsWith(github.event.comment.body, '/member-production-r2-bucket-digest-index ')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Validate exact Owner command and current main
+        id: gate
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMMAND_BODY: ${{ github.event.comment.body }}
+        run: |
+          set -euo pipefail
+          command_re='^/member-production-r2-bucket-digest-index sha=([0-9a-f]{40}) jurisdictions=([a-z,-]+)$'
+          [[ "$COMMAND_BODY" =~ $command_re ]] || { echo '::error::INVALID_MEMBER_R2_BUCKET_DIGEST_INDEX_COMMAND'; exit 1; }
+
+          expected_sha="${BASH_REMATCH[1]}"
+          jurisdictions="${BASH_REMATCH[2]}"
+
+          [[ "$jurisdictions" =~ ^(default|eu|us|fedramp|fedramp-high)(,(default|eu|us|fedramp|fedramp-high))*$ ]] || { echo '::error::INVALID_R2_JURISDICTIONS_FORMAT'; exit 1; }
+          IFS=',' read -r -a parts <<< "$jurisdictions"
+          last_index=-1
+          declare -A seen=()
+          for jurisdiction in "${parts[@]}"; do
+            case "$jurisdiction" in
+              default) index=0 ;;
+              eu) index=1 ;;
+              us) index=2 ;;
+              fedramp) index=3 ;;
+              fedramp-high) index=4 ;;
+              *) echo '::error::INVALID_R2_JURISDICTION'; exit 1 ;;
+            esac
+            [[ -z "${seen[$jurisdiction]:-}" ]] || { echo '::error::DUPLICATE_R2_JURISDICTION'; exit 1; }
+            (( index > last_index )) || { echo '::error::R2_JURISDICTIONS_NOT_CANONICAL_ORDER'; exit 1; }
+            seen[$jurisdiction]=1
+            last_index=$index
+          done
+          rejoined="$(IFS=,; printf '%s' "${parts[*]}")"
+          test "$rejoined" = "$jurisdictions" || { echo '::error::R2_JURISDICTIONS_REJOIN_MISMATCH'; exit 1; }
+
+          current_sha="$(curl --fail --silent --show-error -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' -H 'X-GitHub-Api-Version: 2022-11-28' "https://api.github.com/repos/${GITHUB_REPOSITORY}/commits/main" | python3 -c 'import json,sys; print(json.load(sys.stdin)["sha"])')"
+          test "$current_sha" = "$expected_sha" || { echo "::error::MAIN_DRIFT expected=$expected_sha current=$current_sha"; exit 1; }
+
+          echo "expected_sha=$expected_sha" >> "$GITHUB_OUTPUT"
+          echo "jurisdictions=$jurisdictions" >> "$GITHUB_OUTPUT"
+          echo "MEMBER_R2_BUCKET_DIGEST_INDEX_AUTHORIZED_SHA=$expected_sha"
+          echo "R2_JURISDICTIONS_AUTHORIZED=$jurisdictions"
+          echo 'RAW_BUCKET_NAME_PRINTED=NO'
+          echo 'R2_OBJECT_READ=0'
+          echo 'R2_WRITE=0'
+          echo 'BUCKET_MUTATION=0'
+          echo 'PRODUCTION_STORAGE_BINDING_CHANGE=0'
+          echo 'PRODUCTION_STORAGE_FETCH=0'
+          echo 'PRODUCTION_DEPLOY=0'
+          echo 'PRODUCTION_TRAFFIC_CHANGE=0'
+          echo 'PRODUCTION_D1_WRITE=0'
+
+      - name: Dispatch exact read-only Member R2 bucket digest index
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_SHA: ${{ steps.gate.outputs.expected_sha }}
+          JURISDICTIONS: ${{ steps.gate.outputs.jurisdictions }}
+        run: |
+          set -euo pipefail
+          payload="$(python3 - <<'PY'
+          import json, os
+          print(json.dumps({
+              'ref':'main',
+              'inputs':{
+                  'expected_sha':os.environ['EXPECTED_SHA'],
+                  'jurisdictions':os.environ['JURISDICTIONS']
+              }
+          }))
+          PY
+          )"
+          code="$(curl --silent --show-error --output /tmp/member-r2-bucket-digest-index-dispatch.txt --write-out '%{http_code}' --request POST -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' -H 'X-GitHub-Api-Version: 2022-11-28' "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/member-production-r2-bucket-digest-index.yml/dispatches" -d "$payload")"
+          test "$code" = '204' || {
+            rm -f /tmp/member-r2-bucket-digest-index-dispatch.txt
+            echo "::error::MEMBER_R2_BUCKET_DIGEST_INDEX_DISPATCH_FAILED_HTTP_$code"
+            exit 1
+          }
+          rm -f /tmp/member-r2-bucket-digest-index-dispatch.txt
+          echo "MEMBER_R2_BUCKET_DIGEST_INDEX_DISPATCHED_SHA=$EXPECTED_SHA"
+          echo "R2_JURISDICTIONS_DISPATCHED=$JURISDICTIONS"
+          echo 'RAW_BUCKET_NAME_PRINTED=NO'
+          echo 'R2_OBJECT_READ=0'
+          echo 'R2_WRITE=0'
+          echo 'BUCKET_MUTATION=0'
+          echo 'PRODUCTION_STORAGE_BINDING_CHANGE=0'
+          echo 'PRODUCTION_STORAGE_FETCH=0'
+          echo 'PRODUCTION_DEPLOY=0'
+          echo 'PRODUCTION_TRAFFIC_CHANGE=0'
+          echo 'PRODUCTION_D1_WRITE=0'
