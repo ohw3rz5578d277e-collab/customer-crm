@@ -9,7 +9,7 @@ LINE_HISTORY_XLSX="${5:-}"
 
 if [ -z "$SALES_XLSX" ] || [ -z "$CUSTOMER_MASTER" ] || [ -z "$PRODUCTION_SNAPSHOT" ]; then
   echo "Usage: $0 <Photo売上管理.xlsx> <customer-master.json> <production-customers-snapshot.json> [output-dir] [LINE履歴.xlsx]"
-  echo "NOTE=Production snapshot must be obtained separately under an authorized read-only flow."
+  echo "NOTE=Production snapshot must be obtained separately under an authorized read-only flow and supplied as complete JSON."
   exit 2
 fi
 
@@ -59,19 +59,16 @@ echo "=== 2. Validate supplied Production identity snapshot locally ==="
 python3 - "$PRODUCTION_SNAPSHOT" <<'PY'
 import json, pathlib, sys
 path=pathlib.Path(sys.argv[1])
-raw=path.read_text(encoding='utf-8')
+raw=path.read_text(encoding='utf-8-sig')
 if not raw.strip():
     print('RESULT=STOP_PRODUCTION_SNAPSHOT_EMPTY')
     raise SystemExit(7)
 try:
     json.loads(raw)
-    print('PRODUCTION_SNAPSHOT_FORMAT=JSON')
 except json.JSONDecodeError:
-    # The reconciliation CLI also accepts a captured command output containing JSON.
-    if 'customer_id' not in raw or 'name' not in raw:
-        print('RESULT=STOP_PRODUCTION_SNAPSHOT_UNRECOGNIZED')
-        raise SystemExit(8)
-    print('PRODUCTION_SNAPSHOT_FORMAT=CAPTURED_JSON_OUTPUT')
+    print('RESULT=STOP_PRODUCTION_SNAPSHOT_INVALID_JSON')
+    raise SystemExit(8)
+print('PRODUCTION_SNAPSHOT_FORMAT=STRICT_COMPLETE_JSON')
 print('PRODUCTION_SNAPSHOT_INPUT=PASS')
 print('PRODUCTION_NETWORK_ACCESS=0')
 PY
@@ -95,7 +92,7 @@ echo "=================================================="
 echo " RESULT=SALES_CRM_LOCAL_RUNNER_COMPLETE"
 echo "=================================================="
 echo "OUTPUT_DIR=$OUT_DIR"
-echo "PRODUCTION_SNAPSHOT_SOURCE=SUPPLIED_FILE_ONLY"
+echo "PRODUCTION_SNAPSHOT_SOURCE=SUPPLIED_COMPLETE_JSON_FILE_ONLY"
 echo "PRODUCTION_NETWORK_ACCESS=0"
 echo "PRODUCTION_D1_READ=0"
 echo "PRODUCTION_D1_WRITE=0"
