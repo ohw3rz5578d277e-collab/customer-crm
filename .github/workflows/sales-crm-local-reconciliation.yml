@@ -14,6 +14,7 @@ on:
       - 'scripts/reconcile-photo-sales-readonly.mjs'
       - 'scripts/run-sales-crm-readonly-reconciliation.sh'
       - 'tests/sales-crm-readonly-reconciliation.test.mjs'
+      - 'tests/sales-crm-source-identity-coverage.test.mjs'
       - 'tests/sales-crm-xlsx-extractor.test.py'
       - '.github/workflows/sales-crm-local-reconciliation.yml'
 
@@ -45,6 +46,8 @@ jobs:
           node --check src/crm-sales-snapshot.mjs
           node --check src/crm-sales-output-safety.mjs
           node --check scripts/reconcile-photo-sales-readonly.mjs
+          node --check tests/sales-crm-readonly-reconciliation.test.mjs
+          node --check tests/sales-crm-source-identity-coverage.test.mjs
           python3 -m py_compile \
             scripts/extract-photo-sales-xlsx.py \
             scripts/extract-line-name-evidence-xlsx.py \
@@ -85,4 +88,5 @@ jobs:
         run: |
           set -euo pipefail
           node tests/sales-crm-readonly-reconciliation.test.mjs
+          node tests/sales-crm-source-identity-coverage.test.mjs
           python3 tests/sales-crm-xlsx-extractor.test.py
