@@ -6,7 +6,6 @@ OWNER_ACK="${2:-}"
 OUT_FILE="${3:-}"
 
 ACCOUNT_ID="799b203a471e51a791129a5ca97a9b2b"
-CRM_DB_ID="1ae3e0d9-72c0-47ad-8fc1-fed9d15ec70f"
 WRANGLER_VERSION="4.107.0"
 EXPECTED_SQL='SELECT customer_id, line_user_id, name, deleted_at FROM customers ORDER BY customer_id;'
 
