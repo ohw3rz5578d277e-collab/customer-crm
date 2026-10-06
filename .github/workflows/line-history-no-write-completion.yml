@@ -15,6 +15,8 @@ on:
       - 'scripts/plan-line-history-owner-decisions.mjs'
       - 'scripts/run-line-history-recovery-operator.sh'
       - 'scripts/run-line-history-owner-authorization-prep.sh'
+      - 'scripts/verify-line-history-no-write-safety.mjs'
+      - 'scripts/run-line-history-no-write-local-final-gate.sh'
       - 'tests/line-history-recovery-next-phase.test.mjs'
       - 'tests/line-history-recovery-artifact-discovery.test.mjs'
       - 'tests/line-history-owner-decision-plan.test.mjs'
@@ -53,84 +55,21 @@ jobs:
           node --check scripts/discover-line-history-recovery-artifacts.mjs
           node --check scripts/inspect-line-history-recovery-status.mjs
           node --check scripts/plan-line-history-owner-decisions.mjs
+          node --check scripts/verify-line-history-no-write-safety.mjs
           node --check tests/line-history-recovery-next-phase.test.mjs
           node --check tests/line-history-recovery-artifact-discovery.test.mjs
           node --check tests/line-history-owner-decision-plan.test.mjs
           node --check tests/line-history-owner-review-queue.test.mjs
           bash -n scripts/run-line-history-recovery-operator.sh
           bash -n scripts/run-line-history-owner-authorization-prep.sh
+          bash -n scripts/run-line-history-no-write-local-final-gate.sh
           echo 'LINE_HISTORY_NO_WRITE_SYNTAX=PASS'
 
-      - name: No-write safety contract
+      - name: Cross-platform no-write safety contract
         shell: bash
         run: |
           set -euo pipefail
-          no_write_files=(
-            src/crm-line-history-recovery-next-phase.mjs
-            src/crm-line-history-recovery-discovery.mjs
-            src/crm-line-history-owner-decision-plan.mjs
-            src/crm-line-history-owner-review-queue.mjs
-            scripts/discover-line-history-recovery-artifacts.mjs
-            scripts/inspect-line-history-recovery-status.mjs
-            scripts/plan-line-history-owner-decisions.mjs
-            scripts/run-line-history-owner-authorization-prep.sh
-          )
-
-          if grep -Eiq '\bwrangler\b|d1[[:space:]]+execute|--execute-production-write' "${no_write_files[@]}"; then
-            echo 'STOP: NO_WRITE_RUNTIME_CONTAINS_PRODUCTION_EXECUTION_TOKEN'
-            exit 41
-          fi
-
-          MUTATION_SQL_RE='INSERT[[:space:]]+(OR[[:space:]]+IGNORE[[:space:]]+)?INTO|UPDATE[[:space:]]+[A-Za-z_][A-Za-z0-9_]*|DELETE[[:space:]]+FROM|CREATE[[:space:]]+(TABLE|INDEX|TRIGGER|VIEW)|ALTER[[:space:]]+TABLE|DROP[[:space:]]+(TABLE|INDEX|TRIGGER|VIEW)|REPLACE[[:space:]]+INTO|TRUNCATE([[:space:]]+TABLE)?[[:space:]]+[A-Za-z_][A-Za-z0-9_]*|UPSERT[[:space:]]+[A-Za-z_]'
-
-          if grep -zEiq "$MUTATION_SQL_RE" "${no_write_files[@]}"; then
-            echo 'STOP: NO_WRITE_RUNTIME_CONTAINS_MUTATION_SQL'
-            exit 42
-          fi
-
-          mutation_samples=(
-            'INSERT INTO t VALUES (1)'
-            'UPDATE t SET x=1'
-            'DELETE FROM t'
-            'CREATE TABLE t(x INTEGER)'
-            'ALTER TABLE t ADD COLUMN y TEXT'
-            'DROP TABLE t'
-            'REPLACE INTO t VALUES (1)'
-            'TRUNCATE TABLE t'
-            'UPSERT t'
-          )
-          for sample in "${mutation_samples[@]}"; do
-            if ! printf '%s\n' "$sample" | grep -zEiq "$MUTATION_SQL_RE"; then
-              echo "STOP: SQL_DENY_LIST_SELF_TEST_MISSED=$sample"
-              exit 43
-            fi
-          done
-
-          if ! printf 'UPDATE\ncustomers SET x=1\n' | grep -zEiq "$MUTATION_SQL_RE"; then
-            echo 'STOP: SQL_DENY_LIST_MULTILINE_SELF_TEST_MISSED'
-            exit 44
-          fi
-
-          if printf '%s\n' 'tmp_path.replace(receipt_path)' | grep -zEiq "$MUTATION_SQL_RE"; then
-            echo 'STOP: SQL_DENY_LIST_FALSE_POSITIVE_LOCAL_REPLACE'
-            exit 45
-          fi
-
-          grep -q 'customer-crm-line-history-no-write-completion-v1' scripts/run-line-history-owner-authorization-prep.sh
-          grep -q 'PRODUCTION_D1_READ=0' scripts/run-line-history-owner-authorization-prep.sh
-          grep -q 'PRODUCTION_D1_WRITE=0' scripts/run-line-history-owner-authorization-prep.sh
-          grep -q 'AUTHORIZATION_GRANTED=NO' scripts/run-line-history-owner-authorization-prep.sh
-          grep -q 'STATUS_ARGS+=(--main-sha "$LOCAL_HEAD")' scripts/run-line-history-recovery-operator.sh
-          grep -q 'PROPOSED_WRITE_ACTIONS=0' scripts/plan-line-history-owner-decisions.mjs
-          grep -q 'AUTHORIZATION_GRANTED=NO' scripts/plan-line-history-owner-decisions.mjs
-          grep -q 'PRODUCTION_D1_WRITE=0' scripts/plan-line-history-owner-decisions.mjs
-          echo 'SQL_MUTATION_DENY_LIST_SELF_TEST=9/9_PASS'
-          echo 'SQL_MUTATION_DENY_LIST_MULTILINE_SELF_TEST=PASS'
-          echo 'SQL_MUTATION_DENY_LIST_LOCAL_REPLACE_FALSE_POSITIVE=0'
-          echo 'DECISION_PLAN_NO_WRITE_CONTRACT=PASS'
-          echo 'PRODUCTION_D1_WRITE=0'
-          echo 'PRODUCTION_MUTATION_PATH_ADDED=0'
-          echo 'LINE_HISTORY_NO_WRITE_SAFETY=PASS'
+          node scripts/verify-line-history-no-write-safety.mjs
 
       - name: No-write completion regressions
         shell: bash
