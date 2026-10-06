@@ -212,6 +212,10 @@ jobs:
           set -euo pipefail
           test -n "$CLOUDFLARE_R2_READ_API_TOKEN" || { echo '::error::CLOUDFLARE_R2_READ_API_TOKEN_MISSING'; exit 1; }
           [[ "$CLOUDFLARE_R2_READ_API_TOKEN" != *[[:space:]]* ]] || { echo '::error::R2_READ_REST_TOKEN_FORMAT_INVALID_WHITESPACE'; exit 1; }
+          case "$CLOUDFLARE_R2_READ_API_TOKEN" in
+            cfut_*) ;;
+            *) echo '::error::R2_READ_REST_TOKEN_TYPE_NOT_USER_API_TOKEN'; exit 1 ;;
+          esac
           verify_file=/tmp/member-r2-digest-index-token.json
           cleanup(){ rm -f "$verify_file"; }
           trap cleanup EXIT
@@ -262,32 +266,32 @@ jobs:
           const jurisdictions=String(process.env.JURISDICTIONS||'').split(',');
           const sha256=value=>crypto.createHash('sha256').update(value).digest('hex');
           const records=[];
+
           for(const observed of jurisdictions){
             const path=`/tmp/member-r2-digest-index-buckets-${observed}.json`;
-            const payload=JSON.parse(fs.readFileSync(path,'utf8'));
+            let payload;
+            try { payload=JSON.parse(fs.readFileSync(path,'utf8')); }
+            catch { throw new Error('R2_BUCKET_DIGEST_INDEX_JSON_INVALID:'+observed); }
             if(payload?.success!==true)throw new Error('R2_BUCKET_DIGEST_INDEX_API_NOT_SUCCESS:'+observed);
             if(String(payload?.result_info?.cursor||''))throw new Error('R2_BUCKET_DIGEST_INDEX_PAGINATION_UNSUPPORTED:'+observed);
-            const buckets=Array.isArray(payload?.result?.buckets)?payload.result.buckets:[];
-            for(const bucket of buckets){
-              const name=String(bucket?.name||'');
-              if(!name)continue;
-              records.push({name_sha256:sha256(name),observed});
+            if(!Array.isArray(payload?.result?.buckets))throw new Error('R2_BUCKET_DIGEST_INDEX_BUCKETS_ARRAY_REQUIRED:'+observed);
+
+            for(const bucket of payload.result.buckets){
+              const name=typeof bucket?.name==='string'?bucket.name:'';
+              if(!name)throw new Error('R2_BUCKET_DIGEST_INDEX_BUCKET_NAME_REQUIRED:'+observed);
+              records.push({
+                name_sha256:sha256(name),
+                observed,
+                inventory_key:observed+':'+name
+              });
             }
           }
-          const inventoryKeys=[];
-          for(const observed of jurisdictions){
-            const path=`/tmp/member-r2-digest-index-buckets-${observed}.json`;
-            const payload=JSON.parse(fs.readFileSync(path,'utf8'));
-            const buckets=Array.isArray(payload?.result?.buckets)?payload.result.buckets:[];
-            for(const bucket of buckets){
-              const name=String(bucket?.name||'');
-              if(name)inventoryKeys.push(observed+':'+name);
-            }
-          }
+
+          const inventoryKeys=records.map(record=>record.inventory_key);
           if(new Set(inventoryKeys).size!==inventoryKeys.length)throw new Error('R2_BUCKET_DIGEST_INDEX_DUPLICATE_JURISDICTION_NAME');
-          const sortedInventory=[...inventoryKeys].sort();
-          const inventoryDigest=sha256(sortedInventory.join('\n'));
+          const inventoryDigest=sha256([...inventoryKeys].sort().join('\n'));
           const sorted=[...records].sort((a,b)=>a.name_sha256.localeCompare(b.name_sha256)||a.observed.localeCompare(b.observed));
+
           console.log('R2_JURISDICTIONS_SCANNED='+jurisdictions.join(','));
           console.log('R2_BUCKET_DIGEST_INDEX_COUNT='+sorted.length);
           console.log('R2_BUCKET_INVENTORY_SHA256='+inventoryDigest);
