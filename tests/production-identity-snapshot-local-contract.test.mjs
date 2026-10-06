@@ -58,8 +58,10 @@ function normalizeJsSourceEscapes(value){
       .replace(/\\n/g,'\n')
       .replace(/\\r/g,'\r')
       .replace(/\\t/g,'\t')
+      .replace(/\\b/g,'\b')
       .replace(/\\f/g,'\f')
-      .replace(/\\v/g,'\v');
+      .replace(/\\v/g,'\v')
+      .replace(/\\([^0-9xu\\\r\n\u2028\u2029])/g,'$1');
   }
   return out;
 }
@@ -258,6 +260,9 @@ try{
     String.raw`await import('node:\u0068ttps')`,
     String.raw`await import('node:\x68ttps')`,
     String.raw`const netEscaped = require('node:\u{6e}et')`,
+    String.raw`await import('node:\https')`,
+    String.raw`import {resolve} from 'node:dns\/promises'`,
+    String.raw`import '\axios'`,
     "await import//separator\r('node:https')",
     `await import//separator${String.fromCharCode(0x2028)}('node:https')`,
     `await import//separator${String.fromCharCode(0x2029)}('node:https')`,
@@ -308,6 +313,8 @@ try{
     String.raw`const sql="UPDATE--x\u{D}customers--x\u{D}SET name='new'";`,
     String.raw`const sql="UPDATE\fcustomers\fSET name='new'";`,
     String.raw`const sql="UPDATE\vcustomers\vSET name='new'";`,
+    String.raw`const sql="UPDATE\ customers\ SET name='new'";`,
+    String.raw`const sql="UPDATE\/*x*\/customers\/*y*\/SET name='new'";`,
     'UPDATE main.customers SET name=1',
     'UPDATE customers AS c SET name=1',
     'UPDATE customers INDEXED BY idx SET name=1',
@@ -364,6 +371,7 @@ try{
   console.log('PRODUCTION_IDENTITY_SNAPSHOT_NETWORK_TEMPLATE_LITERAL=PASS');
   console.log('PRODUCTION_IDENTITY_SNAPSHOT_NETWORK_ESCAPED_SPECIFIER=PASS');
   console.log('PRODUCTION_IDENTITY_SNAPSHOT_NETWORK_LINE_TERMINATORS=PASS');
+  console.log('PRODUCTION_IDENTITY_SNAPSHOT_JS_IDENTITY_ESCAPE_SOURCE=PASS');
   console.log(`PRODUCTION_IDENTITY_SNAPSHOT_SQL_GUARD=${mutationFixtures.length}/${mutationFixtures.length}_PASS`);
   console.log('PRODUCTION_IDENTITY_SNAPSHOT_SQL_COMMENT_SEPARATOR=PASS');
   console.log('PRODUCTION_IDENTITY_SNAPSHOT_SQL_LINE_COMMENT_SEPARATOR=PASS');
