@@ -11,8 +11,9 @@ const NO_WRITE_FILES = [
   'scripts/run-line-history-owner-authorization-prep.sh'
 ];
 
-const SQL_SEP = '(?:(?:\\s+)|(?:/\\*[\\s\\S]*?\\*/)|(?:--[^\\r\\n]*\\r?\\n))+';
-const SQL_GAP = '(?:(?:\\s*)|(?:/\\*[\\s\\S]*?\\*/)|(?:--[^\\r\\n]*\\r?\\n))*';
+const SQL_SEPARATOR_ATOM = '(?:\\s|/\\*[\\s\\S]*?\\*/|--[^\\r\\n]*(?:\\r\\n|\\r|\\n|$))';
+const SQL_SEP = `(?:${SQL_SEPARATOR_ATOM})+`;
+const SQL_GAP = `(?:${SQL_SEPARATOR_ATOM})*`;
 const IDENT = '(?:"(?:""|[^"])+"|`(?:``|[^`])+`|\'(?:\'\'|[^\'])+\'|\\[(?:\\]\\]|[^\\]])+\\]|[A-Za-z_][A-Za-z0-9_$]*)';
 const QUALIFIED_IDENT = `${IDENT}(?:${SQL_GAP}\\.${SQL_GAP}${IDENT}){0,2}`;
 const OR_CONFLICT = `(?:OR${SQL_SEP}(?:ROLLBACK|ABORT|FAIL|IGNORE|REPLACE)${SQL_SEP})?`;
@@ -177,6 +178,12 @@ for (const sample of allowedSamples) {
   if (mutationMatch(sample)) fail('SQL_DENY_LIST_FALSE_POSITIVE', JSON.stringify(sample));
 }
 
+const backtrackingProbe = `DELETE${' '.repeat(8192)}NOT_FROM customers`;
+const backtrackingStartedAt = Date.now();
+if (mutationMatch(backtrackingProbe)) fail('SQL_DENY_LIST_BACKTRACKING_PROBE_FALSE_POSITIVE');
+const backtrackingElapsedMs = Date.now() - backtrackingStartedAt;
+if (backtrackingElapsedMs > 1000) fail('SQL_DENY_LIST_BACKTRACKING_PROBE_SLOW', String(backtrackingElapsedMs));
+
 const executionSamples = [
   "import https from 'https'",
   "import 'node:http2'",
@@ -241,6 +248,7 @@ console.log(`NETWORK_DENY_LIST_FALSE_POSITIVE_SELF_TEST=${executionAllowedSample
 console.log('SQL_MUTATION_DENY_LIST_SOURCE_ESCAPE_NORMALIZATION=PASS');
 console.log('SQL_MUTATION_DENY_LIST_COMMENT_SEPARATOR_NORMALIZATION=PASS');
 console.log('SQL_MUTATION_DENY_LIST_QUOTED_COMMENT_MARKER_PRESERVATION=PASS');
+console.log('SQL_MUTATION_DENY_LIST_BOUNDED_BACKTRACKING=PASS');
 console.log('SQL_MUTATION_DENY_LIST_MULTILINE_SELF_TEST=PASS');
 console.log('SQL_MUTATION_DENY_LIST_QUOTED_IDENTIFIER_SELF_TEST=PASS');
 console.log('SQL_MUTATION_DENY_LIST_ESCAPED_IDENTIFIER_SELF_TEST=PASS');
