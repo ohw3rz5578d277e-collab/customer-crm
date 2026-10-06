@@ -25,6 +25,8 @@ pass('digest index emits observed jurisdiction',workflow.includes('R2_BUCKET_DIG
 pass('combined inventory digest retained',workflow.includes('R2_BUCKET_INVENTORY_SHA256='));
 pass('raw bucket marker no',workflow.includes('RAW_BUCKET_NAME_PRINTED=NO'));
 pass('no raw bucket console logging',!workflow.match(/console\.log\([^\n]*\bname\b(?!_sha256)/));
+pass('missing buckets array fails closed',workflow.includes('R2_BUCKET_DIGEST_INDEX_BUCKETS_ARRAY_REQUIRED'));
+pass('nameless bucket fails closed',workflow.includes('R2_BUCKET_DIGEST_INDEX_BUCKET_NAME_REQUIRED'));
 pass('object read remains zero',workflow.includes('R2_OBJECT_READ=0'));
 pass('write remains zero',workflow.includes('R2_WRITE=0'));
 pass('bucket mutation remains zero',workflow.includes('BUCKET_MUTATION=0'));
