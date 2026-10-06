@@ -11,7 +11,7 @@ const NO_WRITE_FILES = [
   'scripts/run-line-history-owner-authorization-prep.sh'
 ];
 
-const IDENT = '(?:"[^"]+"|`[^`]+`|\\[[^\\]]+\\]|[A-Za-z_][A-Za-z0-9_$]*)';
+const IDENT = '(?:"(?:""|[^"])+"|`(?:``|[^`])+`|\\[(?:\\]\\]|[^\\]])+\\]|[A-Za-z_][A-Za-z0-9_$]*)';
 const QUALIFIED_IDENT = `${IDENT}(?:\\s*\\.\\s*${IDENT})?`;
 const OR_CONFLICT = '(?:OR\\s+(?:ROLLBACK|ABORT|FAIL|IGNORE|REPLACE)\\s+)?';
 
@@ -65,13 +65,17 @@ const mutationSamples = [
   'INSERT OR IGNORE INTO t VALUES (1)',
   'INSERT OR ABORT INTO "customers" VALUES (1)',
   'INSERT OR REPLACE INTO `customers` VALUES (1)',
+  'INSERT INTO "customer""history" VALUES (1)',
   'UPDATE t SET x=1',
   'UPDATE "customers" SET x=1',
+  'UPDATE "customer""history" SET x=1',
+  'UPDATE `customer``history` SET x=1',
   'UPDATE OR FAIL [customers] SET x=1',
   'UPDATE\ncustomers SET x=1',
   'DELETE FROM t',
   'DELETE\nFROM [customers]',
   'CREATE TABLE t(x INTEGER)',
+  'CREATE TABLE "customer""history"(x INTEGER)',
   'CREATE TEMP TABLE t(x INTEGER)',
   'CREATE TEMPORARY TABLE "t"(x INTEGER)',
   'CREATE TABLE IF NOT EXISTS [t](x INTEGER)',
@@ -127,6 +131,7 @@ console.log(`SQL_MUTATION_DENY_LIST_SELF_TEST=${mutationSamples.length}/${mutati
 console.log(`SQL_MUTATION_DENY_LIST_FALSE_POSITIVE_SELF_TEST=${allowedSamples.length}/${allowedSamples.length}_PASS`);
 console.log('SQL_MUTATION_DENY_LIST_MULTILINE_SELF_TEST=PASS');
 console.log('SQL_MUTATION_DENY_LIST_QUOTED_IDENTIFIER_SELF_TEST=PASS');
+console.log('SQL_MUTATION_DENY_LIST_ESCAPED_IDENTIFIER_SELF_TEST=PASS');
 console.log('SQL_MUTATION_DENY_LIST_SQLITE_MODIFIER_SELF_TEST=PASS');
 console.log('DECISION_PLAN_NO_WRITE_CONTRACT=PASS');
 console.log('PRODUCTION_D1_READ=0');
