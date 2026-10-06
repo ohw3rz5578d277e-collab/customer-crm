@@ -79,3 +79,32 @@ jobs:
           node tests/line-history-recovery-artifact-discovery.test.mjs
           node tests/line-history-owner-decision-plan.test.mjs
           node tests/line-history-owner-review-queue.test.mjs
+
+  macos-portability:
+    runs-on: macos-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact PR head
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+
+      - name: Set up Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Assert exact PR head
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
+
+      - name: Run the same portable final gate used on Mac
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          bash scripts/run-line-history-no-write-local-final-gate.sh
