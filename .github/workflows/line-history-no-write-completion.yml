@@ -1,0 +1,110 @@
+name: LINE history no-write completion
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'src/crm-line-history-recovery-next-phase.mjs'
+      - 'src/crm-line-history-recovery-next-command.mjs'
+      - 'src/crm-line-history-recovery-discovery.mjs'
+      - 'src/crm-line-history-owner-decision-plan.mjs'
+      - 'src/crm-line-history-owner-review-queue.mjs'
+      - 'scripts/discover-line-history-recovery-artifacts.mjs'
+      - 'scripts/inspect-line-history-recovery-status.mjs'
+      - 'scripts/plan-line-history-owner-decisions.mjs'
+      - 'scripts/run-line-history-recovery-operator.sh'
+      - 'scripts/run-line-history-owner-authorization-prep.sh'
+      - 'scripts/verify-line-history-no-write-safety.mjs'
+      - 'scripts/run-line-history-no-write-local-final-gate.sh'
+      - 'tests/line-history-recovery-next-phase.test.mjs'
+      - 'tests/line-history-recovery-artifact-discovery.test.mjs'
+      - 'tests/line-history-owner-decision-plan.test.mjs'
+      - 'tests/line-history-owner-review-queue.test.mjs'
+      - '.github/workflows/line-history-no-write-completion.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact PR head
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+
+      - name: Assert exact PR head
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
+
+      - name: Syntax checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check src/crm-line-history-recovery-next-phase.mjs
+          node --check src/crm-line-history-recovery-next-command.mjs
+          node --check src/crm-line-history-recovery-discovery.mjs
+          node --check src/crm-line-history-owner-decision-plan.mjs
+          node --check src/crm-line-history-owner-review-queue.mjs
+          node --check scripts/discover-line-history-recovery-artifacts.mjs
+          node --check scripts/inspect-line-history-recovery-status.mjs
+          node --check scripts/plan-line-history-owner-decisions.mjs
+          node --check scripts/verify-line-history-no-write-safety.mjs
+          node --check tests/line-history-recovery-next-phase.test.mjs
+          node --check tests/line-history-recovery-artifact-discovery.test.mjs
+          node --check tests/line-history-owner-decision-plan.test.mjs
+          node --check tests/line-history-owner-review-queue.test.mjs
+          bash -n scripts/run-line-history-recovery-operator.sh
+          bash -n scripts/run-line-history-owner-authorization-prep.sh
+          bash -n scripts/run-line-history-no-write-local-final-gate.sh
+          echo 'LINE_HISTORY_NO_WRITE_SYNTAX=PASS'
+
+      - name: Cross-platform no-write safety contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/verify-line-history-no-write-safety.mjs
+
+      - name: No-write completion regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          node tests/line-history-recovery-next-phase.test.mjs
+          node tests/line-history-recovery-artifact-discovery.test.mjs
+          node tests/line-history-owner-decision-plan.test.mjs
+          node tests/line-history-owner-review-queue.test.mjs
+
+  macos-portability:
+    runs-on: macos-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact PR head
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+
+      - name: Set up Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Assert exact PR head
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
+
+      - name: Run the same portable final gate used on Mac
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          bash scripts/run-line-history-no-write-local-final-gate.sh
