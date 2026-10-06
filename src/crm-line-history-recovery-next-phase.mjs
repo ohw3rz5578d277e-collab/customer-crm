@@ -1,4 +1,135 @@
-function bool(v){return v===true}
+function exactSha(v){return /^[0-9a-f]{40}$/.test(String(v||''))}
+function exactDigest(v){return /^[0-9a-f]{64}$/.test(String(v||''))}
+function exactInt(v){return Number.isInteger(v)?v:null}
+
+const DECISION_SUMMARY_KEYS=[
+  'SAME_PERSON',
+  'DIFFERENT_PERSON',
+  'DEFERRED',
+  'NEEDS_MORE_EVIDENCE'
+];
+
+const WRITE_RECEIPT_DIGEST_FIELDS=[
+  'packet_sha256',
+  'insert_manifest_sha256',
+  'write_result_sha256',
+  'post_preview_result_sha256',
+  'approved_insert_sql_sha256'
+];
+
+function hasExactDecisionSummary(receipt,groups,noWrite){
+  const summary=receipt?.decision_summary;
+  if(!summary||typeof summary!=='object'||Array.isArray(summary))return false;
+  const keys=Object.keys(summary).sort();
+  const expected=[...DECISION_SUMMARY_KEYS].sort();
+  if(keys.length!==expected.length||keys.some((key,index)=>key!==expected[index]))return false;
+
+  const values={};
+  for(const key of DECISION_SUMMARY_KEYS){
+    const value=exactInt(summary[key]);
+    if(value===null||value<0)return false;
+    values[key]=value;
+  }
+
+  if(values.SAME_PERSON!==0)return false;
+  const noWriteSummary=
+    values.DIFFERENT_PERSON+
+    values.DEFERRED+
+    values.NEEDS_MORE_EVIDENCE;
+  return noWriteSummary===groups&&noWriteSummary===noWrite;
+}
+
+function hasValidWriteReceiptHashChain(receipt,artifactDigests=null){
+  for(const key of WRITE_RECEIPT_DIGEST_FIELDS){
+    if(!exactDigest(receipt?.[key]))return false;
+  }
+
+  if(!artifactDigests||typeof artifactDigests!=='object'||Array.isArray(artifactDigests))return false;
+  for(const key of WRITE_RECEIPT_DIGEST_FIELDS){
+    if(!exactDigest(artifactDigests[key]))return false;
+    if(String(receipt[key])!==String(artifactDigests[key]))return false;
+  }
+
+  return true;
+}
+
+export function isValidOwnerNoWriteCompletionReceipt(receipt,currentMainSha=''){
+  if(!receipt||receipt.complete!==true)return false;
+  if(String(receipt.receipt_format||'')!=='customer-crm-line-history-no-write-completion-v1')return false;
+  if(String(receipt.completion_type||'')!=='OWNER_DECISIONS_NO_WRITE')return false;
+  if(!exactSha(currentMainSha)||String(receipt.source_main_sha||'')!==String(currentMainSha))return false;
+
+  const groups=exactInt(receipt.review_queue_groups);
+  const submitted=exactInt(receipt.submitted_decisions);
+  const noWrite=exactInt(receipt.accepted_no_write_decisions);
+  const identityActions=exactInt(receipt.proposed_backfill_identity_actions);
+  const physicalWrites=exactInt(receipt.proposed_write_actions);
+
+  if(groups===null||groups<=0)return false;
+  if(submitted!==groups||noWrite!==groups)return false;
+  if(identityActions!==0||physicalWrites!==0)return false;
+  if(receipt.authorization_granted!==false)return false;
+  if(!hasExactDecisionSummary(receipt,groups,noWrite))return false;
+
+  const zeroFields=[
+    'production_d1_read',
+    'production_d1_write',
+    'customer_id_generation',
+    'customer_update',
+    'customer_delete',
+    'customer_merge',
+    'line_send',
+    'worker_deploy',
+    'production_deploy'
+  ];
+  if(zeroFields.some((key)=>exactInt(receipt[key])!==0))return false;
+
+  return true;
+}
+
+export function isValidOwnerWriteCompletionReceipt(receipt,currentMainSha='',artifactDigests=null){
+  if(!receipt||receipt.complete!==true)return false;
+  if(String(receipt.planner||'')!=='line_history_owner_write_completion_receipt_v1')return false;
+  if(!exactSha(currentMainSha)||String(receipt.source_main_sha||'')!==String(currentMainSha))return false;
+  if(String(receipt.authorization_scope||'')!=='CUSTOMER_LINE_MESSAGES_INSERT_ONLY')return false;
+  if(!hasValidWriteReceiptHashChain(receipt,artifactDigests))return false;
+
+  const exactRows=exactInt(receipt.exact_physical_insert_rows);
+  const blockerCount=exactInt(receipt.blocker_count);
+  const remainingRows=exactInt(receipt.post_preview_would_insert_rows);
+  const reportedRows=exactInt(receipt.reported_change_rows);
+  if(exactRows===null||exactRows<1)return false;
+  if(blockerCount!==0||remainingRows!==0)return false;
+  if(!Array.isArray(receipt.blockers)||receipt.blockers.length!==0)return false;
+  if(reportedRows===null||reportedRows<0)return false;
+
+  if(receipt.change_metadata_found===true){
+    if(reportedRows!==exactRows)return false;
+  }else if(receipt.change_metadata_found===false){
+    if(reportedRows!==0)return false;
+  }else{
+    return false;
+  }
+
+  const safety=receipt.safety;
+  if(!safety||typeof safety!=='object'||Array.isArray(safety))return false;
+  const zeroSafetyFields=[
+    'line_send',
+    'customer_id_generation',
+    'customer_update',
+    'customer_delete',
+    'customer_merge',
+    'worker_deploy',
+    'production_deploy'
+  ];
+  if(zeroSafetyFields.some((key)=>exactInt(safety[key])!==0))return false;
+  if(safety.private_customer_id_output!==false)return false;
+  if(safety.private_line_user_id_output!==false)return false;
+  if(safety.message_text_output!==false)return false;
+  if(safety.customer_name_output!==false)return false;
+
+  return true;
+}
 
 export function resolveLineHistoryRecoveryNextPhase({
   candidatesPresent=false,
@@ -10,15 +141,26 @@ export function resolveLineHistoryRecoveryNextPhase({
   d1Packet=null,
   approvalFilePresent=false,
   completionReceipt=null,
+  completionReceiptArtifactDigests=null,
   currentMainSha=''
 }={}){
-  if(completionReceipt&&completionReceipt.complete===true){
-    return {
-      stage:'COMPLETE',
-      next_phase:'none',
-      next_action:'Recovery flow is complete. Keep the completion receipt with the run artifacts.',
-      production_write_possible:false
-    };
+  if(completionReceipt){
+    if(isValidOwnerNoWriteCompletionReceipt(completionReceipt,currentMainSha)){
+      return {
+        stage:'COMPLETE_NO_WRITE',
+        next_phase:'none',
+        next_action:'Owner review is complete and selected no Production backfill actions. Keep the SHA-bound no-write completion receipt with the run artifacts.',
+        production_write_possible:false
+      };
+    }
+    if(isValidOwnerWriteCompletionReceipt(completionReceipt,currentMainSha,completionReceiptArtifactDigests)){
+      return {
+        stage:'COMPLETE',
+        next_phase:'none',
+        next_action:'Recovery flow is complete. Keep the validated write completion receipt with the run artifacts.',
+        production_write_possible:false
+      };
+    }
   }
 
   if(d1Packet){

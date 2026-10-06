@@ -1,0 +1,380 @@
+name: Member Production R2 bucket digest index
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/member-production-r2-bucket-digest-index.yml'
+      - '.github/workflows/dispatch-member-production-r2-bucket-digest-index-from-issue.yml'
+      - 'tests/member-production-r2-bucket-digest-index-contract.test.mjs'
+      - 'docs/member-app/member-production-r2-bucket-digest-index.md'
+  workflow_dispatch:
+    inputs:
+      expected_sha:
+        description: Exact current main SHA to inspect read-only
+        required: true
+        type: string
+      jurisdictions:
+        description: Explicit canonical comma-separated jurisdiction subset
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.event_name == 'pull_request' && format('member-r2-bucket-digest-index-pr-{0}', github.event.pull_request.number) || format('member-r2-bucket-digest-index-{0}', github.run_id) }}
+  cancel-in-progress: false
+
+jobs:
+  contract:
+    name: Member R2 bucket digest index contract
+    if: ${{ github.event_name == 'pull_request' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact PR head
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+
+      - name: Assert exact PR head
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
+
+      - name: Verify workflow YAML syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          ruby -e "require 'yaml'; YAML.load_file(ARGV[0])" .github/workflows/member-production-r2-bucket-digest-index.yml
+          ruby -e "require 'yaml'; YAML.load_file(ARGV[0])" .github/workflows/dispatch-member-production-r2-bucket-digest-index-from-issue.yml
+          echo 'MEMBER_R2_BUCKET_DIGEST_INDEX_YAML=PASS'
+
+      - name: Verify read-only shell syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          ruby -e 'require "yaml"; y=YAML.load_file(ARGV[0]); steps=y.fetch("jobs").fetch("digest_index").fetch("steps"); %w[Verify\ dedicated\ R2\ REST\ API\ token Read\ Owner-authorized\ R2\ bucket\ digest\ index].each_with_index { |name,i| s=steps.find { |step| step["name"] == name }; abort "R2_STEP_NOT_FOUND:#{name}" unless s; File.write("/tmp/member-r2-digest-index-#{i}.sh", s.fetch("run")) }' .github/workflows/member-production-r2-bucket-digest-index.yml
+          bash -n /tmp/member-r2-digest-index-0.sh
+          bash -n /tmp/member-r2-digest-index-1.sh
+          rm -f /tmp/member-r2-digest-index-0.sh /tmp/member-r2-digest-index-1.sh
+          echo 'MEMBER_R2_BUCKET_DIGEST_INDEX_SHELL=PASS'
+
+      - name: Set up Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+
+      - name: Verify digest index contract
+        run: node tests/member-production-r2-bucket-digest-index-contract.test.mjs
+
+  digest_index:
+    name: Exact-SHA read-only Member R2 bucket digest index
+    if: ${{ github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      EXPECTED_SHA_RAW: ${{ inputs.expected_sha }}
+      JURISDICTIONS_RAW: ${{ inputs.jurisdictions }}
+    steps:
+      - name: Validate exact read-only inputs
+        id: gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected_sha="$(printf '%s' "$EXPECTED_SHA_RAW" | tr '[:upper:]' '[:lower:]')"
+          jurisdictions="$JURISDICTIONS_RAW"
+
+          [[ "$expected_sha" =~ ^[0-9a-f]{40}$ ]] || { echo '::error::INVALID_EXPECTED_SHA'; exit 1; }
+          test -n "$jurisdictions" || { echo '::error::R2_JURISDICTIONS_REQUIRED'; exit 1; }
+          [[ "$jurisdictions" != *[[:space:]]* ]] || { echo '::error::R2_JURISDICTIONS_WHITESPACE_FORBIDDEN'; exit 1; }
+          lowercase_jurisdictions="$(printf '%s' "$jurisdictions" | tr '[:upper:]' '[:lower:]')"
+          test "$jurisdictions" = "$lowercase_jurisdictions" || { echo '::error::R2_JURISDICTIONS_CASE_NOT_CANONICAL'; exit 1; }
+          [[ "$jurisdictions" =~ ^(default|eu|us|fedramp|fedramp-high)(,(default|eu|us|fedramp|fedramp-high))*$ ]] || { echo '::error::INVALID_R2_JURISDICTIONS_FORMAT'; exit 1; }
+
+          IFS=',' read -r -a parts <<< "$jurisdictions"
+          last_index=-1
+          declare -A seen=()
+          for jurisdiction in "${parts[@]}"; do
+            case "$jurisdiction" in
+              default) index=0 ;;
+              eu) index=1 ;;
+              us) index=2 ;;
+              fedramp) index=3 ;;
+              fedramp-high) index=4 ;;
+              *) echo '::error::INVALID_R2_JURISDICTION'; exit 1 ;;
+            esac
+            [[ -z "${seen[$jurisdiction]:-}" ]] || { echo '::error::DUPLICATE_R2_JURISDICTION'; exit 1; }
+            (( index > last_index )) || { echo '::error::R2_JURISDICTIONS_NOT_CANONICAL_ORDER'; exit 1; }
+            seen[$jurisdiction]=1
+            last_index=$index
+          done
+          rejoined="$(IFS=,; printf '%s' "${parts[*]}")"
+          test "$rejoined" = "$jurisdictions" || { echo '::error::R2_JURISDICTIONS_REJOIN_MISMATCH'; exit 1; }
+
+          echo "expected_sha=$expected_sha" >> "$GITHUB_OUTPUT"
+          echo "jurisdictions=$jurisdictions" >> "$GITHUB_OUTPUT"
+          echo "MEMBER_R2_BUCKET_DIGEST_INDEX_SHA=$expected_sha"
+          echo "R2_JURISDICTIONS_AUTHORIZED=$jurisdictions"
+          echo 'RAW_BUCKET_NAME_PRINTED=NO'
+          echo 'R2_OBJECT_READ=0'
+          echo 'R2_WRITE=0'
+          echo 'BUCKET_MUTATION=0'
+          echo 'PRODUCTION_STORAGE_BINDING_CHANGE=0'
+          echo 'PRODUCTION_STORAGE_FETCH=0'
+          echo 'MEMBER_ROUTE_ACTIVATION=0'
+          echo 'PRODUCTION_DEPLOY=0'
+          echo 'PRODUCTION_TRAFFIC_CHANGE=0'
+          echo 'PRODUCTION_D1_WRITE=0'
+
+      - name: Checkout exact inspected SHA
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ steps.gate.outputs.expected_sha }}
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Exact current-main gate
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ steps.gate.outputs.expected_sha }}
+        run: |
+          set -euo pipefail
+          actual_sha="$(git rev-parse HEAD)"
+          current_main="$(git ls-remote origin refs/heads/main | awk '{print $1}')"
+          test "$actual_sha" = "$EXPECTED_SHA" || { echo "::error::CHECKOUT_SHA_MISMATCH actual=$actual_sha expected=$EXPECTED_SHA"; exit 1; }
+          test "$current_main" = "$EXPECTED_SHA" || { echo "::error::MAIN_DRIFT current=$current_main expected=$EXPECTED_SHA"; exit 1; }
+          echo 'CURRENT_MAIN_EXACT_GATE=PASS'
+
+      - name: Verify canonical Member storage remains default-off
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const fs=require('fs');
+          const entry=fs.readFileSync('src/production-index-crm-customer360-entry.js','utf8');
+          const cfg=JSON.parse(fs.readFileSync('wrangler.jsonc','utf8'));
+          if(!entry.includes('const MEMBER_PRODUCTION_OWNER_APPROVED=false;'))throw new Error('MEMBER_OWNER_FLAG_NOT_DEFAULT_OFF');
+          if(!entry.includes('public_asset_adapter:null'))throw new Error('PUBLIC_ASSET_ADAPTER_NOT_DEFAULT_NULL');
+          if(!entry.includes('private_media_storage_adapter:null'))throw new Error('PRIVATE_MEDIA_ADAPTER_NOT_DEFAULT_NULL');
+          if(String(cfg?.vars?.MEMBER_PRODUCTION_ROUTE_MODE||'').trim().toLowerCase()==='enabled')throw new Error('MEMBER_PRODUCTION_ROUTE_MODE_ENABLED');
+          if(String(cfg?.vars?.MEMBER_PRIVATE_MEDIA_CONTENT_ROUTE_MODE||'').trim().toLowerCase()==='enabled')throw new Error('PRIVATE_MEDIA_ROUTE_MODE_ENABLED');
+          if(Array.isArray(cfg?.r2_buckets)&&cfg.r2_buckets.length)throw new Error('CANONICAL_R2_BINDING_ALREADY_DECLARED');
+          console.log('MEMBER_CANONICAL_STORAGE_DEFAULT_OFF=PASS');
+          console.log('CANONICAL_R2_BINDING_DECLARED=NO');
+          NODE
+
+      - name: Install pinned Wrangler tooling
+        run: npm install --no-save wrangler@4.131.2
+
+      - name: Confirm Worker-management Cloudflare authentication
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          npx wrangler whoami >/tmp/member-r2-digest-index-whoami.txt
+          test -s /tmp/member-r2-digest-index-whoami.txt
+          rm -f /tmp/member-r2-digest-index-whoami.txt
+          echo 'CLOUDFLARE_WORKER_AUTH=PASS'
+
+      - name: Snapshot active Production version before digest index
+        id: active_before
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          npx wrangler deployments status --name customer-crm-api --json > /tmp/member-r2-digest-index-before.json
+          active_version_id="$(node - /tmp/member-r2-digest-index-before.json <<'NODE'
+          const fs=require('fs');
+          const value=JSON.parse(fs.readFileSync(process.argv[2],'utf8'));
+          const d=Array.isArray(value)?value[0]:value;
+          const active=(d?.versions||[]).filter(v=>Number(v.percentage)===100);
+          if(active.length!==1||typeof active[0].version_id!=='string')process.exit(2);
+          process.stdout.write(active[0].version_id.toLowerCase());
+          NODE
+          )" || { echo '::error::CURRENT_ACTIVE_PRODUCTION_VERSION_UNAVAILABLE'; exit 1; }
+          [[ "$active_version_id" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] || { echo '::error::INVALID_CURRENT_ACTIVE_VERSION_ID'; exit 1; }
+          echo "active_version_id=$active_version_id" >> "$GITHUB_OUTPUT"
+          echo "ACTIVE_PRODUCTION_VERSION_BEFORE=$active_version_id"
+
+      - name: Verify dedicated R2 REST API token
+        id: r2_auth
+        shell: bash
+        env:
+          CLOUDFLARE_R2_READ_API_TOKEN: ${{ secrets.CLOUDFLARE_R2_READ_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_R2_READ_API_TOKEN" || { echo '::error::CLOUDFLARE_R2_READ_API_TOKEN_MISSING'; exit 1; }
+          [[ "$CLOUDFLARE_R2_READ_API_TOKEN" != *[[:space:]]* ]] || { echo '::error::R2_READ_REST_TOKEN_FORMAT_INVALID_WHITESPACE'; exit 1; }
+          case "$CLOUDFLARE_R2_READ_API_TOKEN" in
+            cfut_*) ;;
+            *) echo '::error::R2_READ_REST_TOKEN_TYPE_NOT_USER_API_TOKEN'; exit 1 ;;
+          esac
+          verify_file=/tmp/member-r2-digest-index-token.json
+          cleanup(){ rm -f "$verify_file"; }
+          trap cleanup EXIT
+          code="$(curl --silent --show-error --output "$verify_file" --write-out '%{http_code}' -H "Authorization: Bearer $CLOUDFLARE_R2_READ_API_TOKEN" -H 'Accept: application/json' 'https://api.cloudflare.com/client/v4/user/tokens/verify')"
+          if [[ "$code" != '200' ]]; then
+            error_codes="$(node -e 'const fs=require("fs"); try { const p=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); const v=(Array.isArray(p?.errors)?p.errors:[]).map(x=>String(x?.code??"")).filter(x=>/^\d+$/.test(x)); process.stdout.write(v.length?[...new Set(v)].join(","):"unknown"); } catch { process.stdout.write("unparseable"); }' "$verify_file")"
+            echo "::error::R2_READ_REST_TOKEN_VERIFY_HTTP_${code}_CF_CODES_${error_codes}"
+            exit 1
+          fi
+          state="$(node -e 'const fs=require("fs"); try { const p=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); process.stdout.write(p?.success===true&&String(p?.result?.status||"")==="active"?"PASS":"FAIL"); } catch { process.stdout.write("JSON_INVALID"); }' "$verify_file")"
+          test "$state" = 'PASS' || { echo "::error::R2_READ_REST_TOKEN_VERIFY_${state}"; exit 1; }
+          cleanup
+          trap - EXIT
+          echo 'R2_READ_REST_TOKEN_AUTH=PASS'
+          echo 'R2_READ_REST_TOKEN_VALUE_PRINTED=NO'
+
+      - name: Read Owner-authorized R2 bucket digest index
+        id: digest_index
+        shell: bash
+        env:
+          CLOUDFLARE_R2_READ_API_TOKEN: ${{ secrets.CLOUDFLARE_R2_READ_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          JURISDICTIONS: ${{ steps.gate.outputs.jurisdictions }}
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_R2_READ_API_TOKEN" || { echo '::error::CLOUDFLARE_R2_READ_API_TOKEN_MISSING'; exit 1; }
+          test -n "$CLOUDFLARE_ACCOUNT_ID" || { echo '::error::CLOUDFLARE_ACCOUNT_ID_MISSING'; exit 1; }
+          test -n "$JURISDICTIONS" || { echo '::error::R2_JURISDICTIONS_REQUIRED'; exit 1; }
+
+          IFS=',' read -r -a jurisdictions <<< "$JURISDICTIONS"
+          rm -f /tmp/member-r2-digest-index-buckets-*.json
+          cleanup(){ rm -f /tmp/member-r2-digest-index-buckets-*.json; }
+          trap cleanup EXIT
+
+          for jurisdiction in "${jurisdictions[@]}"; do
+            response_file="/tmp/member-r2-digest-index-buckets-$jurisdiction.json"
+            code="$(curl --silent --show-error --output "$response_file" --write-out '%{http_code}' -H "Authorization: Bearer $CLOUDFLARE_R2_READ_API_TOKEN" -H 'Content-Type: application/json' -H "cf-r2-jurisdiction: $jurisdiction" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/r2/buckets?per_page=1000&order=name&direction=asc")"
+            if [[ "$code" != '200' ]]; then
+              error_codes="$(node -e 'const fs=require("fs"); try { const p=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); const v=(Array.isArray(p?.errors)?p.errors:[]).map(x=>String(x?.code??"")).filter(x=>/^\d+$/.test(x)); process.stdout.write(v.length?[...new Set(v)].join(","):"unknown"); } catch { process.stdout.write("unparseable"); }' "$response_file")"
+              echo "::error::R2_BUCKET_DIGEST_INDEX_HTTP_${jurisdiction}_${code}_CF_CODES_${error_codes}"
+              exit 1
+            fi
+          done
+
+          node <<'NODE'
+          const crypto=require('crypto');
+          const fs=require('fs');
+          const jurisdictions=String(process.env.JURISDICTIONS||'').split(',');
+          const sha256=value=>crypto.createHash('sha256').update(value).digest('hex');
+          const records=[];
+
+          for(const observed of jurisdictions){
+            const path=`/tmp/member-r2-digest-index-buckets-${observed}.json`;
+            let payload;
+            try { payload=JSON.parse(fs.readFileSync(path,'utf8')); }
+            catch { throw new Error('R2_BUCKET_DIGEST_INDEX_JSON_INVALID:'+observed); }
+            if(payload?.success!==true)throw new Error('R2_BUCKET_DIGEST_INDEX_API_NOT_SUCCESS:'+observed);
+            if(String(payload?.result_info?.cursor||''))throw new Error('R2_BUCKET_DIGEST_INDEX_PAGINATION_UNSUPPORTED:'+observed);
+            if(!Array.isArray(payload?.result?.buckets))throw new Error('R2_BUCKET_DIGEST_INDEX_BUCKETS_ARRAY_REQUIRED:'+observed);
+
+            for(const bucket of payload.result.buckets){
+              const name=typeof bucket?.name==='string'?bucket.name:'';
+              if(!name)throw new Error('R2_BUCKET_DIGEST_INDEX_BUCKET_NAME_REQUIRED:'+observed);
+              records.push({
+                name_sha256:sha256(name),
+                observed,
+                inventory_key:observed+':'+name
+              });
+            }
+          }
+
+          const inventoryKeys=records.map(record=>record.inventory_key);
+          if(new Set(inventoryKeys).size!==inventoryKeys.length)throw new Error('R2_BUCKET_DIGEST_INDEX_DUPLICATE_JURISDICTION_NAME');
+          const inventoryDigest=sha256([...inventoryKeys].sort().join('\n'));
+          const sorted=[...records].sort((a,b)=>a.name_sha256.localeCompare(b.name_sha256)||a.observed.localeCompare(b.observed));
+
+          console.log('R2_JURISDICTIONS_SCANNED='+jurisdictions.join(','));
+          console.log('R2_BUCKET_DIGEST_INDEX_COUNT='+sorted.length);
+          console.log('R2_BUCKET_INVENTORY_SHA256='+inventoryDigest);
+          sorted.forEach((record,index)=>{
+            const n=String(index+1).padStart(3,'0');
+            console.log(`R2_BUCKET_DIGEST_INDEX_${n}_SHA256=${record.name_sha256}`);
+            console.log(`R2_BUCKET_DIGEST_INDEX_${n}_OBSERVED_JURISDICTION=${record.observed}`);
+          });
+          fs.appendFileSync(process.env.GITHUB_OUTPUT,'bucket_count='+sorted.length+'\n');
+          fs.appendFileSync(process.env.GITHUB_OUTPUT,'inventory_sha256='+inventoryDigest+'\n');
+          NODE
+
+          cleanup
+          trap - EXIT
+          echo 'R2_BUCKET_DIGEST_INDEX=PASS'
+          echo 'RAW_BUCKET_NAME_PRINTED=NO'
+          echo 'R2_OBJECT_READ=0'
+          echo 'R2_WRITE=0'
+          echo 'BUCKET_MUTATION=0'
+          echo 'PRODUCTION_STORAGE_FETCH=0'
+
+      - name: Verify active Production version and main did not drift
+        if: ${{ always() && steps.active_before.outcome == 'success' }}
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          EXPECTED_SHA: ${{ steps.gate.outputs.expected_sha }}
+          ACTIVE_BEFORE: ${{ steps.active_before.outputs.active_version_id }}
+        run: |
+          set -euo pipefail
+          npx wrangler deployments status --name customer-crm-api --json > /tmp/member-r2-digest-index-after.json
+          active_after="$(node - /tmp/member-r2-digest-index-after.json <<'NODE'
+          const fs=require('fs');
+          const value=JSON.parse(fs.readFileSync(process.argv[2],'utf8'));
+          const d=Array.isArray(value)?value[0]:value;
+          const active=(d?.versions||[]).filter(v=>Number(v.percentage)===100);
+          if(active.length!==1||typeof active[0].version_id!=='string')process.exit(2);
+          process.stdout.write(active[0].version_id.toLowerCase());
+          NODE
+          )" || { echo '::error::ACTIVE_VERSION_AFTER_DIGEST_INDEX_UNAVAILABLE'; exit 1; }
+          rm -f /tmp/member-r2-digest-index-before.json /tmp/member-r2-digest-index-after.json
+          test "$active_after" = "$ACTIVE_BEFORE" || { echo "::error::ACTIVE_PRODUCTION_VERSION_DRIFT before=$ACTIVE_BEFORE after=$active_after"; exit 1; }
+          current_main="$(git ls-remote origin refs/heads/main | awk '{print $1}')"
+          test "$current_main" = "$EXPECTED_SHA" || { echo "::error::MAIN_DRIFT_AFTER_DIGEST_INDEX expected=$EXPECTED_SHA current=$current_main"; exit 1; }
+          echo "ACTIVE_PRODUCTION_VERSION_AFTER=$active_after"
+          echo 'ACTIVE_PRODUCTION_VERSION_STABLE=PASS'
+          echo 'CURRENT_MAIN_STABLE=PASS'
+
+      - name: Summarize read-only evidence
+        if: ${{ always() }}
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ steps.gate.outputs.expected_sha }}
+          JURISDICTIONS: ${{ steps.gate.outputs.jurisdictions }}
+          ACTIVE_VERSION: ${{ steps.active_before.outputs.active_version_id }}
+          INDEX_OUTCOME: ${{ steps.digest_index.outcome }}
+          BUCKET_COUNT: ${{ steps.digest_index.outputs.bucket_count }}
+          INVENTORY_SHA256: ${{ steps.digest_index.outputs.inventory_sha256 }}
+        run: |
+          set -euo pipefail
+          {
+            echo '## Member Production R2 bucket digest index'
+            echo
+            echo "- CURRENT_MAIN_SHA=$EXPECTED_SHA"
+            echo "- R2_JURISDICTIONS_AUTHORIZED=$JURISDICTIONS"
+            echo "- ACTIVE_PRODUCTION_VERSION_BEFORE=$ACTIVE_VERSION"
+            echo "- DIGEST_INDEX_OUTCOME=$INDEX_OUTCOME"
+            echo "- R2_BUCKET_COUNT=$BUCKET_COUNT"
+            echo "- R2_BUCKET_INVENTORY_SHA256=$INVENTORY_SHA256"
+            echo '- RAW_BUCKET_NAME_PRINTED=NO'
+            echo '- R2_OBJECT_READ=0'
+            echo '- R2_WRITE=0'
+            echo '- BUCKET_MUTATION=0'
+            echo '- PRODUCTION_STORAGE_BINDING_CHANGE=0'
+            echo '- PRODUCTION_STORAGE_FETCH=0'
+            echo '- MEMBER_ROUTE_ACTIVATION=0'
+            echo '- PRODUCTION_DEPLOY=0'
+            echo '- PRODUCTION_TRAFFIC_CHANGE=0'
+            echo '- PRODUCTION_D1_WRITE=0'
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [[ "$INDEX_OUTCOME" == 'success' ]]; then
+            echo 'MEMBER_PRODUCTION_R2_BUCKET_DIGEST_INDEX=PASS'
+          else
+            echo 'MEMBER_PRODUCTION_R2_BUCKET_DIGEST_INDEX=FAIL_CLOSED'
+          fi
