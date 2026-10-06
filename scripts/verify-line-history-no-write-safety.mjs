@@ -11,7 +11,8 @@ const NO_WRITE_FILES = [
   'scripts/run-line-history-owner-authorization-prep.sh'
 ];
 
-const SQL_SEPARATOR_ATOM = '(?:\\s|/\\*[\\s\\S]*?\\*/|--[^\\r\\n]*(?:\\r\\n|\\r|\\n|$))';
+const BLOCK_COMMENT = '/\\*(?:[^*]|\\*(?!\\/))*\\*/';
+const SQL_SEPARATOR_ATOM = `(?:\\s|${BLOCK_COMMENT}|--[^\\r\\n]*(?:\\r\\n|\\r|\\n|$))`;
 const SQL_SEP = `(?:${SQL_SEPARATOR_ATOM})+`;
 const SQL_GAP = `(?:${SQL_SEPARATOR_ATOM})*`;
 const IDENT = '(?:"(?:""|[^"])+"|`(?:``|[^`])+`|\'(?:\'\'|[^\'])+\'|\\[(?:\\]\\]|[^\\]])+\\]|[A-Za-z_][A-Za-z0-9_$]*)';
@@ -38,7 +39,7 @@ const MUTATION_PATTERNS = [
   new RegExp(`\\bDETACH${SQL_SEP}(?:DATABASE${SQL_SEP})?`, 'i')
 ];
 
-const JS_GAP = '(?:(?:\\s)|(?:/\\*[\\s\\S]*?\\*/)|(?://[^\\r\\n]*(?:\\r?\\n|$)))*';
+const JS_GAP = `(?:\\s|${BLOCK_COMMENT}|//[^\\r\\n]*(?:\\r?\\n|$))*`;
 const NETWORK_MODULE = '(?:(?:node:)?(?:http|https|http2|net|tls|dgram|dns(?:/promises)?)|cloudflare:sockets|undici|axios|got|node-fetch|ws)';
 const NETWORK_MODULE_SPECIFIER = new RegExp(`(?:\\bfrom${JS_GAP}|\\brequire${JS_GAP}\\(${JS_GAP}|\\bimport${JS_GAP}\\(${JS_GAP}|\\bimport${JS_GAP})['\"]${NETWORK_MODULE}['\"]`, 'i');
 const PRODUCTION_EXECUTION_PATTERNS = [
@@ -184,6 +185,12 @@ if (mutationMatch(backtrackingProbe)) fail('SQL_DENY_LIST_BACKTRACKING_PROBE_FAL
 const backtrackingElapsedMs = Date.now() - backtrackingStartedAt;
 if (backtrackingElapsedMs > 1000) fail('SQL_DENY_LIST_BACKTRACKING_PROBE_SLOW', String(backtrackingElapsedMs));
 
+const repeatedCommentProbe = `DELETE ${'/**/'.repeat(28)} NOT_FROM customers`;
+const repeatedCommentStartedAt = Date.now();
+if (mutationMatch(repeatedCommentProbe)) fail('SQL_DENY_LIST_REPEATED_COMMENT_PROBE_FALSE_POSITIVE');
+const repeatedCommentElapsedMs = Date.now() - repeatedCommentStartedAt;
+if (repeatedCommentElapsedMs > 2000) fail('SQL_DENY_LIST_REPEATED_COMMENT_PROBE_SLOW', String(repeatedCommentElapsedMs));
+
 const executionSamples = [
   "import https from 'https'",
   "import 'node:http2'",
@@ -248,6 +255,7 @@ console.log(`NETWORK_DENY_LIST_FALSE_POSITIVE_SELF_TEST=${executionAllowedSample
 console.log('SQL_MUTATION_DENY_LIST_SOURCE_ESCAPE_NORMALIZATION=PASS');
 console.log('SQL_MUTATION_DENY_LIST_COMMENT_SEPARATOR_NORMALIZATION=PASS');
 console.log('SQL_MUTATION_DENY_LIST_QUOTED_COMMENT_MARKER_PRESERVATION=PASS');
+console.log('SQL_MUTATION_DENY_LIST_COMMENT_TOKENIZATION=PASS');
 console.log('SQL_MUTATION_DENY_LIST_BOUNDED_BACKTRACKING=PASS');
 console.log('SQL_MUTATION_DENY_LIST_MULTILINE_SELF_TEST=PASS');
 console.log('SQL_MUTATION_DENY_LIST_QUOTED_IDENTIFIER_SELF_TEST=PASS');
