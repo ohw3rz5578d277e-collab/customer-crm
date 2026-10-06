@@ -54,12 +54,13 @@ const SQL_MUTATION_PATTERNS=[
   /\b(?:PRAGMA|VACUUM|REINDEX|ANALYZE)\b/i,
   /\b(?:ATTACH|DETACH)\s+(?:DATABASE\s+)?/i
 ];
-const hasMutationSql=value=>SQL_MUTATION_PATTERNS.some(re=>re.test(value));
+const normalizeSqlForScan=value=>String(value).replace(/\/\*[\s\S]*?\*\//g,' ');
+const hasMutationSql=value=>SQL_MUTATION_PATTERNS.some(re=>re.test(normalizeSqlForScan(value)));
 
 const JS_GAP='(?:(?:\\s)|(?:/\\*[\\s\\S]*?\\*/)|(?://[^\\r\\n]*(?:\\r?\\n|$)))*';
 const NETWORK_BUILTIN='(?:http|https|http2|net|tls|dns(?:/promises)?|dgram)';
 const NETWORK_SPECIFIER=`(?:(?:node:)?${NETWORK_BUILTIN}|cloudflare:sockets|undici|axios|got|node-fetch)`;
-const NETWORK_MODULE_RE=new RegExp(`(?:\\bfrom${JS_GAP}|\\brequire${JS_GAP}\\(${JS_GAP}|\\bimport${JS_GAP}\\(${JS_GAP}|\\bimport${JS_GAP})['\"]${NETWORK_SPECIFIER}['\"]`,'i');
+const NETWORK_MODULE_RE=new RegExp(`(?:\\bfrom${JS_GAP}|\\brequire${JS_GAP}\\(${JS_GAP}|\\bimport${JS_GAP}\\(${JS_GAP}|\\bimport${JS_GAP})(['"\\x60])${NETWORK_SPECIFIER}\\1`,'i');
 const hasNetworkSurface=value=>[
   NETWORK_MODULE_RE,
   new RegExp(`\\bprocess${JS_GAP}\\.${JS_GAP}getBuiltinModule${JS_GAP}\\(`,'i'),
@@ -135,6 +136,19 @@ try{
     assertNoCanaryOutput(errorWrapper.result,`error-wrapper-${index}`);
   }
 
+  const outerWrapperFailureCases=[
+    {success:false,error:'query failed',result:{results:rows,success:true}},
+    {error:'query failed',result:{results:rows,success:true}},
+    {success:false,result:{results:rows,success:true}},
+    {success:true,error:null,result:{results:rows,success:true}}
+  ];
+  for(const [index,value] of outerWrapperFailureCases.entries()){
+    const outerFailure=run(value,`outer-wrapper-failure-${index}`);
+    assert.notEqual(outerFailure.result.status,0,`outer wrapper failure ${index} should fail closed`);
+    assert.match(outerFailure.result.stderr,/STOP_WRAPPER_ENTRY_ERROR_PRESENT|STOP_WRAPPER_ENTRY_UNSUCCESSFUL/);
+    assertNoCanaryOutput(outerFailure.result,`outer-wrapper-failure-${index}`);
+  }
+
   for(const field of ['customer_id','line_user_id','name','deleted_at']){
     const incomplete={...rows[0]};
     delete incomplete[field];
@@ -198,6 +212,8 @@ try{
     "import {connect} from 'node:http2'",
     "await import('http2')",
     "await import/*comment*/('node:http2')",
+    'await import(`node:https`)',
+    'const netTemplate = require(`node:net`)',
     "const net = require('net')",
     "const tls = require/*comment*/('node:tls')",
     "await import('node:tls')",
@@ -234,11 +250,14 @@ try{
     'INSERT INTO customers(customer_id) VALUES(1)',
     'INSERT OR ABORT INTO main.customers(customer_id) VALUES(1)',
     'UPDATE customers SET name=1',
+    "UPDATE/**/customers/**/SET name='new'",
     'UPDATE main.customers SET name=1',
     'UPDATE customers AS c SET name=1',
     'UPDATE customers INDEXED BY idx SET name=1',
     'DELETE FROM main.customers',
+    'DELETE/**/FROM/**/main.customers',
     'CREATE TABLE t(x INTEGER)',
+    'CREATE/**/UNIQUE/**/INDEX idx ON customers(customer_id)',
     'CREATE UNIQUE INDEX idx ON customers(customer_id)',
     'CREATE VIRTUAL TABLE v USING fts5(x)',
     'ALTER TABLE customers ADD COLUMN x TEXT',
@@ -272,6 +291,7 @@ try{
   console.log('PRODUCTION_IDENTITY_SNAPSHOT_BOM_TOLERANCE=PASS');
   console.log('PRODUCTION_IDENTITY_SNAPSHOT_WRAPPER_INTEGRITY_FAIL_CLOSED=PASS');
   console.log('PRODUCTION_IDENTITY_SNAPSHOT_WRAPPER_ERROR_FIELD_FAIL_CLOSED=PASS');
+  console.log('PRODUCTION_IDENTITY_SNAPSHOT_OUTER_WRAPPER_FAIL_CLOSED=PASS');
   console.log('PRODUCTION_IDENTITY_SNAPSHOT_REQUIRED_IDENTITY_FIELDS=PASS');
   console.log('PRODUCTION_IDENTITY_SNAPSHOT_DELETED_IDENTITY_PRESERVED=PASS');
   console.log('PRODUCTION_IDENTITY_SNAPSHOT_DUPLICATE_FAIL_CLOSED=PASS');
@@ -280,7 +300,9 @@ try{
   console.log('PRODUCTION_IDENTITY_SNAPSHOT_SHA_BOUND=PASS');
   console.log(`PRODUCTION_IDENTITY_SNAPSHOT_NETWORK_GUARD=${networkFixtures.length}/${networkFixtures.length}_PASS`);
   console.log('PRODUCTION_IDENTITY_SNAPSHOT_NETWORK_COMMENT_SEPARATOR=PASS');
+  console.log('PRODUCTION_IDENTITY_SNAPSHOT_NETWORK_TEMPLATE_LITERAL=PASS');
   console.log(`PRODUCTION_IDENTITY_SNAPSHOT_SQL_GUARD=${mutationFixtures.length}/${mutationFixtures.length}_PASS`);
+  console.log('PRODUCTION_IDENTITY_SNAPSHOT_SQL_COMMENT_SEPARATOR=PASS');
   console.log('PRODUCTION_IDENTITY_SNAPSHOT_PRIVATE_CANARIES=0');
   console.log('PRODUCTION_IDENTITY_SNAPSHOT_LOCAL_ONLY=PASS');
   console.log('PRODUCTION_D1_READ=0');
