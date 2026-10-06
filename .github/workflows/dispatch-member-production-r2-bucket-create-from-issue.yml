@@ -19,6 +19,7 @@ jobs:
   dispatch:
     name: Validate exact Member R2 bucket-create command and dispatch
     if: >-
+      github.run_attempt == 1 &&
       github.event.issue.number == 26 &&
       github.event.issue.pull_request == null &&
       github.actor == 'ohw3rz5578d277e-collab' &&
