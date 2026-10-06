@@ -186,7 +186,14 @@ assert.equal(isValidOwnerNoWriteCompletionReceipt(validNoWrite,''),false);
 
 const validWrite=writeReceipt(exactMainSha);
 const validWriteArtifactDigests=writeReceiptArtifactDigests(validWrite);
-assert.equal(isValidOwnerWriteCompletionReceipt(validWrite,exactMainSha),true);
+assert.equal(isValidOwnerWriteCompletionReceipt(validWrite,exactMainSha),false);
+assert.notEqual(
+  resolveLineHistoryRecoveryNextPhase({
+    completionReceipt:validWrite,
+    currentMainSha:exactMainSha
+  }).stage,
+  'COMPLETE'
+);
 assert.equal(isValidOwnerWriteCompletionReceipt(validWrite,exactMainSha,validWriteArtifactDigests),true);
 expectStage({
   completionReceipt:validWrite,
@@ -199,7 +206,10 @@ const validWriteNoMetadata={
   change_metadata_found:false,
   reported_change_rows:0
 };
-assert.equal(isValidOwnerWriteCompletionReceipt(validWriteNoMetadata,exactMainSha),true);
+assert.equal(
+  isValidOwnerWriteCompletionReceipt(validWriteNoMetadata,exactMainSha,validWriteArtifactDigests),
+  true
+);
 
 const missingPacketDigest={...validWrite};
 delete missingPacketDigest.packet_sha256;
@@ -224,9 +234,14 @@ for(const bad of [
   {...validWrite,change_metadata_found:'true'},
   {...validWrite,safety:{...validWrite.safety,line_send:1}}
 ]){
-  assert.equal(isValidOwnerWriteCompletionReceipt(bad,exactMainSha),false);
+  const artifactDigests=writeReceiptArtifactDigests(bad);
+  assert.equal(isValidOwnerWriteCompletionReceipt(bad,exactMainSha,artifactDigests),false);
   assert.notEqual(
-    resolveLineHistoryRecoveryNextPhase({completionReceipt:bad,currentMainSha:exactMainSha}).stage,
+    resolveLineHistoryRecoveryNextPhase({
+      completionReceipt:bad,
+      completionReceiptArtifactDigests:artifactDigests,
+      currentMainSha:exactMainSha
+    }).stage,
     'COMPLETE'
   );
 }
@@ -327,6 +342,7 @@ console.log('LINE_HISTORY_RECOVERY_NEXT_PHASE_NO_WRITE_RECEIPT=PASS');
 console.log('LINE_HISTORY_RECOVERY_NEXT_PHASE_DECISION_SUMMARY=PASS');
 console.log('LINE_HISTORY_RECOVERY_NEXT_PHASE_WRITE_RECEIPT=PASS');
 console.log('LINE_HISTORY_RECOVERY_NEXT_PHASE_WRITE_HASH_CHAIN=PASS');
+console.log('LINE_HISTORY_RECOVERY_NEXT_PHASE_WRITE_ARTIFACT_BINDING=PASS');
 console.log('LINE_HISTORY_RECOVERY_NEXT_PHASE_WRITE_CHANGE_COUNT=PASS');
 console.log('LINE_HISTORY_RECOVERY_NEXT_PHASE_D1_PREVIEW=PASS');
 console.log('LINE_HISTORY_RECOVERY_NEXT_PHASE_STALE_PACKET=PASS');
