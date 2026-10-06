@@ -5,6 +5,7 @@ function exactInt(v){return Number.isInteger(v)?v:null}
 
 export function isValidOwnerNoWriteCompletionReceipt(receipt,currentMainSha=''){
   if(!receipt||receipt.complete!==true)return false;
+  if(String(receipt.receipt_format||'')!=='customer-crm-line-history-no-write-completion-v1')return false;
   if(String(receipt.completion_type||'')!=='OWNER_DECISIONS_NO_WRITE')return false;
   if(!exactSha(currentMainSha)||String(receipt.source_main_sha||'')!==String(currentMainSha))return false;
 
