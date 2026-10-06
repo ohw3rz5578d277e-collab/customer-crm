@@ -9,7 +9,7 @@ LINE_HISTORY_XLSX="${5:-}"
 
 if [ -z "$SALES_XLSX" ] || [ -z "$CUSTOMER_MASTER" ] || [ -z "$PRODUCTION_SNAPSHOT" ]; then
   echo "Usage: $0 <Photo売上管理.xlsx> <customer-master.json> <production-customers-snapshot.json> [output-dir] [LINE履歴.xlsx]"
-  echo "NOTE=Production snapshot must be obtained separately under an authorized read-only flow and supplied as complete JSON."
+  echo "NOTE=Production snapshot must be obtained separately under an authorized read-only flow and supplied as complete JSON envelope customer-crm-production-identity-snapshot-v1."
   exit 2
 fi
 
@@ -64,11 +64,30 @@ if not raw.strip():
     print('RESULT=STOP_PRODUCTION_SNAPSHOT_EMPTY')
     raise SystemExit(7)
 try:
-    json.loads(raw)
+    data=json.loads(raw)
 except json.JSONDecodeError:
     print('RESULT=STOP_PRODUCTION_SNAPSHOT_INVALID_JSON')
     raise SystemExit(8)
-print('PRODUCTION_SNAPSHOT_FORMAT=STRICT_COMPLETE_JSON')
+if not isinstance(data, dict):
+    print('RESULT=STOP_PRODUCTION_SNAPSHOT_ENVELOPE_REQUIRED')
+    raise SystemExit(9)
+if data.get('snapshot_format') != 'customer-crm-production-identity-snapshot-v1':
+    print('RESULT=STOP_PRODUCTION_SNAPSHOT_FORMAT_INVALID')
+    raise SystemExit(10)
+if data.get('complete') is not True:
+    print('RESULT=STOP_PRODUCTION_SNAPSHOT_NOT_COMPLETE')
+    raise SystemExit(11)
+if data.get('query_scope') != 'all_customer_identities':
+    print('RESULT=STOP_PRODUCTION_SNAPSHOT_SCOPE_INVALID')
+    raise SystemExit(12)
+customers=data.get('customers')
+count=data.get('customer_count')
+if isinstance(count, bool) or not isinstance(count, int) or not isinstance(customers, list) or count != len(customers) or count <= 0:
+    print('RESULT=STOP_PRODUCTION_SNAPSHOT_COUNT_INVALID')
+    raise SystemExit(13)
+print('PRODUCTION_SNAPSHOT_FORMAT=customer-crm-production-identity-snapshot-v1')
+print('PRODUCTION_SNAPSHOT_SCOPE=all_customer_identities')
+print('PRODUCTION_SNAPSHOT_COMPLETE=PASS')
 print('PRODUCTION_SNAPSHOT_INPUT=PASS')
 print('PRODUCTION_NETWORK_ACCESS=0')
 PY
@@ -92,7 +111,7 @@ echo "=================================================="
 echo " RESULT=SALES_CRM_LOCAL_RUNNER_COMPLETE"
 echo "=================================================="
 echo "OUTPUT_DIR=$OUT_DIR"
-echo "PRODUCTION_SNAPSHOT_SOURCE=SUPPLIED_COMPLETE_JSON_FILE_ONLY"
+echo "PRODUCTION_SNAPSHOT_SOURCE=SUPPLIED_COMPLETE_ENVELOPE_FILE_ONLY"
 echo "PRODUCTION_NETWORK_ACCESS=0"
 echo "PRODUCTION_D1_READ=0"
 echo "PRODUCTION_D1_WRITE=0"
