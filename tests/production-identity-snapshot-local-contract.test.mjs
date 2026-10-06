@@ -63,11 +63,19 @@ const SQL_MUTATION_PATTERNS=[
   new RegExp(`\\bATTACH${SQL_SEP}(?:DATABASE${SQL_SEP})?`,'i'),
   new RegExp(`\\bDETACH${SQL_SEP}(?:DATABASE${SQL_SEP})?`,'i')
 ];
+function decodeJsCodePointEscape(match,hex){
+  const cp=Number.parseInt(hex,16);
+  if(!Number.isInteger(cp)||cp<0||cp>0x10ffff)return match;
+  return String.fromCodePoint(cp);
+}
 function normalizeSqlForScan(value){
   let out=String(value??'');
   out=out.replace(/\\(?:\r\n|\r|\n|\u2028|\u2029)/g,'');
   for(let i=0;i<2;i++){
     out=out
+      .replace(/\\x([0-9a-fA-F]{2})/g,decodeJsCodePointEscape)
+      .replace(/\\u\{([0-9a-fA-F]{1,6})\}/g,decodeJsCodePointEscape)
+      .replace(/\\u([0-9a-fA-F]{4})/g,decodeJsCodePointEscape)
       .replace(/\\\"/g,'\"')
       .replace(/\\'/g,"'")
       .replace(/\\`/g,'`')
@@ -277,17 +285,23 @@ try{
     "UPDATE/**/customers/**/SET name='new'",
     "UPDATE--comment\ncustomers--comment\nSET name='new'",
     String.raw`const sql="UPDATE--x\ncustomers--x\nSET name='new'";`,
+    String.raw`const sql="UPDATE--x\x0acustomers--x\x0aSET name='new'";`,
+    String.raw`const sql="UPDATE--x\x0Dcustomers--x\x0DSET name='new'";`,
+    String.raw`const sql="UPDATE--x\u000acustomers--x\u000aSET name='new'";`,
+    String.raw`const sql="UPDATE--x\u000Dcustomers--x\u000DSET name='new'";`,
+    String.raw`const sql="UPDATE--x\u{a}customers--x\u{a}SET name='new'";`,
+    String.raw`const sql="UPDATE--x\u{D}customers--x\u{D}SET name='new'";`,
     'UPDATE main.customers SET name=1',
     'UPDATE customers AS c SET name=1',
     'UPDATE customers INDEXED BY idx SET name=1',
     'DELETE FROM main.customers',
     'DELETE/**/FROM/**/main.customers',
     'DELETE--comment\nFROM--comment\nmain.customers',
-    String.raw`const sql="DELETE--x\nFROM--x\nmain.customers";`,
+    String.raw`const sql="DELETE--x\x0aFROM--x\u000amain.customers";`,
     'CREATE TABLE t(x INTEGER)',
     'CREATE/**/UNIQUE/**/INDEX idx ON customers(customer_id)',
     'CREATE--comment\nUNIQUE--comment\nINDEX idx ON customers(customer_id)',
-    String.raw`const sql="CREATE--x\nUNIQUE--x\nINDEX idx ON customers(customer_id)";`,
+    String.raw`const sql="CREATE--x\u{a}UNIQUE--x\x0aINDEX idx ON customers(customer_id)";`,
     'CREATE UNIQUE INDEX idx ON customers(customer_id)',
     'CREATE VIRTUAL TABLE v USING fts5(x)',
     'ALTER TABLE customers ADD COLUMN x TEXT',
@@ -335,6 +349,7 @@ try{
   console.log('PRODUCTION_IDENTITY_SNAPSHOT_SQL_COMMENT_SEPARATOR=PASS');
   console.log('PRODUCTION_IDENTITY_SNAPSHOT_SQL_LINE_COMMENT_SEPARATOR=PASS');
   console.log('PRODUCTION_IDENTITY_SNAPSHOT_SQL_ESCAPED_NEWLINE_SOURCE=PASS');
+  console.log('PRODUCTION_IDENTITY_SNAPSHOT_SQL_HEX_UNICODE_ESCAPE_SOURCE=PASS');
   console.log('PRODUCTION_IDENTITY_SNAPSHOT_PRIVATE_CANARIES=0');
   console.log('PRODUCTION_IDENTITY_SNAPSHOT_LOCAL_ONLY=PASS');
   console.log('PRODUCTION_D1_READ=0');
