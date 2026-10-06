@@ -44,6 +44,7 @@ jobs:
           candidate_sha256="${BASH_REMATCH[5]:-}"
 
           test -n "$jurisdictions" || { echo '::error::R2_JURISDICTIONS_REQUIRED'; exit 1; }
+          [[ "$jurisdictions" =~ ^(default|eu|us|fedramp|fedramp-high)(,(default|eu|us|fedramp|fedramp-high))*$ ]] || { echo '::error::INVALID_R2_JURISDICTIONS_FORMAT'; exit 1; }
           IFS=',' read -r -a jurisdiction_parts <<< "$jurisdictions"
           last_index=-1
           declare -A seen=()
@@ -61,6 +62,8 @@ jobs:
             seen[$jurisdiction]=1
             last_index=$index
           done
+          rejoined_jurisdictions="$(IFS=,; printf '%s' "${jurisdiction_parts[*]}")"
+          test "$rejoined_jurisdictions" = "$jurisdictions" || { echo '::error::R2_JURISDICTIONS_REJOIN_MISMATCH'; exit 1; }
 
           if [[ "$mode" == 'inventory' ]]; then
             test -z "$candidate_sha256" || { echo '::error::INVENTORY_MODE_FORBIDS_CANDIDATE_BUCKET_DIGEST'; exit 1; }
