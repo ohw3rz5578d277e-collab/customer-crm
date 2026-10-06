@@ -21,6 +21,10 @@ on:
         options:
           - inventory
           - verify
+      jurisdictions:
+        description: Explicit canonical comma-separated jurisdiction subset (default,eu,us,fedramp,fedramp-high)
+        required: true
+        type: string
       candidate_bucket_sha256:
         description: SHA-256 of exact candidate bucket name; required only for verify mode
         required: false
@@ -65,7 +69,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          ruby -e 'require "yaml"; y=YAML.load_file(ARGV[0]); steps=y.fetch("jobs").fetch("preflight").fetch("steps"); %w[Verify\ dedicated\ R2\ REST\ API\ token Read\ every\ R2\ jurisdiction\ inventory\ without\ object\ access].each_with_index { |name,i| s=steps.find { |step| step["name"] == name }; abort "R2_STEP_NOT_FOUND:#{name}" unless s; File.write("/tmp/member-storage-r2-step-#{i}.sh", s.fetch("run")) }' .github/workflows/member-production-storage-preflight.yml
+          ruby -e 'require "yaml"; y=YAML.load_file(ARGV[0]); steps=y.fetch("jobs").fetch("preflight").fetch("steps"); %w[Verify\ dedicated\ R2\ REST\ API\ token Read\ Owner-authorized\ R2\ jurisdiction\ inventory\ without\ object\ access].each_with_index { |name,i| s=steps.find { |step| step["name"] == name }; abort "R2_STEP_NOT_FOUND:#{name}" unless s; File.write("/tmp/member-storage-r2-step-#{i}.sh", s.fetch("run")) }' .github/workflows/member-production-storage-preflight.yml
           bash -n /tmp/member-storage-r2-step-0.sh
           bash -n /tmp/member-storage-r2-step-1.sh
           rm -f /tmp/member-storage-r2-step-0.sh /tmp/member-storage-r2-step-1.sh
@@ -87,6 +91,7 @@ jobs:
     env:
       EXPECTED_SHA_RAW: ${{ inputs.expected_sha }}
       MODE_RAW: ${{ inputs.mode }}
+      JURISDICTIONS_RAW: ${{ inputs.jurisdictions }}
       CANDIDATE_BUCKET_SHA256_RAW: ${{ inputs.candidate_bucket_sha256 }}
     steps:
       - name: Normalize and validate read-only inputs
@@ -96,10 +101,33 @@ jobs:
           set -euo pipefail
           expected_sha="$(printf '%s' "$EXPECTED_SHA_RAW" | tr '[:upper:]' '[:lower:]')"
           mode="$(printf '%s' "$MODE_RAW" | tr '[:upper:]' '[:lower:]')"
+          jurisdictions="$(printf '%s' "$JURISDICTIONS_RAW" | tr '[:upper:]' '[:lower:]')"
           candidate_sha256="$(printf '%s' "$CANDIDATE_BUCKET_SHA256_RAW" | tr '[:upper:]' '[:lower:]')"
 
           [[ "$expected_sha" =~ ^[0-9a-f]{40}$ ]] || { echo '::error::INVALID_EXPECTED_SHA'; exit 1; }
           [[ "$mode" == 'inventory' || "$mode" == 'verify' ]] || { echo '::error::INVALID_STORAGE_PREFLIGHT_MODE'; exit 1; }
+          test -n "$jurisdictions" || { echo '::error::R2_JURISDICTIONS_REQUIRED'; exit 1; }
+          [[ "$jurisdictions" != *[[:space:]]* ]] || { echo '::error::R2_JURISDICTIONS_WHITESPACE_FORBIDDEN'; exit 1; }
+
+          IFS=',' read -r -a jurisdiction_parts <<< "$jurisdictions"
+          test "${#jurisdiction_parts[@]}" -ge 1 || { echo '::error::R2_JURISDICTIONS_REQUIRED'; exit 1; }
+          last_index=-1
+          declare -A seen=()
+          for jurisdiction in "${jurisdiction_parts[@]}"; do
+            case "$jurisdiction" in
+              default) index=0 ;;
+              eu) index=1 ;;
+              us) index=2 ;;
+              fedramp) index=3 ;;
+              fedramp-high) index=4 ;;
+              *) echo '::error::INVALID_R2_JURISDICTION'; exit 1 ;;
+            esac
+            [[ -z "${seen[$jurisdiction]:-}" ]] || { echo '::error::DUPLICATE_R2_JURISDICTION'; exit 1; }
+            (( index > last_index )) || { echo '::error::R2_JURISDICTIONS_NOT_CANONICAL_ORDER'; exit 1; }
+            seen[$jurisdiction]=1
+            last_index=$index
+          done
+
           if [[ "$mode" == 'inventory' ]]; then
             test -z "$candidate_sha256" || { echo '::error::INVENTORY_MODE_FORBIDS_CANDIDATE_BUCKET_DIGEST'; exit 1; }
           else
@@ -108,9 +136,11 @@ jobs:
 
           echo "expected_sha=$expected_sha" >> "$GITHUB_OUTPUT"
           echo "mode=$mode" >> "$GITHUB_OUTPUT"
+          echo "jurisdictions=$jurisdictions" >> "$GITHUB_OUTPUT"
           echo "candidate_bucket_sha256=$candidate_sha256" >> "$GITHUB_OUTPUT"
           echo "MEMBER_STORAGE_PREFLIGHT_SHA=$expected_sha"
           echo "MEMBER_STORAGE_PREFLIGHT_MODE=$mode"
+          echo "R2_JURISDICTIONS_AUTHORIZED=$jurisdictions"
           echo 'PRODUCTION_STORAGE_BINDING_CHANGE=0'
           echo 'PRODUCTION_STORAGE_FETCH=0'
           echo 'R2_OBJECT_READ=0'
@@ -238,21 +268,25 @@ jobs:
           echo 'R2_READ_REST_TOKEN_AUTH=PASS'
           echo 'R2_READ_REST_TOKEN_VALUE_PRINTED=NO'
 
-      - name: Read every R2 jurisdiction inventory without object access
+      - name: Read Owner-authorized R2 jurisdiction inventory without object access
         id: inventory
         shell: bash
         env:
           CLOUDFLARE_R2_READ_API_TOKEN: ${{ secrets.CLOUDFLARE_R2_READ_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           MODE: ${{ steps.gate.outputs.mode }}
+          JURISDICTIONS: ${{ steps.gate.outputs.jurisdictions }}
           CANDIDATE_BUCKET_SHA256: ${{ steps.gate.outputs.candidate_bucket_sha256 }}
         run: |
           set -euo pipefail
           test -n "$CLOUDFLARE_R2_READ_API_TOKEN" || { echo '::error::CLOUDFLARE_R2_READ_API_TOKEN_MISSING'; exit 1; }
           test -n "$CLOUDFLARE_ACCOUNT_ID" || { echo '::error::CLOUDFLARE_ACCOUNT_ID_MISSING'; exit 1; }
+          test -n "$JURISDICTIONS" || { echo '::error::R2_JURISDICTIONS_REQUIRED'; exit 1; }
 
-          jurisdictions=(default eu us fedramp fedramp-high)
+          IFS=',' read -r -a jurisdictions <<< "$JURISDICTIONS"
           rm -f /tmp/member-storage-r2-buckets-*.json
+          cleanup(){ rm -f /tmp/member-storage-r2-buckets-*.json; }
+          trap cleanup EXIT
           for jurisdiction in "${jurisdictions[@]}"; do
             response_file="/tmp/member-storage-r2-buckets-$jurisdiction.json"
             code="$(curl --silent --show-error \
@@ -273,7 +307,8 @@ jobs:
           node <<'NODE'
           const crypto=require('crypto');
           const fs=require('fs');
-          const jurisdictions=['default','eu','us','fedramp','fedramp-high'];
+          const jurisdictions=String(process.env.JURISDICTIONS||'').split(',').filter(Boolean);
+          if(!jurisdictions.length)throw new Error('R2_JURISDICTIONS_REQUIRED');
           const records=[];
           const sha256=value=>crypto.createHash('sha256').update(value).digest('hex');
           for(const jurisdiction of jurisdictions){
@@ -323,7 +358,8 @@ jobs:
           }
           NODE
 
-          rm -f /tmp/member-storage-r2-buckets-*.json
+          cleanup
+          trap - EXIT
           echo 'R2_BUCKET_INVENTORY=PASS'
           echo 'R2_OBJECT_READ=0'
           echo 'R2_WRITE=0'
@@ -363,6 +399,7 @@ jobs:
         env:
           EXPECTED_SHA: ${{ steps.gate.outputs.expected_sha }}
           MODE: ${{ steps.gate.outputs.mode }}
+          JURISDICTIONS: ${{ steps.gate.outputs.jurisdictions }}
           ACTIVE_VERSION: ${{ steps.active_before.outputs.active_version_id }}
           R2_AUTH_OUTCOME: ${{ steps.r2_auth.outcome }}
           INVENTORY_OUTCOME: ${{ steps.inventory.outcome }}
@@ -376,11 +413,12 @@ jobs:
             echo
             echo "- CURRENT_MAIN_SHA=$EXPECTED_SHA"
             echo "- MODE=$MODE"
+            echo "- R2_JURISDICTIONS_AUTHORIZED=$JURISDICTIONS"
             echo "- ACTIVE_PRODUCTION_VERSION_BEFORE=$ACTIVE_VERSION"
             echo "- R2_REST_TOKEN_AUTH_OUTCOME=$R2_AUTH_OUTCOME"
             echo "- INVENTORY_OUTCOME=$INVENTORY_OUTCOME"
             if [[ "$INVENTORY_OUTCOME" == 'success' ]]; then
-              echo '- R2_JURISDICTIONS_SCANNED=default,eu,us,fedramp,fedramp-high'
+              echo "- R2_JURISDICTIONS_SCANNED=$JURISDICTIONS"
               echo "- R2_BUCKET_COUNT=$BUCKET_COUNT"
               echo "- R2_BUCKET_INVENTORY_SHA256=$INVENTORY_SHA256"
               if [[ "$MODE" == 'verify' ]]; then
