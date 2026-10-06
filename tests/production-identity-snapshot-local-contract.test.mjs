@@ -56,10 +56,13 @@ const SQL_MUTATION_PATTERNS=[
 ];
 const hasMutationSql=value=>SQL_MUTATION_PATTERNS.some(re=>re.test(value));
 
-const NETWORK_MODULE_RE=/(?:\bfrom\s*|\brequire\s*\(\s*|\bimport\s*\(\s*|\bimport\s*)['"](?:node:)?(?:http|https|net|tls|dns|dgram)['"]/i;
+const NETWORK_BUILTIN='(?:http|https|http2|net|tls|dns(?:/promises)?|dgram)';
+const NETWORK_MODULE_RE=new RegExp(`(?:\\bfrom\\s*|\\brequire\\s*\\(\\s*|\\bimport\\s*\\(\\s*|\\bimport\\s*)['\"](?:node:)?${NETWORK_BUILTIN}['\"]`,'i');
+const CLOUDFLARE_SOCKET_RE=/(?:\bfrom\s*|\brequire\s*\(\s*|\bimport\s*\(\s*|\bimport\s*)['"]cloudflare:sockets['"]/i;
 const THIRD_PARTY_NETWORK_RE=/(?:\bfrom\s*|\brequire\s*\(\s*|\bimport\s*\(\s*|\bimport\s*)['"](?:undici|axios|got|node-fetch)['"]/i;
 const hasNetworkSurface=value=>[
   NETWORK_MODULE_RE,
+  CLOUDFLARE_SOCKET_RE,
   THIRD_PARTY_NETWORK_RE,
   /\bprocess\.getBuiltinModule\s*\(/i,
   /\bcreateRequire\s*\(/i,
@@ -104,6 +107,31 @@ try{
   const bomWrapped=run(`\uFEFF${JSON.stringify([{results:rows}])}`,'bom');
   assert.equal(bomWrapped.result.status,0,bomWrapped.result.stderr||bomWrapped.result.stdout);
   assertNoCanaryOutput(bomWrapped.result,'bom');
+
+  const failedWrapper=run([
+    {results:[],success:false,error:'query failed'},
+    {results:rows,success:true}
+  ],'failed-wrapper');
+  assert.notEqual(failedWrapper.result.status,0);
+  assert.match(failedWrapper.result.stderr,/STOP_WRAPPER_ENTRY_UNSUCCESSFUL/);
+  assertNoCanaryOutput(failedWrapper.result,'failed-wrapper');
+
+  const malformedWrapper=run([
+    {unexpected:true},
+    {results:rows,success:true}
+  ],'malformed-wrapper');
+  assert.notEqual(malformedWrapper.result.status,0);
+  assert.match(malformedWrapper.result.stderr,/STOP_WRAPPER_ENTRY_RESULTS_REQUIRED/);
+  assertNoCanaryOutput(malformedWrapper.result,'malformed-wrapper');
+
+  for(const field of ['customer_id','line_user_id','name','deleted_at']){
+    const incomplete={...rows[0]};
+    delete incomplete[field];
+    const missingField=run([{results:[incomplete],success:true}],`missing-${field}`);
+    assert.notEqual(missingField.result.status,0,`${field} omission should fail closed`);
+    assert.match(missingField.result.stderr,/STOP_CUSTOMER_ROW_IDENTITY_FIELDS_REQUIRED/);
+    assertNoCanaryOutput(missingField.result,`missing-${field}`);
+  }
 
   const duplicate=run([{results:[rows[0],{...rows[0],name:'PRIVATE_NAME_CANARY_DUPLICATE'}]}],'duplicate');
   assert.notEqual(duplicate.result.status,0);
@@ -154,10 +182,15 @@ try{
     "import https from 'https'",
     "import 'https'",
     "import http from 'node:http'",
+    "import {connect} from 'node:http2'",
+    "await import('http2')",
     "const net = require('net')",
     "await import('node:tls')",
     "import {lookup} from 'dns'",
+    "import {resolve} from 'node:dns/promises'",
+    "const dnsPromises = require('dns/promises')",
     "import dgram from 'node:dgram'",
+    "import {connect} from 'cloudflare:sockets'",
     "import {request} from 'undici'",
     "import 'node-fetch'",
     "process.getBuiltinModule('https')",
@@ -219,6 +252,8 @@ try{
   console.log('PRODUCTION_IDENTITY_SNAPSHOT_OBJECT_JSON=PASS');
   console.log('PRODUCTION_IDENTITY_SNAPSHOT_DIRECT_ROWS=PASS');
   console.log('PRODUCTION_IDENTITY_SNAPSHOT_BOM_TOLERANCE=PASS');
+  console.log('PRODUCTION_IDENTITY_SNAPSHOT_WRAPPER_INTEGRITY_FAIL_CLOSED=PASS');
+  console.log('PRODUCTION_IDENTITY_SNAPSHOT_REQUIRED_IDENTITY_FIELDS=PASS');
   console.log('PRODUCTION_IDENTITY_SNAPSHOT_DELETED_IDENTITY_PRESERVED=PASS');
   console.log('PRODUCTION_IDENTITY_SNAPSHOT_DUPLICATE_FAIL_CLOSED=PASS');
   console.log('PRODUCTION_IDENTITY_SNAPSHOT_EMPTY_FAIL_CLOSED=PASS');
