@@ -37,6 +37,7 @@ try{
   assert.equal(parsed.source_main_sha,sha);
   assert.equal(parsed.customer_count,2);
   assert.deepEqual(parsed.customers.map(x=>x.customer_id),['26000001','26000002']);
+  assert.equal(parsed.customers[0].deleted_at,'2026-01-02');
   assert.deepEqual(parseProductionSnapshotText(body).map(x=>x.customer_id),['26000001','26000002']);
   assert.match(wrapped.result.stdout,/PRIVATE_CUSTOMER_VALUES_PRINTED=0/);
   assert.match(wrapped.result.stdout,/PRODUCTION_D1_WRITE=0/);
@@ -47,6 +48,9 @@ try{
   const directRows=run(rows,'direct');
   assert.equal(directRows.result.status,0,directRows.result.stderr||directRows.result.stdout);
 
+  const bomWrapped=run(`\uFEFF${JSON.stringify([{results:rows}])}`,'bom');
+  assert.equal(bomWrapped.result.status,0,bomWrapped.result.stderr||bomWrapped.result.stdout);
+
   const duplicate=run([{results:[rows[0],{...rows[0],name:'Duplicate'}]}],'duplicate');
   assert.notEqual(duplicate.result.status,0);
   assert.match(duplicate.result.stderr,/STOP_DUPLICATE_CUSTOMER_ID/);
@@ -54,6 +58,14 @@ try{
   const empty=run([{results:[]}],'empty');
   assert.notEqual(empty.result.status,0);
   assert.match(empty.result.stderr,/STOP_CUSTOMER_ROWS_EMPTY/);
+
+  const prefixedGarbage=run(`wrangler log line\n${JSON.stringify([{results:rows}])}`,'prefixed-garbage');
+  assert.notEqual(prefixedGarbage.result.status,0);
+  assert.match(prefixedGarbage.result.stderr,/STOP_INPUT_JSON_INVALID/);
+
+  const suffixedGarbage=run(`${JSON.stringify([{results:rows}])}\nnon-json trailer`,'suffixed-garbage');
+  assert.notEqual(suffixedGarbage.result.status,0);
+  assert.match(suffixedGarbage.result.stderr,/STOP_INPUT_JSON_INVALID/);
 
   const badShaInput=path.join(root,'bad-sha.raw');
   const badShaOutput=path.join(root,'bad-sha.json');
@@ -92,8 +104,11 @@ try{
   console.log('PRODUCTION_IDENTITY_SNAPSHOT_WRAPPED_JSON=PASS');
   console.log('PRODUCTION_IDENTITY_SNAPSHOT_OBJECT_JSON=PASS');
   console.log('PRODUCTION_IDENTITY_SNAPSHOT_DIRECT_ROWS=PASS');
+  console.log('PRODUCTION_IDENTITY_SNAPSHOT_BOM_TOLERANCE=PASS');
+  console.log('PRODUCTION_IDENTITY_SNAPSHOT_DELETED_IDENTITY_PRESERVED=PASS');
   console.log('PRODUCTION_IDENTITY_SNAPSHOT_DUPLICATE_FAIL_CLOSED=PASS');
   console.log('PRODUCTION_IDENTITY_SNAPSHOT_EMPTY_FAIL_CLOSED=PASS');
+  console.log('PRODUCTION_IDENTITY_SNAPSHOT_GARBAGE_FAIL_CLOSED=PASS');
   console.log('PRODUCTION_IDENTITY_SNAPSHOT_SHA_BOUND=PASS');
   console.log('PRODUCTION_IDENTITY_SNAPSHOT_SQL_CONTEXT_SCAN=PASS');
   console.log('PRODUCTION_IDENTITY_SNAPSHOT_LOCAL_ONLY=PASS');
