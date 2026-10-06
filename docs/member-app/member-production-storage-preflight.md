@@ -1,6 +1,6 @@
 # MIZUNO PHOTO MEMBER — Production Storage Read-Only Preflight
 
-Baseline: 2026-10-05 JST
+Baseline: 2026-10-06 JST
 
 ## Purpose
 
@@ -34,14 +34,14 @@ Before any future binding change, the repository needs durable evidence that:
 3. no canonical `r2_buckets` binding has silently appeared in `wrangler.jsonc`;
 4. Worker-management authentication can read the current Production deployment state;
 5. the dedicated R2 credential is an active Cloudflare REST API bearer token;
-6. that least-privilege token can perform account-level bucket inventory;
-7. every documented R2 jurisdiction is inspected;
+6. that least-privilege token can perform account-level bucket inventory for the **Owner-authorized jurisdiction subset only**;
+7. no unapproved jurisdiction is silently added by the workflow;
 8. the active 100%-traffic Worker version remains stable during the observation;
-9. a candidate bucket, represented only by its SHA-256 name digest in GitHub metadata, exists exactly once across the observed jurisdiction inventories.
+9. a candidate bucket, represented only by its SHA-256 name digest in GitHub metadata, exists exactly once across the authorized jurisdiction inventories.
 
-## Jurisdiction-complete inventory
+## Explicit jurisdiction authorization
 
-The preflight queries each supported List Buckets jurisdiction independently:
+Supported jurisdiction values remain:
 
 - `default`
 - `eu`
@@ -49,11 +49,27 @@ The preflight queries each supported List Buckets jurisdiction independently:
 - `fedramp`
 - `fedramp-high`
 
-Each request is an account-level `GET /accounts/{account_id}/r2/buckets` with the matching `cf-r2-jurisdiction` header and the dedicated R2 REST read token. Cloudflare's current List Buckets API documents all five values, including `default`, as supported values for this optional header.
+The preflight no longer assumes that every account can access all five. Each execution must include an explicit `jurisdictions=` argument.
 
-The workflow fails closed if any jurisdiction request does not succeed or if a response requires pagination beyond the single complete page supported by this gate.
+The value is a comma-separated subset in canonical order:
+
+`default,eu,us,fedramp,fedramp-high`
+
+Examples:
+
+- standard non-FedRAMP scope: `jurisdictions=default,eu,us`
+- FedRAMP-only scope: `jurisdictions=fedramp,fedramp-high`
+- one jurisdiction only: `jurisdictions=default`
+
+There is intentionally no shorthand such as `all`, `standard`, `auto`, or an omitted/default scope. Unknown values, duplicates, whitespace, or non-canonical ordering fail closed before any Cloudflare bucket request.
+
+The workflow queries only the explicit subset. Each request is an account-level `GET /accounts/{account_id}/r2/buckets` with the matching `cf-r2-jurisdiction` header and the dedicated R2 REST read token.
+
+The workflow fails closed if any authorized jurisdiction request does not succeed or if a response requires pagination beyond the single complete page supported by this gate.
 
 On a non-200 response, the response body is not printed. Only numeric Cloudflare error codes are extracted for diagnostics. Bucket names and Cloudflare error messages are not emitted by that failure path.
+
+Temporary response files are removed on success and failure via an EXIT cleanup trap.
 
 ## Modes
 
@@ -61,13 +77,18 @@ On a non-200 response, the response body is not printed. Only numeric Cloudflare
 
 Command shape:
 
-`/member-production-storage-preflight sha=<40hex> mode=inventory`
+`/member-production-storage-preflight sha=<40hex> mode=inventory jurisdictions=<canonical-comma-separated-subset>`
 
-The workflow first verifies the dedicated REST API token, then retrieves only account-level bucket metadata.
+Example for the currently intended standard scope:
+
+`/member-production-storage-preflight sha=<40hex> mode=inventory jurisdictions=default,eu,us`
+
+The workflow first verifies the dedicated REST API token, then retrieves only account-level bucket metadata for the exact authorized jurisdictions.
 
 On success it outputs:
 
-- combined bucket count across all scanned jurisdictions;
+- the exact authorized/scanned jurisdiction list;
+- combined bucket count across those jurisdictions;
 - SHA-256 digest of sorted `jurisdiction:bucket-name` inventory entries;
 - current active 100%-traffic Worker version;
 - exact inspected main SHA.
@@ -80,9 +101,9 @@ GitHub must never receive the raw candidate bucket name. The Owner computes the 
 
 Command shape:
 
-`/member-production-storage-preflight sha=<40hex> mode=verify candidate_bucket_sha256=<64hex>`
+`/member-production-storage-preflight sha=<40hex> mode=verify jurisdictions=<canonical-comma-separated-subset> candidate_bucket_sha256=<64hex>`
 
-The workflow hashes each observed bucket name internally and requires the supplied digest to match exactly one bucket across all scanned jurisdictions. It outputs only the digest plus non-secret bucket metadata such as observed jurisdiction, reported jurisdiction, location, and storage class.
+The workflow hashes each observed bucket name internally and requires the supplied digest to match exactly one bucket across the authorized jurisdictions. It outputs only the digest plus non-secret bucket metadata such as observed jurisdiction, reported jurisdiction, location, and storage class.
 
 The raw candidate bucket name is not written to Issue #26, workflow input, logs, outputs, or summary by this contract.
 
@@ -96,8 +117,12 @@ The workflow fails closed if:
 - the active 100%-traffic Worker version changes during the observation;
 - the dedicated R2 read secret is absent;
 - the dedicated R2 secret contains whitespace or is not accepted as an active Cloudflare REST bearer token;
-- any jurisdiction R2 list response is unsuccessful;
-- any jurisdiction list is paginated beyond the single complete page expected by this gate;
+- `jurisdictions` is missing or contains whitespace;
+- a jurisdiction value is unsupported;
+- the same jurisdiction is repeated;
+- jurisdictions are not listed in canonical order;
+- any authorized jurisdiction R2 list response is unsuccessful;
+- any authorized jurisdiction list is paginated beyond the single complete page expected by this gate;
 - verify mode does not find the candidate digest;
 - the candidate digest is ambiguous across observed jurisdictions;
 - canonical Member route flags are unexpectedly enabled;
@@ -129,10 +154,16 @@ The preflight performs:
 - commerce activation = 0;
 - paid spend = 0.
 
+## Failure evidence from 2026-10-06
+
+A read-only inventory using the prior all-jurisdiction contract successfully passed dedicated R2 token verification and reached `fedramp`, where Cloudflare returned HTTP 403 with sanitized numeric code `10003`. The run then failed closed. The active Production Worker version and current main SHA remained stable, and no object access or mutation occurred.
+
+This evidence is why jurisdiction selection is now explicit rather than automatically expanding to all five values.
+
 ## Next gate
 
 A successful token verification, inventory, or candidate verification is not authorization to edit `wrangler.jsonc` or activate Member routes.
 
-If token verification returns Cloudflare code `9106`, the credential staged in `CLOUDFLARE_R2_READ_API_TOKEN` must be rechecked as a Cloudflare REST API bearer token rather than an R2 S3 `Access Key ID` / `Secret Access Key`. Any secret replacement or token creation remains a separate Owner-authorized operation.
+Any future R2 inventory run must use a fresh Owner authorization that names the exact current main SHA and exact jurisdiction subset.
 
 Any future R2 binding change must use a separately reviewed exact bucket and binding name, remain default-off first, and receive fresh Owner exact-SHA/scope authorization before any Production deployment or route activation.
