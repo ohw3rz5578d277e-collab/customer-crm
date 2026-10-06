@@ -17,21 +17,28 @@ assert.ok(workflow.includes("MEMBER_PRODUCTION_ROUTE_MODE_ENABLED"));
 assert.ok(workflow.includes("PRIVATE_MEDIA_ROUTE_MODE_ENABLED"));
 assert.ok(workflow.includes('wrangler@4.131.2'));
 assert.ok(workflow.includes('wrangler deployments status --name customer-crm-api --json'));
+assert.ok(workflow.includes('jurisdictions="$JURISDICTIONS_RAW"'));
 assert.ok(workflow.includes('R2_JURISDICTIONS_REQUIRED'));
 assert.ok(workflow.includes('R2_JURISDICTIONS_WHITESPACE_FORBIDDEN'));
+assert.ok(workflow.includes('R2_JURISDICTIONS_CASE_NOT_CANONICAL'));
+assert.ok(workflow.includes('INVALID_R2_JURISDICTIONS_FORMAT'));
+assert.ok(workflow.includes('R2_JURISDICTIONS_REJOIN_MISMATCH'));
 assert.ok(workflow.includes('INVALID_R2_JURISDICTION'));
 assert.ok(workflow.includes('DUPLICATE_R2_JURISDICTION'));
 assert.ok(workflow.includes('R2_JURISDICTIONS_NOT_CANONICAL_ORDER'));
+assert.ok(workflow.includes('^(default|eu|us|fedramp|fedramp-high)(,(default|eu|us|fedramp|fedramp-high))*$'));
 assert.ok(workflow.includes("case \"$jurisdiction\" in"));
 assert.ok(workflow.includes('default) index=0'));
 assert.ok(workflow.includes('eu) index=1'));
 assert.ok(workflow.includes('us) index=2'));
 assert.ok(workflow.includes('fedramp) index=3'));
 assert.ok(workflow.includes('fedramp-high) index=4'));
+assert.ok(workflow.includes('rejoined_jurisdictions="$(IFS=,; printf \'%s\' "${jurisdiction_parts[*]}")"'));
 assert.ok(workflow.includes('IFS=\',\' read -r -a jurisdictions <<< "$JURISDICTIONS"'));
 assert.ok(workflow.includes('cf-r2-jurisdiction: $jurisdiction'));
 assert.ok(workflow.includes('/r2/buckets?per_page=1000&order=name&direction=asc'));
-assert.ok(workflow.includes("const jurisdictions=String(process.env.JURISDICTIONS||'').split(',').filter(Boolean);"));
+assert.ok(workflow.includes("const jurisdictions=String(process.env.JURISDICTIONS||'').split(',');"));
+assert.doesNotMatch(workflow,/split\(','\)\.filter\(Boolean\)/);
 assert.ok(workflow.includes('R2_JURISDICTIONS_AUTHORIZED='));
 assert.ok(workflow.includes('R2_JURISDICTIONS_SCANNED='));
 assert.ok(workflow.includes('R2_BUCKET_INVENTORY_SHA256='));
@@ -54,10 +61,11 @@ assert.ok(workflow.includes('R2_BUCKET_INVENTORY_PAGINATION_UNSUPPORTED'));
 assert.ok(workflow.includes('cleanup(){ rm -f /tmp/member-storage-r2-buckets-*.json; }'));
 assert.ok(workflow.includes('trap cleanup EXIT'));
 
-// Never silently expand an Owner-approved subset back to all jurisdictions.
+// Never silently expand or normalize an Owner-approved subset.
 assert.doesNotMatch(workflow,/jurisdictions=\(default eu us fedramp fedramp-high\)/);
 assert.doesNotMatch(workflow,/const jurisdictions=\['default','eu','us','fedramp','fedramp-high'\]/);
 assert.doesNotMatch(workflow,/R2_JURISDICTIONS_SCANNED=default,eu,us,fedramp,fedramp-high/);
+assert.doesNotMatch(workflow,/jurisdictions="\$\(printf '%s' "\$JURISDICTIONS_RAW" \| tr '\[:upper:\]' '\[:lower:\]'\)"/);
 
 // Both R2 auth and explicitly scoped inventory shells must be syntax-checked by PR CI.
 assert.ok(workflow.includes('- name: Verify R2 auth and inventory shell syntax'));
@@ -124,9 +132,12 @@ assert.ok(bridge.includes("/member-production-storage-preflight "));
 assert.ok(bridge.includes("mode=(inventory|verify) jurisdictions=([a-z,-]+)"));
 assert.ok(bridge.includes("candidate_bucket_sha256=([0-9a-f]{64})"));
 assert.ok(bridge.includes("R2_JURISDICTIONS_REQUIRED"));
+assert.ok(bridge.includes("INVALID_R2_JURISDICTIONS_FORMAT"));
 assert.ok(bridge.includes("INVALID_R2_JURISDICTION"));
 assert.ok(bridge.includes("DUPLICATE_R2_JURISDICTION"));
 assert.ok(bridge.includes("R2_JURISDICTIONS_NOT_CANONICAL_ORDER"));
+assert.ok(bridge.includes("R2_JURISDICTIONS_REJOIN_MISMATCH"));
+assert.ok(bridge.includes("^(default|eu|us|fedramp|fedramp-high)(,(default|eu|us|fedramp|fedramp-high))*$"));
 assert.ok(bridge.includes("'jurisdictions':os.environ['JURISDICTIONS']"));
 assert.ok(bridge.includes("R2_JURISDICTIONS_AUTHORIZED="));
 assert.ok(bridge.includes("R2_JURISDICTIONS_DISPATCHED="));
