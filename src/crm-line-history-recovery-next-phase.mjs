@@ -1,4 +1,5 @@
 function exactSha(v){return /^[0-9a-f]{40}$/.test(String(v||''))}
+function exactDigest(v){return /^[0-9a-f]{64}$/.test(String(v||''))}
 function exactInt(v){return Number.isInteger(v)?v:null}
 
 const DECISION_SUMMARY_KEYS=[
@@ -6,6 +7,14 @@ const DECISION_SUMMARY_KEYS=[
   'DIFFERENT_PERSON',
   'DEFERRED',
   'NEEDS_MORE_EVIDENCE'
+];
+
+const WRITE_RECEIPT_DIGEST_FIELDS=[
+  'packet_sha256',
+  'insert_manifest_sha256',
+  'write_result_sha256',
+  'post_preview_result_sha256',
+  'approved_insert_sql_sha256'
 ];
 
 function hasExactDecisionSummary(receipt,groups,noWrite){
@@ -28,6 +37,22 @@ function hasExactDecisionSummary(receipt,groups,noWrite){
     values.DEFERRED+
     values.NEEDS_MORE_EVIDENCE;
   return noWriteSummary===groups&&noWriteSummary===noWrite;
+}
+
+function hasValidWriteReceiptHashChain(receipt,artifactDigests=null){
+  for(const key of WRITE_RECEIPT_DIGEST_FIELDS){
+    if(!exactDigest(receipt?.[key]))return false;
+  }
+
+  if(artifactDigests!==null&&artifactDigests!==undefined){
+    if(!artifactDigests||typeof artifactDigests!=='object'||Array.isArray(artifactDigests))return false;
+    for(const key of WRITE_RECEIPT_DIGEST_FIELDS){
+      if(!exactDigest(artifactDigests[key]))return false;
+      if(String(receipt[key])!==String(artifactDigests[key]))return false;
+    }
+  }
+
+  return true;
 }
 
 export function isValidOwnerNoWriteCompletionReceipt(receipt,currentMainSha=''){
@@ -64,11 +89,12 @@ export function isValidOwnerNoWriteCompletionReceipt(receipt,currentMainSha=''){
   return true;
 }
 
-export function isValidOwnerWriteCompletionReceipt(receipt,currentMainSha=''){
+export function isValidOwnerWriteCompletionReceipt(receipt,currentMainSha='',artifactDigests=null){
   if(!receipt||receipt.complete!==true)return false;
   if(String(receipt.planner||'')!=='line_history_owner_write_completion_receipt_v1')return false;
   if(!exactSha(currentMainSha)||String(receipt.source_main_sha||'')!==String(currentMainSha))return false;
   if(String(receipt.authorization_scope||'')!=='CUSTOMER_LINE_MESSAGES_INSERT_ONLY')return false;
+  if(!hasValidWriteReceiptHashChain(receipt,artifactDigests))return false;
 
   const exactRows=exactInt(receipt.exact_physical_insert_rows);
   const blockerCount=exactInt(receipt.blocker_count);
@@ -117,6 +143,7 @@ export function resolveLineHistoryRecoveryNextPhase({
   d1Packet=null,
   approvalFilePresent=false,
   completionReceipt=null,
+  completionReceiptArtifactDigests=null,
   currentMainSha=''
 }={}){
   if(completionReceipt){
@@ -128,7 +155,7 @@ export function resolveLineHistoryRecoveryNextPhase({
         production_write_possible:false
       };
     }
-    if(isValidOwnerWriteCompletionReceipt(completionReceipt,currentMainSha)){
+    if(isValidOwnerWriteCompletionReceipt(completionReceipt,currentMainSha,completionReceiptArtifactDigests)){
       return {
         stage:'COMPLETE',
         next_phase:'none',

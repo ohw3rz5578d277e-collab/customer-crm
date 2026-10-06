@@ -50,6 +50,11 @@ function writeReceipt(mainSha='a'.repeat(40)){
     planner:'line_history_owner_write_completion_receipt_v1',
     complete:true,
     source_main_sha:mainSha,
+    packet_sha256:'1'.repeat(64),
+    insert_manifest_sha256:'2'.repeat(64),
+    write_result_sha256:'3'.repeat(64),
+    post_preview_result_sha256:'4'.repeat(64),
+    approved_insert_sql_sha256:'5'.repeat(64),
     authorization_scope:'CUSTOMER_LINE_MESSAGES_INSERT_ONLY',
     exact_physical_insert_rows:2,
     change_metadata_found:true,
@@ -70,6 +75,16 @@ function writeReceipt(mainSha='a'.repeat(40)){
       worker_deploy:0,
       production_deploy:0
     }
+  };
+}
+
+function writeReceiptArtifactDigests(receipt){
+  return {
+    packet_sha256:receipt.packet_sha256,
+    insert_manifest_sha256:receipt.insert_manifest_sha256,
+    write_result_sha256:receipt.write_result_sha256,
+    post_preview_result_sha256:receipt.post_preview_result_sha256,
+    approved_insert_sql_sha256:receipt.approved_insert_sql_sha256
   };
 }
 
@@ -170,9 +185,12 @@ for(const bad of [
 assert.equal(isValidOwnerNoWriteCompletionReceipt(validNoWrite,''),false);
 
 const validWrite=writeReceipt(exactMainSha);
+const validWriteArtifactDigests=writeReceiptArtifactDigests(validWrite);
 assert.equal(isValidOwnerWriteCompletionReceipt(validWrite,exactMainSha),true);
+assert.equal(isValidOwnerWriteCompletionReceipt(validWrite,exactMainSha,validWriteArtifactDigests),true);
 expectStage({
   completionReceipt:validWrite,
+  completionReceiptArtifactDigests:validWriteArtifactDigests,
   currentMainSha:exactMainSha
 },'COMPLETE','none',false);
 
@@ -183,10 +201,21 @@ const validWriteNoMetadata={
 };
 assert.equal(isValidOwnerWriteCompletionReceipt(validWriteNoMetadata,exactMainSha),true);
 
+const missingPacketDigest={...validWrite};
+delete missingPacketDigest.packet_sha256;
+const artifactDigestMismatch={
+  ...validWriteArtifactDigests,
+  write_result_sha256:'f'.repeat(64)
+};
+assert.equal(isValidOwnerWriteCompletionReceipt(validWrite,exactMainSha,artifactDigestMismatch),false);
+
 for(const bad of [
   {complete:true},
   {...validWrite,planner:'legacy'},
   {...validWrite,source_main_sha:'b'.repeat(40)},
+  missingPacketDigest,
+  {...validWrite,insert_manifest_sha256:'not-a-digest'},
+  {...validWrite,approved_insert_sql_sha256:'A'.repeat(64)},
   {...validWrite,blocker_count:1,blockers:['X']},
   {...validWrite,post_preview_would_insert_rows:1},
   {...validWrite,change_metadata_found:true,reported_change_rows:0},
@@ -261,6 +290,12 @@ assert.doesNotMatch(cli,/d1\s+execute/i);
 assert.doesNotMatch(cli,/INSERT\s+(?:OR\s+IGNORE\s+)?INTO/i);
 assert.match(cli,/--main-sha/);
 assert.match(cli,/no-write-completion-receipt\.json/);
+assert.match(cli,/createHash\('sha256'\)/);
+assert.match(cli,/completionReceiptArtifactDigests/);
+assert.match(cli,/approved-insert-manifest\.json/);
+assert.match(cli,/approved-insert\.sql/);
+assert.match(cli,/write-result\.json/);
+assert.match(cli,/post-preview-result\.json/);
 assert.match(cli,/PRODUCTION_WRITE_POSSIBLE=/);
 assert.match(cli,/PRIVATE_VALUES_PRINTED_TO_TERMINAL=0/);
 
@@ -291,6 +326,7 @@ console.log('LINE_HISTORY_RECOVERY_NEXT_PHASE_PREAUTH=PASS');
 console.log('LINE_HISTORY_RECOVERY_NEXT_PHASE_NO_WRITE_RECEIPT=PASS');
 console.log('LINE_HISTORY_RECOVERY_NEXT_PHASE_DECISION_SUMMARY=PASS');
 console.log('LINE_HISTORY_RECOVERY_NEXT_PHASE_WRITE_RECEIPT=PASS');
+console.log('LINE_HISTORY_RECOVERY_NEXT_PHASE_WRITE_HASH_CHAIN=PASS');
 console.log('LINE_HISTORY_RECOVERY_NEXT_PHASE_WRITE_CHANGE_COUNT=PASS');
 console.log('LINE_HISTORY_RECOVERY_NEXT_PHASE_D1_PREVIEW=PASS');
 console.log('LINE_HISTORY_RECOVERY_NEXT_PHASE_STALE_PACKET=PASS');

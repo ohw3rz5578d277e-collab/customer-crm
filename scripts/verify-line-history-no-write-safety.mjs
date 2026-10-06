@@ -73,6 +73,7 @@ function readRequired(path) {
 
 function normalizeSqlSource(text) {
   let out = String(text ?? '');
+  out = out.replace(/\\(?:\r\n|\r|\n)/g, '');
   for (let i = 0; i < 2; i++) {
     out = out
       .replace(/\\"/g, '"')
@@ -125,6 +126,7 @@ const mutationSamples = [
   'const marker = "*/"; const sql = "DELETE FROM t";',
   String.raw`const sql = "UPDATE \"customer\"\"history\" SET x=1";`,
   String.raw`const sql = "UPDATE\ncustomers SET x=1";`,
+  'const sql = "UPDATE ' + '\\' + '\n' + 'customers SET x=1";',
   'DELETE FROM t',
   'DELETE/**/FROM [customers]',
   'DELETE\nFROM [customers]',
@@ -253,6 +255,7 @@ console.log(`SQL_MUTATION_DENY_LIST_FALSE_POSITIVE_SELF_TEST=${allowedSamples.le
 console.log(`NETWORK_DENY_LIST_SELF_TEST=${executionSamples.length}/${executionSamples.length}_PASS`);
 console.log(`NETWORK_DENY_LIST_FALSE_POSITIVE_SELF_TEST=${executionAllowedSamples.length}/${executionAllowedSamples.length}_PASS`);
 console.log('SQL_MUTATION_DENY_LIST_SOURCE_ESCAPE_NORMALIZATION=PASS');
+console.log('SQL_MUTATION_DENY_LIST_JS_LINE_CONTINUATION_NORMALIZATION=PASS');
 console.log('SQL_MUTATION_DENY_LIST_COMMENT_SEPARATOR_NORMALIZATION=PASS');
 console.log('SQL_MUTATION_DENY_LIST_QUOTED_COMMENT_MARKER_PRESERVATION=PASS');
 console.log('SQL_MUTATION_DENY_LIST_COMMENT_TOKENIZATION=PASS');

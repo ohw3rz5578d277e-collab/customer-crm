@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import { resolveLineHistoryRecoveryNextPhase } from '../src/crm-line-history-recovery-next-phase.mjs';
 import { buildLineHistoryRecoveryNextCommand } from '../src/crm-line-history-recovery-next-command.mjs';
 
@@ -11,6 +12,10 @@ function exists(p){return !!p&&fs.existsSync(p)}
 function readJson(p){
   if(!exists(p))return null;
   try{return JSON.parse(fs.readFileSync(p,'utf8'))}catch{return null}
+}
+function fileSha256(p){
+  if(!exists(p))return '';
+  return createHash('sha256').update(fs.readFileSync(p)).digest('hex');
 }
 
 const candidates=arg('--candidates');
@@ -28,7 +33,12 @@ const reviewQueue=resumeDir?path.join(resumeDir,'owner-review-queue.json'):'';
 const preauthSummary=preauthDir?path.join(preauthDir,'readonly-preview','owner-backfill-preview-summary.json'):'';
 const noWriteReceipt=preauthDir?path.join(preauthDir,'no-write-completion-receipt.json'):'';
 const packetPath=d1PreviewDir?path.join(d1PreviewDir,'write-authorization-packet.json'):'';
-const approvedWriteReceipt=d1PreviewDir?path.join(d1PreviewDir,'approved-insert-run','completion-receipt.json'):'';
+const approvedWriteDir=d1PreviewDir?path.join(d1PreviewDir,'approved-insert-run'):'';
+const approvedWriteReceipt=approvedWriteDir?path.join(approvedWriteDir,'completion-receipt.json'):'';
+const approvedInsertManifest=approvedWriteDir?path.join(approvedWriteDir,'approved-insert-manifest.json'):'';
+const approvedInsertSql=approvedWriteDir?path.join(approvedWriteDir,'approved-insert.sql'):'';
+const writeResultPath=approvedWriteDir?path.join(approvedWriteDir,'write-result.json'):'';
+const postPreviewResultPath=approvedWriteDir?path.join(approvedWriteDir,'post-preview-result.json'):'';
 const inferredReceipt=exists(approvedWriteReceipt)
   ?approvedWriteReceipt
   :exists(noWriteReceipt)
@@ -40,6 +50,16 @@ const queue=readJson(reviewQueue);
 const preauthSummaryJson=readJson(preauthSummary);
 const packet=readJson(packetPath);
 const receipt=readJson(completionReceiptPath);
+const completionReceiptArtifactDigests=
+  receipt?.planner==='line_history_owner_write_completion_receipt_v1'&&d1PreviewDir
+    ?{
+      packet_sha256:fileSha256(packetPath),
+      insert_manifest_sha256:fileSha256(approvedInsertManifest),
+      write_result_sha256:fileSha256(writeResultPath),
+      post_preview_result_sha256:fileSha256(postPreviewResultPath),
+      approved_insert_sql_sha256:fileSha256(approvedInsertSql)
+    }
+    :null;
 
 const result=resolveLineHistoryRecoveryNextPhase({
   candidatesPresent:exists(candidates),
@@ -51,6 +71,7 @@ const result=resolveLineHistoryRecoveryNextPhase({
   d1Packet:packet,
   approvalFilePresent:exists(approvalFile),
   completionReceipt:receipt,
+  completionReceiptArtifactDigests,
   currentMainSha:mainSha
 });
 
