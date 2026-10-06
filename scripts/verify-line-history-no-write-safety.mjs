@@ -35,15 +35,21 @@ const MUTATION_PATTERNS = [
   /\bDETACH\s+(?:DATABASE\s+)?/i
 ];
 
+const NETWORK_MODULE_SPECIFIER = /(?:\bfrom\s*|\brequire\s*\(\s*|\bimport\s*\(\s*|\bimport\s*)['"](?:(?:node:)?(?:http|https|http2|net|tls|dgram|dns(?:\/promises)?)|cloudflare:sockets|undici|axios|got|node-fetch|ws)['"]/i;
 const PRODUCTION_EXECUTION_PATTERNS = [
   /\bwrangler\b/i,
   /\bd1\s+execute\b/i,
   /--execute-production-write\b/i,
+  NETWORK_MODULE_SPECIFIER,
+  /\bprocess\.getBuiltinModule\s*\(/i,
+  /\bcreateRequire\s*\(/i,
   /\bfetch\s*\(/i,
-  /node:(?:http|https|net|tls)\b/i,
+  /\bWebSocket\s*\(/i,
+  /\bEventSource\s*\(/i,
   /\b(?:curl|wget)\b/i,
   /child_process/i,
-  /https?:\/\//i
+  /https?:\/\//i,
+  /wss?:\/\//i
 ];
 
 function fail(code, detail = '') {
@@ -72,7 +78,9 @@ function normalizeSqlSource(text) {
       .replace(/\\r/g, '\r')
       .replace(/\\t/g, '\t');
   }
-  return out;
+  return out
+    .replace(/\/\*[\s\S]*?\*\//g, ' ')
+    .replace(/--[^\r\n]*(?:\r?\n|$)/g, '\n');
 }
 
 function mutationMatch(text) {
@@ -96,6 +104,7 @@ const mutationSamples = [
   'INSERT OR ABORT INTO "customers" VALUES (1)',
   'INSERT OR REPLACE INTO `customers` VALUES (1)',
   'INSERT INTO "customer""history" VALUES (1)',
+  'INSERT/**/INTO t VALUES (1)',
   'UPDATE t SET x=1',
   'UPDATE "customers" SET x=1',
   'UPDATE "customer""history" SET x=1',
@@ -105,11 +114,15 @@ const mutationSamples = [
   'UPDATE main.customers AS c SET x=1',
   'UPDATE customers INDEXED BY idx SET x=1',
   'UPDATE\ncustomers SET x=1',
+  'UPDATE/*comment*/ "customers" SET x=1',
+  'UPDATE--comment\ncustomers SET x=1',
   String.raw`const sql = "UPDATE \"customer\"\"history\" SET x=1";`,
   String.raw`const sql = "UPDATE\ncustomers SET x=1";`,
   'DELETE FROM t',
+  'DELETE/**/FROM [customers]',
   'DELETE\nFROM [customers]',
   'CREATE TABLE t(x INTEGER)',
+  'CREATE/**/TABLE t(x INTEGER)',
   'CREATE TABLE "customer""history"(x INTEGER)',
   'CREATE TEMP TABLE t(x INTEGER)',
   'CREATE TEMPORARY TABLE "t"(x INTEGER)',
@@ -118,8 +131,10 @@ const mutationSamples = [
   'CREATE TEMP UNIQUE INDEX idx2 ON t(x)',
   'CREATE VIRTUAL TABLE v USING fts5(x)',
   String.raw`const sql = "CREATE UNIQUE INDEX idx ON t(x)";`,
+  'ALTER/**/TABLE t ADD COLUMN y TEXT',
   'ALTER TABLE t ADD COLUMN y TEXT',
   'DROP TABLE t',
+  'DROP/**/TABLE IF EXISTS "t"',
   'DROP TABLE IF EXISTS "t"',
   'REPLACE INTO t VALUES (1)',
   'TRUNCATE TABLE t',
@@ -128,7 +143,9 @@ const mutationSamples = [
   'VACUUM',
   'REINDEX idx',
   'ANALYZE',
+  "ATTACH/**/DATABASE 'other.db' AS other",
   "ATTACH DATABASE 'other.db' AS other",
+  'DETACH/**/DATABASE other',
   'DETACH DATABASE other'
 ];
 
@@ -144,11 +161,41 @@ const allowedSamples = [
   'const note = "create local receipt only";',
   'function analyzeSalesHistory(records) {}',
   'const pragmaLabel = "metadata";',
-  'const reindexRequired = false;'
+  'const reindexRequired = false;',
+  'const comment = "UPDATE documentation only";'
 ];
 
 for (const sample of allowedSamples) {
   if (mutationMatch(sample)) fail('SQL_DENY_LIST_FALSE_POSITIVE', JSON.stringify(sample));
+}
+
+const executionSamples = [
+  "import https from 'https'",
+  "import 'node:http2'",
+  "const http2 = require('http2')",
+  "await import('node:dgram')",
+  "import {lookup} from 'dns/promises'",
+  "import tls from 'node:tls'",
+  "import {connect} from 'cloudflare:sockets'",
+  "import {request} from 'undici'",
+  "process.getBuiltinModule('node:https')",
+  "createRequire(import.meta.url)('node:http2')",
+  "fetch(destination)",
+  "new WebSocket(destination)",
+  "curl $DESTINATION"
+];
+for (const sample of executionSamples) {
+  if (!executionMatch(sample)) fail('NETWORK_DENY_LIST_SELF_TEST_MISSED', JSON.stringify(sample));
+}
+
+const executionAllowedSamples = [
+  "const httpsLabel='offline';",
+  "const networkStatus='DISABLED';",
+  "const http2Enabled=false;",
+  "const fetchRequired=false;"
+];
+for (const sample of executionAllowedSamples) {
+  if (executionMatch(sample)) fail('NETWORK_DENY_LIST_FALSE_POSITIVE', JSON.stringify(sample));
 }
 
 const requiredMarkers = new Map([
@@ -177,7 +224,10 @@ for (const [path, markers] of requiredMarkers) {
 
 console.log(`SQL_MUTATION_DENY_LIST_SELF_TEST=${mutationSamples.length}/${mutationSamples.length}_PASS`);
 console.log(`SQL_MUTATION_DENY_LIST_FALSE_POSITIVE_SELF_TEST=${allowedSamples.length}/${allowedSamples.length}_PASS`);
+console.log(`NETWORK_DENY_LIST_SELF_TEST=${executionSamples.length}/${executionSamples.length}_PASS`);
+console.log(`NETWORK_DENY_LIST_FALSE_POSITIVE_SELF_TEST=${executionAllowedSamples.length}/${executionAllowedSamples.length}_PASS`);
 console.log('SQL_MUTATION_DENY_LIST_SOURCE_ESCAPE_NORMALIZATION=PASS');
+console.log('SQL_MUTATION_DENY_LIST_COMMENT_SEPARATOR_NORMALIZATION=PASS');
 console.log('SQL_MUTATION_DENY_LIST_MULTILINE_SELF_TEST=PASS');
 console.log('SQL_MUTATION_DENY_LIST_QUOTED_IDENTIFIER_SELF_TEST=PASS');
 console.log('SQL_MUTATION_DENY_LIST_ESCAPED_IDENTIFIER_SELF_TEST=PASS');
