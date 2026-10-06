@@ -36,9 +36,9 @@ jobs:
           SOURCE_COMMENT_ID: ${{ github.event.comment.id }}
         run: |
           set -euo pipefail
+          [[ "$SOURCE_COMMENT_ID" =~ ^[0-9]+$ ]] || { echo '::error::INVALID_SOURCE_COMMENT_ID'; exit 1; }
           command_re='^/member-production-r2-bucket-create sha=([0-9a-f]{40}) bucket_sha256=([0-9a-f]{64}) jurisdiction=(default) owner_ack=(AUTHORIZE_MEMBER_R2_BUCKET_CREATE:[0-9a-f]{40}:[0-9a-f]{64}:default)$'
           [[ "$COMMAND_BODY" =~ $command_re ]] || { echo '::error::INVALID_MEMBER_R2_BUCKET_CREATE_COMMAND'; exit 1; }
-          [[ "$SOURCE_COMMENT_ID" =~ ^[0-9]+$ ]] || { echo '::error::INVALID_SOURCE_COMMENT_ID'; exit 1; }
 
           expected_sha="${BASH_REMATCH[1]}"
           bucket_sha256="${BASH_REMATCH[2]}"
