@@ -6,11 +6,15 @@ on:
       - main
     paths:
       - 'src/crm-sales-history-reconciliation.mjs'
+      - 'src/crm-sales-snapshot.mjs'
+      - 'src/crm-sales-output-safety.mjs'
+      - 'src/crm-customer-csv-import.mjs'
       - 'scripts/extract-photo-sales-xlsx.py'
       - 'scripts/extract-line-name-evidence-xlsx.py'
       - 'scripts/reconcile-photo-sales-readonly.mjs'
       - 'scripts/run-sales-crm-readonly-reconciliation.sh'
       - 'tests/sales-crm-readonly-reconciliation.test.mjs'
+      - 'tests/sales-crm-xlsx-extractor.test.py'
       - '.github/workflows/sales-crm-local-reconciliation.yml'
 
 permissions:
@@ -38,8 +42,13 @@ jobs:
         run: |
           set -euo pipefail
           node --check src/crm-sales-history-reconciliation.mjs
+          node --check src/crm-sales-snapshot.mjs
+          node --check src/crm-sales-output-safety.mjs
           node --check scripts/reconcile-photo-sales-readonly.mjs
-          python3 -m py_compile scripts/extract-photo-sales-xlsx.py scripts/extract-line-name-evidence-xlsx.py
+          python3 -m py_compile \
+            scripts/extract-photo-sales-xlsx.py \
+            scripts/extract-line-name-evidence-xlsx.py \
+            tests/sales-crm-xlsx-extractor.test.py
           bash -n scripts/run-sales-crm-readonly-reconciliation.sh
           echo 'SALES_RECONCILIATION_SYNTAX=PASS'
 
@@ -47,13 +56,25 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          files=(
+            src/crm-sales-history-reconciliation.mjs
+            src/crm-sales-snapshot.mjs
+            src/crm-sales-output-safety.mjs
+            scripts/reconcile-photo-sales-readonly.mjs
+            scripts/extract-photo-sales-xlsx.py
+            scripts/extract-line-name-evidence-xlsx.py
+            scripts/run-sales-crm-readonly-reconciliation.sh
+          )
+          ! grep -Eiq '\b(wrangler|curl|wget|npx|ssh|scp|rsync)\b' "${files[@]}"
+          ! grep -Eiq 'git[[:space:]]+ls-remote|--remote\b|api\.cloudflare\.com|api\.line\.me|CLOUDFLARE_(API_TOKEN|API_KEY|EMAIL|ACCOUNT_ID)' "${files[@]}"
+          ! grep -Eiq '\bfetch[[:space:]]*\(|node:(http|https)|urllib|requests\.' "${files[@]}"
+          ! grep -Eiq '\b(INSERT|UPDATE|DELETE|REPLACE|UPSERT)[[:space:]]+' "${files[@]}"
           runner='scripts/run-sales-crm-readonly-reconciliation.sh'
-          ! grep -Eiq '\b(wrangler|curl|wget|npx|ssh|scp|rsync)\b' "$runner"
-          ! grep -Eiq 'git[[:space:]]+ls-remote|--remote\b|api\.cloudflare\.com|api\.line\.me|CLOUDFLARE_(API_TOKEN|API_KEY|EMAIL|ACCOUNT_ID)' "$runner"
+          grep -q '<production-customers-snapshot.json>' "$runner"
+          grep -q 'supplied as complete JSON' "$runner"
           grep -q 'PRODUCTION_NETWORK_ACCESS=0' "$runner"
           grep -q 'PRODUCTION_D1_READ=0' "$runner"
           grep -q 'PRODUCTION_D1_WRITE=0' "$runner"
-          grep -q '<production-customers-snapshot.json>' "$runner"
           echo 'PRODUCTION_NETWORK_ACCESS=0'
           echo 'PRODUCTION_D1_READ=0'
           echo 'PRODUCTION_D1_WRITE=0'
@@ -64,3 +85,4 @@ jobs:
         run: |
           set -euo pipefail
           node tests/sales-crm-readonly-reconciliation.test.mjs
+          python3 tests/sales-crm-xlsx-extractor.test.py
