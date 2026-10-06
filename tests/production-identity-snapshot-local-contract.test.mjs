@@ -7,6 +7,13 @@ import {parseProductionSnapshotText} from '../src/crm-sales-snapshot.mjs';
 
 const root=fs.mkdtempSync(path.join(os.tmpdir(),'crm-production-snapshot-'));
 const sha='a'.repeat(40);
+const canaries=[
+  '26999101',
+  '26999102',
+  'U_SNAPSHOT_PRIVATE_CANARY_2222',
+  'PRIVATE_NAME_CANARY_ALPHA',
+  'PRIVATE_NAME_CANARY_BETA'
+];
 
 function run(inputValue,name='case'){
   const input=path.join(root,`${name}.raw`);
@@ -21,14 +28,54 @@ function run(inputValue,name='case'){
   return {result,output};
 }
 
+function assertNoCanaryOutput(result,label){
+  const combined=`${result.stdout||''}\n${result.stderr||''}`;
+  for(const canary of canaries){
+    assert.equal(combined.includes(canary),false,`${label} leaked private canary ${canary}`);
+  }
+}
+
+const IDENT='(?:"(?:""|[^"])+"|`(?:``|[^`])+`|\\[(?:\\]\\]|[^\\]])+\\]|[A-Za-z_][A-Za-z0-9_$]*)';
+const QUALIFIED_IDENT=`${IDENT}(?:\\s*\\.\\s*${IDENT}){0,2}`;
+const OR_CONFLICT='(?:OR\\s+(?:ROLLBACK|ABORT|FAIL|IGNORE|REPLACE)\\s+)?';
+const UPDATE_QUALIFIERS=`(?:(?:\\s+AS\\s+${IDENT})|(?:\\s+INDEXED\\s+BY\\s+${IDENT})|(?:\\s+NOT\\s+INDEXED))*`;
+const SQL_MUTATION_PATTERNS=[
+  new RegExp(`\\bINSERT\\s+${OR_CONFLICT}INTO\\s+${QUALIFIED_IDENT}`,'i'),
+  new RegExp(`\\bUPDATE\\s+${OR_CONFLICT}${QUALIFIED_IDENT}${UPDATE_QUALIFIERS}\\s+SET\\b`,'i'),
+  new RegExp(`\\bDELETE\\s+FROM\\s+${QUALIFIED_IDENT}`,'i'),
+  /\bCREATE\s+(?:(?:TEMP|TEMPORARY|UNIQUE|VIRTUAL)\s+)*(?:TABLE|INDEX|TRIGGER|VIEW)\b/i,
+  /\bALTER\s+TABLE\b/i,
+  /\bDROP\s+(?:TABLE|INDEX|TRIGGER|VIEW)\b/i,
+  /\bREPLACE\s+(?:INTO\s+)?/i,
+  /\bTRUNCATE(?:\s+TABLE)?\b/i,
+  /\bUPSERT\s+/i,
+  /\b(?:PRAGMA|VACUUM|REINDEX|ANALYZE)\b/i,
+  /\b(?:ATTACH|DETACH)\s+(?:DATABASE\s+)?/i
+];
+const hasMutationSql=value=>SQL_MUTATION_PATTERNS.some(re=>re.test(value));
+
+const NETWORK_MODULE_RE=/(?:\bfrom\s*|\brequire\s*\(\s*|\bimport\s*\(\s*)['"](?:node:)?(?:http|https|net|tls|dns|dgram)['"]/i;
+const THIRD_PARTY_NETWORK_RE=/(?:\bfrom\s*|\brequire\s*\(\s*|\bimport\s*\(\s*)['"](?:undici|axios|got|node-fetch)['"]/i;
+const hasNetworkSurface=value=>[
+  NETWORK_MODULE_RE,
+  THIRD_PARTY_NETWORK_RE,
+  /\bfetch\s*\(/i,
+  /\bWebSocket\s*\(/i,
+  /\bEventSource\s*\(/i,
+  /https?:\/\//i,
+  /\b(?:curl|wget)\b/i,
+  /child_process/i
+].some(re=>re.test(value));
+
 try{
   const rows=[
-    {customer_id:'26000002',line_user_id:'U22222222222222222222',name:'Beta',deleted_at:''},
-    {customer_id:'26000001',line_user_id:'',name:'Alpha',deleted_at:'2026-01-02'}
+    {customer_id:'26999102',line_user_id:'U_SNAPSHOT_PRIVATE_CANARY_2222',name:'PRIVATE_NAME_CANARY_BETA',deleted_at:''},
+    {customer_id:'26999101',line_user_id:'',name:'PRIVATE_NAME_CANARY_ALPHA',deleted_at:'2026-01-02'}
   ];
 
   const wrapped=run([{results:rows,success:true}], 'wrapped');
   assert.equal(wrapped.result.status,0,wrapped.result.stderr||wrapped.result.stdout);
+  assertNoCanaryOutput(wrapped.result,'wrapped');
   const body=fs.readFileSync(wrapped.output,'utf8');
   const parsed=JSON.parse(body);
   assert.equal(parsed.snapshot_format,'customer-crm-production-identity-snapshot-v1');
@@ -36,36 +83,42 @@ try{
   assert.equal(parsed.query_scope,'all_customer_identities');
   assert.equal(parsed.source_main_sha,sha);
   assert.equal(parsed.customer_count,2);
-  assert.deepEqual(parsed.customers.map(x=>x.customer_id),['26000001','26000002']);
+  assert.deepEqual(parsed.customers.map(x=>x.customer_id),['26999101','26999102']);
   assert.equal(parsed.customers[0].deleted_at,'2026-01-02');
-  assert.deepEqual(parseProductionSnapshotText(body).map(x=>x.customer_id),['26000001','26000002']);
+  assert.deepEqual(parseProductionSnapshotText(body).map(x=>x.customer_id),['26999101','26999102']);
   assert.match(wrapped.result.stdout,/PRIVATE_CUSTOMER_VALUES_PRINTED=0/);
   assert.match(wrapped.result.stdout,/PRODUCTION_D1_WRITE=0/);
 
   const objectShape=run({results:rows},'object');
   assert.equal(objectShape.result.status,0,objectShape.result.stderr||objectShape.result.stdout);
+  assertNoCanaryOutput(objectShape.result,'object');
 
   const directRows=run(rows,'direct');
   assert.equal(directRows.result.status,0,directRows.result.stderr||directRows.result.stdout);
+  assertNoCanaryOutput(directRows.result,'direct');
 
   const bomWrapped=run(`\uFEFF${JSON.stringify([{results:rows}])}`,'bom');
   assert.equal(bomWrapped.result.status,0,bomWrapped.result.stderr||bomWrapped.result.stdout);
+  assertNoCanaryOutput(bomWrapped.result,'bom');
 
-  const duplicate=run([{results:[rows[0],{...rows[0],name:'Duplicate'}]}],'duplicate');
+  const duplicate=run([{results:[rows[0],{...rows[0],name:'PRIVATE_NAME_CANARY_DUPLICATE'}]}],'duplicate');
   assert.notEqual(duplicate.result.status,0);
   assert.match(duplicate.result.stderr,/STOP_DUPLICATE_CUSTOMER_ID/);
+  assertNoCanaryOutput(duplicate.result,'duplicate');
 
   const empty=run([{results:[]}],'empty');
   assert.notEqual(empty.result.status,0);
   assert.match(empty.result.stderr,/STOP_CUSTOMER_ROWS_EMPTY/);
 
-  const prefixedGarbage=run(`wrangler log line\n${JSON.stringify([{results:rows}])}`,'prefixed-garbage');
+  const prefixedGarbage=run(`transport log line\n${JSON.stringify([{results:rows}])}`,'prefixed-garbage');
   assert.notEqual(prefixedGarbage.result.status,0);
   assert.match(prefixedGarbage.result.stderr,/STOP_INPUT_JSON_INVALID/);
+  assertNoCanaryOutput(prefixedGarbage.result,'prefixed-garbage');
 
   const suffixedGarbage=run(`${JSON.stringify([{results:rows}])}\nnon-json trailer`,'suffixed-garbage');
   assert.notEqual(suffixedGarbage.result.status,0);
   assert.match(suffixedGarbage.result.stderr,/STOP_INPUT_JSON_INVALID/);
+  assertNoCanaryOutput(suffixedGarbage.result,'suffixed-garbage');
 
   const badShaInput=path.join(root,'bad-sha.raw');
   const badShaOutput=path.join(root,'bad-sha.json');
@@ -78,28 +131,80 @@ try{
   ],{encoding:'utf8'});
   assert.notEqual(badSha.status,0);
   assert.match(badSha.stderr,/STOP_SOURCE_SHA_INVALID/);
+  assertNoCanaryOutput(badSha,'bad-sha');
 
   const source=fs.readFileSync('scripts/build-production-identity-snapshot.mjs','utf8');
+  assert.equal(hasNetworkSurface(source),false,'normalizer contains network/process execution surface');
   assert.doesNotMatch(source,/\bwrangler\b/i);
   assert.doesNotMatch(source,/d1\s+execute/i);
-  assert.doesNotMatch(source,/\bfetch\s*\(/i);
-  assert.doesNotMatch(source,/node:(?:http|https)/i);
-  assert.doesNotMatch(source,/child_process/i);
-  assert.doesNotMatch(source,/\bINSERT\s+(?:OR\s+(?:ROLLBACK|ABORT|FAIL|IGNORE|REPLACE)\s+)?INTO\b/i);
-  assert.doesNotMatch(source,/\bUPDATE\s+(?:OR\s+(?:ROLLBACK|ABORT|FAIL|IGNORE|REPLACE)\s+)?(?:[A-Za-z_][A-Za-z0-9_$]*|"[^"]+"|`[^`]+`|\[[^\]]+\])\s+SET\b/i);
-  assert.doesNotMatch(source,/\bDELETE\s+FROM\b/i);
-  assert.doesNotMatch(source,/\bCREATE\s+(?:TEMP(?:ORARY)?\s+)?(?:TABLE|INDEX|TRIGGER|VIEW)\b/i);
-  assert.doesNotMatch(source,/\bALTER\s+TABLE\b/i);
-  assert.doesNotMatch(source,/\bDROP\s+(?:TABLE|INDEX|TRIGGER|VIEW)\b/i);
-  assert.doesNotMatch(source,/\bREPLACE\s+INTO\b/i);
-  assert.doesNotMatch(source,/\bTRUNCATE(?:\s+TABLE)?\b/i);
-  assert.doesNotMatch(source,/\bUPSERT\s+[A-Za-z_]/i);
+  assert.doesNotMatch(source,/\bprocess\.env\b/i);
+  assert.equal(hasMutationSql(source),false,'normalizer contains mutation SQL context');
   assert.match(source,/\.replace\(/,'local string replace remains allowed');
   assert.match(source,/customer-crm-production-identity-snapshot-v1/);
   assert.match(source,/all_customer_identities/);
   assert.match(source,/parseProductionSnapshotText/);
   assert.match(source,/PRIVATE_CUSTOMER_VALUES_PRINTED=0/);
   assert.match(source,/PRODUCTION_D1_WRITE=0/);
+
+  const networkFixtures=[
+    "import https from 'https'",
+    "import http from 'node:http'",
+    "const net = require('net')",
+    "await import('node:tls')",
+    "import {lookup} from 'dns'",
+    "import dgram from 'node:dgram'",
+    "import {request} from 'undici'",
+    "fetch('https://example.invalid')",
+    "new WebSocket('wss://example.invalid')",
+    "curl https://example.invalid"
+  ];
+  for(const fixture of networkFixtures){
+    assert.equal(hasNetworkSurface(fixture),true,`network guard missed ${fixture}`);
+  }
+  const networkAllowedFixtures=[
+    "const httpsLabel='offline';",
+    "const networkStatus='DISABLED';",
+    "const fetchRequired=false;"
+  ];
+  for(const fixture of networkAllowedFixtures){
+    assert.equal(hasNetworkSurface(fixture),false,`network guard false-positive ${fixture}`);
+  }
+
+  const mutationFixtures=[
+    'INSERT INTO customers(customer_id) VALUES(1)',
+    'INSERT OR ABORT INTO main.customers(customer_id) VALUES(1)',
+    'UPDATE customers SET name=1',
+    'UPDATE main.customers SET name=1',
+    'UPDATE customers AS c SET name=1',
+    'UPDATE customers INDEXED BY idx SET name=1',
+    'DELETE FROM main.customers',
+    'CREATE TABLE t(x INTEGER)',
+    'CREATE UNIQUE INDEX idx ON customers(customer_id)',
+    'CREATE VIRTUAL TABLE v USING fts5(x)',
+    'ALTER TABLE customers ADD COLUMN x TEXT',
+    'DROP TABLE IF EXISTS customers',
+    'REPLACE INTO customers(customer_id) VALUES(1)',
+    'TRUNCATE TABLE customers',
+    'UPSERT customers',
+    'PRAGMA user_version=1',
+    'VACUUM',
+    'REINDEX idx',
+    'ANALYZE',
+    "ATTACH DATABASE 'x.db' AS x",
+    'DETACH DATABASE x'
+  ];
+  for(const fixture of mutationFixtures){
+    assert.equal(hasMutationSql(fixture),true,`SQL guard missed ${fixture}`);
+  }
+  const mutationAllowedFixtures=[
+    'tmp_path.replace(receipt_path)',
+    'const status="UPDATE_REQUIRED";',
+    'createHash("sha256")',
+    'function analyzeSalesHistory(){}'
+  ];
+  for(const fixture of mutationAllowedFixtures){
+    assert.equal(hasMutationSql(fixture),false,`SQL guard false-positive ${fixture}`);
+  }
 
   console.log('PRODUCTION_IDENTITY_SNAPSHOT_WRAPPED_JSON=PASS');
   console.log('PRODUCTION_IDENTITY_SNAPSHOT_OBJECT_JSON=PASS');
@@ -110,7 +215,9 @@ try{
   console.log('PRODUCTION_IDENTITY_SNAPSHOT_EMPTY_FAIL_CLOSED=PASS');
   console.log('PRODUCTION_IDENTITY_SNAPSHOT_GARBAGE_FAIL_CLOSED=PASS');
   console.log('PRODUCTION_IDENTITY_SNAPSHOT_SHA_BOUND=PASS');
-  console.log('PRODUCTION_IDENTITY_SNAPSHOT_SQL_CONTEXT_SCAN=PASS');
+  console.log(`PRODUCTION_IDENTITY_SNAPSHOT_NETWORK_GUARD=${networkFixtures.length}/${networkFixtures.length}_PASS`);
+  console.log(`PRODUCTION_IDENTITY_SNAPSHOT_SQL_GUARD=${mutationFixtures.length}/${mutationFixtures.length}_PASS`);
+  console.log('PRODUCTION_IDENTITY_SNAPSHOT_PRIVATE_CANARIES=0');
   console.log('PRODUCTION_IDENTITY_SNAPSHOT_LOCAL_ONLY=PASS');
   console.log('PRODUCTION_D1_READ=0');
   console.log('PRODUCTION_D1_WRITE=0');
