@@ -54,7 +54,9 @@ const SQL_MUTATION_PATTERNS=[
   /\b(?:PRAGMA|VACUUM|REINDEX|ANALYZE)\b/i,
   /\b(?:ATTACH|DETACH)\s+(?:DATABASE\s+)?/i
 ];
-const normalizeSqlForScan=value=>String(value).replace(/\/\*[\s\S]*?\*\//g,' ');
+const normalizeSqlForScan=value=>String(value)
+  .replace(/\/\*[\s\S]*?\*\//g,' ')
+  .replace(/--[^\r\n]*(?:\r?\n|$)/g,' ');
 const hasMutationSql=value=>SQL_MUTATION_PATTERNS.some(re=>re.test(normalizeSqlForScan(value)));
 
 const JS_GAP='(?:(?:\\s)|(?:/\\*[\\s\\S]*?\\*/)|(?://[^\\r\\n]*(?:\\r?\\n|$)))*';
@@ -251,13 +253,16 @@ try{
     'INSERT OR ABORT INTO main.customers(customer_id) VALUES(1)',
     'UPDATE customers SET name=1',
     "UPDATE/**/customers/**/SET name='new'",
+    "UPDATE--comment\ncustomers--comment\nSET name='new'",
     'UPDATE main.customers SET name=1',
     'UPDATE customers AS c SET name=1',
     'UPDATE customers INDEXED BY idx SET name=1',
     'DELETE FROM main.customers',
     'DELETE/**/FROM/**/main.customers',
+    'DELETE--comment\nFROM--comment\nmain.customers',
     'CREATE TABLE t(x INTEGER)',
     'CREATE/**/UNIQUE/**/INDEX idx ON customers(customer_id)',
+    'CREATE--comment\nUNIQUE--comment\nINDEX idx ON customers(customer_id)',
     'CREATE UNIQUE INDEX idx ON customers(customer_id)',
     'CREATE VIRTUAL TABLE v USING fts5(x)',
     'ALTER TABLE customers ADD COLUMN x TEXT',
@@ -303,6 +308,7 @@ try{
   console.log('PRODUCTION_IDENTITY_SNAPSHOT_NETWORK_TEMPLATE_LITERAL=PASS');
   console.log(`PRODUCTION_IDENTITY_SNAPSHOT_SQL_GUARD=${mutationFixtures.length}/${mutationFixtures.length}_PASS`);
   console.log('PRODUCTION_IDENTITY_SNAPSHOT_SQL_COMMENT_SEPARATOR=PASS');
+  console.log('PRODUCTION_IDENTITY_SNAPSHOT_SQL_LINE_COMMENT_SEPARATOR=PASS');
   console.log('PRODUCTION_IDENTITY_SNAPSHOT_PRIVATE_CANARIES=0');
   console.log('PRODUCTION_IDENTITY_SNAPSHOT_LOCAL_ONLY=PASS');
   console.log('PRODUCTION_D1_READ=0');
