@@ -12,9 +12,10 @@ assert.ok(script.includes('[ "$(uname -s)" = "Darwin" ]'));
 assert.ok(script.includes('NODE_22_REQUIRED'));
 pass('runtime is explicitly physical-Mac and Node-22 gated');
 
-for(const token of ['EXPECTED_SHA="${1:-}"','OWNER_ACK="${2:-}"','OUT_FILE="${3:-}"']){
+for(const token of ['EXPECTED_SHA="${1:-}"','OWNER_ACK="${2:-}"']){
   assert.ok(script.includes(token),`missing required local input ${token}`);
 }
+assert.doesNotMatch(script,/OUT_FILE="\$\{3:-\}"/);
 assert.ok(script.includes('AUTHORIZE_PRODUCTION_CUSTOMER_IDENTITY_SNAPSHOT_READ:${EXPECTED_SHA}'));
 assert.ok(script.includes('[ "$OWNER_ACK" = "$EXPECTED_ACK" ]'));
 assert.ok(script.includes('LOCAL_HEAD="$(git rev-parse HEAD)"'));
@@ -72,12 +73,17 @@ for(const marker of [
 pass('D1 result is fail-closed on writes, malformed/empty results, and missing identity columns');
 
 assert.match(script,/node scripts\/build-production-identity-snapshot\.mjs\s+\\\n\s+--input "\$RAW"\s+\\\n\s+--output "\$OUT_FILE"\s+\\\n\s+--source-sha "\$EXPECTED_SHA"/);
+assert.ok(script.includes('PRIVATE_DIR="${HOME}/.customer-crm-private"'));
+assert.ok(script.includes('production-customer-identity-snapshot-${EXPECTED_SHA}.json'));
 assert.ok(script.includes('umask 077'));
+assert.ok(script.includes('chmod 700 "$PRIVATE_DIR"'));
+assert.ok(script.includes('PRIVATE_DIR_INSIDE_REPOSITORY'));
+assert.ok(script.includes("stat -f '%Lp' \"$PRIVATE_DIR\""));
 assert.ok(script.includes('chmod 600 "$OUT_FILE"'));
 assert.ok(script.includes("stat -f '%Lp' \"$OUT_FILE\""));
 assert.ok(script.includes('trap cleanup EXIT'));
 assert.ok(script.includes('rm -rf "$TMP_DIR"'));
-pass('private snapshot remains local with mode 600 and raw D1 temp data is cleaned');
+pass('private snapshot is fixed outside the repo with dir 700/file 600 and raw temp cleanup');
 
 for(const forbidden of [
   'actions/upload-artifact',
@@ -124,6 +130,8 @@ pass('script does not intentionally print customer identity values');
 console.log('RESULT=PRODUCTION_CUSTOMER_IDENTITY_SNAPSHOT_READ_CONTRACT_PASS');
 console.log('RUNTIME_LOCATION=PHYSICAL_MAC_ONLY');
 console.log('PRIVATE_SNAPSHOT_LOCAL_ONLY=1');
+console.log('PRIVATE_DIR_MODE=700');
+console.log('PRIVATE_FILE_MODE=600');
 console.log('GITHUB_ARTIFACT_UPLOAD=0');
 console.log('PRODUCTION_D1_READ_EXECUTED=0');
 console.log('PRODUCTION_D1_WRITE=0');
