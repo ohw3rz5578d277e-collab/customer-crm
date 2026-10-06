@@ -1,5 +1,40 @@
 function bool(v){return v===true}
 
+function exactSha(v){return /^[0-9a-f]{40}$/.test(String(v||''))}
+function exactInt(v){return Number.isInteger(v)?v:null}
+
+export function isValidOwnerNoWriteCompletionReceipt(receipt,currentMainSha=''){
+  if(!receipt||receipt.complete!==true)return false;
+  if(String(receipt.completion_type||'')!=='OWNER_DECISIONS_NO_WRITE')return false;
+  if(!exactSha(currentMainSha)||String(receipt.source_main_sha||'')!==String(currentMainSha))return false;
+
+  const groups=exactInt(receipt.review_queue_groups);
+  const submitted=exactInt(receipt.submitted_decisions);
+  const noWrite=exactInt(receipt.accepted_no_write_decisions);
+  const identityActions=exactInt(receipt.proposed_backfill_identity_actions);
+  const physicalWrites=exactInt(receipt.proposed_write_actions);
+
+  if(groups===null||groups<=0)return false;
+  if(submitted!==groups||noWrite!==groups)return false;
+  if(identityActions!==0||physicalWrites!==0)return false;
+  if(receipt.authorization_granted!==false)return false;
+
+  const zeroFields=[
+    'production_d1_read',
+    'production_d1_write',
+    'customer_id_generation',
+    'customer_update',
+    'customer_delete',
+    'customer_merge',
+    'line_send',
+    'worker_deploy',
+    'production_deploy'
+  ];
+  if(zeroFields.some((key)=>exactInt(receipt[key])!==0))return false;
+
+  return true;
+}
+
 export function resolveLineHistoryRecoveryNextPhase({
   candidatesPresent=false,
   customerMasterPresent=false,
@@ -12,7 +47,16 @@ export function resolveLineHistoryRecoveryNextPhase({
   completionReceipt=null,
   currentMainSha=''
 }={}){
-  if(completionReceipt&&completionReceipt.complete===true){
+  if(completionReceipt&&String(completionReceipt.completion_type||'')==='OWNER_DECISIONS_NO_WRITE'){
+    if(isValidOwnerNoWriteCompletionReceipt(completionReceipt,currentMainSha)){
+      return {
+        stage:'COMPLETE_NO_WRITE',
+        next_phase:'none',
+        next_action:'Owner review is complete and selected no Production backfill actions. Keep the SHA-bound no-write completion receipt with the run artifacts.',
+        production_write_possible:false
+      };
+    }
+  }else if(completionReceipt&&completionReceipt.complete===true){
     return {
       stage:'COMPLETE',
       next_phase:'none',
