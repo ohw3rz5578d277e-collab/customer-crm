@@ -1,0 +1,67 @@
+name: LINE history no-write completion
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'src/crm-line-history-recovery-next-phase.mjs'
+      - 'scripts/inspect-line-history-recovery-status.mjs'
+      - 'scripts/run-line-history-owner-authorization-prep.sh'
+      - 'tests/line-history-recovery-next-phase.test.mjs'
+      - '.github/workflows/line-history-no-write-completion.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact PR head
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+
+      - name: Assert exact PR head
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
+
+      - name: Syntax checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check src/crm-line-history-recovery-next-phase.mjs
+          node --check scripts/inspect-line-history-recovery-status.mjs
+          node --check tests/line-history-recovery-next-phase.test.mjs
+          bash -n scripts/run-line-history-owner-authorization-prep.sh
+          echo 'LINE_HISTORY_NO_WRITE_SYNTAX=PASS'
+
+      - name: No-write safety contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          files=(
+            src/crm-line-history-recovery-next-phase.mjs
+            scripts/inspect-line-history-recovery-status.mjs
+            scripts/run-line-history-owner-authorization-prep.sh
+          )
+          ! grep -Eiq '\bwrangler\b|d1[[:space:]]+execute|--execute-production-write' "${files[@]}"
+          ! grep -Eiq 'INSERT[[:space:]]+(OR[[:space:]]+IGNORE[[:space:]]+)?INTO|UPDATE[[:space:]]+[A-Za-z_]|DELETE[[:space:]]+FROM|REPLACE[[:space:]]+INTO|UPSERT[[:space:]]+' "${files[@]}"
+          grep -q 'customer-crm-line-history-no-write-completion-v1' scripts/run-line-history-owner-authorization-prep.sh
+          grep -q 'PRODUCTION_D1_READ=0' scripts/run-line-history-owner-authorization-prep.sh
+          grep -q 'PRODUCTION_D1_WRITE=0' scripts/run-line-history-owner-authorization-prep.sh
+          grep -q 'AUTHORIZATION_GRANTED=NO' scripts/run-line-history-owner-authorization-prep.sh
+          echo 'PRODUCTION_D1_WRITE=0'
+          echo 'PRODUCTION_MUTATION_PATH_ADDED=0'
+          echo 'LINE_HISTORY_NO_WRITE_SAFETY=PASS'
+
+      - name: No-write completion regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          node tests/line-history-recovery-next-phase.test.mjs
