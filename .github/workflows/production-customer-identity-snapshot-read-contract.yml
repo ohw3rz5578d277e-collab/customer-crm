@@ -1,0 +1,50 @@
+name: Production customer identity snapshot read contract
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/production-customer-identity-snapshot-read-contract.yml'
+      - 'scripts/run-production-customer-identity-snapshot-read-mac.sh'
+      - 'tests/production-customer-identity-snapshot-read-contract.test.mjs'
+      - 'scripts/build-production-identity-snapshot.mjs'
+      - 'src/crm-sales-snapshot.mjs'
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact PR head
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+          fetch-depth: 1
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+
+      - name: Syntax and local-only snapshot-read contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
+          bash -n scripts/run-production-customer-identity-snapshot-read-mac.sh
+          node --check tests/production-customer-identity-snapshot-read-contract.test.mjs
+          node --check scripts/build-production-identity-snapshot.mjs
+          node tests/production-customer-identity-snapshot-read-contract.test.mjs
+          echo 'RUNTIME_LOCATION=PHYSICAL_MAC_ONLY'
+          echo 'PRIVATE_SNAPSHOT_LOCAL_ONLY=1'
+          echo 'GITHUB_ARTIFACT_UPLOAD=0'
+          echo 'PRODUCTION_D1_READ_EXECUTED=0'
+          echo 'PRODUCTION_D1_WRITE=0'
+          echo 'PRODUCTION_FETCH=0'
+          echo 'R2_ACCESS=0'
+          echo 'CRM_MUTATION=0'
+          echo 'LINE_SEND=0'
+          echo 'CUSTOMER_ID_GENERATION=0'
+          echo 'PRODUCTION_DEPLOY=0'
