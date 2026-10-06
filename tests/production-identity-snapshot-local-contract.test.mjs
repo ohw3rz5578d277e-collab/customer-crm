@@ -12,7 +12,9 @@ const canaries=[
   '26999102',
   'U_SNAPSHOT_PRIVATE_CANARY_2222',
   'PRIVATE_NAME_CANARY_ALPHA',
-  'PRIVATE_NAME_CANARY_BETA'
+  'PRIVATE_NAME_CANARY_BETA',
+  'PRIVATE_NAME_CANARY_DUPLICATE',
+  '2099-12-31T23:59:59Z'
 ];
 
 function run(inputValue,name='case'){
@@ -54,11 +56,13 @@ const SQL_MUTATION_PATTERNS=[
 ];
 const hasMutationSql=value=>SQL_MUTATION_PATTERNS.some(re=>re.test(value));
 
-const NETWORK_MODULE_RE=/(?:\bfrom\s*|\brequire\s*\(\s*|\bimport\s*\(\s*)['"](?:node:)?(?:http|https|net|tls|dns|dgram)['"]/i;
-const THIRD_PARTY_NETWORK_RE=/(?:\bfrom\s*|\brequire\s*\(\s*|\bimport\s*\(\s*)['"](?:undici|axios|got|node-fetch)['"]/i;
+const NETWORK_MODULE_RE=/(?:\bfrom\s*|\brequire\s*\(\s*|\bimport\s*\(\s*|\bimport\s*)['"](?:node:)?(?:http|https|net|tls|dns|dgram)['"]/i;
+const THIRD_PARTY_NETWORK_RE=/(?:\bfrom\s*|\brequire\s*\(\s*|\bimport\s*\(\s*|\bimport\s*)['"](?:undici|axios|got|node-fetch)['"]/i;
 const hasNetworkSurface=value=>[
   NETWORK_MODULE_RE,
   THIRD_PARTY_NETWORK_RE,
+  /\bprocess\.getBuiltinModule\s*\(/i,
+  /\bcreateRequire\s*\(/i,
   /\bfetch\s*\(/i,
   /\bWebSocket\s*\(/i,
   /\bEventSource\s*\(/i,
@@ -70,7 +74,7 @@ const hasNetworkSurface=value=>[
 try{
   const rows=[
     {customer_id:'26999102',line_user_id:'U_SNAPSHOT_PRIVATE_CANARY_2222',name:'PRIVATE_NAME_CANARY_BETA',deleted_at:''},
-    {customer_id:'26999101',line_user_id:'',name:'PRIVATE_NAME_CANARY_ALPHA',deleted_at:'2026-01-02'}
+    {customer_id:'26999101',line_user_id:'',name:'PRIVATE_NAME_CANARY_ALPHA',deleted_at:'2099-12-31T23:59:59Z'}
   ];
 
   const wrapped=run([{results:rows,success:true}], 'wrapped');
@@ -84,7 +88,7 @@ try{
   assert.equal(parsed.source_main_sha,sha);
   assert.equal(parsed.customer_count,2);
   assert.deepEqual(parsed.customers.map(x=>x.customer_id),['26999101','26999102']);
-  assert.equal(parsed.customers[0].deleted_at,'2026-01-02');
+  assert.equal(parsed.customers[0].deleted_at,'2099-12-31T23:59:59Z');
   assert.deepEqual(parseProductionSnapshotText(body).map(x=>x.customer_id),['26999101','26999102']);
   assert.match(wrapped.result.stdout,/PRIVATE_CUSTOMER_VALUES_PRINTED=0/);
   assert.match(wrapped.result.stdout,/PRODUCTION_D1_WRITE=0/);
@@ -148,12 +152,16 @@ try{
 
   const networkFixtures=[
     "import https from 'https'",
+    "import 'https'",
     "import http from 'node:http'",
     "const net = require('net')",
     "await import('node:tls')",
     "import {lookup} from 'dns'",
     "import dgram from 'node:dgram'",
     "import {request} from 'undici'",
+    "import 'node-fetch'",
+    "process.getBuiltinModule('https')",
+    "createRequire(import.meta.url)('node:https')",
     "fetch('https://example.invalid')",
     "new WebSocket('wss://example.invalid')",
     "curl https://example.invalid"
@@ -164,7 +172,8 @@ try{
   const networkAllowedFixtures=[
     "const httpsLabel='offline';",
     "const networkStatus='DISABLED';",
-    "const fetchRequired=false;"
+    "const fetchRequired=false;",
+    "const createRequireLabel='disabled';"
   ];
   for(const fixture of networkAllowedFixtures){
     assert.equal(hasNetworkSurface(fixture),false,`network guard false-positive ${fixture}`);
