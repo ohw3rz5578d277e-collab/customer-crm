@@ -11,26 +11,39 @@ const NO_WRITE_FILES = [
   'scripts/run-line-history-owner-authorization-prep.sh'
 ];
 
-const IDENT = '(?:"(?:""|[^"])+"|`(?:``|[^`])+`|\\[(?:\\]\\]|[^\\]])+\\]|[A-Za-z_][A-Za-z0-9_$]*)';
-const QUALIFIED_IDENT = `${IDENT}(?:\\s*\\.\\s*${IDENT})?`;
+const IDENT = '(?:"(?:""|[^"])+"|`(?:``|[^`])+`|\'(?:\'\'|[^\'])+\'|\\[(?:\\]\\]|[^\\]])+\\]|[A-Za-z_][A-Za-z0-9_$]*)';
+const QUALIFIED_IDENT = `${IDENT}(?:\\s*\\.\\s*${IDENT}){0,2}`;
 const OR_CONFLICT = '(?:OR\\s+(?:ROLLBACK|ABORT|FAIL|IGNORE|REPLACE)\\s+)?';
+const UPDATE_QUALIFIERS = `(?:(?:\\s+AS\\s+${IDENT})|(?:\\s+INDEXED\\s+BY\\s+${IDENT})|(?:\\s+NOT\\s+INDEXED))*`;
+const CREATE_MODIFIERS = '(?:(?:TEMP|TEMPORARY|UNIQUE|VIRTUAL)\\s+)*';
 
 const MUTATION_PATTERNS = [
   new RegExp(`\\bINSERT\\s+${OR_CONFLICT}INTO\\s+${QUALIFIED_IDENT}`, 'i'),
-  new RegExp(`\\bUPDATE\\s+${OR_CONFLICT}${QUALIFIED_IDENT}\\s+SET\\b`, 'i'),
+  new RegExp(`\\bUPDATE\\s+${OR_CONFLICT}${QUALIFIED_IDENT}${UPDATE_QUALIFIERS}\\s+SET\\b`, 'i'),
   new RegExp(`\\bDELETE\\s+FROM\\s+${QUALIFIED_IDENT}`, 'i'),
-  new RegExp(`\\bCREATE\\s+(?:TEMP(?:ORARY)?\\s+)?(?:TABLE|INDEX|TRIGGER|VIEW)\\s+(?:IF\\s+NOT\\s+EXISTS\\s+)?${QUALIFIED_IDENT}`, 'i'),
+  new RegExp(`\\bCREATE\\s+${CREATE_MODIFIERS}(?:TABLE|INDEX|TRIGGER|VIEW)\\b`, 'i'),
   new RegExp(`\\bALTER\\s+TABLE\\s+${QUALIFIED_IDENT}`, 'i'),
   new RegExp(`\\bDROP\\s+(?:TABLE|INDEX|TRIGGER|VIEW)\\s+(?:IF\\s+EXISTS\\s+)?${QUALIFIED_IDENT}`, 'i'),
   new RegExp(`\\bREPLACE\\s+(?:INTO\\s+)?${QUALIFIED_IDENT}`, 'i'),
   new RegExp(`\\bTRUNCATE\\s+(?:TABLE\\s+)?${QUALIFIED_IDENT}`, 'i'),
-  new RegExp(`\\bUPSERT\\s+${QUALIFIED_IDENT}`, 'i')
+  new RegExp(`\\bUPSERT\\s+${QUALIFIED_IDENT}`, 'i'),
+  /\bPRAGMA\b/i,
+  /\bVACUUM\b/i,
+  /\bREINDEX\b/i,
+  /\bANALYZE\b/i,
+  /\bATTACH\s+(?:DATABASE\s+)?/i,
+  /\bDETACH\s+(?:DATABASE\s+)?/i
 ];
 
 const PRODUCTION_EXECUTION_PATTERNS = [
   /\bwrangler\b/i,
   /\bd1\s+execute\b/i,
-  /--execute-production-write\b/i
+  /--execute-production-write\b/i,
+  /\bfetch\s*\(/i,
+  /node:(?:http|https|net|tls)\b/i,
+  /\b(?:curl|wget)\b/i,
+  /child_process/i,
+  /https?:\/\//i
 ];
 
 function fail(code, detail = '') {
@@ -46,8 +59,25 @@ function readRequired(path) {
   }
 }
 
+function normalizeSqlSource(text) {
+  let out = String(text ?? '');
+  for (let i = 0; i < 2; i++) {
+    out = out
+      .replace(/\\"/g, '"')
+      .replace(/\\'/g, "'")
+      .replace(/\\`/g, '`')
+      .replace(/\\\[/g, '[')
+      .replace(/\\\]/g, ']')
+      .replace(/\\n/g, '\n')
+      .replace(/\\r/g, '\r')
+      .replace(/\\t/g, '\t');
+  }
+  return out;
+}
+
 function mutationMatch(text) {
-  return MUTATION_PATTERNS.find((pattern) => pattern.test(text)) || null;
+  const normalized = normalizeSqlSource(text);
+  return MUTATION_PATTERNS.find((pattern) => pattern.test(normalized)) || null;
 }
 
 function executionMatch(text) {
@@ -56,7 +86,7 @@ function executionMatch(text) {
 
 for (const path of NO_WRITE_FILES) {
   const text = readRequired(path);
-  if (executionMatch(text)) fail('NO_WRITE_RUNTIME_CONTAINS_PRODUCTION_EXECUTION_TOKEN', path);
+  if (executionMatch(text)) fail('NO_WRITE_RUNTIME_CONTAINS_PRODUCTION_OR_NETWORK_EXECUTION_TOKEN', path);
   if (mutationMatch(text)) fail('NO_WRITE_RUNTIME_CONTAINS_MUTATION_SQL', path);
 }
 
@@ -70,8 +100,13 @@ const mutationSamples = [
   'UPDATE "customers" SET x=1',
   'UPDATE "customer""history" SET x=1',
   'UPDATE `customer``history` SET x=1',
+  "UPDATE 'customer''history' SET x=1",
   'UPDATE OR FAIL [customers] SET x=1',
+  'UPDATE main.customers AS c SET x=1',
+  'UPDATE customers INDEXED BY idx SET x=1',
   'UPDATE\ncustomers SET x=1',
+  String.raw`const sql = "UPDATE \"customer\"\"history\" SET x=1";`,
+  String.raw`const sql = "UPDATE\ncustomers SET x=1";`,
   'DELETE FROM t',
   'DELETE\nFROM [customers]',
   'CREATE TABLE t(x INTEGER)',
@@ -79,12 +114,22 @@ const mutationSamples = [
   'CREATE TEMP TABLE t(x INTEGER)',
   'CREATE TEMPORARY TABLE "t"(x INTEGER)',
   'CREATE TABLE IF NOT EXISTS [t](x INTEGER)',
+  'CREATE UNIQUE INDEX idx ON t(x)',
+  'CREATE TEMP UNIQUE INDEX idx2 ON t(x)',
+  'CREATE VIRTUAL TABLE v USING fts5(x)',
+  String.raw`const sql = "CREATE UNIQUE INDEX idx ON t(x)";`,
   'ALTER TABLE t ADD COLUMN y TEXT',
   'DROP TABLE t',
   'DROP TABLE IF EXISTS "t"',
   'REPLACE INTO t VALUES (1)',
   'TRUNCATE TABLE t',
-  'UPSERT t'
+  'UPSERT t',
+  'PRAGMA user_version=1',
+  'VACUUM',
+  'REINDEX idx',
+  'ANALYZE',
+  "ATTACH DATABASE 'other.db' AS other",
+  'DETACH DATABASE other'
 ];
 
 for (const sample of mutationSamples) {
@@ -96,7 +141,10 @@ const allowedSamples = [
   'value.replace(/x/g, y)',
   'createHash("sha256")',
   'const status = "UPDATE_REQUIRED";',
-  'const note = "create local receipt only";'
+  'const note = "create local receipt only";',
+  'function analyzeSalesHistory(records) {}',
+  'const pragmaLabel = "metadata";',
+  'const reindexRequired = false;'
 ];
 
 for (const sample of allowedSamples) {
@@ -129,10 +177,13 @@ for (const [path, markers] of requiredMarkers) {
 
 console.log(`SQL_MUTATION_DENY_LIST_SELF_TEST=${mutationSamples.length}/${mutationSamples.length}_PASS`);
 console.log(`SQL_MUTATION_DENY_LIST_FALSE_POSITIVE_SELF_TEST=${allowedSamples.length}/${allowedSamples.length}_PASS`);
+console.log('SQL_MUTATION_DENY_LIST_SOURCE_ESCAPE_NORMALIZATION=PASS');
 console.log('SQL_MUTATION_DENY_LIST_MULTILINE_SELF_TEST=PASS');
 console.log('SQL_MUTATION_DENY_LIST_QUOTED_IDENTIFIER_SELF_TEST=PASS');
 console.log('SQL_MUTATION_DENY_LIST_ESCAPED_IDENTIFIER_SELF_TEST=PASS');
-console.log('SQL_MUTATION_DENY_LIST_SQLITE_MODIFIER_SELF_TEST=PASS');
+console.log('SQL_MUTATION_DENY_LIST_SQLITE_CREATE_MODIFIER_SELF_TEST=PASS');
+console.log('SQL_MUTATION_DENY_LIST_SQLITE_CONTROL_STATEMENT_SELF_TEST=PASS');
+console.log('NO_WRITE_NETWORK_EXECUTION_SURFACE=0');
 console.log('DECISION_PLAN_NO_WRITE_CONTRACT=PASS');
 console.log('PRODUCTION_D1_READ=0');
 console.log('PRODUCTION_D1_WRITE=0');
