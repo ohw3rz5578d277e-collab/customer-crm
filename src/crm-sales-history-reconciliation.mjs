@@ -1,38 +1,41 @@
-import { normalizeImportName, normalizeImportDate } from './crm-customer-csv-import.mjs';
-
-export const SALES_RECONCILIATION_BUILD='crm-sales-local-reconciliation-20261006-02';
+export const SALES_RECONCILIATION_BUILD='crm-sales-local-reconciliation-20261006-03';
 export const CURRENT_CUSTOMER_ID_RE=/^\d{8}$/;
 export const LINE_USER_ID_RE=/^U[0-9a-fA-F]{20,}$/;
 
 function text(v){return v==null?'':String(v).trim()}
+function excelDate(serial){
+  const n=Number(serial);
+  if(!Number.isInteger(n)||n<20000||n>80000)return'';
+  return new Date(Date.UTC(1899,11,30)+n*86400000).toISOString().slice(0,10);
+}
+export function normalizeReconciliationName(v){
+  return text(v).normalize('NFKC').toLowerCase().replace(/[\s　・･.．,，、()（）\[\]［］【】「」『』]/g,'');
+}
+export function normalizeReconciliationDate(v){
+  const raw=text(v).normalize('NFKC');
+  if(!raw)return'';
+  if(/^\d{5}$/.test(raw)){const x=excelDate(raw);if(x)return x}
+  const m=raw.match(/^(20\d{2})[\/\.\-年](\d{1,2})[\/\.\-月](\d{1,2})(?:日)?/);
+  if(!m)return'';
+  const y=Number(m[1]),mo=Number(m[2]),d=Number(m[3]);
+  const dt=new Date(Date.UTC(y,mo-1,d));
+  if(dt.getUTCFullYear()!==y||dt.getUTCMonth()!==mo-1||dt.getUTCDate()!==d)return'';
+  return `${String(y).padStart(4,'0')}-${String(mo).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+}
 function uniqueByCustomerId(rows){
   const map=new Map();
-  for(const row of rows||[]){
-    const id=text(row?.customer_id);
-    if(!id)continue;
-    if(!map.has(id))map.set(id,row);
-  }
+  for(const row of rows||[]){const id=text(row?.customer_id);if(id&&!map.has(id))map.set(id,row)}
   return [...map.values()];
 }
-function pushIndex(map,key,row){
-  if(!key)return;
-  if(!map.has(key))map.set(key,[]);
-  map.get(key).push(row);
-}
+function pushIndex(map,key,row){if(!key)return;if(!map.has(key))map.set(key,[]);map.get(key).push(row)}
 
 export function normalizeSalesRecord(raw={}){
   const name=text(raw.name);
   return {
-    year:Number(raw.year)||0,
-    source_row:Number(raw.source_row)||0,
-    name,
-    name_key:normalizeImportName(name),
-    shoot_date:normalizeImportDate(raw.shoot_date),
-    genre:text(raw.genre),
-    status:text(raw.status),
-    repeat_flag:text(raw.repeat_flag),
-    sales_customer_id:text(raw.sales_customer_id),
-    line_user_id:text(raw.line_user_id)
+    year:Number(raw.year)||0,source_row:Number(raw.source_row)||0,name,
+    name_key:normalizeReconciliationName(name),shoot_date:normalizeReconciliationDate(raw.shoot_date),
+    genre:text(raw.genre),status:text(raw.status),repeat_flag:text(raw.repeat_flag),
+    sales_customer_id:text(raw.sales_customer_id),line_user_id:text(raw.line_user_id)
   };
 }
 
@@ -75,14 +78,12 @@ export function analyzeSalesHistory(records=[]){
   for(const group of groups.values()){
     const shoots=[...group.shoots.values()].sort((a,b)=>a.shoot_date.localeCompare(b.shoot_date));
     const years=[...new Set(shoots.map(x=>Number(x.year)||Number(x.shoot_date.slice(0,4))))].filter(Boolean).sort();
-    const ids=[...group.sales_customer_ids];
-    const lineIds=[...group.line_user_ids];
+    const ids=[...group.sales_customer_ids],lineIds=[...group.line_user_ids];
     customers.push({
       name_key:group.name_key,name:group.name,shoot_count:shoots.length,shoot_dates:shoots.map(x=>x.shoot_date),years,
       is_repeater:shoots.length>=2,repeat_flag_seen:group.repeat_flag_seen,
       duplicate_same_day_rows:shoots.reduce((n,x)=>n+Number(x.duplicate_source_rows||0),0),
-      sales_customer_ids:ids,sales_customer_id_conflict:ids.length>1,
-      line_user_ids:lineIds,line_user_id_conflict:lineIds.length>1,shoots
+      sales_customer_ids:ids,sales_customer_id_conflict:ids.length>1,line_user_ids:lineIds,line_user_id_conflict:lineIds.length>1,shoots
     });
   }
   customers.sort((a,b)=>a.name.localeCompare(b.name,'ja-JP'));
@@ -98,18 +99,18 @@ export function reconcileSalesHistory({salesAnalysis,customerMaster=[],productio
   if(!salesAnalysis||!Array.isArray(salesAnalysis.customers))throw new Error('sales_analysis_required');
 
   const production=(productionCustomers||[]).map(row=>({
-    customer_id:text(row?.customer_id),name:text(row?.name),name_key:normalizeImportName(row?.name),
+    customer_id:text(row?.customer_id),name:text(row?.name),name_key:normalizeReconciliationName(row?.name),
     line_user_id:text(row?.line_user_id),current_customer_id:CURRENT_CUSTOMER_ID_RE.test(text(row?.customer_id))
   })).filter(x=>x.customer_id);
   const master=(customerMaster||[]).map(row=>({
     customer_id:text(row?.customer_id??row?.customerId),line_user_id:text(row?.line_user_id??row?.lineUserId),
     name:text(row?.name??row?.displayName),line_name:text(row?.line_name??row?.lineName??row?.line_display_name),
-    name_key:normalizeImportName(row?.name??row?.displayName),line_name_key:normalizeImportName(row?.line_name??row?.lineName??row?.line_display_name),
+    name_key:normalizeReconciliationName(row?.name??row?.displayName),line_name_key:normalizeReconciliationName(row?.line_name??row?.lineName??row?.line_display_name),
     current_customer_id:CURRENT_CUSTOMER_ID_RE.test(text(row?.customer_id??row?.customerId)),
     valid_line_user_id:LINE_USER_ID_RE.test(text(row?.line_user_id??row?.lineUserId))
   })).filter(x=>x.customer_id||x.line_user_id||x.name||x.line_name);
   const evidence=(lineNameEvidence||[]).map(row=>({
-    name_key:normalizeImportName(row?.name_key??row?.name),line_user_id:text(row?.line_user_id??row?.lineUserId),source:text(row?.source)||'line_body_exact_full_name'
+    name_key:normalizeReconciliationName(row?.name_key??row?.name),line_user_id:text(row?.line_user_id??row?.lineUserId),source:text(row?.source)||'line_body_exact_full_name'
   })).filter(x=>x.name_key&&LINE_USER_ID_RE.test(x.line_user_id));
 
   const prodByName=new Map(),prodByLine=new Map(),prodById=new Map();
