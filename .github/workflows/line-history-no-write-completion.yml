@@ -7,10 +7,13 @@ on:
     paths:
       - 'src/crm-line-history-recovery-next-phase.mjs'
       - 'src/crm-line-history-recovery-next-command.mjs'
+      - 'src/crm-line-history-recovery-discovery.mjs'
+      - 'scripts/discover-line-history-recovery-artifacts.mjs'
       - 'scripts/inspect-line-history-recovery-status.mjs'
       - 'scripts/run-line-history-recovery-operator.sh'
       - 'scripts/run-line-history-owner-authorization-prep.sh'
       - 'tests/line-history-recovery-next-phase.test.mjs'
+      - 'tests/line-history-recovery-artifact-discovery.test.mjs'
       - '.github/workflows/line-history-no-write-completion.yml'
 
 permissions:
@@ -39,8 +42,11 @@ jobs:
           set -euo pipefail
           node --check src/crm-line-history-recovery-next-phase.mjs
           node --check src/crm-line-history-recovery-next-command.mjs
+          node --check src/crm-line-history-recovery-discovery.mjs
+          node --check scripts/discover-line-history-recovery-artifacts.mjs
           node --check scripts/inspect-line-history-recovery-status.mjs
           node --check tests/line-history-recovery-next-phase.test.mjs
+          node --check tests/line-history-recovery-artifact-discovery.test.mjs
           bash -n scripts/run-line-history-recovery-operator.sh
           bash -n scripts/run-line-history-owner-authorization-prep.sh
           echo 'LINE_HISTORY_NO_WRITE_SYNTAX=PASS'
@@ -51,6 +57,8 @@ jobs:
           set -euo pipefail
           no_write_files=(
             src/crm-line-history-recovery-next-phase.mjs
+            src/crm-line-history-recovery-discovery.mjs
+            scripts/discover-line-history-recovery-artifacts.mjs
             scripts/inspect-line-history-recovery-status.mjs
             scripts/run-line-history-owner-authorization-prep.sh
           )
@@ -60,7 +68,7 @@ jobs:
             exit 41
           fi
 
-          if grep -Eiq 'INSERT[[:space:]]+(OR[[:space:]]+IGNORE[[:space:]]+)?INTO|UPDATE[[:space:]]+[A-Za-z_]|DELETE[[:space:]]+FROM|REPLACE[[:space:]]+INTO|UPSERT[[:space:]]+' "${no_write_files[@]}"; then
+          if grep -Eiq '\b(INSERT|UPDATE|DELETE|CREATE|ALTER|DROP|REPLACE|TRUNCATE|UPSERT)\b' "${no_write_files[@]}"; then
             echo 'STOP: NO_WRITE_RUNTIME_CONTAINS_MUTATION_SQL'
             exit 42
           fi
@@ -79,3 +87,4 @@ jobs:
         run: |
           set -euo pipefail
           node tests/line-history-recovery-next-phase.test.mjs
+          node tests/line-history-recovery-artifact-discovery.test.mjs
