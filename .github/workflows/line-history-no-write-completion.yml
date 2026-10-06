@@ -68,9 +68,34 @@ jobs:
             exit 41
           fi
 
-          if grep -Eiq '\b(INSERT|UPDATE|DELETE|CREATE|ALTER|DROP|REPLACE|TRUNCATE|UPSERT)\b' "${no_write_files[@]}"; then
+          MUTATION_SQL_RE='INSERT[[:space:]]+(OR[[:space:]]+IGNORE[[:space:]]+)?INTO|UPDATE[[:space:]]+[A-Za-z_][A-Za-z0-9_]*|DELETE[[:space:]]+FROM|CREATE[[:space:]]+(TABLE|INDEX|TRIGGER|VIEW)|ALTER[[:space:]]+TABLE|DROP[[:space:]]+(TABLE|INDEX|TRIGGER|VIEW)|REPLACE[[:space:]]+INTO|TRUNCATE([[:space:]]+TABLE)?[[:space:]]+[A-Za-z_][A-Za-z0-9_]*|UPSERT[[:space:]]+[A-Za-z_]'
+
+          if grep -Eiq "$MUTATION_SQL_RE" "${no_write_files[@]}"; then
             echo 'STOP: NO_WRITE_RUNTIME_CONTAINS_MUTATION_SQL'
             exit 42
+          fi
+
+          mutation_samples=(
+            'INSERT INTO t VALUES (1)'
+            'UPDATE t SET x=1'
+            'DELETE FROM t'
+            'CREATE TABLE t(x INTEGER)'
+            'ALTER TABLE t ADD COLUMN y TEXT'
+            'DROP TABLE t'
+            'REPLACE INTO t VALUES (1)'
+            'TRUNCATE TABLE t'
+            'UPSERT t'
+          )
+          for sample in "${mutation_samples[@]}"; do
+            if ! printf '%s\n' "$sample" | grep -Eiq "$MUTATION_SQL_RE"; then
+              echo "STOP: SQL_DENY_LIST_SELF_TEST_MISSED=$sample"
+              exit 43
+            fi
+          done
+
+          if printf '%s\n' 'tmp_path.replace(receipt_path)' | grep -Eiq "$MUTATION_SQL_RE"; then
+            echo 'STOP: SQL_DENY_LIST_FALSE_POSITIVE_LOCAL_REPLACE'
+            exit 44
           fi
 
           grep -q 'customer-crm-line-history-no-write-completion-v1' scripts/run-line-history-owner-authorization-prep.sh
@@ -78,6 +103,8 @@ jobs:
           grep -q 'PRODUCTION_D1_WRITE=0' scripts/run-line-history-owner-authorization-prep.sh
           grep -q 'AUTHORIZATION_GRANTED=NO' scripts/run-line-history-owner-authorization-prep.sh
           grep -q 'STATUS_ARGS+=(--main-sha "$LOCAL_HEAD")' scripts/run-line-history-recovery-operator.sh
+          echo 'SQL_MUTATION_DENY_LIST_SELF_TEST=9/9_PASS'
+          echo 'SQL_MUTATION_DENY_LIST_LOCAL_REPLACE_FALSE_POSITIVE=0'
           echo 'PRODUCTION_D1_WRITE=0'
           echo 'PRODUCTION_MUTATION_PATH_ADDED=0'
           echo 'LINE_HISTORY_NO_WRITE_SAFETY=PASS'
