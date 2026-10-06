@@ -73,12 +73,33 @@ function resumeDirFromFile(p){
   }
   return '';
 }
+function recognizedNoWriteReceipt(p){
+  if(path.basename(p)!=='no-write-completion-receipt.json')return false;
+  const raw=readJson(p);
+  return !!(
+    raw&&
+    raw.complete===true&&
+    text(raw.receipt_format)==='customer-crm-line-history-no-write-completion-v1'&&
+    text(raw.completion_type)==='OWNER_DECISIONS_NO_WRITE'
+  );
+}
 function preauthDirFromFile(p){
-  if(path.basename(p)!=='decision-plan-private.json')return '';
+  const base=path.basename(p);
   const dir=path.dirname(p);
-  if(fs.existsSync(path.join(dir,'readonly-preview','owner-backfill-preview-summary.json'))){
+
+  if(base==='decision-plan-private.json'){
+    if(fs.existsSync(path.join(dir,'readonly-preview','owner-backfill-preview-summary.json'))){
+      return dir;
+    }
+    if(recognizedNoWriteReceipt(path.join(dir,'no-write-completion-receipt.json'))){
+      return dir;
+    }
+  }
+
+  if(recognizedNoWriteReceipt(p)&&fs.existsSync(path.join(dir,'decision-plan-private.json'))){
     return dir;
   }
+
   return '';
 }
 function d1PreviewDirFromFile(p){
