@@ -21,6 +21,7 @@ assert.ok(workflow.includes('BUCKET_DELETE_AUTHORIZED=0'));
 assert.equal((workflow.match(/--request POST/g)||[]).length,1);
 assert.doesNotMatch(workflow,/--request\s+(PATCH|DELETE|PUT)/i);
 assert.doesNotMatch(workflow,/\/objects(?:[/?"'])/i);
+assert.ok(bridge.includes("github.run_attempt == 1"));
 assert.ok(bridge.includes("github.event.issue.number == 26"));
 assert.ok(bridge.includes("github.actor == 'ohw3rz5578d277e-collab'"));
 assert.ok(bridge.includes("/member-production-r2-bucket-create "));
@@ -30,4 +31,5 @@ assert.ok(doc.includes('must not delete, recreate, patch, rename, or retry the b
 
 console.log('MEMBER_R2_BUCKET_CREATE_GATE_CONTRACT=PASS');
 console.log('ISSUE_BRIDGE_BOT_ACTOR_GATE=PASS');
+console.log('ISSUE_BRIDGE_REPLAY_GUARD=PASS');
 console.log(`CANONICAL_BUCKET_SHA256=${digest}`);
