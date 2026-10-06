@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import assert from 'node:assert/strict';
 import {
   isValidOwnerNoWriteCompletionReceipt,
+  isValidOwnerWriteCompletionReceipt,
   resolveLineHistoryRecoveryNextPhase
 } from '../src/crm-line-history-recovery-next-phase.mjs';
 
@@ -24,6 +25,12 @@ function noWriteReceipt(mainSha='a'.repeat(40)){
     accepted_no_write_decisions:4,
     proposed_backfill_identity_actions:0,
     proposed_write_actions:0,
+    decision_summary:{
+      SAME_PERSON:0,
+      DIFFERENT_PERSON:2,
+      DEFERRED:1,
+      NEEDS_MORE_EVIDENCE:1
+    },
     authorization_granted:false,
     production_d1_read:0,
     production_d1_write:0,
@@ -34,6 +41,32 @@ function noWriteReceipt(mainSha='a'.repeat(40)){
     line_send:0,
     worker_deploy:0,
     production_deploy:0
+  };
+}
+
+function writeReceipt(mainSha='a'.repeat(40)){
+  return {
+    planner:'line_history_owner_write_completion_receipt_v1',
+    complete:true,
+    source_main_sha:mainSha,
+    authorization_scope:'CUSTOMER_LINE_MESSAGES_INSERT_ONLY',
+    exact_physical_insert_rows:2,
+    post_preview_would_insert_rows:0,
+    blocker_count:0,
+    blockers:[],
+    safety:{
+      private_customer_id_output:false,
+      private_line_user_id_output:false,
+      message_text_output:false,
+      customer_name_output:false,
+      line_send:0,
+      customer_id_generation:0,
+      customer_update:0,
+      customer_delete:0,
+      customer_merge:0,
+      worker_deploy:0,
+      production_deploy:0
+    }
   };
 }
 
@@ -80,21 +113,80 @@ expectStage({
 },'COMPLETE_NO_WRITE','none');
 
 const wrongFormat={...validNoWrite,receipt_format:'legacy'};
+const missingCompletionType={...validNoWrite};
+delete missingCompletionType.completion_type;
 const staleReceipt={...validNoWrite,source_main_sha:'b'.repeat(40)};
 const countMismatch={...validNoWrite,submitted_decisions:3};
 const actionMismatch={...validNoWrite,proposed_backfill_identity_actions:1};
 const writeFlag={...validNoWrite,production_d1_write:1};
 const authorizationFlag={...validNoWrite,authorization_granted:true};
+const samePersonSummary={
+  ...validNoWrite,
+  decision_summary:{
+    SAME_PERSON:1,
+    DIFFERENT_PERSON:2,
+    DEFERRED:1,
+    NEEDS_MORE_EVIDENCE:0
+  }
+};
+const summaryTotalMismatch={
+  ...validNoWrite,
+  decision_summary:{
+    SAME_PERSON:0,
+    DIFFERENT_PERSON:1,
+    DEFERRED:1,
+    NEEDS_MORE_EVIDENCE:1
+  }
+};
+const summaryExtraKey={
+  ...validNoWrite,
+  decision_summary:{...validNoWrite.decision_summary,UNKNOWN:0}
+};
 
-for(const bad of [wrongFormat,staleReceipt,countMismatch,actionMismatch,writeFlag,authorizationFlag]){
+for(const bad of [
+  wrongFormat,
+  missingCompletionType,
+  staleReceipt,
+  countMismatch,
+  actionMismatch,
+  writeFlag,
+  authorizationFlag,
+  samePersonSummary,
+  summaryTotalMismatch,
+  summaryExtraKey
+]){
   assert.equal(isValidOwnerNoWriteCompletionReceipt(bad,exactMainSha),false);
-  assert.notEqual(
-    resolveLineHistoryRecoveryNextPhase({completionReceipt:bad,currentMainSha:exactMainSha}).stage,
-    'COMPLETE_NO_WRITE'
-  );
+  const stage=resolveLineHistoryRecoveryNextPhase({
+    completionReceipt:bad,
+    currentMainSha:exactMainSha
+  }).stage;
+  assert.notEqual(stage,'COMPLETE_NO_WRITE');
+  assert.notEqual(stage,'COMPLETE');
 }
 
 assert.equal(isValidOwnerNoWriteCompletionReceipt(validNoWrite,''),false);
+
+const validWrite=writeReceipt(exactMainSha);
+assert.equal(isValidOwnerWriteCompletionReceipt(validWrite,exactMainSha),true);
+expectStage({
+  completionReceipt:validWrite,
+  currentMainSha:exactMainSha
+},'COMPLETE','none',false);
+
+for(const bad of [
+  {complete:true},
+  {...validWrite,planner:'legacy'},
+  {...validWrite,source_main_sha:'b'.repeat(40)},
+  {...validWrite,blocker_count:1,blockers:['X']},
+  {...validWrite,post_preview_would_insert_rows:1},
+  {...validWrite,safety:{...validWrite.safety,line_send:1}}
+]){
+  assert.equal(isValidOwnerWriteCompletionReceipt(bad,exactMainSha),false);
+  assert.notEqual(
+    resolveLineHistoryRecoveryNextPhase({completionReceipt:bad,currentMainSha:exactMainSha}).stage,
+    'COMPLETE'
+  );
+}
 
 expectStage({
   d1Packet:{
@@ -136,15 +228,6 @@ expectStage({
   approvalFilePresent:true
 },'APPROVED_WRITE_READY','approved-write',true);
 
-expectStage({
-  d1Packet:{
-    packet_ready:true,
-    authorization_required:true
-  },
-  approvalFilePresent:true,
-  completionReceipt:{complete:true}
-},'COMPLETE','none',false);
-
 const cli=fs.readFileSync('scripts/inspect-line-history-recovery-status.mjs','utf8');
 assert.doesNotMatch(cli,/\bwrangler\b/i);
 assert.doesNotMatch(cli,/child_process/i);
@@ -169,12 +252,19 @@ assert.doesNotMatch(preauth,/--execute-production-write/);
 const operator=fs.readFileSync('scripts/run-line-history-recovery-operator.sh','utf8');
 assert.match(operator,/inspect-line-history-recovery-status\.mjs/);
 assert.match(operator,/STATUS_ARGS=\(\)/);
+assert.match(operator,/STATUS_ARGS\+=\(--main-sha "\$LOCAL_HEAD"\)/);
 assert.match(operator,/PRODUCTION_D1_WRITE=0/);
+
+const nextCommand=fs.readFileSync('src/crm-line-history-recovery-next-command.mjs','utf8');
+assert.match(nextCommand,/COMPLETE_NO_WRITE/);
+assert.match(nextCommand,/production_write:false/);
 
 console.log('LINE_HISTORY_RECOVERY_NEXT_PHASE_INPUTS=PASS');
 console.log('LINE_HISTORY_RECOVERY_NEXT_PHASE_REVIEW=PASS');
 console.log('LINE_HISTORY_RECOVERY_NEXT_PHASE_PREAUTH=PASS');
 console.log('LINE_HISTORY_RECOVERY_NEXT_PHASE_NO_WRITE_RECEIPT=PASS');
+console.log('LINE_HISTORY_RECOVERY_NEXT_PHASE_DECISION_SUMMARY=PASS');
+console.log('LINE_HISTORY_RECOVERY_NEXT_PHASE_WRITE_RECEIPT=PASS');
 console.log('LINE_HISTORY_RECOVERY_NEXT_PHASE_D1_PREVIEW=PASS');
 console.log('LINE_HISTORY_RECOVERY_NEXT_PHASE_STALE_PACKET=PASS');
 console.log('LINE_HISTORY_RECOVERY_NEXT_PHASE_EXACT_APPROVAL=PASS');
