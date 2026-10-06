@@ -73,7 +73,16 @@ try{
   assert.doesNotMatch(source,/\bfetch\s*\(/i);
   assert.doesNotMatch(source,/node:(?:http|https)/i);
   assert.doesNotMatch(source,/child_process/i);
-  assert.doesNotMatch(source,/\b(?:INSERT|UPDATE|DELETE|ALTER|DROP|CREATE|REPLACE|TRUNCATE|UPSERT)\b/i);
+  assert.doesNotMatch(source,/\bINSERT\s+(?:OR\s+(?:ROLLBACK|ABORT|FAIL|IGNORE|REPLACE)\s+)?INTO\b/i);
+  assert.doesNotMatch(source,/\bUPDATE\s+(?:OR\s+(?:ROLLBACK|ABORT|FAIL|IGNORE|REPLACE)\s+)?(?:[A-Za-z_][A-Za-z0-9_$]*|"[^"]+"|`[^`]+`|\[[^\]]+\])\s+SET\b/i);
+  assert.doesNotMatch(source,/\bDELETE\s+FROM\b/i);
+  assert.doesNotMatch(source,/\bCREATE\s+(?:TEMP(?:ORARY)?\s+)?(?:TABLE|INDEX|TRIGGER|VIEW)\b/i);
+  assert.doesNotMatch(source,/\bALTER\s+TABLE\b/i);
+  assert.doesNotMatch(source,/\bDROP\s+(?:TABLE|INDEX|TRIGGER|VIEW)\b/i);
+  assert.doesNotMatch(source,/\bREPLACE\s+INTO\b/i);
+  assert.doesNotMatch(source,/\bTRUNCATE(?:\s+TABLE)?\b/i);
+  assert.doesNotMatch(source,/\bUPSERT\s+[A-Za-z_]/i);
+  assert.match(source,/\.replace\(/,'local string replace remains allowed');
   assert.match(source,/customer-crm-production-identity-snapshot-v1/);
   assert.match(source,/all_customer_identities/);
   assert.match(source,/parseProductionSnapshotText/);
@@ -86,6 +95,7 @@ try{
   console.log('PRODUCTION_IDENTITY_SNAPSHOT_DUPLICATE_FAIL_CLOSED=PASS');
   console.log('PRODUCTION_IDENTITY_SNAPSHOT_EMPTY_FAIL_CLOSED=PASS');
   console.log('PRODUCTION_IDENTITY_SNAPSHOT_SHA_BOUND=PASS');
+  console.log('PRODUCTION_IDENTITY_SNAPSHOT_SQL_CONTEXT_SCAN=PASS');
   console.log('PRODUCTION_IDENTITY_SNAPSHOT_LOCAL_ONLY=PASS');
   console.log('PRODUCTION_D1_READ=0');
   console.log('PRODUCTION_D1_WRITE=0');
