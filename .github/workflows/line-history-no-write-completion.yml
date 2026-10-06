@@ -6,7 +6,9 @@ on:
       - main
     paths:
       - 'src/crm-line-history-recovery-next-phase.mjs'
+      - 'src/crm-line-history-recovery-next-command.mjs'
       - 'scripts/inspect-line-history-recovery-status.mjs'
+      - 'scripts/run-line-history-recovery-operator.sh'
       - 'scripts/run-line-history-owner-authorization-prep.sh'
       - 'tests/line-history-recovery-next-phase.test.mjs'
       - '.github/workflows/line-history-no-write-completion.yml'
@@ -36,8 +38,10 @@ jobs:
         run: |
           set -euo pipefail
           node --check src/crm-line-history-recovery-next-phase.mjs
+          node --check src/crm-line-history-recovery-next-command.mjs
           node --check scripts/inspect-line-history-recovery-status.mjs
           node --check tests/line-history-recovery-next-phase.test.mjs
+          bash -n scripts/run-line-history-recovery-operator.sh
           bash -n scripts/run-line-history-owner-authorization-prep.sh
           echo 'LINE_HISTORY_NO_WRITE_SYNTAX=PASS'
 
@@ -47,6 +51,7 @@ jobs:
           set -euo pipefail
           files=(
             src/crm-line-history-recovery-next-phase.mjs
+            src/crm-line-history-recovery-next-command.mjs
             scripts/inspect-line-history-recovery-status.mjs
             scripts/run-line-history-owner-authorization-prep.sh
           )
@@ -56,6 +61,7 @@ jobs:
           grep -q 'PRODUCTION_D1_READ=0' scripts/run-line-history-owner-authorization-prep.sh
           grep -q 'PRODUCTION_D1_WRITE=0' scripts/run-line-history-owner-authorization-prep.sh
           grep -q 'AUTHORIZATION_GRANTED=NO' scripts/run-line-history-owner-authorization-prep.sh
+          grep -q 'STATUS_ARGS+=(--main-sha "$LOCAL_HEAD")' scripts/run-line-history-recovery-operator.sh
           echo 'PRODUCTION_D1_WRITE=0'
           echo 'PRODUCTION_MUTATION_PATH_ADDED=0'
           echo 'LINE_HISTORY_NO_WRITE_SAFETY=PASS'
