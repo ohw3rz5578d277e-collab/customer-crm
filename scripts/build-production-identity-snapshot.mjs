@@ -5,6 +5,7 @@ function arg(name){const i=process.argv.indexOf(name);return i>=0?process.argv[i
 function text(v){return v==null?'':String(v).trim()}
 function fail(code){console.error(`RESULT=STOP_${code}`);process.exit(1)}
 function stripTransportNoise(s){return String(s??'').replace(/^\uFEFF/,'').replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g,'').trim()}
+function owns(obj,key){return Object.prototype.hasOwnProperty.call(obj,key)}
 
 function parseExactJson(raw){
   const source=stripTransportNoise(raw);
@@ -12,17 +13,35 @@ function parseExactJson(raw){
   try{return JSON.parse(source)}catch{fail('INPUT_JSON_INVALID')}
 }
 
+function validateWrapperEntry(item){
+  if(!item||typeof item!=='object'||Array.isArray(item))fail('WRAPPER_ENTRY_INVALID');
+  if(!Array.isArray(item.results))fail('WRAPPER_ENTRY_RESULTS_REQUIRED');
+  if(owns(item,'success')&&item.success!==true)fail('WRAPPER_ENTRY_UNSUCCESSFUL');
+  return item.results;
+}
+
 function rowsFromParsed(raw){
   if(Array.isArray(raw)){
-    if(raw.length===1&&raw[0]&&Array.isArray(raw[0].results))return raw[0].results;
-    if(raw.every(x=>x&&typeof x==='object'&&!Array.isArray(x)&&!Object.prototype.hasOwnProperty.call(x,'results')))return raw;
-    const rows=[];
-    for(const item of raw){if(item&&Array.isArray(item.results))rows.push(...item.results)}
-    return rows;
+    const wrapperLike=raw.some(x=>x&&typeof x==='object'&&!Array.isArray(x)&&(owns(x,'results')||owns(x,'success')||owns(x,'error')));
+    if(wrapperLike){
+      const rows=[];
+      for(const item of raw)rows.push(...validateWrapperEntry(item));
+      return rows;
+    }
+    if(raw.every(x=>x&&typeof x==='object'&&!Array.isArray(x)))return raw;
+    fail('INPUT_ARRAY_SHAPE_INVALID');
   }
-  if(raw&&Array.isArray(raw.results))return raw.results;
-  if(raw&&raw.result&&Array.isArray(raw.result.results))return raw.result.results;
-  return [];
+  if(raw&&typeof raw==='object'&&!Array.isArray(raw)&&Array.isArray(raw.results)){
+    if(owns(raw,'success')&&raw.success!==true)fail('WRAPPER_ENTRY_UNSUCCESSFUL');
+    return raw.results;
+  }
+  if(raw&&typeof raw==='object'&&!Array.isArray(raw)&&raw.result){
+    const result=raw.result;
+    if(!result||typeof result!=='object'||Array.isArray(result)||!Array.isArray(result.results))fail('WRAPPER_ENTRY_RESULTS_REQUIRED');
+    if(owns(result,'success')&&result.success!==true)fail('WRAPPER_ENTRY_UNSUCCESSFUL');
+    return result.results;
+  }
+  fail('INPUT_SHAPE_INVALID');
 }
 
 const input=arg('--input');
@@ -38,8 +57,10 @@ if(!rawRows.length)fail('CUSTOMER_ROWS_EMPTY');
 
 const seen=new Set();
 const customers=[];
+const requiredIdentityFields=['customer_id','line_user_id','name','deleted_at'];
 for(const row of rawRows){
   if(!row||typeof row!=='object'||Array.isArray(row))fail('CUSTOMER_ROW_INVALID');
+  if(requiredIdentityFields.some(field=>!owns(row,field)))fail('CUSTOMER_ROW_IDENTITY_FIELDS_REQUIRED');
   const customerId=text(row.customer_id);
   if(!customerId)fail('CUSTOMER_ID_REQUIRED');
   if(seen.has(customerId))fail('DUPLICATE_CUSTOMER_ID');
