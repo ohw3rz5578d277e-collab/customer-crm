@@ -16,6 +16,7 @@ function parseExactJson(raw){
 function validateWrapperEntry(item){
   if(!item||typeof item!=='object'||Array.isArray(item))fail('WRAPPER_ENTRY_INVALID');
   if(!Array.isArray(item.results))fail('WRAPPER_ENTRY_RESULTS_REQUIRED');
+  if(owns(item,'error'))fail('WRAPPER_ENTRY_ERROR_PRESENT');
   if(owns(item,'success')&&item.success!==true)fail('WRAPPER_ENTRY_UNSUCCESSFUL');
   return item.results;
 }
@@ -32,14 +33,10 @@ function rowsFromParsed(raw){
     fail('INPUT_ARRAY_SHAPE_INVALID');
   }
   if(raw&&typeof raw==='object'&&!Array.isArray(raw)&&Array.isArray(raw.results)){
-    if(owns(raw,'success')&&raw.success!==true)fail('WRAPPER_ENTRY_UNSUCCESSFUL');
-    return raw.results;
+    return validateWrapperEntry(raw);
   }
   if(raw&&typeof raw==='object'&&!Array.isArray(raw)&&raw.result){
-    const result=raw.result;
-    if(!result||typeof result!=='object'||Array.isArray(result)||!Array.isArray(result.results))fail('WRAPPER_ENTRY_RESULTS_REQUIRED');
-    if(owns(result,'success')&&result.success!==true)fail('WRAPPER_ENTRY_UNSUCCESSFUL');
-    return result.results;
+    return validateWrapperEntry(raw.result);
   }
   fail('INPUT_SHAPE_INVALID');
 }
