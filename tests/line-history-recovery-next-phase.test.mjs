@@ -1,6 +1,9 @@
 import fs from 'node:fs';
 import assert from 'node:assert/strict';
-import { resolveLineHistoryRecoveryNextPhase } from '../src/crm-line-history-recovery-next-phase.mjs';
+import {
+  isValidOwnerNoWriteCompletionReceipt,
+  resolveLineHistoryRecoveryNextPhase
+} from '../src/crm-line-history-recovery-next-phase.mjs';
 
 function expectStage(input,stage,nextPhase,writePossible=false){
   const r=resolveLineHistoryRecoveryNextPhase(input);
@@ -8,6 +11,30 @@ function expectStage(input,stage,nextPhase,writePossible=false){
   assert.equal(r.next_phase,nextPhase);
   assert.equal(r.production_write_possible,writePossible);
   assert.ok(r.next_action);
+}
+
+function noWriteReceipt(mainSha='a'.repeat(40)){
+  return {
+    receipt_format:'customer-crm-line-history-no-write-completion-v1',
+    complete:true,
+    completion_type:'OWNER_DECISIONS_NO_WRITE',
+    source_main_sha:mainSha,
+    review_queue_groups:4,
+    submitted_decisions:4,
+    accepted_no_write_decisions:4,
+    proposed_backfill_identity_actions:0,
+    proposed_write_actions:0,
+    authorization_granted:false,
+    production_d1_read:0,
+    production_d1_write:0,
+    customer_id_generation:0,
+    customer_update:0,
+    customer_delete:0,
+    customer_merge:0,
+    line_send:0,
+    worker_deploy:0,
+    production_deploy:0
+  };
 }
 
 expectStage({},'INPUTS_REQUIRED','readonly-resume');
@@ -43,6 +70,31 @@ expectStage({
   decisionsPresent:true,
   preauthPreviewReady:true
 },'D1_PREVIEW_REQUIRED','d1-preview');
+
+const exactMainSha='a'.repeat(40);
+const validNoWrite=noWriteReceipt(exactMainSha);
+assert.equal(isValidOwnerNoWriteCompletionReceipt(validNoWrite,exactMainSha),true);
+expectStage({
+  completionReceipt:validNoWrite,
+  currentMainSha:exactMainSha
+},'COMPLETE_NO_WRITE','none');
+
+const wrongFormat={...validNoWrite,receipt_format:'legacy'};
+const staleReceipt={...validNoWrite,source_main_sha:'b'.repeat(40)};
+const countMismatch={...validNoWrite,submitted_decisions:3};
+const actionMismatch={...validNoWrite,proposed_backfill_identity_actions:1};
+const writeFlag={...validNoWrite,production_d1_write:1};
+const authorizationFlag={...validNoWrite,authorization_granted:true};
+
+for(const bad of [wrongFormat,staleReceipt,countMismatch,actionMismatch,writeFlag,authorizationFlag]){
+  assert.equal(isValidOwnerNoWriteCompletionReceipt(bad,exactMainSha),false);
+  assert.notEqual(
+    resolveLineHistoryRecoveryNextPhase({completionReceipt:bad,currentMainSha:exactMainSha}).stage,
+    'COMPLETE_NO_WRITE'
+  );
+}
+
+assert.equal(isValidOwnerNoWriteCompletionReceipt(validNoWrite,''),false);
 
 expectStage({
   d1Packet:{
@@ -99,8 +151,20 @@ assert.doesNotMatch(cli,/child_process/i);
 assert.doesNotMatch(cli,/d1\s+execute/i);
 assert.doesNotMatch(cli,/INSERT\s+(?:OR\s+IGNORE\s+)?INTO/i);
 assert.match(cli,/--main-sha/);
+assert.match(cli,/no-write-completion-receipt\.json/);
 assert.match(cli,/PRODUCTION_WRITE_POSSIBLE=/);
 assert.match(cli,/PRIVATE_VALUES_PRINTED_TO_TERMINAL=0/);
+
+const preauth=fs.readFileSync('scripts/run-line-history-owner-authorization-prep.sh','utf8');
+assert.match(preauth,/no-write-completion-receipt\.json/);
+assert.match(preauth,/customer-crm-line-history-no-write-completion-v1/);
+assert.match(preauth,/OWNER_DECISIONS_NO_WRITE/);
+assert.match(preauth,/RESULT=OWNER_BACKFILL_COMPLETE_NO_WRITE/);
+assert.match(preauth,/PRODUCTION_D1_READ=0/);
+assert.match(preauth,/PRODUCTION_D1_WRITE=0/);
+assert.match(preauth,/PROPOSED_BACKFILL_IDENTITY_ACTIONS=0/);
+assert.match(preauth,/PROPOSED_WRITE_ACTIONS=0/);
+assert.doesNotMatch(preauth,/--execute-production-write/);
 
 const operator=fs.readFileSync('scripts/run-line-history-recovery-operator.sh','utf8');
 assert.match(operator,/inspect-line-history-recovery-status\.mjs/);
@@ -110,6 +174,7 @@ assert.match(operator,/PRODUCTION_D1_WRITE=0/);
 console.log('LINE_HISTORY_RECOVERY_NEXT_PHASE_INPUTS=PASS');
 console.log('LINE_HISTORY_RECOVERY_NEXT_PHASE_REVIEW=PASS');
 console.log('LINE_HISTORY_RECOVERY_NEXT_PHASE_PREAUTH=PASS');
+console.log('LINE_HISTORY_RECOVERY_NEXT_PHASE_NO_WRITE_RECEIPT=PASS');
 console.log('LINE_HISTORY_RECOVERY_NEXT_PHASE_D1_PREVIEW=PASS');
 console.log('LINE_HISTORY_RECOVERY_NEXT_PHASE_STALE_PACKET=PASS');
 console.log('LINE_HISTORY_RECOVERY_NEXT_PHASE_EXACT_APPROVAL=PASS');
