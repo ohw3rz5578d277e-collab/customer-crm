@@ -101,13 +101,16 @@ jobs:
           set -euo pipefail
           expected_sha="$(printf '%s' "$EXPECTED_SHA_RAW" | tr '[:upper:]' '[:lower:]')"
           mode="$(printf '%s' "$MODE_RAW" | tr '[:upper:]' '[:lower:]')"
-          jurisdictions="$(printf '%s' "$JURISDICTIONS_RAW" | tr '[:upper:]' '[:lower:]')"
+          jurisdictions="$JURISDICTIONS_RAW"
           candidate_sha256="$(printf '%s' "$CANDIDATE_BUCKET_SHA256_RAW" | tr '[:upper:]' '[:lower:]')"
 
           [[ "$expected_sha" =~ ^[0-9a-f]{40}$ ]] || { echo '::error::INVALID_EXPECTED_SHA'; exit 1; }
           [[ "$mode" == 'inventory' || "$mode" == 'verify' ]] || { echo '::error::INVALID_STORAGE_PREFLIGHT_MODE'; exit 1; }
           test -n "$jurisdictions" || { echo '::error::R2_JURISDICTIONS_REQUIRED'; exit 1; }
           [[ "$jurisdictions" != *[[:space:]]* ]] || { echo '::error::R2_JURISDICTIONS_WHITESPACE_FORBIDDEN'; exit 1; }
+          lowercase_jurisdictions="$(printf '%s' "$jurisdictions" | tr '[:upper:]' '[:lower:]')"
+          test "$jurisdictions" = "$lowercase_jurisdictions" || { echo '::error::R2_JURISDICTIONS_CASE_NOT_CANONICAL'; exit 1; }
+          [[ "$jurisdictions" =~ ^(default|eu|us|fedramp|fedramp-high)(,(default|eu|us|fedramp|fedramp-high))*$ ]] || { echo '::error::INVALID_R2_JURISDICTIONS_FORMAT'; exit 1; }
 
           IFS=',' read -r -a jurisdiction_parts <<< "$jurisdictions"
           test "${#jurisdiction_parts[@]}" -ge 1 || { echo '::error::R2_JURISDICTIONS_REQUIRED'; exit 1; }
@@ -127,6 +130,8 @@ jobs:
             seen[$jurisdiction]=1
             last_index=$index
           done
+          rejoined_jurisdictions="$(IFS=,; printf '%s' "${jurisdiction_parts[*]}")"
+          test "$rejoined_jurisdictions" = "$jurisdictions" || { echo '::error::R2_JURISDICTIONS_REJOIN_MISMATCH'; exit 1; }
 
           if [[ "$mode" == 'inventory' ]]; then
             test -z "$candidate_sha256" || { echo '::error::INVENTORY_MODE_FORBIDS_CANDIDATE_BUCKET_DIGEST'; exit 1; }
@@ -307,7 +312,7 @@ jobs:
           node <<'NODE'
           const crypto=require('crypto');
           const fs=require('fs');
-          const jurisdictions=String(process.env.JURISDICTIONS||'').split(',').filter(Boolean);
+          const jurisdictions=String(process.env.JURISDICTIONS||'').split(',');
           if(!jurisdictions.length)throw new Error('R2_JURISDICTIONS_REQUIRED');
           const records=[];
           const sha256=value=>crypto.createHash('sha256').update(value).digest('hex');
