@@ -54,3 +54,39 @@ jobs:
           echo 'CRM_MUTATION=0'
           echo 'LINE_SEND=0'
           echo 'PRODUCTION_DEPLOY=0'
+
+  macos-portability:
+    runs-on: macos-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact PR head
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+
+      - name: Assert exact PR head
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Run identical local-only snapshot contract on macOS
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check scripts/build-production-identity-snapshot.mjs
+          node --check tests/production-identity-snapshot-local-contract.test.mjs
+          node tests/production-identity-snapshot-local-contract.test.mjs
+          echo 'MACOS_PORTABILITY=PASS'
+          echo 'PRODUCTION_NETWORK_ACCESS=0'
+          echo 'PRODUCTION_D1_READ=0'
+          echo 'PRODUCTION_D1_WRITE=0'
+          echo 'CRM_MUTATION=0'
+          echo 'LINE_SEND=0'
+          echo 'PRODUCTION_DEPLOY=0'
