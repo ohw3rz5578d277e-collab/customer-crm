@@ -24,11 +24,22 @@ export function planConsentRecord({
  if(!MEMBER_RE.test(member)) return {status:'invalid_member_identity',record_allowed:false};
  if(!VERSION_RE.test(tv)||!VERSION_RE.test(pv)||!HASH_RE.test(th)||!HASH_RE.test(ph)) return {status:'invalid_document_identity',record_allowed:false};
  if(terms_accepted!==true||privacy_accepted!==true) return {status:'consent_incomplete',record_allowed:false};
- if(!ISO_INSTANT_RE.test(at)||Number.isNaN(Date.parse(at))) return {status:'invalid_accepted_at',record_allowed:false};
- const parsed=new Date(at);
- const normalized=parsed.toISOString();
- const normalizedInput=at.endsWith('Z')?new Date(at).toISOString():normalized;
- if(normalizedInput!==normalized) return {status:'invalid_accepted_at',record_allowed:false};
+ const match=at.match(ISO_INSTANT_RE);
+ if(!match||Number.isNaN(Date.parse(at))) return {status:'invalid_accepted_at',record_allowed:false};
+ const local=at.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,3}))?(Z|([+-])(\d{2}):(\d{2}))$/);
+ if(!local) return {status:'invalid_accepted_at',record_allowed:false};
+ const [,ys,mos,ds,hs,mis,ss,mss='',zone,sign,ohs='00',oms='00']=local;
+ const y=Number(ys),mo=Number(mos),d=Number(ds),h=Number(hs),mi=Number(mis),sec=Number(ss),ms=Number(mss.padEnd(3,'0'));
+ if(mo<1||mo>12||d<1||d>31||h>23||mi>59||sec>59) return {status:'invalid_accepted_at',record_allowed:false};
+ const localUtc=Date.UTC(y,mo-1,d,h,mi,sec,ms);
+ const check=new Date(localUtc);
+ if(check.getUTCFullYear()!==y||check.getUTCMonth()!==mo-1||check.getUTCDate()!==d||check.getUTCHours()!==h||check.getUTCMinutes()!==mi||check.getUTCSeconds()!==sec) return {status:'invalid_accepted_at',record_allowed:false};
+ if(zone!=='Z'){
+  const oh=Number(ohs),om=Number(oms);
+  if(oh>23||om>59) return {status:'invalid_accepted_at',record_allowed:false};
+  const offset=(oh*60+om)*60000*(sign==='+'?1:-1);
+  if(new Date(localUtc-offset).getTime()!==Date.parse(at)) return {status:'invalid_accepted_at',record_allowed:false};
+ }
  return {
   status:'ready',
   member_identity_id:member,
