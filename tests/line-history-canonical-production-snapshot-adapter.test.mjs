@@ -2,11 +2,14 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 
 const repo=process.cwd();
 const script=path.join(repo,'scripts/classify-line-history-unresolved.mjs');
 const tmp=fs.mkdtempSync(path.join(os.tmpdir(),'crm-line-history-canonical-snapshot-'));
+const SOURCE_SHA='a'.repeat(40);
+function digest(pathname){return createHash('sha256').update(fs.readFileSync(pathname)).digest('hex')}
 
 try{
   const line='U'+'a'.repeat(20);
@@ -28,7 +31,7 @@ try{
     snapshot_format:'customer-crm-production-identity-snapshot-v1',
     complete:true,
     query_scope:'all_customer_identities',
-    source_main_sha:'a'.repeat(40),
+    source_main_sha:SOURCE_SHA,
     generated_at:'2026-10-07T00:00:00.000Z',
     customer_count:1,
     customers:[customer]
@@ -36,8 +39,13 @@ try{
   fs.writeFileSync(canonicalPath,JSON.stringify(envelope,null,2));
   fs.writeFileSync(directPath,JSON.stringify([customer],null,2));
 
-  function run(customers,out){
-    return spawnSync(process.execPath,[script,'--candidates',candidatesPath,'--customers',customers,'--out',out],{
+  function run(customers,out,{sourceSha=SOURCE_SHA,snapshotSha=digest(customers),bind=true}={}){
+    const args=[script,'--candidates',candidatesPath,'--customers',customers,'--out',out];
+    if(bind){
+      args.push('--expected-customer-source-sha',sourceSha);
+      args.push('--expected-customer-snapshot-sha256',snapshotSha);
+    }
+    return spawnSync(process.execPath,args,{
       cwd:repo,
       encoding:'utf8',
       env:{...process.env}
@@ -52,11 +60,23 @@ try{
   assert.equal(canonicalResult.already_resolved_message_rows,1);
   assert.equal(canonicalResult.unresolved_message_rows,0);
 
-  const direct=run(directPath,outDirect);
+  const direct=run(directPath,outDirect,{bind:false});
   assert.equal(direct.status,0,direct.stderr||direct.stdout);
   const directResult=JSON.parse(fs.readFileSync(outDirect,'utf8'));
   assert.equal(directResult.already_resolved_message_rows,1);
   assert.equal(directResult.unresolved_message_rows,0);
+
+  const missingBinding=run(canonicalPath,path.join(tmp,'missing-binding-out.json'),{bind:false});
+  assert.notEqual(missingBinding.status,0,'canonical envelope without binding should fail closed');
+  assert.match(String(missingBinding.stderr||missingBinding.stdout),/expected source sha required/);
+
+  const sourceMismatch=run(canonicalPath,path.join(tmp,'source-mismatch-out.json'),{sourceSha:'b'.repeat(40)});
+  assert.notEqual(sourceMismatch.status,0,'source SHA mismatch should fail closed');
+  assert.match(String(sourceMismatch.stderr||sourceMismatch.stdout),/source sha mismatch/);
+
+  const digestMismatch=run(canonicalPath,path.join(tmp,'digest-mismatch-out.json'),{snapshotSha:'0'.repeat(64)});
+  assert.notEqual(digestMismatch.status,0,'snapshot digest mismatch should fail closed');
+  assert.match(String(digestMismatch.stderr||digestMismatch.stdout),/sha256 mismatch/);
 
   for(const [name,patch,expected] of [
     ['incomplete',{complete:false},'incomplete'],
@@ -67,12 +87,15 @@ try{
   ]){
     const p=path.join(tmp,`${name}.json`);
     fs.writeFileSync(p,JSON.stringify({...envelope,...patch},null,2));
-    const r=run(p,path.join(tmp,`${name}-out.json`));
+    const sourceSha=name==='sha'?SOURCE_SHA:String(({...envelope,...patch}).source_main_sha||SOURCE_SHA);
+    const r=run(p,path.join(tmp,`${name}-out.json`),{sourceSha,snapshotSha:digest(p)});
     assert.notEqual(r.status,0,`${name} should fail closed`);
     assert.match(String(r.stderr||r.stdout),new RegExp(expected.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')));
   }
 
   console.log('LINE_HISTORY_CANONICAL_PRODUCTION_SNAPSHOT_ADAPTER=PASS');
+  console.log('CANONICAL_SNAPSHOT_EXACT_SOURCE_BINDING=PASS');
+  console.log('CANONICAL_SNAPSHOT_SHA256_BINDING=PASS');
   console.log('CANONICAL_SNAPSHOT_FAIL_CLOSED=PASS');
   console.log('DIRECT_ARRAY_COMPATIBILITY=PASS');
   console.log('PRODUCTION_D1_READ=0');
