@@ -12,12 +12,13 @@ export function buildMemberAdminReadModel({
  benefit_status='none',
  acquisition_source='',
  reservation_status='none',
- promotion_status='not_applicable'
+ promotion_status='prospect'
 }={}){
  const type=text(subject_type);
  if(!['customer','prospect'].includes(type)) return {status:'invalid_subject_type',read_ready:false};
  if(type==='customer'&&!/^\d{8}$/.test(text(canonical_customer_id))) return {status:'invalid_customer_id',read_ready:false};
  if(type==='prospect'&&!/^PID_[A-Za-z0-9_-]{22,}$/.test(text(prospect_id))) return {status:'invalid_prospect_id',read_ready:false};
+ if(type==='prospect'&&!/^MID_[A-Za-z0-9_-]{22,}$/.test(text(member_identity_id))) return {status:'invalid_member_identity',read_ready:false};
  const pending=Number(review_pending_count);
  if(!Number.isInteger(pending)||pending<0) return {status:'invalid_review_count',read_ready:false};
  return {
