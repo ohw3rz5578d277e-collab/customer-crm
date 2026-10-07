@@ -155,6 +155,7 @@ The preflight performs:
 - private-media route activation = 0;
 - LINE Login activation = 0;
 - Production deploy = 0;
+- Worker activation = 0;
 - Production traffic change = 0;
 - Production D1 write = 0;
 - CRM write = 0;
@@ -172,8 +173,8 @@ This evidence is why jurisdiction selection is now explicit rather than automati
 
 ## Next gate
 
-A successful token verification, inventory, or candidate verification is not authorization to wire `env.MEMBER_PRIVATE_MEDIA_BUCKET` into Production runtime, enable storage fetch, activate Member/private-media routes, activate LINE Login Production, or deploy Production.
+A successful token verification, inventory, or candidate verification is not authorization to wire `env.MEMBER_PRIVATE_MEDIA_BUCKET` into Production runtime, enable storage fetch, activate Member/private-media routes, activate LINE Login Production, deploy Production, activate a Worker version, or change Production traffic.
 
 Any future R2 inventory run must use a fresh Owner authorization that names the exact current main SHA and exact jurisdiction subset.
 
-Any additional or different R2 binding source change, runtime storage consumption, route activation, or Production deployment requires separate fresh Owner exact-SHA/scope authorization.
+Any additional or different R2 binding source change, runtime storage consumption, route activation, Production deployment, Worker activation, or Production traffic change requires separate fresh Owner exact-SHA/scope authorization.
