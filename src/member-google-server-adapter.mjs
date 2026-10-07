@@ -26,7 +26,7 @@ export function signGoogleServerRequest({method='POST',path,timestamp_ms,nonce,s
 }
 
 export function verifyGoogleServerEnvelope({
- now_ms,timestamp_ms,nonce,nonce_seen=false,event_seen=false,sync_event_id,
+ now_ms,timestamp_ms,nonce,nonce_seen,event_seen,sync_event_id,
  method='POST',path,body,signature_sha256,shared_secret,max_skew_ms=300000
 }={}){
  const now=Number(now_ms), ts=Number(timestamp_ms), skew=Number(max_skew_ms);
@@ -36,6 +36,7 @@ export function verifyGoogleServerEnvelope({
  if(n.length<22) return {status:'invalid_nonce',execute_allowed:false};
  if(!EVENT_RE.test(event)) return {status:'invalid_sync_event_id',execute_allowed:false};
  if(!secret||!p.startsWith('/')||!/^[0-9a-f]{64}$/.test(supplied)) return {status:'invalid_signature_input',execute_allowed:false};
+ if(typeof nonce_seen!=='boolean'||typeof event_seen!=='boolean') return {status:'invalid_replay_evidence',execute_allowed:false};
  if(nonce_seen===true) return {status:'nonce_replay',execute_allowed:false};
  if(event_seen===true) return {status:'event_replay_check_required',execute_allowed:false};
  const bodyDigest=crypto.createHash('sha256').update(canonicalRequestBody(body)).digest('hex');
