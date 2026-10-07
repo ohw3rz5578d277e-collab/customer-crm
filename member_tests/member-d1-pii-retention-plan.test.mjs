@@ -14,8 +14,10 @@ p=planPiiRetention({now_ms:d(10),pii_written_at_ms:t0,google_synced:true});
 assert.equal(p.status,'SYNCED');
 
 p=planPiiRetention({now_ms:d(10),pii_written_at_ms:t0,google_synced:true,identity_verified:true,version_verified:true});
-assert.equal(p.status,'VERIFIED');
+assert.equal(p.status,'PURGE_ELIGIBLE');
+assert.equal(p.verified_state,'VERIFIED');
 assert.equal(p.pii_access_allowed,true);
+assert.equal(p.purge_required,true);
 
 p=planPiiRetention({now_ms:d(30),pii_written_at_ms:t0});
 assert.equal(p.status,'DEADLINE_RECOVERY');
