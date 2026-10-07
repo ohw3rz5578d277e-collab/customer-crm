@@ -8,6 +8,8 @@ assert.equal(a.source,'unknown');
 let e=planFunnelEvent({stage:'registered',member_identity_id:m,prospect_id:p,occurred_at:'2026-10-07T06:00:00Z'});
 assert.equal(e.status,'ready');assert.equal(e.append_only,true);assert.equal(e.identity_authority,false);
 assert.equal(planFunnelEvent({stage:'reserved',member_identity_id:m,canonical_customer_id:'12345678',occurred_at:'2026-10-07T06:00:00Z'}).status,'reservation_context_required');
+assert.equal(planFunnelEvent({stage:'registered',member_identity_id:m,prospect_id:p,occurred_at:'2026-02-30T00:00:00Z'}).status,'invalid_time');
+assert.equal(planFunnelEvent({stage:'registered',member_identity_id:m,prospect_id:p,occurred_at:'2026-04-31T09:00:00+09:00'}).status,'invalid_time');
 console.log('MEMBER_ACQUISITION_ATTRIBUTION_FOUNDATION=PASS');
 console.log('ATTRIBUTION_IDENTITY_AUTHORITY=0');
 console.log('PRODUCTION_ANALYTICS_WRITE=0');
