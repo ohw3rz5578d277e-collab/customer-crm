@@ -1,17 +1,20 @@
 # MIZUNO PHOTO MEMBER — Production Integration Acceptance
 
-Baseline: 2026-09-25 JST
+Baseline: 2026-10-07 JST
 
 ## Purpose
 
-This is the final source-only acceptance layer before any future Production Worker entry change.
+Record the current source-only Member Production integration stage after the canonical default-off Production entry wiring and canonical private-media binding declaration were merged, and after the private-media read-only adapter was separately authorized for source-only runtime wiring.
 
-It adds two source foundations:
+The current source stage:
 
-1. a single Production-facing Member request composition;
-2. a deterministic default-off wiring candidate for the current canonical Production entry.
+1. keeps the single Production-facing Member request composition;
+2. keeps the existing double activation gate default-off;
+3. keeps public assets unbound;
+4. explicitly wraps `env?.MEMBER_PRIVATE_MEDIA_BUCKET` with the reviewed read-only private-media storage adapter;
+5. passes that adapter into `private_media_storage_adapter` without executing a storage fetch.
 
-Nothing in this phase modifies the actual Production Worker entry.
+This stage changes source only. It does not authorize or execute Production deployment, route activation, storage fetch, R2 object access, LINE Login Production, D1 mutation, CRM mutation, LINE send, or Customer ID mutation.
 
 ## Production-facing Member request composition
 
@@ -32,11 +35,11 @@ The production-facing source handler requires both:
 - `MEMBER_PRODUCTION_ROUTE_MODE=enabled`
 - explicit trusted-caller `approved:true`
 
-The route mode defaults disabled.
+The route mode remains disabled in canonical source configuration.
 
-The explicit approval defaults false.
+`MEMBER_PRODUCTION_OWNER_APPROVED` remains `false`.
 
-When route mode is disabled, Member requests return `null` so an imported-but-inactive integration can preserve existing Production fallthrough behavior.
+When route mode is disabled, Member requests return `null` so the imported integration preserves existing Production fallthrough behavior.
 
 When route mode is enabled but trusted approval is missing, the Member namespace fails closed with 503.
 
@@ -44,7 +47,7 @@ When route mode is enabled but trusted approval is missing, the Member namespace
 
 Overall Member route approval does not imply LINE Login external token exchange approval.
 
-`line_login_approved` separately defaults false.
+`line_login_approved` remains explicitly `false` in the Production entry.
 
 ### Explicit storage dependencies
 
@@ -53,81 +56,70 @@ The source handler accepts only explicit:
 - `public_asset_adapter`
 - `private_media_storage_adapter`
 
-It never discovers either storage binding from `env`.
+It never discovers either storage dependency inside the handler from arbitrary `env` keys.
 
-## Exact default-off Production entry candidate
+The Production entry now owns the exact private-media binding handoff and wires:
 
-The acceptance module can deterministically transform the current canonical Production entry **in memory only**.
+`private_media_storage_adapter:createMemberPrivateMediaStorageAdapter(env?.MEMBER_PRIVATE_MEDIA_BUCKET)`
 
-The candidate is deliberately default-off.
+The Production entry does not hardcode the bucket name. Public assets remain `public_asset_adapter:null`.
 
-It would add:
+## Private-media adapter safety
 
-- one import for the Production-facing Member handler;
+`createMemberPrivateMediaStorageAdapter(binding)` returns a frozen read-only adapter with only `get(key)`.
+
+Adapter construction itself performs no R2 object access. The underlying `binding.get(...)` is called only if the returned adapter's `get(key)` is later called.
+
+Therefore the current source wiring alone does not execute Production storage fetch. With Member route mode disabled, the Member request composition returns before the Member API handler can call the storage adapter.
+
+## Canonical source inspection
+
+Static acceptance now requires the current Production entry to contain all of the following:
+
+- one Member request-composition import;
+- one private-media adapter factory import;
 - `MEMBER_PRODUCTION_OWNER_APPROVED=false`;
-- a route-mode + Owner-flag boundary helper;
-- Member browser pages to the sensitive/no-store Production path set;
-- an exact LINE callback GET exception that exists only when both the Owner flag and route mode are active;
-- Member dispatch after the global Production boundary and before the existing CRM request path;
+- the existing route-mode + Owner-flag boundary helper;
+- the exact LINE callback GET exception gated by both Owner flag and route mode;
+- Member dispatch after the global Production boundary and before existing CRM dispatch;
 - `line_login_approved:false`;
 - `public_asset_adapter:null`;
-- `private_media_storage_adapter:null`.
+- exact private-media wiring through `createMemberPrivateMediaStorageAdapter(env?.MEMBER_PRIVATE_MEDIA_BUCKET)`;
+- existing CRM dispatch preserved exactly once.
 
-The existing CRM dispatch remains the fallback.
+The acceptance remains static and reports `production_activation_ready=false` even when all observed evidence flags are true.
 
-## Why the callback exception is double-gated
+## Recommended release sequence from this stage
 
-The current Production boundary blocks cross-site `/api/*`.
+The acceptance sequence remains intentionally staged:
 
-LINE OAuth return can be a cross-site top-level GET.
+1. merge the source-only private-media runtime wiring after CI/Codex review and separate exact-HEAD Owner merge approval;
+2. verify existing CRM regressions while Member routes remain inactive;
+3. verify Member runtime dependencies without activating routes or executing storage fetch;
+4. obtain a separate fresh exact-SHA/scope Owner authorization for route activation;
+5. activate route mode and Owner flag only in the exact separately approved release;
+6. run a separately authorized read-only Member canary;
+7. activate the private-media content route only under its own separate gate;
+8. keep Favorites write, historical MEMORY write, BLACK entitlement write, checkout/payment, and commerce activation separate.
 
-The candidate does not create a permanent unconditional exception.
-
-The exception becomes effective only when:
-
-1. the compiled Owner activation flag is true; and
-2. `MEMBER_PRODUCTION_ROUTE_MODE=enabled`; and
-3. the request is exactly GET `/api/member/login/line/callback`.
-
-All other cross-site API requests remain blocked.
-
-## Recommended release sequence
-
-The acceptance sequence is intentionally staged:
-
-1. merge this source-only acceptance;
-2. obtain fresh exact-SHA Owner authorization for Production entry modification;
-3. apply the exact default-off entry candidate;
-4. verify existing CRM regressions while Member routes remain inactive;
-5. configure and verify Member runtime dependencies without route activation;
-6. obtain a separate fresh exact-SHA/scope Owner authorization for route activation;
-7. activate route mode and Owner flag in the exact approved release;
-8. run a read-only Member canary;
-9. activate private media only under its separate binding gate;
-10. keep Favorites write, historical MEMORY write, BLACK entitlement write, checkout/payment, and commerce activation separate.
-
-## Static evidence never authorizes Production
-
-Even if every observed evidence field is true, the source acceptance always reports:
-
-`production_activation_ready=false`
-
-This prevents source code, CI, Preview, or an evidence collector from converting themselves into Production authorization.
+Production deploy, Worker activation, Production traffic change, storage fetch, route activation, and LINE Login Production remain separate gates.
 
 ## Current Production state
 
-This phase performs:
+This source-only phase performs:
 
-- Production Worker entry modification = 0
+- Production Worker deploy = 0
+- Worker activation = 0
+- Production traffic change = 0
 - Production route activation = 0
 - LINE callback Production exception activation = 0
-- Production deploy = 0
+- Production storage fetch = 0
+- R2 object read/write/list/delete = 0
+- public asset runtime binding/fetch change = 0
 - Production schema apply = 0
 - Production D1 write = 0
-- public asset Production binding/fetch = 0
-- private media Production binding/fetch = 0
 - CRM write = 0
 - LINE send = 0
-- Customer ID generation = 0
+- Customer ID generation/update/delete/merge = 0
 - checkout/payment = 0
 - paid spend = 0
