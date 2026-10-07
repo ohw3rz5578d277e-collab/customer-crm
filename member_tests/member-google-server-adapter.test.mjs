@@ -5,6 +5,8 @@ assert.equal(canonicalRequestBody({b:1,a:{y:2,x:1}}),canonicalRequestBody({a:{x:
 assert.notEqual(canonicalRequestBody(false),canonicalRequestBody({}));
 assert.notEqual(canonicalRequestBody(0),canonicalRequestBody({}));
 assert.notEqual(canonicalRequestBody(''),canonicalRequestBody({}));
+assert.notEqual(canonicalRequestBody(null),canonicalRequestBody({}));
+assert.equal(canonicalRequestBody(null),'null');
 const signed=signGoogleServerRequest({
  path:'/member/profile-sync',timestamp_ms:1000000,nonce:'abcdefghijklmnopqrstuvwxyz',
  sync_event_id:'SE_abcdefghijklmnopqrstuvwxyz123456',body:{b:1,a:2},shared_secret:'test-only-secret'
