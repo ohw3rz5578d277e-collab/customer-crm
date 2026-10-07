@@ -15,8 +15,8 @@ This gate covers PRs #203 through #211 only. It is a source-review/merge-order g
 | 5 | #207 | d45c97cc650c70551cc4aec58d14bc15f821aa13 |
 | 6 | #208 | 784d99df5ba42eba9c7e3f774f0c46ea9f574ab1 |
 | 7 | #209 | 1d2c76dff0705adf0239787ca683a4d62cebccbc |
-| 8 | #210 | 14ab11a77b1b53da081d98e5cb7e3804a94aa6e6 |
-| 9 | #211 | 20b180eec06fc48edf35b08838168d410ea39df1 |
+| 8 | #210 | 8c2cdabbb44717c7bf0fe79cefd2ca1d310c1b28 |
+| 9 | #211 | f510eca28b184c8b166cf13fd3618d3b3357b805 |
 
 ## Stack drift found by fresh audit
 
