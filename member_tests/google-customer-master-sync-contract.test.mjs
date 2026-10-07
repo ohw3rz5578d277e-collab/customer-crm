@@ -4,7 +4,11 @@ const doc=fs.readFileSync('docs/member-app/google-customer-master-sync-contract.
 
 for(const phrase of [
  'Customer CRM remains the sole issuer/owner of canonical Customer ID.',
- 'Customer ID is the only update key.',
+ 'Customer ID is the only Customer update key.',
+ 'A newly registered pre-booking Member has no canonical Customer ID yet',
+ 'Prospect ID is the only Prospect update key',
+ 'Prospect History is append-only',
+ 'explicit promotion event copies/transforms the current Prospect profile into Customer Master',
  'The customer browser never talks directly to Google Sheets or GAS.',
  'same sync_event_id replay -> no duplicate history row',
  'older profile_version -> reject/no overwrite',
@@ -19,7 +23,8 @@ for(const phrase of [
  'does not authorize Google Sheet creation'
 ]) assert.ok(doc.includes(phrase),`missing: ${phrase}`);
 
-assert.ok(doc.includes('Name, phone, email, address, LINE display name, or fuzzy similarity must never select the row to overwrite.'));
+assert.ok(doc.includes('Name, phone, email, address, LINE display name, or fuzzy similarity must never select the Customer row to overwrite.'));
+assert.ok(doc.includes('name, phone, email, address, LINE display name, or fuzzy similarity must never select a Prospect row.'));
 assert.ok(doc.includes('Spreadsheet ID'));
 assert.ok(doc.includes('GAS deployment secret'));
 assert.ok(doc.includes('HMAC/shared secret'));
