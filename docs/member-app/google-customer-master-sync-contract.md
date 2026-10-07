@@ -14,6 +14,16 @@ Phase 3 follows the Member Identity / Prospect foundation. This document is sour
 - Cloudflare remains the identity/runtime/sync-control layer and may hold only bounded PII cache under the retention contract.
 - The customer browser never talks directly to Google Sheets or GAS.
 
+## Prospect Master
+
+A newly registered pre-booking Member has no canonical Customer ID yet, so required Prospect PII must have a durable Google destination keyed by Prospect ID.
+
+Prospect Master stores the current profile for an unpromoted Prospect. Prospect ID is the only Prospect update key; name, phone, email, address, LINE display name, or fuzzy similarity must never select a Prospect row.
+
+Prospect History is append-only and follows the same sync_event_id/profile_version/idempotency rules as Customer History.
+
+When Customer CRM later issues the canonical Customer ID for the first reservation, an explicit promotion event copies/transforms the current Prospect profile into Customer Master, records the promotion in history, preserves Member Identity and consent/acquisition state, and marks the Prospect record promoted. Promotion must verify the persisted Prospect ID <-> Member Identity binding and must fail to review on ambiguity. It must not silently merge by profile fields.
+
 ## Customer Master
 
 One current row per canonical Customer ID.
@@ -28,7 +38,7 @@ Minimum control fields:
 
 Profile fields may include name, phone, postal/address, email, and other explicitly approved customer profile fields.
 
-Customer ID is the only update key. Name, phone, email, address, LINE display name, or fuzzy similarity must never select the row to overwrite.
+Customer ID is the only Customer update key. Name, phone, email, address, LINE display name, or fuzzy similarity must never select the Customer row to overwrite.
 
 ## Customer History
 
@@ -66,13 +76,14 @@ A future GAS endpoint must authenticate server-to-server requests. Replay resist
 
 Each accepted profile mutation receives a unique sync_event_id and monotonic profile_version for that customer.
 
-The Google side must be idempotent:
+The Google side must be idempotent for both Customer and Prospect profile streams:
 
 - same sync_event_id replay -> no duplicate history row
 - older profile_version -> reject/no overwrite
 - same profile_version with different payload digest -> conflict/review
 - next valid profile_version -> append history then update master
-- wrong/missing canonical Customer ID -> reject
+- wrong/missing canonical Customer ID for a Customer event -> reject
+- wrong/missing Prospect ID for a Prospect event -> reject
 
 The operation must use locking/serialization appropriate to GAS/Google so concurrent requests cannot silently overwrite each other.
 
