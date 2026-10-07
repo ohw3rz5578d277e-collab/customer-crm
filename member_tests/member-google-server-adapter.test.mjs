@@ -17,10 +17,15 @@ assert.match(signed.signature_sha256,/^[0-9a-f]{64}$/);
 
 const envelope={
  now_ms:1000000,timestamp_ms:1000000,nonce:'abcdefghijklmnopqrstuvwxyz',sync_event_id:'SE_abcdefghijklmnopqrstuvwxyz123456',
- method:'POST',path:'/member/profile-sync',body:{b:1,a:2},signature_sha256:signed.signature_sha256,shared_secret:'test-only-secret'
+ method:'POST',path:'/member/profile-sync',body:{b:1,a:2},signature_sha256:signed.signature_sha256,shared_secret:'test-only-secret',nonce_seen:false,event_seen:false
 };
 assert.equal(verifyGoogleServerEnvelope({...envelope,timestamp_ms:1}).status,'timestamp_out_of_window');
 assert.equal(verifyGoogleServerEnvelope({...envelope,nonce_seen:true}).status,'nonce_replay');
+assert.equal(verifyGoogleServerEnvelope({...envelope,event_seen:true}).status,'event_replay_check_required');
+for(const bad of [0,1,null,'0','1',undefined]) {
+ assert.equal(verifyGoogleServerEnvelope({...envelope,nonce_seen:bad}).status,'invalid_replay_evidence');
+ assert.equal(verifyGoogleServerEnvelope({...envelope,event_seen:bad}).status,'invalid_replay_evidence');
+}
 assert.equal(verifyGoogleServerEnvelope({...envelope,sync_event_id:'bad'}).status,'invalid_sync_event_id');
 assert.equal(verifyGoogleServerEnvelope({...envelope,signature_sha256:'0'.repeat(64)}).status,'invalid_signature');
 assert.equal(verifyGoogleServerEnvelope({...envelope,body:{a:999}}).status,'invalid_signature');
