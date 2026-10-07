@@ -4,9 +4,9 @@ Baseline: 2026-10-07 JST
 
 ## Purpose
 
-Record the next source-only stage after the first dedicated Member private-media R2 bucket was created and independently verified by a read-only exact-SHA storage preflight.
+Record the approved source-only stage after the first dedicated Member private-media R2 bucket was created, independently verified by read-only exact-SHA storage preflight, and separately approved for canonical binding declaration in source.
 
-This document proposes the canonical Worker binding only. It does not add the binding to `wrangler.jsonc`, does not wire the binding into runtime code, does not read an R2 object, and does not deploy or activate Production.
+The canonical Worker binding is now declared in `wrangler.jsonc` as part of this source-only stage. This stage does not wire the binding into Production runtime code, does not read an R2 object, does not enable storage fetch or routes, and does not deploy or activate Production.
 
 ## Verified bucket evidence
 
@@ -22,9 +22,9 @@ The verified canonical target is:
 
 The read-only list response did not independently expose storage-class metadata for the candidate record, so this proposal does not treat list-level `storage_class` as fresh independent evidence. The earlier create response validated `Standard`; no new mutation is authorized by this document.
 
-## Canonical proposed binding
+## Canonical declared binding
 
-The only acceptable first private-media binding proposal is:
+The only acceptable first private-media binding declaration is:
 
 ```json
 {
@@ -33,13 +33,15 @@ The only acceptable first private-media binding proposal is:
 }
 ```
 
-This proposal is private-media-only. Public Member assets remain unbound.
+This source-only binding is private-media-only. Public Member assets remain unbound.
 
-## Required source state before binding change
+## Required source state at the declared-binding stage
 
-Until a separate Owner authorization explicitly approves the binding source change, canonical source must continue to satisfy all of the following:
+Canonical source must continue to satisfy all of the following:
 
-- `wrangler.jsonc` contains no `r2_buckets` binding;
+- `wrangler.jsonc` contains exactly one `r2_buckets` binding;
+- that binding is exactly `MEMBER_PRIVATE_MEDIA_BUCKET -> customer-crm-member-private-media`;
+- no additional or env-scoped R2 binding is present;
 - `MEMBER_PRODUCTION_OWNER_APPROVED` remains `false`;
 - `public_asset_adapter` remains literal `null` in the Production entry;
 - `private_media_storage_adapter` remains literal `null` in the Production entry;
@@ -48,29 +50,29 @@ Until a separate Owner authorization explicitly approves the binding source chan
 - no Production storage fetch occurs;
 - the storage adapter remains explicit-binding and read-only.
 
-## Future binding source change boundary
-
-A later, separately approved source change may add exactly one `wrangler.jsonc` R2 binding with:
-
-- binding: `MEMBER_PRIVATE_MEDIA_BUCKET`
-- bucket name: `customer-crm-member-private-media`
-
-That later source change must not, by itself:
-
-- pass `env.MEMBER_PRIVATE_MEDIA_BUCKET` into the Production request composition;
-- create `createMemberPrivateMediaStorageAdapter(env.MEMBER_PRIVATE_MEDIA_BUCKET)` in Production runtime;
-- enable Member Production routes;
-- enable private-media content routes;
-- read any R2 object;
-- deploy Production or activate a Worker version.
+## Runtime consumption boundary
 
 Binding declaration and runtime consumption remain separate gates.
 
+The approved source-only declaration must not, by itself:
+
+- pass `env.MEMBER_PRIVATE_MEDIA_BUCKET` into the Production request composition;
+- create or wire `createMemberPrivateMediaStorageAdapter(env.MEMBER_PRIVATE_MEDIA_BUCKET)` in Production runtime;
+- enable Member Production routes;
+- enable private-media content routes;
+- activate LINE Login Production;
+- read any R2 object;
+- enable Production storage fetch;
+- deploy Production or activate a Worker version;
+- change Production traffic.
+
+Any transition from source declaration to runtime consumption requires a separate fresh Owner authorization at the then-current exact SHA and scope.
+
 ## Authorization boundaries
 
-Merging this proposal document and its contract test does **not** authorize:
+Recording this approved source-only declaration does **not** authorize:
 
-- `wrangler.jsonc` R2 binding changes;
+- any additional or different `wrangler.jsonc` R2 binding change;
 - R2 bucket create, update, rename, delete, lifecycle, CORS, domain, or public-access changes;
 - R2 object read, write, list, multipart upload, or delete;
 - Production storage fetch;
@@ -81,10 +83,10 @@ Merging this proposal document and its contract test does **not** authorize:
 - Production D1 read/write or migration apply;
 - CRM write;
 - LINE send;
-- Customer ID generation;
-- token or secret change/revoke/delete;
+- Customer ID generation, update, delete, or merge;
+- token or secret creation/change/revoke/delete;
 - security policy change;
 - commerce activation;
 - paid spend.
 
-No authorization from the bucket-create or read-only verification stages carries forward automatically.
+No authorization from the bucket-create, read-only verification, or source-binding declaration stage carries forward automatically to runtime consumption, route activation, or Production deployment.
