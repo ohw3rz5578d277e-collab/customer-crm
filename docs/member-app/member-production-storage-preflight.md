@@ -1,12 +1,16 @@
 # MIZUNO PHOTO MEMBER — Production Storage Read-Only Preflight
 
-Baseline: 2026-10-06 JST
+Baseline: 2026-10-07 JST
 
 ## Purpose
 
-This gate discovers whether the Cloudflare account has R2 bucket resources that could later be reviewed as an explicit Member Production storage source.
+This gate verifies the Cloudflare account R2 inventory and an explicit Member Production storage candidate without reading or mutating R2 objects.
 
-It does not select a bucket automatically and it does not create, bind, read from, write to, or delete any R2 object.
+The canonical private-media binding is now declared in source as exactly:
+
+`MEMBER_PRIVATE_MEDIA_BUCKET -> customer-crm-member-private-media`
+
+The preflight does not select a different bucket automatically, does not change bindings, does not wire runtime storage consumption, and does not create, read from, write to, or delete any R2 object.
 
 ## Authentication split
 
@@ -21,23 +25,24 @@ Before any bucket request, the workflow calls Cloudflare's read-only `GET /user/
 
 The workflow does not fall back to the Worker-management token for R2 verification or inventory.
 
-This repository change does **not** create, rotate, stage, or modify either secret. If `CLOUDFLARE_R2_READ_API_TOKEN` is absent, contains whitespace, is not accepted as a Cloudflare REST bearer token, or is not active, the preflight fails closed before bucket inventory.
+This repository change does **not** create, rotate, stage, or modify either secret. If `CLOUDFLARE_R2_READ_API_TOKEN` is absent, contains whitespace or control characters, is not accepted as a Cloudflare REST bearer token, or is not active, the preflight fails closed before bucket inventory.
 
 ## Why this exists
 
-The canonical Member Production contract intentionally did not invent a bucket name, binding name, or storage provider. The Production entry is still default-off and currently passes `null` for both public-asset and private-media adapters.
+The Production entry remains default-off and still passes `null` for both public-asset and private-media adapters. Source declaration of the R2 binding is therefore intentionally separate from runtime consumption.
 
-Before any future binding change, the repository needs durable evidence that:
+The repository needs durable evidence that:
 
 1. the inspected main SHA is still current;
 2. the Member Production route and private-media route remain disabled;
-3. no canonical `r2_buckets` binding has silently appeared in `wrangler.jsonc`;
-4. Worker-management authentication can read the current Production deployment state;
-5. the dedicated R2 credential is an active Cloudflare REST API bearer token;
-6. that least-privilege token can perform account-level bucket inventory for the **Owner-authorized jurisdiction subset only**;
-7. no unapproved jurisdiction is silently added or normalized by the workflow;
-8. the active 100%-traffic Worker version remains stable during the observation;
-9. a candidate bucket, represented only by its SHA-256 name digest in GitHub metadata, exists exactly once across the authorized jurisdiction inventories.
+3. `wrangler.jsonc` contains exactly one canonical R2 binding, `MEMBER_PRIVATE_MEDIA_BUCKET -> customer-crm-member-private-media`;
+4. no additional, wrong, or env-scoped R2 binding has appeared;
+5. Worker-management authentication can read the current Production deployment state;
+6. the dedicated R2 credential is an active Cloudflare REST API bearer token;
+7. that least-privilege token can perform account-level bucket inventory for the **Owner-authorized jurisdiction subset only**;
+8. no unapproved jurisdiction is silently added or normalized by the workflow;
+9. the active 100%-traffic Worker version remains stable during the observation;
+10. a candidate bucket, represented only by its SHA-256 name digest in GitHub metadata, exists exactly once across the authorized jurisdiction inventories.
 
 ## Explicit jurisdiction authorization
 
@@ -49,7 +54,7 @@ Supported jurisdiction values remain:
 - `fedramp`
 - `fedramp-high`
 
-The preflight no longer assumes that every account can access all five. Each execution must include an explicit `jurisdictions=` argument.
+The preflight does not assume that every account can access all five. Each execution must include an explicit `jurisdictions=` argument.
 
 The value is an **exact lowercase** comma-separated subset in canonical order:
 
@@ -107,7 +112,7 @@ The workflow hashes each observed bucket name internally and requires the suppli
 
 The raw candidate bucket name is not written to Issue #26, workflow input, logs, outputs, or summary by this contract.
 
-This is existence evidence only. It does not mean the candidate is approved for Member data.
+This is existence evidence only. It does not authorize runtime consumption or route activation.
 
 ## Drift protection
 
@@ -116,7 +121,7 @@ The workflow fails closed if:
 - main no longer equals the authorized SHA;
 - the active 100%-traffic Worker version changes during the observation;
 - the dedicated R2 read secret is absent;
-- the dedicated R2 secret contains whitespace or is not accepted as an active Cloudflare REST bearer token;
+- the dedicated R2 secret contains whitespace or control characters or is not accepted as an active Cloudflare REST bearer token;
 - `jurisdictions` is missing or contains whitespace;
 - jurisdiction casing is not exact lowercase canonical form;
 - the jurisdiction string contains a leading/trailing comma or an empty entry;
@@ -128,7 +133,10 @@ The workflow fails closed if:
 - verify mode does not find the candidate digest;
 - the candidate digest is ambiguous across observed jurisdictions;
 - canonical Member route flags are unexpectedly enabled;
-- a canonical R2 binding is already declared without review.
+- the R2 binding count is not exactly one;
+- the binding name or bucket name differs from the canonical source declaration;
+- unexpected binding configuration or any env-scoped R2 binding is present;
+- the Production runtime adapters are no longer literal `null`.
 
 The active Worker version and main SHA postflight check runs with `always()` after a successful pre-inventory snapshot, so an R2 token verification or inventory failure cannot suppress the drift evidence.
 
@@ -147,6 +155,7 @@ The preflight performs:
 - private-media route activation = 0;
 - LINE Login activation = 0;
 - Production deploy = 0;
+- Worker activation = 0;
 - Production traffic change = 0;
 - Production D1 write = 0;
 - CRM write = 0;
@@ -164,8 +173,8 @@ This evidence is why jurisdiction selection is now explicit rather than automati
 
 ## Next gate
 
-A successful token verification, inventory, or candidate verification is not authorization to edit `wrangler.jsonc` or activate Member routes.
+A successful token verification, inventory, or candidate verification is not authorization to wire `env.MEMBER_PRIVATE_MEDIA_BUCKET` into Production runtime, enable storage fetch, activate Member/private-media routes, activate LINE Login Production, deploy Production, activate a Worker version, or change Production traffic.
 
 Any future R2 inventory run must use a fresh Owner authorization that names the exact current main SHA and exact jurisdiction subset.
 
-Any future R2 binding change must use a separately reviewed exact bucket and binding name, remain default-off first, and receive fresh Owner exact-SHA/scope authorization before any Production deployment or route activation.
+Any additional or different R2 binding source change, runtime storage consumption, route activation, Production deployment, Worker activation, or Production traffic change requires separate fresh Owner exact-SHA/scope authorization.

@@ -14,8 +14,7 @@ const VERIFIED_MAIN='660620477f1d2ef9f9d1a49183c58957cf13e7eb';
 const READ_ONLY_RUN='37560368471';
 
 const doc=fs.readFileSync(DOC,'utf8');
-const wranglerText=fs.readFileSync(WRANGLER,'utf8');
-const cfg=JSON.parse(wranglerText);
+const cfg=JSON.parse(fs.readFileSync(WRANGLER,'utf8'));
 const entry=fs.readFileSync(ENTRY,'utf8');
 const adapter=fs.readFileSync(ADAPTER,'utf8');
 
@@ -32,15 +31,17 @@ assert.ok(doc.includes('Public Member assets remain unbound.'));
 assert.ok(doc.includes('Binding declaration and runtime consumption remain separate gates.'));
 assert.ok(doc.includes('does **not** authorize'));
 
+assert.deepEqual(
+  cfg.r2_buckets,
+  [{binding:BINDING,bucket_name:BUCKET}],
+  'default Wrangler scope must declare exactly one canonical private-media R2 binding'
+);
+
 const scopes=[
   ['default',cfg],
   ...Object.entries(cfg?.env||{}).map(([name,value])=>[`env.${name}`,value])
 ];
 for(const [scopeName,scope] of scopes){
-  assert.ok(
-    !Array.isArray(scope?.r2_buckets)||scope.r2_buckets.length===0,
-    `${scopeName} must remain without an R2 binding while this is proposal-only`
-  );
   assert.notEqual(
     String(scope?.vars?.MEMBER_PRODUCTION_ROUTE_MODE||'').trim().toLowerCase(),
     'enabled',
@@ -52,14 +53,18 @@ for(const [scopeName,scope] of scopes){
     `${scopeName} private-media route must remain disabled`
   );
 }
+for(const [scopeName,scope] of Object.entries(cfg?.env||{})){
+  assert.ok(
+    !Array.isArray(scope?.r2_buckets)||scope.r2_buckets.length===0,
+    `env.${scopeName} must not add another R2 binding`
+  );
+}
 
-assert.ok(!wranglerText.includes(BUCKET),'proposal PR must not configure the canonical bucket yet');
-assert.ok(!wranglerText.includes(BINDING),'proposal PR must not configure the canonical binding yet');
 assert.ok(entry.includes('const MEMBER_PRODUCTION_OWNER_APPROVED=false;'));
 assert.match(
   entry,
   /public_asset_adapter:null,\s*private_media_storage_adapter:null/,
-  'Production entry must keep both storage adapters null during proposal-only stage'
+  'Production entry must keep both storage adapters null while binding consumption remains separately gated'
 );
 assert.ok(!entry.includes(BUCKET));
 assert.ok(!entry.includes(BINDING));
@@ -72,12 +77,12 @@ assert.ok(adapter.includes('storage_delete:false'));
 assert.doesNotMatch(adapter,/\.put\s*\(/);
 assert.doesNotMatch(adapter,/\.delete\s*\(/);
 
-console.log('MEMBER_R2_BINDING_PROPOSAL_CONTRACT=PASS');
+console.log('MEMBER_R2_BINDING_SOURCE_CONTRACT=PASS');
 console.log(`CANONICAL_BUCKET_SHA256=${BUCKET_SHA256}`);
-console.log(`PROPOSED_BINDING=${BINDING}`);
+console.log(`CANONICAL_BINDING=${BINDING}`);
 console.log(`READ_ONLY_VERIFICATION_RUN=${READ_ONLY_RUN}`);
-console.log('CANONICAL_R2_BINDING_CONFIGURED=NO');
-console.log('PRODUCTION_STORAGE_BINDING_CHANGE=0');
+console.log('CANONICAL_R2_BINDING_CONFIGURED=SOURCE_ONLY');
+console.log('PRODUCTION_RUNTIME_BINDING_CONSUMPTION=0');
 console.log('PRODUCTION_STORAGE_FETCH=0');
 console.log('R2_OBJECT_READ=0');
 console.log('R2_WRITE=0');

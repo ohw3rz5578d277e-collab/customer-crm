@@ -10,7 +10,16 @@ assert.ok(workflow.includes("jurisdictions:\n        description: Explicit canon
 assert.ok(workflow.includes("candidate_bucket_sha256:"));
 assert.doesNotMatch(workflow,/candidate_bucket_name:\s*\n/);
 assert.ok(workflow.includes("CURRENT_MAIN_EXACT_GATE=PASS"));
-assert.ok(workflow.includes("CANONICAL_R2_BINDING_DECLARED=NO"));
+assert.ok(workflow.includes("CANONICAL_R2_BINDING_DECLARED=PASS"));
+assert.ok(workflow.includes("CANONICAL_R2_BINDING_EXACT=PASS"));
+assert.ok(workflow.includes("CANONICAL_R2_BINDING_COUNT_INVALID"));
+assert.ok(workflow.includes("CANONICAL_R2_BINDING_NAME_MISMATCH"));
+assert.ok(workflow.includes("CANONICAL_R2_BUCKET_NAME_MISMATCH"));
+assert.ok(workflow.includes("CANONICAL_R2_BINDING_UNEXPECTED_CONFIGURATION"));
+assert.ok(workflow.includes("NONCANONICAL_ENV_R2_BINDING_DECLARED"));
+assert.ok(workflow.includes("MEMBER_PRIVATE_MEDIA_BUCKET"));
+assert.ok(workflow.includes("customer-crm-member-private-media"));
+assert.doesNotMatch(workflow,/CANONICAL_R2_BINDING_ALREADY_DECLARED/);
 assert.ok(workflow.includes("public_asset_adapter:null"));
 assert.ok(workflow.includes("private_media_storage_adapter:null"));
 assert.ok(workflow.includes("MEMBER_PRODUCTION_ROUTE_MODE_ENABLED"));

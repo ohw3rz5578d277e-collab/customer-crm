@@ -1,14 +1,16 @@
 # MIZUNO PHOTO MEMBER — R2 Bucket Digest Index
 
-Baseline: 2026-10-06 JST
+Baseline: 2026-10-07 JST
 
 ## Purpose
 
 This is a read-only diagnostic gate for reconciling a locally derived candidate bucket-name SHA-256 with the actual R2 bucket inventory without exposing raw bucket names to GitHub.
 
-It exists because a local UI selection can contain breadcrumbs or unrelated text even when exactly one syntactically valid token is extracted. A failed candidate verify therefore does not prove that the intended bucket is absent; it can mean that the local token was not the bucket name.
+The canonical source binding is now declared as exactly:
 
-This gate does not select a bucket, approve a bucket for Member data, configure a binding, fetch an object, activate a route, or deploy Production.
+`MEMBER_PRIVATE_MEDIA_BUCKET -> customer-crm-member-private-media`
+
+This gate does not select a bucket automatically, approve runtime consumption, change a binding, fetch an object, activate a route, or deploy Production.
 
 ## Evidence model
 
@@ -51,11 +53,15 @@ The workflow:
 
 1. checks out the exact approved current main SHA;
 2. requires current main to equal that SHA;
-3. requires Member storage wiring to remain default-off and no canonical R2 binding to exist;
-4. uses the existing Worker-management credential only for read-only Worker authentication and active deployment snapshots;
-5. verifies `CLOUDFLARE_R2_READ_API_TOKEN` with read-only `GET /user/tokens/verify`;
-6. performs R2 account-level bucket metadata List GET only for the exact Owner-authorized jurisdictions;
-7. fails closed on pagination, HTTP/API failure, malformed inventory, main drift, or active Production Worker version drift.
+3. requires Member runtime storage consumption to remain default-off;
+4. requires exactly one canonical source binding, `MEMBER_PRIVATE_MEDIA_BUCKET -> customer-crm-member-private-media`;
+5. rejects additional, wrong, unexpected, or env-scoped R2 bindings;
+6. requires `public_asset_adapter` and `private_media_storage_adapter` to remain literal `null` and Member/private-media routes to remain disabled;
+7. uses the existing Worker-management credential only for read-only Worker authentication and active deployment snapshots;
+8. verifies `CLOUDFLARE_R2_READ_API_TOKEN` with read-only `GET /user/tokens/verify` without relying on token-prefix classification;
+9. rejects an empty token and tokens containing whitespace or control characters before verification;
+10. performs R2 account-level bucket metadata List GET only for the exact Owner-authorized jurisdictions;
+11. fails closed on pagination, HTTP/API failure, malformed inventory, main drift, or active Production Worker version drift.
 
 ## Privacy and mutation boundary
 
@@ -71,13 +77,14 @@ This gate authorizes or performs none of the following by itself:
 - private-media route activation;
 - LINE Login Production activation;
 - Production deploy;
+- Worker activation;
 - Production traffic change;
-- Production D1 write;
+- Production D1 read/write;
 - migration apply;
 - CRM write;
 - LINE send;
-- Customer ID generation;
-- secret/token change;
+- Customer ID generation, update, delete, or merge;
+- secret/token creation, change, deletion, or revoke;
 - security policy change;
 - commerce activation;
 - paid spend.
@@ -92,4 +99,4 @@ Any digest-index execution requires its own fresh Owner authorization naming the
 
 Any subsequent candidate verify requires another fresh Owner authorization.
 
-Any source merge, Production R2 binding change, Production storage fetch, route activation, or deploy remains outside this gate and requires separate fresh Owner authorization at the appropriate exact SHA and scope.
+The existing source-only binding declaration does not authorize runtime use. Any additional or different source binding modification, Production storage fetch, runtime adapter wiring, Member/private-media route activation, LINE Login Production activation, Production deploy, Worker activation, or traffic change remains outside this gate and requires separate fresh Owner authorization at the appropriate exact SHA and scope.
