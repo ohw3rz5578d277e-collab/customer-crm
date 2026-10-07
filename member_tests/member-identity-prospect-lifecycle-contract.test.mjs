@@ -20,7 +20,9 @@ for (const phrase of [
   'expires',
   'must not expose the Customer ID',
   'seven-day cache',
-  'absolute maximum retention target of 30 days',
+  'hard absolute maximum retention of 30 days',
+  'cached PII must be deleted or made cryptographically inaccessible',
+  'must not silently extend PII retention beyond 30 days',
   'do not overwrite Customer Master',
   'separate review queue',
   'human administrator',
@@ -29,14 +31,14 @@ for (const phrase of [
   'does **not** authorize'
 ]) assert.ok(doc.includes(phrase), `missing contract phrase: ${phrase}`);
 
-for (const prohibitedIdentitySource of [
-  'name',
-  'address',
-  'phone',
-  'email',
-  'LINE display name',
-  'fuzzy matching'
-]) assert.ok(doc.includes(prohibitedIdentitySource), `identity prohibition missing: ${prohibitedIdentitySource}`);
+assert.ok(
+  doc.includes('A Member Identity must not be inferred from name, address, phone number, email address, LINE display name, or fuzzy matching.'),
+  'complete Member Identity no-inference rule must remain locked'
+);
+assert.ok(
+  doc.includes('No name/phone/email/fuzzy match may silently merge a prospect into a customer.'),
+  'Prospect promotion no-fuzzy-merge rule must remain locked'
+);
 
 assert.ok(identity.includes("customer_identity_source:'canonical_customer_id_only'"));
 assert.ok(identity.includes('name_match:false'));
