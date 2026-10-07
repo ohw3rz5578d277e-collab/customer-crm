@@ -1,8 +1,11 @@
 import fs from 'node:fs';
 import { classifyLineHistoryUnresolved } from '../src/crm-line-history-unresolved-classifier.mjs';
 
+const CANONICAL_PRODUCTION_IDENTITY_SNAPSHOT='customer-crm-production-identity-snapshot-v1';
+
 function arg(name){const i=process.argv.indexOf(name);return i>=0?String(process.argv[i+1]||''):''}
-function readJson(path,required=true){
+function exactSha(v){return /^[0-9a-f]{40}$/.test(String(v||'').trim().toLowerCase())}
+function readJson(path,required=true,{allowCanonicalCustomers=false}={}){
   if(!path){
     if(required)throw new Error('missing input path');
     return [];
@@ -11,6 +14,15 @@ function readJson(path,required=true){
   if(Array.isArray(raw)){
     if(raw.length===1&&raw[0]&&Array.isArray(raw[0].results))return raw[0].results;
     return raw;
+  }
+  if(allowCanonicalCustomers&&raw&&typeof raw==='object'&&!Array.isArray(raw)&&raw.snapshot_format===CANONICAL_PRODUCTION_IDENTITY_SNAPSHOT){
+    if(raw.complete!==true)throw new Error('canonical production identity snapshot is incomplete: '+path);
+    if(raw.query_scope!=='all_customer_identities')throw new Error('canonical production identity snapshot query scope invalid: '+path);
+    if(!exactSha(raw.source_main_sha))throw new Error('canonical production identity snapshot source sha invalid: '+path);
+    if(!Array.isArray(raw.customers))throw new Error('canonical production identity snapshot customers required: '+path);
+    if(!Number.isInteger(raw.customer_count)||raw.customer_count!==raw.customers.length)throw new Error('canonical production identity snapshot customer count mismatch: '+path);
+    if(raw.customers.length<1)throw new Error('canonical production identity snapshot customers empty: '+path);
+    return raw.customers;
   }
   if(raw&&Array.isArray(raw.results))return raw.results;
   if(raw&&raw.result&&Array.isArray(raw.result.results))return raw.result.results;
@@ -31,7 +43,7 @@ if(!candidatesPath||!customersPath){
 
 const result=classifyLineHistoryUnresolved({
   candidates:readJson(candidatesPath),
-  customers:readJson(customersPath),
+  customers:readJson(customersPath,true,{allowCanonicalCustomers:true}),
   customerMaster:readJson(masterPath,false),
   reviews:readJson(reviewsPath,false),
   reservationIdentities:readJson(reservationPath,false),
