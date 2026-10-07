@@ -84,7 +84,7 @@ const customer=buildMemberFamilyPassIntegrationReadModel({
  member_identity_id:prospect.member_identity_id,canonical_customer_id:'12345678',
  family_id:'FAM-1',family_link_verified:true,
  member_customer_binding_verified:true,persisted_member_customer_id:'12345678',member_status:'active',
- published_non_deleted_memory_count:10
+ published_non_deleted_memory_count:10,entitlement_schema_applied:true
 });
 assert.equal(customer.family_pass.current_tier,'BLACK');
 assert.equal(customer.black_contract.threshold,10);
