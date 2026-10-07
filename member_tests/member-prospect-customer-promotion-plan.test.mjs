@@ -21,6 +21,7 @@ const {existing_customer_member_binding_count,...missingCount}=base;
 assert.equal(planProspectCustomerPromotion(missingCount).status,'missing_persisted_evidence');
 const {prospect_status,...missingStatus}=base;
 assert.equal(planProspectCustomerPromotion(missingStatus).status,'missing_persisted_evidence');
+for(const missing of [null,'','   ',false]) assert.equal(planProspectCustomerPromotion({...base,existing_customer_member_binding_count:missing}).status,'missing_persisted_evidence');
 assert.equal(planProspectCustomerPromotion({...base,member_identity_id:'x',persisted_member_identity_id:'x'}).status,'invalid_identity');
 console.log('PROSPECT_CUSTOMER_PROMOTION_PLAN=PASS');
 console.log('CUSTOMER_ID_SOURCE=CRM_ONLY');
