@@ -18,11 +18,16 @@ function readJson(path,required=true,{allowCanonicalCustomers=false,expectedSour
   }
   const bytes=fs.readFileSync(path);
   const raw=JSON.parse(bytes.toString('utf8'));
+  const bindingRequested=allowCanonicalCustomers&&(expectedSourceSha!==''||expectedSnapshotSha256!=='');
+  const isCanonicalCustomers=allowCanonicalCustomers&&raw&&typeof raw==='object'&&!Array.isArray(raw)&&raw.snapshot_format===CANONICAL_PRODUCTION_IDENTITY_SNAPSHOT;
+  if(bindingRequested&&!isCanonicalCustomers){
+    throw new Error('canonical production identity snapshot required when binding is supplied: '+path);
+  }
   if(Array.isArray(raw)){
     if(raw.length===1&&raw[0]&&Array.isArray(raw[0].results))return raw[0].results;
     return raw;
   }
-  if(allowCanonicalCustomers&&raw&&typeof raw==='object'&&!Array.isArray(raw)&&raw.snapshot_format===CANONICAL_PRODUCTION_IDENTITY_SNAPSHOT){
+  if(isCanonicalCustomers){
     const expectedSource=expectedSourceSha;
     const expectedDigest=expectedSnapshotSha256;
     if(!exactSha(expectedSource))throw new Error('canonical production identity snapshot expected source sha required: '+path);
