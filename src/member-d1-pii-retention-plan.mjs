@@ -38,7 +38,7 @@ export function planPiiRetention({
  }
  if(!google_synced) return {status:STATES.PENDING_SYNC,age_days:ageDays,pii_access_allowed:true,purge_required:false,write_allowed:false};
  if(!identity_verified||!version_verified) return {status:STATES.SYNCED,age_days:ageDays,pii_access_allowed:true,purge_required:false,write_allowed:false};
- return {status:STATES.VERIFIED,age_days:ageDays,pii_access_allowed:true,purge_required:false,write_allowed:false};
+ return {status:STATES.PURGE_ELIGIBLE,verified_state:STATES.VERIFIED,age_days:ageDays,pii_access_allowed:true,purge_required:true,write_allowed:false};
 }
 
 export const __test={STATES,dayMs};
