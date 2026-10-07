@@ -52,6 +52,12 @@ try{
     });
   }
 
+  function writeEnvelope(name,patch){
+    const p=path.join(tmp,`${name}.json`);
+    fs.writeFileSync(p,JSON.stringify({...envelope,...patch},null,2));
+    return p;
+  }
+
   const canonical=run(canonicalPath,outCanonical);
   assert.equal(canonical.status,0,canonical.stderr||canonical.stdout);
   assert.match(canonical.stdout,/RESULT=LINE_HISTORY_UNRESOLVED_TRIAGE_READY/);
@@ -98,10 +104,13 @@ try{
     ['source-padded',{source_main_sha:` ${SOURCE_SHA}`},'source sha invalid'],
     ['source-uppercase',{source_main_sha:SOURCE_SHA.toUpperCase()},'source sha invalid'],
     ['count',{customer_count:2},'customer count mismatch'],
-    ['empty',{customer_count:0,customers:[]},'customers empty']
+    ['empty',{customer_count:0,customers:[]},'customers empty'],
+    ['row-nonobject',{customers:[null]},'customer row invalid'],
+    ['row-missing-field',{customers:[{customer_id:customerId,line_user_id:line,name:'Synthetic Customer'}]},'customer identity fields required'],
+    ['row-blank-id',{customers:[{...customer,customer_id:'   '}]},'customer id required'],
+    ['row-duplicate-id',{customer_count:2,customers:[customer,{...customer,name:'Duplicate Synthetic Customer'}]},'duplicate customer id']
   ]){
-    const p=path.join(tmp,`${name}.json`);
-    fs.writeFileSync(p,JSON.stringify({...envelope,...patch},null,2));
+    const p=writeEnvelope(name,patch);
     const r=run(p,path.join(tmp,`${name}-out.json`),{sourceSha:SOURCE_SHA,snapshotSha:digest(p)});
     assert.notEqual(r.status,0,`${name} should fail closed`);
     assert.match(String(r.stderr||r.stdout),new RegExp(expected.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')));
@@ -111,6 +120,7 @@ try{
   console.log('CANONICAL_SNAPSHOT_EXACT_SOURCE_BINDING=PASS');
   console.log('CANONICAL_SNAPSHOT_SHA256_BINDING=PASS');
   console.log('CANONICAL_HASH_CANONICAL_FORM_ONLY=PASS');
+  console.log('CANONICAL_CUSTOMER_ROW_VALIDATION=PASS');
   console.log('CANONICAL_SNAPSHOT_FAIL_CLOSED=PASS');
   console.log('DIRECT_ARRAY_COMPATIBILITY=PASS');
   console.log('PRODUCTION_D1_READ=0');
