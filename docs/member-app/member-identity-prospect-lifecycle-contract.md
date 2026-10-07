@@ -83,8 +83,10 @@ Administrators must edit customer information through Customer CRM rather than d
 - Google refresh should be prefetched/backgrounded when possible.
 - A confirmed profile edit invalidates or refreshes the cache immediately; it does not wait seven days.
 - Seven-day cache refresh must not extend the absolute D1 PII retention window indefinitely.
-- D1 PII has an absolute maximum retention target of 30 days.
-- PII purge is fail-closed: no purge unless durable Google synchronization, identity correspondence, and latest-version equality are verified.
+- D1 PII has a hard absolute maximum retention of 30 days.
+- Before day 30, normal purge is fail-closed: purge only after durable Google synchronization, identity correspondence, and latest-version equality are verified.
+- At the 30-day deadline, cached PII must be deleted or made cryptographically inaccessible even when Google synchronization or verification is still unavailable. The system may retain only non-PII retry/audit state needed to reconcile the failed sync later.
+- A failed or unverified sync at the deadline must enter an explicit recovery/review state; it must not silently extend PII retention beyond 30 days.
 - Runtime identity/state needed for Customer ID, Family, Member, FAMILY PASS, MEMORIES, sync status, and audit control is not automatically deleted with PII.
 
 ## Profile-write identity gate and review queue
