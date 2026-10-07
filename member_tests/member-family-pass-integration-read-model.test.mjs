@@ -21,6 +21,7 @@ assert.equal(r.status,'ready');
 assert.equal(r.family_pass.black_lifetime_persistence_supported,false);
 for(const malformed of [['10'],{value:10},10n]) assert.equal(buildMemberFamilyPassIntegrationReadModel({member_identity_id:mid,canonical_customer_id:'12345678',family_id:'FAM-1',family_link_verified:true,member_customer_binding_verified:true,persisted_member_customer_id:'12345678',member_status:'active',published_non_deleted_memory_count:malformed,entitlement_schema_applied:true}).status,'invalid_memory_count');
 assert.equal(buildMemberFamilyPassIntegrationReadModel({member_identity_id:mid,canonical_customer_id:'12345678',family_id:'FAM-1',family_link_verified:true,member_customer_binding_verified:true,persisted_member_customer_id:'12345678',member_status:'active',published_non_deleted_memory_count:0,durable_black_entitlement:true,entitlement_schema_applied:false}).status,'durable_black_schema_conflict');
+assert.equal(buildMemberFamilyPassIntegrationReadModel({member_identity_id:mid,canonical_customer_id:'12345678',family_id:'FAM-1',family_link_verified:true,member_customer_binding_verified:true,persisted_member_customer_id:'12345678',member_status:'active',published_non_deleted_memory_count:'9'.repeat(400),entitlement_schema_applied:true}).status,'invalid_memory_count');
 r=buildProspectMemberIntegrationReadModel({member_identity_id:mid,prospect_id:pid,consent_current:true,signup_benefit_state:'available',acquisition_source:'instagram'});
 assert.equal(r.status,'ready');
 assert.equal(r.canonical_customer_id,null);
