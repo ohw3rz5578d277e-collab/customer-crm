@@ -9,6 +9,9 @@ export function buildMemberFamilyPassIntegrationReadModel({
  canonical_customer_id,
  family_id,
  family_link_verified=false,
+ member_customer_binding_verified=false,
+ persisted_member_customer_id='',
+ member_status,
  published_non_deleted_memory_count,
  durable_black_entitlement=false,
  black_achieved_at='',
@@ -19,7 +22,10 @@ export function buildMemberFamilyPassIntegrationReadModel({
 }={}){
  const member=text(member_identity_id),customer=text(canonical_customer_id),family=text(family_id);
  if(!MID.test(member)||!CID.test(customer)||!family) return {status:'invalid_identity',read_ready:false};
+ if(member_customer_binding_verified!==true||text(persisted_member_customer_id)!==customer) return {status:'member_customer_binding_not_verified',read_ready:false};
+ if(!['active','customer'].includes(text(member_status))) return {status:'member_status_not_eligible',read_ready:false};
  if(family_link_verified!==true) return {status:'family_link_not_verified',read_ready:false};
+ if(published_non_deleted_memory_count===undefined||published_non_deleted_memory_count===null||typeof published_non_deleted_memory_count==='boolean'||String(published_non_deleted_memory_count).trim()==='') return {status:'missing_memory_count_evidence',read_ready:false};
  const count=Number(published_non_deleted_memory_count);
  if(!Number.isInteger(count)||count<0) return {status:'invalid_memory_count',read_ready:false};
  const pending=Number(review_pending_count);
