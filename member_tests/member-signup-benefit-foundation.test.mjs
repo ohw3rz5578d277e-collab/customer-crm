@@ -11,6 +11,8 @@ assert.equal(p.issue_allowed,false);
 assert.equal(planSignupBenefitIssue({member_identity_id:member,prospect_id:prospect,registration_completed:true,consent_current:true}).status,'missing_existing_benefit_evidence');
 for(const missing of [null,'','   ',false]) assert.equal(planSignupBenefitIssue({member_identity_id:member,prospect_id:prospect,registration_completed:true,consent_current:true,existing_signup_benefit_count:missing}).status,'missing_existing_benefit_evidence');
 assert.equal(planSignupBenefitIssue({member_identity_id:member,prospect_id:prospect,registration_completed:true,consent_current:true,existing_signup_benefit_count:1}).status,'already_issued');
+for(const malformed of [['0'],{value:0},0n]) assert.equal(planSignupBenefitIssue({member_identity_id:member,prospect_id:prospect,registration_completed:true,consent_current:true,existing_signup_benefit_count:malformed}).status,'invalid_existing_benefit_count');
+assert.equal(planSignupBenefitIssue({member_identity_id:member,prospect_id:prospect,registration_completed:true,consent_current:true,existing_signup_benefit_count:'0'}).status,'ready');
 
 p=planSignupBenefitTransition({current_state:'reserved',target_state:'used',entitlement_member_identity_id:member,authenticated_member_identity_id:member,canonical_customer_id:'12345678',reservation_id:'R-1',prior_redemption_count:0});
 assert.equal(p.status,'ready');
@@ -20,6 +22,7 @@ assert.equal(p.automatic_discount,false);
 assert.equal(planSignupBenefitTransition({current_state:'reserved',target_state:'used',entitlement_member_identity_id:member,authenticated_member_identity_id:member,canonical_customer_id:'12345678',reservation_id:'R-1',prior_redemption_count:1}).status,'already_redeemed');
 assert.equal(planSignupBenefitTransition({current_state:'used',target_state:'available',entitlement_member_identity_id:member,authenticated_member_identity_id:member,prior_redemption_count:1}).status,'invalid_transition');
 for(const missing of [null,'','   ',false]) assert.equal(planSignupBenefitTransition({current_state:'reserved',target_state:'used',entitlement_member_identity_id:member,authenticated_member_identity_id:member,canonical_customer_id:'12345678',reservation_id:'R-1',prior_redemption_count:missing}).status,'missing_redemption_evidence');
+for(const malformed of [['0'],{value:0},0n]) assert.equal(planSignupBenefitTransition({current_state:'reserved',target_state:'used',entitlement_member_identity_id:member,authenticated_member_identity_id:member,canonical_customer_id:'12345678',reservation_id:'R-1',prior_redemption_count:malformed}).status,'invalid_redemption_count');
 assert.equal(planSignupBenefitTransition({current_state:'issued',target_state:'available',entitlement_member_identity_id:member}).status,'ready');
 assert.equal(planSignupBenefitTransition({current_state:'reserved',target_state:'available',entitlement_member_identity_id:member}).status,'ready');
 
