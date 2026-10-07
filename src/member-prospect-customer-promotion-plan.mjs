@@ -2,6 +2,11 @@ const text=v=>v==null?'':String(v).trim();
 const CUSTOMER_RE=/^\d{8}$/;
 const PROSPECT_RE=/^PID_[A-Za-z0-9_-]{22,}$/;
 const MEMBER_RE=/^MID_[A-Za-z0-9_-]{22,}$/;
+const scalarNonNegativeInteger=v=>{
+ if(typeof v==='number') return Number.isInteger(v)&&v>=0?v:null;
+ if(typeof v==='string'&&/^(?:0|[1-9]\d*)$/.test(v.trim())) return Number(v.trim());
+ return null;
+};
 
 export function planProspectCustomerPromotion({
  prospect_id,
@@ -22,8 +27,9 @@ export function planProspectCustomerPromotion({
  if(text(persisted_prospect_id)!==prospect||text(persisted_member_identity_id)!==member) return {status:'binding_mismatch',review_required:true,promotion_allowed:false};
  if(prospect_status===undefined||prospect_status===null||text(prospect_status)===''||existing_customer_member_binding_count===undefined||existing_customer_member_binding_count===null||typeof existing_customer_member_binding_count==='boolean'||String(existing_customer_member_binding_count).trim()==='') return {status:'missing_persisted_evidence',promotion_allowed:false};
  if(text(prospect_status)!=='prospect') return {status:'invalid_prospect_state',promotion_allowed:false};
- if(!Number.isInteger(Number(existing_customer_member_binding_count))||Number(existing_customer_member_binding_count)<0) return {status:'invalid_binding_count',promotion_allowed:false};
- if(Number(existing_customer_member_binding_count)!==0) return {status:'customer_binding_collision',review_required:true,promotion_allowed:false};
+ const bindingCount=scalarNonNegativeInteger(existing_customer_member_binding_count);
+ if(bindingCount===null) return {status:'invalid_binding_count',promotion_allowed:false};
+ if(bindingCount!==0) return {status:'customer_binding_collision',review_required:true,promotion_allowed:false};
  if(consent_history_preserved!==true||acquisition_history_preserved!==true||benefit_state_preserved!==true){
    return {status:'continuity_not_verified',review_required:true,promotion_allowed:false};
  }
