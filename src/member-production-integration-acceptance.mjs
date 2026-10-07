@@ -4,13 +4,16 @@ import { memberBrowserPageHealth } from './member-browser-page.mjs';
 import { memberPublicAssetDeliveryHealth } from './member-public-asset-delivery.mjs';
 import { memberAppHttpCompositionHealth } from './member-app-http-composition.mjs';
 
-const BUILD='member-production-integration-acceptance-20260925-01';
+const BUILD='member-production-integration-acceptance-20261007-02';
 const OWNER_FLAG='MEMBER_PRODUCTION_OWNER_APPROVED';
 const ROUTE_MODE_ENV='MEMBER_PRODUCTION_ROUTE_MODE';
 const CALLBACK_PATH='/api/member/login/line/callback';
+const PRIVATE_MEDIA_BINDING='MEMBER_PRIVATE_MEDIA_BUCKET';
 
 const IMPORT_ANCHOR="import app from './production-index-crm-browser-root-entry.js';";
 const IMPORT_LINE="import { handleMemberProductionRequest, memberProductionRouteModeEnabled } from './member-production-request-composition.mjs';";
+const STORAGE_IMPORT_LINE="import { createMemberPrivateMediaStorageAdapter } from './member-production-storage-adapter.mjs';";
+const PRIVATE_MEDIA_WIRING='private_media_storage_adapter:createMemberPrivateMediaStorageAdapter(env?.MEMBER_PRIVATE_MEDIA_BUCKET)';
 const SENSITIVE_OLD="return pathname==='/admin'||pathname.startsWith('/admin/')||pathname.startsWith('/api/')||pathname.startsWith('/__crm/');";
 const SENSITIVE_NEW="return pathname==='/admin'||pathname.startsWith('/admin/')||pathname==='/member'||pathname.startsWith('/member/')||pathname.startsWith('/api/')||pathname.startsWith('/__crm/');";
 const BOUNDARY_SIGNATURE_OLD='export function enforceProductionRequestBoundary(request){';
@@ -39,7 +42,7 @@ export function buildMemberProductionDefaultOffWiringCandidate(productionEntrySo
   let source=String(productionEntrySource||'');
   const failures=[];
 
-  let step=replaceExactlyOnce(source,IMPORT_ANCHOR,IMPORT_ANCHOR+'\n'+IMPORT_LINE);
+  let step=replaceExactlyOnce(source,IMPORT_ANCHOR,IMPORT_ANCHOR+'\n'+IMPORT_LINE+'\n'+STORAGE_IMPORT_LINE);
   if(!step.ok)failures.push('IMPORT_ANCHOR_MISMATCH');
   else source=step.source;
 
@@ -101,7 +104,7 @@ export function buildMemberProductionDefaultOffWiringCandidate(productionEntrySo
     '      approved:'+OWNER_FLAG+',',
     '      line_login_approved:false,',
     '      public_asset_adapter:null,',
-    '      private_media_storage_adapter:null',
+    '      '+PRIVATE_MEDIA_WIRING,
     '    });',
     '    if(memberResponse)return hardenProductionResponse(memberResponse,request);',
     '    '+CRM_DISPATCH
@@ -122,7 +125,9 @@ export function buildMemberProductionDefaultOffWiringCandidate(productionEntrySo
     route_mode_env:ROUTE_MODE_ENV,
     line_login_approved:false,
     public_asset_adapter:null,
-    private_media_storage_adapter:null,
+    private_media_storage_adapter:'canonical_read_only_binding',
+    private_media_binding:PRIVATE_MEDIA_BINDING,
+    production_storage_fetch:false,
     production_write:false
   };
 }
@@ -135,6 +140,7 @@ export function inspectMemberProductionCandidate(candidateSource){
 
   return {
     import_present:count(source,IMPORT_LINE)===1,
+    private_media_adapter_import_present:count(source,STORAGE_IMPORT_LINE)===1,
     owner_flag_default_false:source.includes('const '+OWNER_FLAG+'=false;'),
     route_mode_checked:source.includes('memberProductionRouteModeEnabled(env)'),
     member_path_sensitive:source.includes("pathname==='/member'||pathname.startsWith('/member/')"),
@@ -146,7 +152,8 @@ export function inspectMemberProductionCandidate(candidateSource){
     owner_flag_passed_to_handler:source.includes('approved:'+OWNER_FLAG),
     line_login_default_false:source.includes('line_login_approved:false'),
     public_asset_adapter_default_null:source.includes('public_asset_adapter:null'),
-    private_media_adapter_default_null:source.includes('private_media_storage_adapter:null'),
+    private_media_adapter_runtime_wired:source.includes(PRIVATE_MEDIA_WIRING),
+    private_media_adapter_uses_canonical_binding:source.includes('env?.'+PRIVATE_MEDIA_BINDING),
     existing_crm_dispatch_preserved:count(source,CRM_DISPATCH)===1
   };
 }
@@ -207,25 +214,25 @@ export function buildMemberProductionIntegrationAcceptance({
 
   const acceptanceSequence=currentDefaultOffApplied
     ?[
-      'canonical_default_off_entry_source_already_applied',
+      'canonical_default_off_entry_source_with_private_media_adapter_wiring_applied',
       'verify_existing_crm_regressions_and_member_routes_still_inactive',
-      'configure_and_verify_member_runtime_dependencies_without_route_activation',
+      'verify_member_runtime_dependencies_without_route_activation_or_storage_fetch',
       'fresh_owner_authorize_route_activation_exact_sha_and_scope',
       'activate_member_route_mode_and_owner_flag_in_exact_release',
       'run_read_only_member_canary',
-      'activate_optional_private_media_only_under_separate_binding_gate',
+      'activate_private_media_content_route_only_under_separate_gate',
       'keep_favorites_memory_black_and_commerce_write_gates_separate'
     ]
     :[
       'merge_source_only_acceptance',
       'fresh_owner_authorize_production_entry_modification_exact_sha',
-      'apply_default_off_production_entry_candidate',
+      'apply_default_off_production_entry_candidate_with_private_media_adapter_wiring',
       'verify_existing_crm_regressions_and_member_routes_still_inactive',
-      'configure_and_verify_member_runtime_dependencies_without_route_activation',
+      'verify_member_runtime_dependencies_without_route_activation_or_storage_fetch',
       'fresh_owner_authorize_route_activation_exact_sha_and_scope',
       'activate_member_route_mode_and_owner_flag_in_exact_release',
       'run_read_only_member_canary',
-      'activate_optional_private_media_only_under_separate_binding_gate',
+      'activate_private_media_content_route_only_under_separate_gate',
       'keep_favorites_memory_black_and_commerce_write_gates_separate'
     ];
 
@@ -236,16 +243,19 @@ export function buildMemberProductionIntegrationAcceptance({
     static_acceptance_only:true,
     source_ready:sourceReady,
     canonical_source_entry_default_off_applied:currentDefaultOffApplied,
+    canonical_private_media_runtime_wiring_applied:currentInspection.private_media_adapter_runtime_wired===true,
     default_off_candidate_ready:defaultOffReady,
     production_activation_ready:false,
     candidate:{
-      status:currentDefaultOffApplied?'already_applied_default_off':generatedCandidate?.status||'not_ready',
+      status:currentDefaultOffApplied?'already_applied_default_off_with_private_media_runtime_wiring':generatedCandidate?.status||'not_ready',
       failures:currentDefaultOffApplied?[]:[...(generatedCandidate?.failures||[])],
       owner_flag_default:false,
       route_mode_env:ROUTE_MODE_ENV,
       line_login_approved:false,
       public_asset_adapter:null,
-      private_media_storage_adapter:null,
+      private_media_storage_adapter:'canonical_read_only_binding',
+      private_media_binding:PRIVATE_MEDIA_BINDING,
+      production_storage_fetch:false,
       inspection
     },
     acceptance_sequence:acceptanceSequence,
@@ -258,9 +268,12 @@ export function buildMemberProductionIntegrationAcceptance({
       production_schema_apply:false,
       production_d1_write:false,
       production_public_asset_binding:false,
-      production_private_media_binding:false,
       production_public_asset_fetch:false,
       production_private_media_fetch:false,
+      r2_object_read:false,
+      r2_object_write:false,
+      r2_object_list:false,
+      r2_object_delete:false,
       crm_write:false,
       line_send:false,
       customer_id_generation:false,
@@ -278,9 +291,11 @@ export function memberProductionIntegrationAcceptanceHealth(){
     static_acceptance_only:true,
     exact_default_off_candidate_supported:true,
     canonical_source_entry_default_off_expected:true,
+    canonical_private_media_runtime_wiring_expected:true,
     production_activation_ready:false,
     production_entry_modified:false,
     production_route_activated:false,
+    production_storage_fetch:false,
     production_deploy:false,
     production_write:false
   };
@@ -291,8 +306,11 @@ export const __test={
   OWNER_FLAG,
   ROUTE_MODE_ENV,
   CALLBACK_PATH,
+  PRIVATE_MEDIA_BINDING,
   IMPORT_ANCHOR,
   IMPORT_LINE,
+  STORAGE_IMPORT_LINE,
+  PRIVATE_MEDIA_WIRING,
   SENSITIVE_OLD,
   SENSITIVE_NEW,
   CRM_DISPATCH,
