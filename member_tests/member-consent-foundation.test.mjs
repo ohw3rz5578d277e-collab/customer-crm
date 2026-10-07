@@ -22,6 +22,11 @@ assert.equal(planConsentRecord({
 }).status,'invalid_accepted_at');
 assert.equal(planConsentRecord({
  member_identity_id:'MID_abcdefghijklmnopqrstuvwxyz123456',terms_version:'1.0',terms_sha256:terms,
+ privacy_version:'1.0',privacy_sha256:privacy,terms_accepted:true,privacy_accepted:true,
+ accepted_at:'2026-04-31T06:00:00+09:00'
+}).status,'invalid_accepted_at');
+assert.equal(planConsentRecord({
+ member_identity_id:'MID_abcdefghijklmnopqrstuvwxyz123456',terms_version:'1.0',terms_sha256:terms,
  privacy_version:'1.0',privacy_sha256:privacy,terms_accepted:'true',privacy_accepted:'true',
  accepted_at:'2026-10-07T06:00:00Z'
 }).status,'consent_incomplete');
