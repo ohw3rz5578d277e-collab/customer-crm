@@ -3,6 +3,11 @@ import {computeCurrentFamilyPass} from './member-family-pass-read-model.mjs';
 const MID=/^MID_[A-Za-z0-9_-]{22,}$/;
 const CID=/^\d{8}$/;
 const text=v=>v==null?'':String(v).trim();
+const scalarNonNegativeInteger=v=>{
+ if(typeof v==='number') return Number.isInteger(v)&&v>=0?v:null;
+ if(typeof v==='string'&&/^(?:0|[1-9]\d*)$/.test(v.trim())) return Number(v.trim());
+ return null;
+};
 
 export function buildMemberFamilyPassIntegrationReadModel({
  member_identity_id,
@@ -27,9 +32,10 @@ export function buildMemberFamilyPassIntegrationReadModel({
  if(!['active','customer'].includes(text(member_status))) return {status:'member_status_not_eligible',read_ready:false};
  if(family_link_verified!==true) return {status:'family_link_not_verified',read_ready:false};
  if(published_non_deleted_memory_count===undefined||published_non_deleted_memory_count===null||typeof published_non_deleted_memory_count==='boolean'||String(published_non_deleted_memory_count).trim()==='') return {status:'missing_memory_count_evidence',read_ready:false};
- const count=Number(published_non_deleted_memory_count);
- if(!Number.isInteger(count)||count<0) return {status:'invalid_memory_count',read_ready:false};
+ const count=scalarNonNegativeInteger(published_non_deleted_memory_count);
+ if(count===null) return {status:'invalid_memory_count',read_ready:false};
  if(typeof entitlement_schema_applied!=='boolean') return {status:'entitlement_schema_evidence_required',read_ready:false};
+ if(entitlement_schema_applied===false&&durable_black_entitlement===true) return {status:'durable_black_schema_conflict',read_ready:false};
  const pending=Number(review_pending_count);
  if(!Number.isInteger(pending)||pending<0) return {status:'invalid_review_count',read_ready:false};
 
