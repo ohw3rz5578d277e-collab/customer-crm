@@ -6,11 +6,13 @@ Baseline: 2026-10-07 JST
 
 This is a read-only diagnostic gate for reconciling a locally derived candidate bucket-name SHA-256 with the actual R2 bucket inventory without exposing raw bucket names to GitHub.
 
-The canonical source binding is now declared as exactly:
+The canonical source binding is declared as exactly:
 
 `MEMBER_PRIVATE_MEDIA_BUCKET -> customer-crm-member-private-media`
 
-This gate does not select a bucket automatically, approve runtime consumption, change a binding, fetch an object, activate a route, or deploy Production.
+The Production source also explicitly wraps `env?.MEMBER_PRIVATE_MEDIA_BUCKET` with `createMemberPrivateMediaStorageAdapter(...)` and passes the resulting get-only adapter into `private_media_storage_adapter`.
+
+This gate does not select a bucket automatically, execute runtime storage fetch, change a binding, fetch an object, activate a route, or deploy Production.
 
 ## Evidence model
 
@@ -53,15 +55,20 @@ The workflow:
 
 1. checks out the exact approved current main SHA;
 2. requires current main to equal that SHA;
-3. requires Member runtime storage consumption to remain default-off;
+3. requires Member operational activation to remain default-off;
 4. requires exactly one canonical source binding, `MEMBER_PRIVATE_MEDIA_BUCKET -> customer-crm-member-private-media`;
 5. rejects additional, wrong, unexpected, or env-scoped R2 bindings;
-6. requires `public_asset_adapter` and `private_media_storage_adapter` to remain literal `null` and Member/private-media routes to remain disabled;
-7. uses the existing Worker-management credential only for read-only Worker authentication and active deployment snapshots;
-8. verifies `CLOUDFLARE_R2_READ_API_TOKEN` with read-only `GET /user/tokens/verify` without relying on token-prefix classification;
-9. rejects an empty token and tokens containing whitespace or control characters before verification;
-10. performs R2 account-level bucket metadata List GET only for the exact Owner-authorized jurisdictions;
-11. fails closed on pagination, HTTP/API failure, malformed inventory, main drift, or active Production Worker version drift.
+6. requires `public_asset_adapter` to remain literal `null`;
+7. requires the private-media adapter factory import and exact source wiring `private_media_storage_adapter:createMemberPrivateMediaStorageAdapter(env?.MEMBER_PRIVATE_MEDIA_BUCKET)`;
+8. rejects a regression back to `private_media_storage_adapter:null`, a hardcoded bucket name in Production runtime, or an unexpected canonical binding reference count;
+9. requires Member/private-media routes to remain disabled;
+10. uses the existing Worker-management credential only for read-only Worker authentication and active deployment snapshots;
+11. verifies `CLOUDFLARE_R2_READ_API_TOKEN` with read-only `GET /user/tokens/verify` without relying on token-prefix classification;
+12. rejects an empty token and tokens containing whitespace or control characters before verification;
+13. performs R2 account-level bucket metadata List GET only for the exact Owner-authorized jurisdictions;
+14. fails closed on pagination, HTTP/API failure, malformed inventory, main drift, or active Production Worker version drift.
+
+The source-only runtime wiring does not call the adapter's `get(key)` method. Adapter construction itself performs no R2 object request.
 
 ## Privacy and mutation boundary
 
@@ -99,4 +106,4 @@ Any digest-index execution requires its own fresh Owner authorization naming the
 
 Any subsequent candidate verify requires another fresh Owner authorization.
 
-The existing source-only binding declaration does not authorize runtime use. Any additional or different source binding modification, Production storage fetch, runtime adapter wiring, Member/private-media route activation, LINE Login Production activation, Production deploy, Worker activation, or traffic change remains outside this gate and requires separate fresh Owner authorization at the appropriate exact SHA and scope.
+The source-only binding declaration and source-only private-media adapter wiring do not authorize live object access. Production storage fetch requires separate fresh Owner authorization. Member/private-media route activation, LINE Login Production activation, Production deploy, Worker activation, and traffic change also remain outside this gate and require separate fresh Owner authorization at the appropriate exact SHA and scope.
