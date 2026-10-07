@@ -15,6 +15,9 @@ assert.equal(buildMemberAdminReadModel({subject_type:'prospect',prospect_id:'bad
 assert.equal(buildMemberAdminReadModel({subject_type:'prospect',prospect_id:'PID_abcdefghijklmnopqrstuvwxyz123456'}).status,'invalid_member_identity');
 const defaultProspect=buildMemberAdminReadModel({subject_type:'prospect',prospect_id:'PID_abcdefghijklmnopqrstuvwxyz123456',member_identity_id:'MID_abcdefghijklmnopqrstuvwxyz123456'});
 assert.equal(defaultProspect.promotion_status,'prospect');
+for(const malformed of [false,['0'],{value:0},0n,'9'.repeat(400),Number.MAX_SAFE_INTEGER+1]){
+ assert.equal(buildMemberAdminReadModel({subject_type:'customer',canonical_customer_id:'12345678',review_pending_count:malformed}).status,'invalid_review_count');
+}
 console.log('CRM_MEMBER_ADMIN_READ_MODEL=PASS');
 console.log('UI_CHANGE=0');
 console.log('CUSTOMER_ID_GENERATION=0');
