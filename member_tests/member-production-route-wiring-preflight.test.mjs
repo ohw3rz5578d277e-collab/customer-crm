@@ -62,8 +62,8 @@ pass('current canonical source exposes Member browser page surface',
 pass('current canonical request composition provides Member asset surface',
   current.current.member_asset_route_present===true
 );
-pass('current wrangler still does not declare implicit Member private-media binding',
-  current.current.wrangler_member_private_media_binding_declared===false
+pass('current wrangler declares the separately approved Member private-media binding source',
+  current.current.wrangler_member_private_media_binding_declared===true
 );
 pass('canonical default-off wiring keeps source plan ready',
   current.source_plan_ready===true
