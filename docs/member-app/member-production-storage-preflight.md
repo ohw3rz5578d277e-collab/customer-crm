@@ -6,11 +6,13 @@ Baseline: 2026-10-07 JST
 
 This gate verifies the Cloudflare account R2 inventory and an explicit Member Production storage candidate without reading or mutating R2 objects.
 
-The canonical private-media binding is now declared in source as exactly:
+The canonical private-media binding is declared in source as exactly:
 
 `MEMBER_PRIVATE_MEDIA_BUCKET -> customer-crm-member-private-media`
 
-The preflight does not select a different bucket automatically, does not change bindings, does not wire runtime storage consumption, and does not create, read from, write to, or delete any R2 object.
+The Production source now also explicitly wraps `env?.MEMBER_PRIVATE_MEDIA_BUCKET` with `createMemberPrivateMediaStorageAdapter(...)` and passes the resulting get-only adapter as `private_media_storage_adapter`.
+
+The preflight does not select a different bucket automatically, does not change bindings, does not execute runtime storage fetch, and does not create, read from, write to, list objects in, or delete any R2 object.
 
 ## Authentication split
 
@@ -29,7 +31,16 @@ This repository change does **not** create, rotate, stage, or modify either secr
 
 ## Why this exists
 
-The Production entry remains default-off and still passes `null` for both public-asset and private-media adapters. Source declaration of the R2 binding is therefore intentionally separate from runtime consumption.
+The Production source remains operationally default-off:
+
+- `MEMBER_PRODUCTION_OWNER_APPROVED=false`;
+- Member Production route mode is not enabled;
+- private-media content route mode is not enabled;
+- LINE Login Production remains unactivated;
+- `public_asset_adapter` remains `null`;
+- the private-media adapter is source-wired only from the canonical binding;
+- adapter construction performs no object request;
+- Production storage fetch remains off.
 
 The repository needs durable evidence that:
 
@@ -37,12 +48,13 @@ The repository needs durable evidence that:
 2. the Member Production route and private-media route remain disabled;
 3. `wrangler.jsonc` contains exactly one canonical R2 binding, `MEMBER_PRIVATE_MEDIA_BUCKET -> customer-crm-member-private-media`;
 4. no additional, wrong, or env-scoped R2 binding has appeared;
-5. Worker-management authentication can read the current Production deployment state;
-6. the dedicated R2 credential is an active Cloudflare REST API bearer token;
-7. that least-privilege token can perform account-level bucket inventory for the **Owner-authorized jurisdiction subset only**;
-8. no unapproved jurisdiction is silently added or normalized by the workflow;
-9. the active 100%-traffic Worker version remains stable during the observation;
-10. a candidate bucket, represented only by its SHA-256 name digest in GitHub metadata, exists exactly once across the authorized jurisdiction inventories.
+5. the Production entry contains exactly the reviewed source-only private-media adapter wiring and does not hardcode the bucket name;
+6. Worker-management authentication can read the current Production deployment state;
+7. the dedicated R2 credential is an active Cloudflare REST API bearer token;
+8. that least-privilege token can perform account-level bucket inventory for the **Owner-authorized jurisdiction subset only**;
+9. no unapproved jurisdiction is silently added or normalized by the workflow;
+10. the active 100%-traffic Worker version remains stable during the observation;
+11. a candidate bucket, represented only by its SHA-256 name digest in GitHub metadata, exists exactly once across the authorized jurisdiction inventories.
 
 ## Explicit jurisdiction authorization
 
@@ -112,7 +124,7 @@ The workflow hashes each observed bucket name internally and requires the suppli
 
 The raw candidate bucket name is not written to Issue #26, workflow input, logs, outputs, or summary by this contract.
 
-This is existence evidence only. It does not authorize runtime consumption or route activation.
+This is existence evidence only. It does not authorize storage fetch or route activation.
 
 ## Drift protection
 
@@ -136,7 +148,11 @@ The workflow fails closed if:
 - the R2 binding count is not exactly one;
 - the binding name or bucket name differs from the canonical source declaration;
 - unexpected binding configuration or any env-scoped R2 binding is present;
-- the Production runtime adapters are no longer literal `null`.
+- `public_asset_adapter` is no longer literal `null`;
+- the private-media adapter factory import or exact canonical source wiring is missing;
+- the private-media adapter regresses to literal `null`;
+- the Production entry hardcodes `customer-crm-member-private-media`;
+- the Production entry references `MEMBER_PRIVATE_MEDIA_BUCKET` more or less than once.
 
 The active Worker version and main SHA postflight check runs with `always()` after a successful pre-inventory snapshot, so an R2 token verification or inventory failure cannot suppress the drift evidence.
 
@@ -146,6 +162,7 @@ The preflight performs:
 
 - raw candidate bucket name in GitHub metadata = 0;
 - token value / token ID logging = 0;
+- source-only private-media runtime wiring = observed/validated only;
 - R2 object read = 0;
 - R2 object write = 0;
 - bucket create/delete/update = 0;
@@ -169,12 +186,12 @@ The preflight performs:
 
 A read-only inventory using the prior all-jurisdiction contract successfully passed dedicated R2 token verification and reached `fedramp`, where Cloudflare returned HTTP 403 with sanitized numeric code `10003`. The run then failed closed. The active Production Worker version and current main SHA remained stable, and no object access or mutation occurred.
 
-This evidence is why jurisdiction selection is now explicit rather than automatically expanding to all five values.
+This evidence is why jurisdiction selection is explicit rather than automatically expanding to all five values.
 
 ## Next gate
 
-A successful token verification, inventory, or candidate verification is not authorization to wire `env.MEMBER_PRIVATE_MEDIA_BUCKET` into Production runtime, enable storage fetch, activate Member/private-media routes, activate LINE Login Production, deploy Production, activate a Worker version, or change Production traffic.
+A successful token verification, inventory, or candidate verification is not authorization to execute `storage_adapter.get(...)`, enable Production storage fetch, activate Member/private-media routes, activate LINE Login Production, deploy Production, activate a Worker version, or change Production traffic.
 
 Any future R2 inventory run must use a fresh Owner authorization that names the exact current main SHA and exact jurisdiction subset.
 
-Any additional or different R2 binding source change, runtime storage consumption, route activation, Production deployment, Worker activation, or Production traffic change requires separate fresh Owner exact-SHA/scope authorization.
+Any additional or different R2 binding source change, Production storage fetch, route activation, Production deployment, Worker activation, or Production traffic change requires separate fresh Owner exact-SHA/scope authorization.
