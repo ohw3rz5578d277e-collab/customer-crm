@@ -9,9 +9,16 @@ export function createSyncEventId(){
   return 'SE_'+crypto.randomBytes(24).toString('base64url');
 }
 
+function canonicalize(value){
+  if(Array.isArray(value)) return value.map(canonicalize);
+  if(value && typeof value==='object'){
+    return Object.fromEntries(Object.keys(value).sort().map(key=>[key,canonicalize(value[key])]));
+  }
+  return value;
+}
+
 export function profilePayloadDigest(profile){
-  const keys=Object.keys(profile||{}).sort();
-  const canonical=JSON.stringify(Object.fromEntries(keys.map(k=>[k,profile[k]])));
+  const canonical=JSON.stringify(canonicalize(profile||{}));
   return crypto.createHash('sha256').update(canonical).digest('hex');
 }
 
@@ -30,7 +37,7 @@ export function planProfileSync({
  const version=Number(profile_version);
  const previous=Number(previous_profile_version);
 
- if(!member_identity_verified) return {status:'identity_not_verified',review_required:true,send_allowed:false};
+ if(member_identity_verified!==true) return {status:'identity_not_verified',review_required:true,send_allowed:false};
  if(!EVENT_ID_RE.test(eventId)) return {status:'invalid_sync_event_id',send_allowed:false};
  if(!Number.isInteger(version)||version<1||!Number.isInteger(previous)||previous<0||version!==previous+1){
    return {status:'invalid_profile_version',review_required:true,send_allowed:false};
@@ -65,7 +72,11 @@ export function planSyncReplay({incoming_event_id,incoming_version,incoming_dige
  const ie=text(incoming_event_id), le=text(last_event_id);
  const iv=Number(incoming_version), lv=Number(last_version);
  const id=text(incoming_digest), ld=text(last_digest);
- if(ie&&ie===le) return {status:'idempotent_replay',master_write:false,history_append:false};
+ if(!EVENT_ID_RE.test(ie)) return {status:'invalid_sync_event_id',master_write:false,history_append:false};
+ if(ie===le){
+   if(iv===lv && id===ld) return {status:'idempotent_replay',master_write:false,history_append:false};
+   return {status:'event_id_integrity_conflict',review_required:true,master_write:false,history_append:false};
+ }
  if(iv<lv) return {status:'stale_version',master_write:false,history_append:false};
  if(iv===lv&&id!==ld) return {status:'version_digest_conflict',review_required:true,master_write:false,history_append:false};
  if(iv!==lv+1) return {status:'version_gap',review_required:true,master_write:false,history_append:false};
