@@ -5,22 +5,22 @@ import { classifyLineHistoryUnresolved } from '../src/crm-line-history-unresolve
 const CANONICAL_PRODUCTION_IDENTITY_SNAPSHOT='customer-crm-production-identity-snapshot-v1';
 const REQUIRED_CUSTOMER_IDENTITY_FIELDS=['customer_id','line_user_id','name','deleted_at'];
 
+function hasArg(name){return process.argv.includes(name)}
 function arg(name){const i=process.argv.indexOf(name);return i>=0?String(process.argv[i+1]||''):''}
 function exactSha(v){return typeof v==='string'&&/^[0-9a-f]{40}$/.test(v)}
 function exactSha256(v){return typeof v==='string'&&/^[0-9a-f]{64}$/.test(v)}
 function sha256(bytes){return createHash('sha256').update(bytes).digest('hex')}
 function owns(obj,key){return Object.prototype.hasOwnProperty.call(obj,key)}
 function customerId(v){return v==null?'':String(v).trim()}
-function readJson(path,required=true,{allowCanonicalCustomers=false,expectedSourceSha='',expectedSnapshotSha256=''}={}){
+function readJson(path,required=true,{allowCanonicalCustomers=false,bindingRequested=false,expectedSourceSha='',expectedSnapshotSha256=''}={}){
   if(!path){
     if(required)throw new Error('missing input path');
     return [];
   }
   const bytes=fs.readFileSync(path);
   const raw=JSON.parse(bytes.toString('utf8'));
-  const bindingRequested=allowCanonicalCustomers&&(expectedSourceSha!==''||expectedSnapshotSha256!=='');
   const isCanonicalCustomers=allowCanonicalCustomers&&raw&&typeof raw==='object'&&!Array.isArray(raw)&&raw.snapshot_format===CANONICAL_PRODUCTION_IDENTITY_SNAPSHOT;
-  if(bindingRequested&&!isCanonicalCustomers){
+  if(allowCanonicalCustomers&&bindingRequested&&!isCanonicalCustomers){
     throw new Error('canonical production identity snapshot required when binding is supplied: '+path);
   }
   if(Array.isArray(raw)){
@@ -64,6 +64,7 @@ const reservationPath=arg('--reservation-identities');
 const exactReservationEvidencePath=arg('--exact-reservation-evidence');
 const expectedCustomerSourceSha=arg('--expected-customer-source-sha');
 const expectedCustomerSnapshotSha256=arg('--expected-customer-snapshot-sha256');
+const customerBindingRequested=hasArg('--expected-customer-source-sha')||hasArg('--expected-customer-snapshot-sha256');
 const outPath=arg('--out')||'line-history-unresolved-triage.json';
 
 if(!candidatesPath||!customersPath){
@@ -75,6 +76,7 @@ const result=classifyLineHistoryUnresolved({
   candidates:readJson(candidatesPath),
   customers:readJson(customersPath,true,{
     allowCanonicalCustomers:true,
+    bindingRequested:customerBindingRequested,
     expectedSourceSha:expectedCustomerSourceSha,
     expectedSnapshotSha256:expectedCustomerSnapshotSha256
   }),
