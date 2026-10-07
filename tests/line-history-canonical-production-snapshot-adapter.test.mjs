@@ -41,17 +41,20 @@ try{
   fs.writeFileSync(directPath,JSON.stringify([customer],null,2));
   fs.writeFileSync(wranglerPath,JSON.stringify([{success:true,results:[customer]}],null,2));
 
-  function run(customers,out,{sourceSha=SOURCE_SHA,snapshotSha=digest(customers),bind=true}={}){
-    const args=[script,'--candidates',candidatesPath,'--customers',customers,'--out',out];
-    if(bind){
-      args.push('--expected-customer-source-sha',sourceSha);
-      args.push('--expected-customer-snapshot-sha256',snapshotSha);
-    }
-    return spawnSync(process.execPath,args,{
+  function invoke(customers,out,extraArgs=[]){
+    return spawnSync(process.execPath,[script,'--candidates',candidatesPath,'--customers',customers,'--out',out,...extraArgs],{
       cwd:repo,
       encoding:'utf8',
       env:{...process.env}
     });
+  }
+
+  function run(customers,out,{sourceSha=SOURCE_SHA,snapshotSha=digest(customers),bind=true}={}){
+    const extraArgs=bind?[
+      '--expected-customer-source-sha',sourceSha,
+      '--expected-customer-snapshot-sha256',snapshotSha
+    ]:[];
+    return invoke(customers,out,extraArgs);
   }
 
   function writeEnvelope(name,patch){
@@ -83,11 +86,21 @@ try{
     assert.match(String(r.stderr||r.stdout),/canonical production identity snapshot required when binding is supplied/);
   }
 
+  for(const [name,input,extraArgs] of [
+    ['empty-source-flag-direct-array',directPath,['--expected-customer-source-sha','']],
+    ['empty-digest-flag-wrangler-array',wranglerPath,['--expected-customer-snapshot-sha256','']]
+  ]){
+    const r=invoke(input,path.join(tmp,`${name}-out.json`),extraArgs);
+    assert.notEqual(r.status,0,`${name} should fail closed by flag presence`);
+    assert.match(String(r.stderr||r.stdout),/canonical production identity snapshot required when binding is supplied/);
+  }
+
   const missingBinding=run(canonicalPath,path.join(tmp,'missing-binding-out.json'),{bind:false});
   assert.notEqual(missingBinding.status,0,'canonical envelope without binding should fail closed');
   assert.match(String(missingBinding.stderr||missingBinding.stdout),/expected source sha required/);
 
   for(const [name,sourceSha] of [
+    ['expected-source-empty',''],
     ['expected-source-padded',` ${SOURCE_SHA}`],
     ['expected-source-uppercase',SOURCE_SHA.toUpperCase()]
   ]){
@@ -95,6 +108,10 @@ try{
     assert.notEqual(r.status,0,`${name} should fail closed`);
     assert.match(String(r.stderr||r.stdout),/expected source sha required/);
   }
+
+  const emptyDigest=run(canonicalPath,path.join(tmp,'expected-digest-empty-out.json'),{snapshotSha:''});
+  assert.notEqual(emptyDigest.status,0,'empty expected digest should fail closed');
+  assert.match(String(emptyDigest.stderr||emptyDigest.stdout),/expected sha256 required/);
 
   const upperDigest=run(canonicalPath,path.join(tmp,'expected-digest-uppercase-out.json'),{snapshotSha:digest(canonicalPath).toUpperCase()});
   assert.notEqual(upperDigest.status,0,'uppercase expected digest should fail closed');
@@ -131,6 +148,7 @@ try{
   console.log('CANONICAL_SNAPSHOT_EXACT_SOURCE_BINDING=PASS');
   console.log('CANONICAL_SNAPSHOT_SHA256_BINDING=PASS');
   console.log('CANONICAL_BINDING_REQUIRES_CANONICAL_ENVELOPE=PASS');
+  console.log('CANONICAL_BINDING_FLAG_PRESENCE_FAIL_CLOSED=PASS');
   console.log('CANONICAL_HASH_CANONICAL_FORM_ONLY=PASS');
   console.log('CANONICAL_CUSTOMER_ROW_VALIDATION=PASS');
   console.log('CANONICAL_SNAPSHOT_FAIL_CLOSED=PASS');
