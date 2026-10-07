@@ -3,9 +3,10 @@ import {
   inspectMemberProductionCandidate
 } from './member-production-integration-acceptance.mjs';
 
-const BUILD='member-production-entry-default-off-manifest-20260925-04';
+const BUILD='member-production-entry-default-off-manifest-20261007-05';
 const PRE_WIRING_ENTRY_BLOB_SHA='9791174a5be2aa8861134f6881e2cee451f50966';
 const APPLIED_DEFAULT_OFF_ENTRY_BLOB_SHA='9b325cb61c3fe67006cef2ecc03d5769d7a693a4';
+const APPLIED_PRIVATE_MEDIA_RUNTIME_WIRING_ENTRY_BLOB_SHA='fdbbc3b4fdc2c3433788f02d79547cd52195f638';
 const ENTRY_PATH='src/production-index-crm-customer360-entry.js';
 const SHA40_RE=/^[0-9a-f]{40}$/;
 
@@ -22,6 +23,7 @@ function inspectionPass(inspection){
 }
 
 function commonResult({observedMain,entryBlob,inspection,source,status}){
+  const runtimeWired=entryBlob===APPLIED_PRIVATE_MEDIA_RUNTIME_WIRING_ENTRY_BLOB_SHA;
   return {
     status,
     build:BUILD,
@@ -42,12 +44,16 @@ function commonResult({observedMain,entryBlob,inspection,source,status}){
       route_mode_env:'MEMBER_PRODUCTION_ROUTE_MODE',
       line_login_approved:false,
       public_asset_adapter:null,
-      private_media_storage_adapter:null
+      private_media_storage_adapter:runtimeWired?'canonical_read_only_binding':null,
+      private_media_binding:runtimeWired?'MEMBER_PRIVATE_MEDIA_BUCKET':null,
+      production_storage_fetch:false
     },
     canonical_source_state:{
-      default_off_wiring_applied:entryBlob===APPLIED_DEFAULT_OFF_ENTRY_BLOB_SHA,
+      default_off_wiring_applied:entryBlob===APPLIED_DEFAULT_OFF_ENTRY_BLOB_SHA||runtimeWired,
+      private_media_runtime_wiring_applied:runtimeWired,
       production_runtime_deployed:false,
-      production_route_activated:false
+      production_route_activated:false,
+      production_storage_fetch:false
     },
     future_patch_contract:{
       allowed_primary_path:ENTRY_PATH,
@@ -56,12 +62,12 @@ function commonResult({observedMain,entryBlob,inspection,source,status}){
       generated_from_exact_entry_blob:true,
       apply_exact_candidate_only:true,
       manual_edit_after_generation:false,
-      entry_patch_required:entryBlob!==APPLIED_DEFAULT_OFF_ENTRY_BLOB_SHA,
+      entry_patch_required:!runtimeWired,
       production_deploy_separate_gate:true,
       route_activation_separate_gate:true,
       line_login_exchange_separate_gate:true,
       public_asset_binding_separate_gate:true,
-      private_media_binding_separate_gate:true
+      private_media_storage_fetch_separate_gate:true
     },
     existing_release_gate:{
       workflow:'.github/workflows/deploy-cloudflare.yml',
@@ -77,9 +83,12 @@ function commonResult({observedMain,entryBlob,inspection,source,status}){
       production_schema_apply:false,
       production_d1_write:false,
       public_asset_binding:false,
-      private_media_binding:false,
       public_asset_fetch:false,
       private_media_fetch:false,
+      r2_object_read:false,
+      r2_object_write:false,
+      r2_object_list:false,
+      r2_object_delete:false,
       crm_write:false,
       line_send:false,
       customer_id_generation:false,
@@ -93,7 +102,7 @@ export function buildMemberProductionEntryDefaultOffManifest({
   production_entry_source='',
   observed_current_main_sha='',
   expected_current_main_sha='',
-  base_entry_blob_sha=APPLIED_DEFAULT_OFF_ENTRY_BLOB_SHA
+  base_entry_blob_sha=APPLIED_PRIVATE_MEDIA_RUNTIME_WIRING_ENTRY_BLOB_SHA
 }={}){
   const source=String(production_entry_source||'');
   const observedMain=normalizeSha(observed_current_main_sha);
@@ -110,6 +119,7 @@ export function buildMemberProductionEntryDefaultOffManifest({
         main_sha_strategy:'fresh_exact_match_required',
         pre_wiring_entry_blob_sha:PRE_WIRING_ENTRY_BLOB_SHA,
         applied_default_off_entry_blob_sha:APPLIED_DEFAULT_OFF_ENTRY_BLOB_SHA,
+        applied_private_media_runtime_wiring_entry_blob_sha:APPLIED_PRIVATE_MEDIA_RUNTIME_WIRING_ENTRY_BLOB_SHA,
         entry_path:ENTRY_PATH
       },
       production_write:false
@@ -128,7 +138,7 @@ export function buildMemberProductionEntryDefaultOffManifest({
     };
   }
 
-  if(entryBlob===APPLIED_DEFAULT_OFF_ENTRY_BLOB_SHA){
+  if(entryBlob===APPLIED_PRIVATE_MEDIA_RUNTIME_WIRING_ENTRY_BLOB_SHA){
     const inspection=inspectMemberProductionCandidate(source);
     if(!inspectionPass(inspection)){
       return {
@@ -147,8 +157,21 @@ export function buildMemberProductionEntryDefaultOffManifest({
       entryBlob,
       inspection,
       source,
-      status:'already_applied_default_off'
+      status:'already_applied_default_off_with_private_media_runtime_wiring'
     });
+  }
+
+  if(entryBlob===APPLIED_DEFAULT_OFF_ENTRY_BLOB_SHA){
+    return {
+      status:'private_media_runtime_wiring_not_applied',
+      build:BUILD,
+      source_only:true,
+      baseline_matches:true,
+      exact_main_sha:observedMain,
+      current_entry_blob_sha:entryBlob,
+      expected_entry_blob_sha:APPLIED_PRIVATE_MEDIA_RUNTIME_WIRING_ENTRY_BLOB_SHA,
+      production_write:false
+    };
   }
 
   if(entryBlob!==PRE_WIRING_ENTRY_BLOB_SHA){
@@ -161,6 +184,7 @@ export function buildMemberProductionEntryDefaultOffManifest({
       expected:{
         pre_wiring_entry_blob_sha:PRE_WIRING_ENTRY_BLOB_SHA,
         applied_default_off_entry_blob_sha:APPLIED_DEFAULT_OFF_ENTRY_BLOB_SHA,
+        applied_private_media_runtime_wiring_entry_blob_sha:APPLIED_PRIVATE_MEDIA_RUNTIME_WIRING_ENTRY_BLOB_SHA,
         entry_path:ENTRY_PATH
       },
       production_write:false
@@ -213,12 +237,15 @@ export function memberProductionEntryDefaultOffManifestHealth(){
     fresh_main_gate_required:true,
     pre_wiring_entry_blob_sha:PRE_WIRING_ENTRY_BLOB_SHA,
     applied_default_off_entry_blob_sha:APPLIED_DEFAULT_OFF_ENTRY_BLOB_SHA,
-    baseline_entry_blob_sha:APPLIED_DEFAULT_OFF_ENTRY_BLOB_SHA,
+    applied_private_media_runtime_wiring_entry_blob_sha:APPLIED_PRIVATE_MEDIA_RUNTIME_WIRING_ENTRY_BLOB_SHA,
+    baseline_entry_blob_sha:APPLIED_PRIVATE_MEDIA_RUNTIME_WIRING_ENTRY_BLOB_SHA,
     entry_path:ENTRY_PATH,
     exact_candidate_only:true,
     canonical_source_entry_default_off_applied:true,
+    canonical_private_media_runtime_wiring_applied:true,
     production_runtime_deployed:false,
     production_route_activated:false,
+    production_storage_fetch:false,
     production_deploy:false,
     production_write:false
   };
@@ -228,7 +255,8 @@ export const __test={
   BUILD,
   PRE_WIRING_ENTRY_BLOB_SHA,
   APPLIED_DEFAULT_OFF_ENTRY_BLOB_SHA,
-  BASE_ENTRY_BLOB_SHA:APPLIED_DEFAULT_OFF_ENTRY_BLOB_SHA,
+  APPLIED_PRIVATE_MEDIA_RUNTIME_WIRING_ENTRY_BLOB_SHA,
+  BASE_ENTRY_BLOB_SHA:APPLIED_PRIVATE_MEDIA_RUNTIME_WIRING_ENTRY_BLOB_SHA,
   ENTRY_PATH,
   SHA40_RE,
   normalizeSha,
