@@ -17,6 +17,7 @@ try{
   const candidatesPath=path.join(tmp,'candidates.json');
   const canonicalPath=path.join(tmp,'canonical.json');
   const directPath=path.join(tmp,'direct.json');
+  const wranglerPath=path.join(tmp,'wrangler.json');
   const outCanonical=path.join(tmp,'canonical-out.json');
   const outDirect=path.join(tmp,'direct-out.json');
 
@@ -38,6 +39,7 @@ try{
   };
   fs.writeFileSync(canonicalPath,JSON.stringify(envelope,null,2));
   fs.writeFileSync(directPath,JSON.stringify([customer],null,2));
+  fs.writeFileSync(wranglerPath,JSON.stringify([{success:true,results:[customer]}],null,2));
 
   function run(customers,out,{sourceSha=SOURCE_SHA,snapshotSha=digest(customers),bind=true}={}){
     const args=[script,'--candidates',candidatesPath,'--customers',customers,'--out',out];
@@ -71,6 +73,15 @@ try{
   const directResult=JSON.parse(fs.readFileSync(outDirect,'utf8'));
   assert.equal(directResult.already_resolved_message_rows,1);
   assert.equal(directResult.unresolved_message_rows,0);
+
+  for(const [name,input] of [
+    ['bound-direct-array',directPath],
+    ['bound-wrangler-array',wranglerPath]
+  ]){
+    const r=run(input,path.join(tmp,`${name}-out.json`));
+    assert.notEqual(r.status,0,`${name} should fail closed`);
+    assert.match(String(r.stderr||r.stdout),/canonical production identity snapshot required when binding is supplied/);
+  }
 
   const missingBinding=run(canonicalPath,path.join(tmp,'missing-binding-out.json'),{bind:false});
   assert.notEqual(missingBinding.status,0,'canonical envelope without binding should fail closed');
@@ -119,6 +130,7 @@ try{
   console.log('LINE_HISTORY_CANONICAL_PRODUCTION_SNAPSHOT_ADAPTER=PASS');
   console.log('CANONICAL_SNAPSHOT_EXACT_SOURCE_BINDING=PASS');
   console.log('CANONICAL_SNAPSHOT_SHA256_BINDING=PASS');
+  console.log('CANONICAL_BINDING_REQUIRES_CANONICAL_ENVELOPE=PASS');
   console.log('CANONICAL_HASH_CANONICAL_FORM_ONLY=PASS');
   console.log('CANONICAL_CUSTOMER_ROW_VALIDATION=PASS');
   console.log('CANONICAL_SNAPSHOT_FAIL_CLOSED=PASS');
