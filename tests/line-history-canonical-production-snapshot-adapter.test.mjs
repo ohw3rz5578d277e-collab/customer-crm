@@ -8,7 +8,7 @@ import { spawnSync } from 'node:child_process';
 const repo=process.cwd();
 const script=path.join(repo,'scripts/classify-line-history-unresolved.mjs');
 const tmp=fs.mkdtempSync(path.join(os.tmpdir(),'crm-line-history-canonical-snapshot-'));
-const SOURCE_SHA='a'.repeat(40);
+const SOURCE_SHA='0123456789abcdef0123456789abcdef01234567';
 function digest(pathname){return createHash('sha256').update(fs.readFileSync(pathname)).digest('hex')}
 
 try{
@@ -70,6 +70,19 @@ try{
   assert.notEqual(missingBinding.status,0,'canonical envelope without binding should fail closed');
   assert.match(String(missingBinding.stderr||missingBinding.stdout),/expected source sha required/);
 
+  for(const [name,sourceSha] of [
+    ['expected-source-padded',` ${SOURCE_SHA}`],
+    ['expected-source-uppercase',SOURCE_SHA.toUpperCase()]
+  ]){
+    const r=run(canonicalPath,path.join(tmp,`${name}-out.json`),{sourceSha});
+    assert.notEqual(r.status,0,`${name} should fail closed`);
+    assert.match(String(r.stderr||r.stdout),/expected source sha required/);
+  }
+
+  const upperDigest=run(canonicalPath,path.join(tmp,'expected-digest-uppercase-out.json'),{snapshotSha:digest(canonicalPath).toUpperCase()});
+  assert.notEqual(upperDigest.status,0,'uppercase expected digest should fail closed');
+  assert.match(String(upperDigest.stderr||upperDigest.stdout),/expected sha256 required/);
+
   const sourceMismatch=run(canonicalPath,path.join(tmp,'source-mismatch-out.json'),{sourceSha:'b'.repeat(40)});
   assert.notEqual(sourceMismatch.status,0,'source SHA mismatch should fail closed');
   assert.match(String(sourceMismatch.stderr||sourceMismatch.stdout),/source sha mismatch/);
@@ -82,13 +95,14 @@ try{
     ['incomplete',{complete:false},'incomplete'],
     ['scope',{query_scope:'partial'},'query scope invalid'],
     ['sha',{source_main_sha:'bad'},'source sha invalid'],
+    ['source-padded',{source_main_sha:` ${SOURCE_SHA}`},'source sha invalid'],
+    ['source-uppercase',{source_main_sha:SOURCE_SHA.toUpperCase()},'source sha invalid'],
     ['count',{customer_count:2},'customer count mismatch'],
     ['empty',{customer_count:0,customers:[]},'customers empty']
   ]){
     const p=path.join(tmp,`${name}.json`);
     fs.writeFileSync(p,JSON.stringify({...envelope,...patch},null,2));
-    const sourceSha=name==='sha'?SOURCE_SHA:String(({...envelope,...patch}).source_main_sha||SOURCE_SHA);
-    const r=run(p,path.join(tmp,`${name}-out.json`),{sourceSha,snapshotSha:digest(p)});
+    const r=run(p,path.join(tmp,`${name}-out.json`),{sourceSha:SOURCE_SHA,snapshotSha:digest(p)});
     assert.notEqual(r.status,0,`${name} should fail closed`);
     assert.match(String(r.stderr||r.stdout),new RegExp(expected.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')));
   }
@@ -96,6 +110,7 @@ try{
   console.log('LINE_HISTORY_CANONICAL_PRODUCTION_SNAPSHOT_ADAPTER=PASS');
   console.log('CANONICAL_SNAPSHOT_EXACT_SOURCE_BINDING=PASS');
   console.log('CANONICAL_SNAPSHOT_SHA256_BINDING=PASS');
+  console.log('CANONICAL_HASH_CANONICAL_FORM_ONLY=PASS');
   console.log('CANONICAL_SNAPSHOT_FAIL_CLOSED=PASS');
   console.log('DIRECT_ARRAY_COMPATIBILITY=PASS');
   console.log('PRODUCTION_D1_READ=0');
