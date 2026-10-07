@@ -2,6 +2,9 @@ import assert from 'node:assert/strict';
 import {signGoogleServerRequest,verifyGoogleServerEnvelope,canonicalRequestBody} from '../src/member-google-server-adapter.mjs';
 
 assert.equal(canonicalRequestBody({b:1,a:{y:2,x:1}}),canonicalRequestBody({a:{x:1,y:2},b:1}));
+assert.notEqual(canonicalRequestBody(false),canonicalRequestBody({}));
+assert.notEqual(canonicalRequestBody(0),canonicalRequestBody({}));
+assert.notEqual(canonicalRequestBody(''),canonicalRequestBody({}));
 const signed=signGoogleServerRequest({
  path:'/member/profile-sync',timestamp_ms:1000000,nonce:'abcdefghijklmnopqrstuvwxyz',
  sync_event_id:'SE_abcdefghijklmnopqrstuvwxyz123456',body:{b:1,a:2},shared_secret:'test-only-secret'
