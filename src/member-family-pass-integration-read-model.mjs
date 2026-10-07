@@ -4,8 +4,11 @@ const MID=/^MID_[A-Za-z0-9_-]{22,}$/;
 const CID=/^\d{8}$/;
 const text=v=>v==null?'':String(v).trim();
 const scalarNonNegativeInteger=v=>{
- if(typeof v==='number') return Number.isInteger(v)&&v>=0?v:null;
- if(typeof v==='string'&&/^(?:0|[1-9]\d*)$/.test(v.trim())) return Number(v.trim());
+ if(typeof v==='number') return Number.isSafeInteger(v)&&v>=0?v:null;
+ if(typeof v==='string'&&/^(?:0|[1-9]\d*)$/.test(v.trim())){
+  const n=Number(v.trim());
+  return Number.isSafeInteger(n)&&n>=0?n:null;
+ }
  return null;
 };
 
