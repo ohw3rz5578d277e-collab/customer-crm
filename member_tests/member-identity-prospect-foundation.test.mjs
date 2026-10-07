@@ -21,18 +21,21 @@ assert.notEqual(createProspectId(),pid);
 assert.notEqual(createInvitationToken(),token);
 assert.match(invitationTokenDigest(token),/^[0-9a-f]{64}$/);
 
-const existing=buildExistingCustomerFirstLoginPlan({customer_id:'12345678'});
+const existing=buildExistingCustomerFirstLoginPlan({customer_id:'12345678',now_ms:Date.UTC(2026,9,7),ttl_days:7});
 assert.equal(existing.status,'ready');
 assert.equal(existing.customer_id,'12345678');
 assert.equal(existing.customer_id_generation,false);
 assert.equal(existing.fuzzy_identity_linking,false);
 assert.equal(existing.invitation.customer_id_exposed,false);
 assert.equal(existing.invitation.single_use,true);
+assert.equal(existing.invitation.expires_at,'2026-10-14T00:00:00.000Z');
+assert.equal(existing.invitation.invalidate_existing_active,false);
 assert.equal(existing.write_allowed,false);
 assert.equal('customer_id' in existing.invitation,false);
 
 assert.equal(buildExistingCustomerFirstLoginPlan({customer_id:'山田'}).write_allowed,false);
 assert.equal(buildExistingCustomerFirstLoginPlan({customer_id:'12345678',active_invitation_count:2}).status,'ambiguous_active_invitation');
+assert.equal(buildExistingCustomerFirstLoginPlan({customer_id:'12345678',active_invitation_count:1}).invitation.invalidate_existing_active,true);
 
 const prospect=buildProspectRegistrationPlan();
 assert.equal(prospect.status,'ready');
@@ -43,7 +46,9 @@ assert.equal(prospect.write_allowed,false);
 const promoted=buildProspectPromotionPlan({
  member_identity_id:prospect.member_identity_id,
  prospect_id:prospect.prospect_id,
- canonical_customer_id:'87654321'
+ canonical_customer_id:'87654321',
+ persisted_member_identity_id:prospect.member_identity_id,
+ persisted_prospect_id:prospect.prospect_id
 });
 assert.equal(promoted.status,'ready');
 assert.equal(promoted.preserve_member_identity,true);
@@ -55,10 +60,23 @@ const collision=buildProspectPromotionPlan({
  member_identity_id:prospect.member_identity_id,
  prospect_id:prospect.prospect_id,
  canonical_customer_id:'87654321',
+ persisted_member_identity_id:prospect.member_identity_id,
+ persisted_prospect_id:prospect.prospect_id,
  collision_count:1
 });
 assert.equal(collision.status,'review_required');
 assert.equal(collision.write_allowed,false);
+
+const mismatch=buildProspectPromotionPlan({
+ member_identity_id:prospect.member_identity_id,
+ prospect_id:prospect.prospect_id,
+ canonical_customer_id:'87654321',
+ persisted_member_identity_id:createMemberIdentityId(),
+ persisted_prospect_id:prospect.prospect_id
+});
+assert.equal(mismatch.status,'binding_mismatch');
+assert.equal(mismatch.review_required,true);
+assert.equal(mismatch.write_allowed,false);
 
 console.log('MEMBER_IDENTITY_PROSPECT_FOUNDATION=PASS');
 console.log('OPAQUE_INVITATION_TOKEN=PASS');
