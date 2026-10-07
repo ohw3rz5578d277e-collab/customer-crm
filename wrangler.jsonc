@@ -15,6 +15,12 @@
       "migrations_table": "d1_migrations_managed"
     }
   ],
+  "r2_buckets": [
+    {
+      "binding": "MEMBER_PRIVATE_MEDIA_BUCKET",
+      "bucket_name": "customer-crm-member-private-media"
+    }
+  ],
   "ratelimits": [
     {
       "name": "CRM_OWNER_LOGIN_RATE_LIMITER",
