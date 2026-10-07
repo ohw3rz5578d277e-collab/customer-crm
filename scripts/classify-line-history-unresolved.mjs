@@ -5,8 +5,8 @@ import { classifyLineHistoryUnresolved } from '../src/crm-line-history-unresolve
 const CANONICAL_PRODUCTION_IDENTITY_SNAPSHOT='customer-crm-production-identity-snapshot-v1';
 
 function arg(name){const i=process.argv.indexOf(name);return i>=0?String(process.argv[i+1]||''):''}
-function exactSha(v){return /^[0-9a-f]{40}$/.test(String(v||'').trim().toLowerCase())}
-function exactSha256(v){return /^[0-9a-f]{64}$/.test(String(v||'').trim().toLowerCase())}
+function exactSha(v){return typeof v==='string'&&/^[0-9a-f]{40}$/.test(v)}
+function exactSha256(v){return typeof v==='string'&&/^[0-9a-f]{64}$/.test(v)}
 function sha256(bytes){return createHash('sha256').update(bytes).digest('hex')}
 function readJson(path,required=true,{allowCanonicalCustomers=false,expectedSourceSha='',expectedSnapshotSha256=''}={}){
   if(!path){
@@ -20,11 +20,11 @@ function readJson(path,required=true,{allowCanonicalCustomers=false,expectedSour
     return raw;
   }
   if(allowCanonicalCustomers&&raw&&typeof raw==='object'&&!Array.isArray(raw)&&raw.snapshot_format===CANONICAL_PRODUCTION_IDENTITY_SNAPSHOT){
-    const expectedSource=String(expectedSourceSha||'').trim().toLowerCase();
-    const expectedDigest=String(expectedSnapshotSha256||'').trim().toLowerCase();
+    const expectedSource=expectedSourceSha;
+    const expectedDigest=expectedSnapshotSha256;
     if(!exactSha(expectedSource))throw new Error('canonical production identity snapshot expected source sha required: '+path);
     if(!exactSha256(expectedDigest))throw new Error('canonical production identity snapshot expected sha256 required: '+path);
-    const actualSource=String(raw.source_main_sha||'').trim().toLowerCase();
+    const actualSource=raw.source_main_sha;
     if(!exactSha(actualSource))throw new Error('canonical production identity snapshot source sha invalid: '+path);
     if(actualSource!==expectedSource)throw new Error('canonical production identity snapshot source sha mismatch: '+path);
     if(sha256(bytes)!==expectedDigest)throw new Error('canonical production identity snapshot sha256 mismatch: '+path);
