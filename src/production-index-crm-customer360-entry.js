@@ -1,5 +1,6 @@
 import app from './production-index-crm-browser-root-entry.js';
 import { handleMemberProductionRequest, memberProductionRouteModeEnabled } from './member-production-request-composition.mjs';
+import { createMemberPrivateMediaStorageAdapter } from './member-production-storage-adapter.mjs';
 import todayReadOnlyApp from './production-index-crm-today-dashboard.js';
 import { patchBrowserRootHealth } from './production-index-crm-browser-root-entry.js';
 import { handleCustomer360Request, customer360Health } from './crm-customer360-runtime.mjs';
@@ -343,7 +344,7 @@ export default {
       approved:MEMBER_PRODUCTION_OWNER_APPROVED,
       line_login_approved:false,
       public_asset_adapter:null,
-      private_media_storage_adapter:null
+      private_media_storage_adapter:createMemberPrivateMediaStorageAdapter(env?.MEMBER_PRIVATE_MEDIA_BUCKET)
     });
     if(memberResponse)return hardenProductionResponse(memberResponse,request);
     const response=await handleCustomerCrmRequest(request,env,ctx);
