@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {MEMBER_STACK_EXPECTED,evaluateMemberStackReadiness} from '../src/member-stack-source-readiness.mjs';
-const good=MEMBER_STACK_EXPECTED.map(x=>({...x,mergeable:true,unresolved_review_threads:0}));
+const good=MEMBER_STACK_EXPECTED.map(x=>({...x,mergeable:true,unresolved_review_threads:0,required_checks_passed:true,changed_files_expected:true}));
 let r=evaluateMemberStackReadiness(good);
 assert.equal(r.status,'source_ready');
 assert.deepEqual(r.merge_order,[203,204,205,206,207,208,209,210,211]);
@@ -14,6 +14,16 @@ r=evaluateMemberStackReadiness(good.map(x=>x.pr===208?{...x,head:'0'.repeat(40)}
 assert.equal(r.status,'blocked');
 assert.equal(r.failures.some(x=>x.pr===208&&x.reason==='head_drift'),true);
 r=evaluateMemberStackReadiness(good.map(x=>x.pr===210?{...x,unresolved_review_threads:1}:x));
+assert.equal(r.status,'blocked');
+for(const unknown of [null,'',undefined]) {
+ r=evaluateMemberStackReadiness(good.map(x=>x.pr===210?{...x,unresolved_review_threads:unknown}:x));
+ assert.equal(r.status,'blocked');
+}
+r=evaluateMemberStackReadiness(good.map(x=>x.pr===209?{...x,required_checks_passed:false}:x));
+assert.equal(r.status,'blocked');
+r=evaluateMemberStackReadiness(good.map(x=>x.pr===208?{...x,changed_files_expected:false}:x));
+assert.equal(r.status,'blocked');
+r=evaluateMemberStackReadiness(good.map(x=>x.pr===207?{pr:x.pr,head:x.head,mergeable:true,unresolved_review_threads:0}:x));
 assert.equal(r.status,'blocked');
 console.log('MEMBER_STACK_SOURCE_READINESS=PASS');
 console.log('MERGE_ORDER=203,204,205,206,207,208,209,210,211');
