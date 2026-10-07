@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import {documentDigest,planConsentRecord,planConsentRequirement} from '../src/member-consent-foundation.mjs';
 const terms=documentDigest('terms v1'),privacy=documentDigest('privacy v1');
 let p=planConsentRecord({
- member_identity_id:'MID_example',terms_version:'1.0',terms_sha256:terms,
+ member_identity_id:'MID_abcdefghijklmnopqrstuvwxyz123456',terms_version:'1.0',terms_sha256:terms,
  privacy_version:'1.0',privacy_sha256:privacy,terms_accepted:true,privacy_accepted:true,
  accepted_at:'2026-10-07T06:00:00Z'
 });
@@ -11,7 +11,17 @@ assert.equal(p.append_only,true);
 assert.equal(p.replace_prior_consent,false);
 assert.equal(p.record_allowed,false);
 assert.equal(planConsentRecord({
- member_identity_id:'MID_example',terms_version:'1.0',terms_sha256:terms,
+ member_identity_id:'12345678',terms_version:'1.0',terms_sha256:terms,
+ privacy_version:'1.0',privacy_sha256:privacy,terms_accepted:true,privacy_accepted:true,
+ accepted_at:'2026-10-07T06:00:00Z'
+}).status,'invalid_member_identity');
+assert.equal(planConsentRecord({
+ member_identity_id:'MID_abcdefghijklmnopqrstuvwxyz123456',terms_version:'1.0',terms_sha256:terms,
+ privacy_version:'1.0',privacy_sha256:privacy,terms_accepted:true,privacy_accepted:true,
+ accepted_at:'2026-02-30T06:00:00Z'
+}).status,'invalid_accepted_at');
+assert.equal(planConsentRecord({
+ member_identity_id:'MID_abcdefghijklmnopqrstuvwxyz123456',terms_version:'1.0',terms_sha256:terms,
  privacy_version:'1.0',privacy_sha256:privacy,terms_accepted:'true',privacy_accepted:'true',
  accepted_at:'2026-10-07T06:00:00Z'
 }).status,'consent_incomplete');
