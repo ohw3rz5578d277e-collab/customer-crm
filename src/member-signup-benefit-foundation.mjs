@@ -18,7 +18,7 @@ export function planSignupBenefitIssue({
  const member=text(member_identity_id),prospect=text(prospect_id);
  if(!MID.test(member)||!PID.test(prospect)) return {status:'invalid_identity',issue_allowed:false};
  if(registration_completed!==true||consent_current!==true) return {status:'registration_not_complete',issue_allowed:false};
- if(existing_signup_benefit_count===undefined) return {status:'missing_existing_benefit_evidence',issue_allowed:false};
+ if(existing_signup_benefit_count===undefined||existing_signup_benefit_count===null||typeof existing_signup_benefit_count==='boolean'||String(existing_signup_benefit_count).trim()==='') return {status:'missing_existing_benefit_evidence',issue_allowed:false};
  const count=Number(existing_signup_benefit_count);
  if(!Number.isInteger(count)||count<0) return {status:'invalid_existing_benefit_count',issue_allowed:false};
  if(count!==0) return {status:'already_issued',issue_allowed:false};
@@ -47,10 +47,7 @@ export function planSignupBenefitTransition({
 }={}){
  const current=text(current_state),target=text(target_state);
  const member=text(entitlement_member_identity_id),auth=text(authenticated_member_identity_id);
- if(!MID.test(member)||member!==auth) return {status:'member_identity_mismatch',transition_allowed:false};
- if(prior_redemption_count===undefined) return {status:'missing_redemption_evidence',transition_allowed:false};
- const redemptions=Number(prior_redemption_count);
- if(!Number.isInteger(redemptions)||redemptions<0) return {status:'invalid_redemption_count',transition_allowed:false};
+ if(!MID.test(member)) return {status:'invalid_entitlement_member_identity',transition_allowed:false};
 
  const allowed={
   issued:new Set(['available','expired','revoked']),
@@ -62,6 +59,10 @@ export function planSignupBenefitTransition({
  };
  if(!allowed[current]||!allowed[current].has(target)) return {status:'invalid_transition',transition_allowed:false};
  if(target==='used'){
+   if(member!==auth) return {status:'member_identity_mismatch',transition_allowed:false};
+   if(prior_redemption_count===undefined||prior_redemption_count===null||typeof prior_redemption_count==='boolean'||String(prior_redemption_count).trim()==='') return {status:'missing_redemption_evidence',transition_allowed:false};
+   const redemptions=Number(prior_redemption_count);
+   if(!Number.isInteger(redemptions)||redemptions<0) return {status:'invalid_redemption_count',transition_allowed:false};
    if(redemptions!==0) return {status:'already_redeemed',transition_allowed:false};
    if(!CID.test(text(canonical_customer_id))||!text(reservation_id)) return {status:'redemption_context_required',transition_allowed:false};
  }
