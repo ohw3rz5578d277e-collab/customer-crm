@@ -3,11 +3,14 @@ import { createHash } from 'node:crypto';
 import { classifyLineHistoryUnresolved } from '../src/crm-line-history-unresolved-classifier.mjs';
 
 const CANONICAL_PRODUCTION_IDENTITY_SNAPSHOT='customer-crm-production-identity-snapshot-v1';
+const REQUIRED_CUSTOMER_IDENTITY_FIELDS=['customer_id','line_user_id','name','deleted_at'];
 
 function arg(name){const i=process.argv.indexOf(name);return i>=0?String(process.argv[i+1]||''):''}
 function exactSha(v){return typeof v==='string'&&/^[0-9a-f]{40}$/.test(v)}
 function exactSha256(v){return typeof v==='string'&&/^[0-9a-f]{64}$/.test(v)}
 function sha256(bytes){return createHash('sha256').update(bytes).digest('hex')}
+function owns(obj,key){return Object.prototype.hasOwnProperty.call(obj,key)}
+function customerId(v){return v==null?'':String(v).trim()}
 function readJson(path,required=true,{allowCanonicalCustomers=false,expectedSourceSha='',expectedSnapshotSha256=''}={}){
   if(!path){
     if(required)throw new Error('missing input path');
@@ -33,6 +36,15 @@ function readJson(path,required=true,{allowCanonicalCustomers=false,expectedSour
     if(!Array.isArray(raw.customers))throw new Error('canonical production identity snapshot customers required: '+path);
     if(!Number.isInteger(raw.customer_count)||raw.customer_count!==raw.customers.length)throw new Error('canonical production identity snapshot customer count mismatch: '+path);
     if(raw.customers.length<1)throw new Error('canonical production identity snapshot customers empty: '+path);
+    const seenCustomerIds=new Set();
+    for(const row of raw.customers){
+      if(!row||typeof row!=='object'||Array.isArray(row))throw new Error('canonical production identity snapshot customer row invalid: '+path);
+      if(REQUIRED_CUSTOMER_IDENTITY_FIELDS.some(field=>!owns(row,field)))throw new Error('canonical production identity snapshot customer identity fields required: '+path);
+      const id=customerId(row.customer_id);
+      if(!id)throw new Error('canonical production identity snapshot customer id required: '+path);
+      if(seenCustomerIds.has(id))throw new Error('canonical production identity snapshot duplicate customer id: '+path);
+      seenCustomerIds.add(id);
+    }
     return raw.customers;
   }
   if(raw&&Array.isArray(raw.results))return raw.results;
