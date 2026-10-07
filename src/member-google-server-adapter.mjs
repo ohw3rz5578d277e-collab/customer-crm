@@ -9,7 +9,7 @@ export function canonicalRequestBody(payload){
    if(value && typeof value==='object') return Object.fromEntries(Object.keys(value).sort().map(k=>[k,canonicalize(value[k])]));
    return value;
  };
- return JSON.stringify(canonicalize(payload||{}));
+ return JSON.stringify(canonicalize(payload??{}));
 }
 
 export function signGoogleServerRequest({method='POST',path,timestamp_ms,nonce,sync_event_id,body,shared_secret}={}){
