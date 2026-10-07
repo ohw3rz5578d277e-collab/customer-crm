@@ -29,6 +29,10 @@ assert.equal(r.family_pass,null);
 assert.equal(r.memories,null);
 assert.equal(r.prospect_access_to_customer_memories,false);
 assert.equal(r.customer_id_generation,false);
+for(const malformed of [false,['0'],{value:0},0n,'9'.repeat(400),Number.MAX_SAFE_INTEGER+1]){
+ assert.equal(buildMemberFamilyPassIntegrationReadModel({member_identity_id:mid,canonical_customer_id:'12345678',family_id:'FAM-1',family_link_verified:true,member_customer_binding_verified:true,persisted_member_customer_id:'12345678',member_status:'active',published_non_deleted_memory_count:1,entitlement_schema_applied:true,review_pending_count:malformed}).status,'invalid_review_count');
+ assert.equal(buildProspectMemberIntegrationReadModel({member_identity_id:mid,prospect_id:pid,review_pending_count:malformed}).status,'invalid_review_count');
+}
 console.log('MEMBER_FAMILY_PASS_INTEGRATION_READ_MODEL=PASS');
 console.log('BLACK_THRESHOLD=10');
 console.log('BLACK_PHOTO_GOODS_DISCOUNT_PERCENT=10');
