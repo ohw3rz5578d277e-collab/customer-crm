@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import {buildProspectRegistrationPlan,buildProspectPromotionPlan} from '../src/member-identity-prospect-foundation.mjs';
+import {buildProspectRegistrationPlan} from '../src/member-identity-prospect-foundation.mjs';
+import {planProspectCustomerPromotion} from '../src/member-prospect-customer-promotion-plan.mjs';
 import {planProfileSync,createSyncEventId} from '../src/member-google-profile-sync-plan.mjs';
 import {planProfileReview} from '../src/member-profile-review-queue-plan.mjs';
 import {planPiiRetention,__test as retentionTest} from '../src/member-d1-pii-retention-plan.mjs';
@@ -25,15 +26,22 @@ assert.equal(isolated.todays_memory,null);
 assert.equal(isolated.next_memory,null);
 assert.equal(isolated.prospect_access_to_customer_memories,false);
 
-const badPromotion=buildProspectPromotionPlan({
+const badPromotion=planProspectCustomerPromotion({
  member_identity_id:prospect.member_identity_id,
  prospect_id:prospect.prospect_id,
  canonical_customer_id:'12345678',
+ customer_id_source:'customer_crm',
  persisted_member_identity_id:'MID_zyxwvutsrqponmlkjihgfedcba654321',
- persisted_prospect_id:prospect.prospect_id
+ persisted_prospect_id:prospect.prospect_id,
+ existing_customer_member_binding_count:0,
+ prospect_status:'prospect',
+ consent_history_preserved:true,
+ acquisition_history_preserved:true,
+ benefit_state_preserved:true
 });
 assert.equal(badPromotion.status,'binding_mismatch');
-assert.equal(badPromotion.write_allowed,false);
+assert.equal(badPromotion.review_required,true);
+assert.equal(badPromotion.promotion_allowed,false);
 
 const sync=planProfileSync({
  subject_type:'prospect',prospect_id:prospect.prospect_id,member_identity_verified:true,
@@ -74,13 +82,23 @@ assert.equal(doubleUse.transition_allowed,false);
 
 const customer=buildMemberFamilyPassIntegrationReadModel({
  member_identity_id:prospect.member_identity_id,canonical_customer_id:'12345678',
- family_id:'FAM-1',family_link_verified:true,published_non_deleted_memory_count:10
+ family_id:'FAM-1',family_link_verified:true,
+ member_customer_binding_verified:true,persisted_member_customer_id:'12345678',member_status:'active',
+ published_non_deleted_memory_count:10
 });
 assert.equal(customer.family_pass.current_tier,'BLACK');
 assert.equal(customer.black_contract.threshold,10);
 assert.equal(customer.black_contract.photo_goods_discount_percent,10);
 assert.equal(customer.black_contract.automatic_award,false);
 assert.equal(customer.write_allowed,false);
+const wrongMemberBinding=buildMemberFamilyPassIntegrationReadModel({
+ member_identity_id:prospect.member_identity_id,canonical_customer_id:'12345678',
+ family_id:'FAM-1',family_link_verified:true,
+ member_customer_binding_verified:true,persisted_member_customer_id:'87654321',member_status:'active',
+ published_non_deleted_memory_count:10
+});
+assert.equal(wrongMemberBinding.status,'member_customer_binding_not_verified');
+assert.equal(wrongMemberBinding.read_ready,false);
 
 console.log('MEMBER_LIFECYCLE_CROSS_CONTRACT_SECURITY=PASS');
 console.log('PROSPECT_CUSTOMER_DATA_LEAK=0');
