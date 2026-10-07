@@ -10,10 +10,16 @@ assert.equal(signed.status,'ready');
 assert.equal(signed.request_allowed,false);
 assert.match(signed.signature_sha256,/^[0-9a-f]{64}$/);
 
-assert.equal(verifyGoogleServerEnvelope({now_ms:1000000,timestamp_ms:1,signature_valid:true}).status,'timestamp_out_of_window');
-assert.equal(verifyGoogleServerEnvelope({now_ms:1000000,timestamp_ms:1000000,nonce_seen:true,signature_valid:true}).status,'nonce_replay');
-assert.equal(verifyGoogleServerEnvelope({now_ms:1000000,timestamp_ms:1000000,signature_valid:'true'}).status,'invalid_signature');
-const verified=verifyGoogleServerEnvelope({now_ms:1000000,timestamp_ms:1000000,signature_valid:true});
+const envelope={
+ now_ms:1000000,timestamp_ms:1000000,nonce:'abcdefghijklmnopqrstuvwxyz',sync_event_id:'SE_abcdefghijklmnopqrstuvwxyz123456',
+ method:'POST',path:'/member/profile-sync',body:{b:1,a:2},signature_sha256:signed.signature_sha256,shared_secret:'test-only-secret'
+};
+assert.equal(verifyGoogleServerEnvelope({...envelope,timestamp_ms:1}).status,'timestamp_out_of_window');
+assert.equal(verifyGoogleServerEnvelope({...envelope,nonce_seen:true}).status,'nonce_replay');
+assert.equal(verifyGoogleServerEnvelope({...envelope,sync_event_id:'bad'}).status,'invalid_sync_event_id');
+assert.equal(verifyGoogleServerEnvelope({...envelope,signature_sha256:'0'.repeat(64)}).status,'invalid_signature');
+assert.equal(verifyGoogleServerEnvelope({...envelope,body:{a:999}}).status,'invalid_signature');
+const verified=verifyGoogleServerEnvelope(envelope);
 assert.equal(verified.status,'verified');
 assert.equal(verified.execute_allowed,false);
 assert.equal(verified.execution_requires_separate_gate,true);
