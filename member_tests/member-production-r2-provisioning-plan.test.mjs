@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import { handleMemberProductionRequest } from '../src/member-production-request-composition.mjs';
 import { handleMemberAppHttpRequest } from '../src/member-app-http-composition.mjs';
 import { handleMemberPrivateMediaHttpRequest } from '../src/member-private-media-http-router.mjs';
+import { createMemberPrivateMediaStorageAdapter } from '../src/member-production-storage-adapter.mjs';
 
 const DOC='docs/member-app/member-production-r2-provisioning-plan.md';
 const WRANGLER='wrangler.jsonc';
@@ -19,6 +20,8 @@ const RUNTIME_PATHS=[
 const BUCKET='customer-crm-member-private-media';
 const BINDING='MEMBER_PRIVATE_MEDIA_BUCKET';
 const BUCKET_SHA256=crypto.createHash('sha256').update(BUCKET).digest('hex');
+const STORAGE_IMPORT="import { createMemberPrivateMediaStorageAdapter } from './member-production-storage-adapter.mjs';";
+const PRIVATE_WIRING='private_media_storage_adapter:createMemberPrivateMediaStorageAdapter(env?.MEMBER_PRIVATE_MEDIA_BUCKET)';
 
 const doc=fs.readFileSync(DOC,'utf8');
 const cfg=JSON.parse(fs.readFileSync(WRANGLER,'utf8'));
@@ -36,10 +39,10 @@ assert.ok(doc.includes(`Canonical Worker binding: \`${BINDING}\``));
 assert.ok(doc.includes('Verified jurisdiction: `default`'));
 assert.ok(doc.includes('Public access: disabled'));
 assert.ok(doc.includes('The first bucket is private-media-only.'));
-assert.ok(doc.includes('current source-only declared-binding stage'));
+assert.ok(doc.includes('current source-only runtime-wiring stage'));
 assert.ok(doc.includes(`\`${BINDING} -> ${BUCKET}\``));
 assert.ok(doc.includes('exactly one canonical R2 binding exists'));
-assert.ok(doc.includes('runtime adapter consumption remains unapproved and off'));
+assert.ok(doc.includes('private-media adapter is explicitly created from the canonical binding in source'));
 assert.ok(doc.includes('Production storage fetch remains unapproved and off'));
 assert.ok(doc.includes('Member Production route and private-media route remain unapproved and off'));
 assert.ok(doc.includes('LINE Login Production activation remains unapproved'));
@@ -84,15 +87,14 @@ for(const [scopeName,scope] of Object.entries(cfg?.env||{})){
 }
 
 assert.ok(entry.includes('const MEMBER_PRODUCTION_OWNER_APPROVED=false;'));
-assert.ok(!entry.includes(BUCKET));
-assert.ok(!entry.includes(BINDING));
+assert.ok(entry.includes(STORAGE_IMPORT));
+assert.ok(entry.includes('public_asset_adapter:null'));
+assert.ok(entry.includes(PRIVATE_WIRING));
+assert.ok(!entry.includes(BUCKET),'Production entry must not hardcode the bucket name');
+assert.equal((entry.match(/MEMBER_PRIVATE_MEDIA_BUCKET/g)||[]).length,1,'Production entry must reference the canonical binding exactly once');
 const memberInvocationMatches=[...entry.matchAll(/handleMemberProductionRequest\s*\(/g)];
 assert.equal(memberInvocationMatches.length,1,'Production entry must have exactly one Member Production dispatch invocation');
-assert.match(
-  entry,
-  /const memberResponse=await handleMemberProductionRequest\(request,env,\{\s*approved:MEMBER_PRODUCTION_OWNER_APPROVED,\s*line_login_approved:false,\s*public_asset_adapter:null,\s*private_media_storage_adapter:null\s*\}\);/,
-  'Production entry must pass literal null storage adapters until separately authorized runtime wiring is reviewed'
-);
+assert.doesNotMatch(entry,/private_media_storage_adapter:null/);
 
 for(const [path,source] of runtimeSources){
   assert.ok(!source.includes(BUCKET),`${path} must not discover the configured bucket by name`);
@@ -110,8 +112,9 @@ assert.ok(adapter.includes('storage_delete:false'));
 assert.doesNotMatch(adapter,/\.put\s*\(/);
 assert.doesNotMatch(adapter,/\.delete\s*\(/);
 
+let storageGetCalls=0;
 const poisonBinding=Object.freeze({
-  get(){throw new Error('POISON_R2_BINDING_TOUCHED');}
+  get(){storageGetCalls++;throw new Error('POISON_R2_BINDING_TOUCHED');}
 });
 const poisonEnv={
   MEMBER_PRODUCTION_ROUTE_MODE:'enabled',
@@ -119,6 +122,24 @@ const poisonEnv={
   [BINDING]:poisonBinding,
   UNRELATED_R2_BINDING:poisonBinding
 };
+
+const sourceWiredAdapter=createMemberPrivateMediaStorageAdapter(poisonBinding);
+assert.ok(sourceWiredAdapter&&typeof sourceWiredAdapter.get==='function','canonical binding can be wrapped without object access');
+assert.equal(storageGetCalls,0,'adapter construction must not fetch an R2 object');
+
+let disabledApiCalls=0;
+const disabledResult=await handleMemberProductionRequest(
+  new Request('https://example.test/api/member/probe'),
+  {MEMBER_PRODUCTION_ROUTE_MODE:'disabled'},
+  {
+    approved:false,
+    private_media_storage_adapter:sourceWiredAdapter,
+    api_handler:async()=>{disabledApiCalls++;return new Response('unexpected');}
+  }
+);
+assert.equal(disabledResult,null,'route-off composition must preserve CRM fallthrough');
+assert.equal(disabledApiCalls,0,'route-off composition must not invoke Member API handler');
+assert.equal(storageGetCalls,0,'route-off composition must not fetch an R2 object');
 
 let productionPrivateObserved=Symbol('unset');
 await handleMemberProductionRequest(
@@ -134,6 +155,7 @@ await handleMemberProductionRequest(
   }
 );
 assert.equal(productionPrivateObserved,null,'Production composition must not discover private R2 bindings from env');
+assert.equal(storageGetCalls,0,'explicit-null composition must not touch poison R2 binding');
 
 let productionPublicObserved=Symbol('unset');
 await handleMemberProductionRequest(
@@ -239,10 +261,12 @@ console.log(`PROPOSED_BINDING=${BINDING}`);
 console.log(`WRANGLER_SCOPES_CHECKED=${wranglerScopes.length}`);
 console.log('POISON_ENV_IMPLICIT_BINDING=REJECTED');
 console.log('CANONICAL_R2_BINDING_CONFIGURED=SOURCE_ONLY');
+console.log('PRODUCTION_RUNTIME_BINDING_CONSUMPTION=SOURCE_ONLY_WIRED');
+console.log('ADAPTER_CONSTRUCTION_R2_OBJECT_READ=0');
+console.log('ROUTE_OFF_R2_OBJECT_READ=0');
 console.log('BUCKET_CREATE=0');
 console.log('R2_OBJECT_READ=0');
 console.log('R2_WRITE=0');
-console.log('PRODUCTION_RUNTIME_BINDING_CONSUMPTION=0');
 console.log('PRODUCTION_STORAGE_FETCH=0');
 console.log('MEMBER_ROUTE_ACTIVATION=0');
 console.log('PRIVATE_MEDIA_ROUTE_ACTIVATION=0');
