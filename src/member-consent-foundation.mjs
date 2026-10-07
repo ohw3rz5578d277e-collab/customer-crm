@@ -2,6 +2,8 @@ import crypto from 'node:crypto';
 const text=v=>v==null?'':String(v).trim();
 const VERSION_RE=/^[A-Za-z0-9._-]{1,64}$/;
 const HASH_RE=/^[0-9a-f]{64}$/;
+const MEMBER_RE=/^MID_[A-Za-z0-9_-]{22,}$/;
+const ISO_INSTANT_RE=/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})$/;
 
 export function documentDigest(content){
  return crypto.createHash('sha256').update(String(content??'')).digest('hex');
@@ -19,10 +21,14 @@ export function planConsentRecord({
 }={}){
  const member=text(member_identity_id);
  const tv=text(terms_version),pv=text(privacy_version),th=text(terms_sha256),ph=text(privacy_sha256),at=text(accepted_at);
- if(!member) return {status:'missing_member_identity',record_allowed:false};
+ if(!MEMBER_RE.test(member)) return {status:'invalid_member_identity',record_allowed:false};
  if(!VERSION_RE.test(tv)||!VERSION_RE.test(pv)||!HASH_RE.test(th)||!HASH_RE.test(ph)) return {status:'invalid_document_identity',record_allowed:false};
  if(terms_accepted!==true||privacy_accepted!==true) return {status:'consent_incomplete',record_allowed:false};
- if(!at||Number.isNaN(Date.parse(at))) return {status:'invalid_accepted_at',record_allowed:false};
+ if(!ISO_INSTANT_RE.test(at)||Number.isNaN(Date.parse(at))) return {status:'invalid_accepted_at',record_allowed:false};
+ const parsed=new Date(at);
+ const normalized=parsed.toISOString();
+ const normalizedInput=at.endsWith('Z')?new Date(at).toISOString():normalized;
+ if(normalizedInput!==normalized) return {status:'invalid_accepted_at',record_allowed:false};
  return {
   status:'ready',
   member_identity_id:member,
