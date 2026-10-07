@@ -14,7 +14,7 @@ The 30-day clock is based on the PII record/version write time. Reading the cach
 
 ## State machine
 
-PENDING_SYNC -> SYNCED -> VERIFIED -> PURGE_ELIGIBLE -> PII_PURGED
+PENDING_SYNC -> SYNCED -> VERIFIED/PURGE_ELIGIBLE -> PII_PURGED
 
 If the hard deadline arrives before full verification:
 
@@ -30,7 +30,7 @@ DEADLINE_RECOVERY means:
 
 ## Normal early purge
 
-Before day 30, PII may become purge-eligible after all are true:
+Before day 30, PII becomes purge-eligible immediately after all are true:
 
 - durable Google sync confirmed
 - exact canonical Customer ID correspondence verified
