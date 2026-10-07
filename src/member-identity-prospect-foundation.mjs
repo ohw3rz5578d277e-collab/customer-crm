@@ -26,10 +26,11 @@ export function invitationTokenDigest(token){
   return crypto.createHash('sha256').update(value).digest('hex');
 }
 
-export function buildExistingCustomerFirstLoginPlan({customer_id,member_identity_id='',active_invitation_count=0}={}){
+export function buildExistingCustomerFirstLoginPlan({customer_id,member_identity_id='',active_invitation_count=0,now_ms=Date.now(),ttl_days=7}={}){
   const customerId=text(customer_id);
   if(!CUSTOMER_ID_RE.test(customerId)) return {status:'invalid_customer_id',write_allowed:false};
   if(Number(active_invitation_count)>1) return {status:'ambiguous_active_invitation',review_required:true,write_allowed:false};
+  if(!Number.isFinite(Number(now_ms))||!Number.isInteger(Number(ttl_days))||Number(ttl_days)<1||Number(ttl_days)>30) return {status:'invalid_invitation_ttl',write_allowed:false};
   if(member_identity_id && !MEMBER_ID_RE.test(text(member_identity_id))) return {status:'invalid_member_identity',write_allowed:false};
   return {
     status:'ready',
@@ -37,6 +38,8 @@ export function buildExistingCustomerFirstLoginPlan({customer_id,member_identity
     member_identity_id:member_identity_id?text(member_identity_id):createMemberIdentityId(),
     invitation:{
       raw_token:createInvitationToken(),
+      expires_at:new Date(Number(now_ms)+Number(ttl_days)*24*60*60*1000).toISOString(),
+      invalidate_existing_active:Number(active_invitation_count)===1,
       single_use:true,
       customer_id_exposed:false
     },
@@ -60,12 +63,15 @@ export function buildProspectRegistrationPlan({member_identity_id='',prospect_id
   };
 }
 
-export function buildProspectPromotionPlan({member_identity_id,prospect_id,canonical_customer_id,collision_count=0}={}){
+export function buildProspectPromotionPlan({member_identity_id,prospect_id,canonical_customer_id,collision_count=0,persisted_member_identity_id='',persisted_prospect_id=''}={}){
   const memberId=text(member_identity_id);
   const prospectId=text(prospect_id);
   const customerId=text(canonical_customer_id);
   if(!MEMBER_ID_RE.test(memberId)||!PROSPECT_ID_RE.test(prospectId)||!CUSTOMER_ID_RE.test(customerId)){
     return {status:'invalid_identity',write_allowed:false};
+  }
+  if(text(persisted_member_identity_id)!==memberId||text(persisted_prospect_id)!==prospectId){
+    return {status:'binding_mismatch',review_required:true,write_allowed:false};
   }
   if(Number(collision_count)!==0){
     return {status:'review_required',review_required:true,write_allowed:false};
