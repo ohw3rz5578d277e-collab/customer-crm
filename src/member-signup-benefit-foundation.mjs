@@ -3,6 +3,11 @@ const MID=/^MID_[A-Za-z0-9_-]{22,}$/;
 const PID=/^PID_[A-Za-z0-9_-]{22,}$/;
 const CID=/^\d{8}$/;
 const text=v=>v==null?'':String(v).trim();
+const scalarNonNegativeInteger=v=>{
+ if(typeof v==='number') return Number.isInteger(v)&&v>=0?v:null;
+ if(typeof v==='string'&&/^(?:0|[1-9]\d*)$/.test(v.trim())) return Number(v.trim());
+ return null;
+};
 
 export function createBenefitEntitlementId(){
  return 'BEN_'+crypto.randomBytes(24).toString('base64url');
@@ -19,8 +24,8 @@ export function planSignupBenefitIssue({
  if(!MID.test(member)||!PID.test(prospect)) return {status:'invalid_identity',issue_allowed:false};
  if(registration_completed!==true||consent_current!==true) return {status:'registration_not_complete',issue_allowed:false};
  if(existing_signup_benefit_count===undefined||existing_signup_benefit_count===null||typeof existing_signup_benefit_count==='boolean'||String(existing_signup_benefit_count).trim()==='') return {status:'missing_existing_benefit_evidence',issue_allowed:false};
- const count=Number(existing_signup_benefit_count);
- if(!Number.isInteger(count)||count<0) return {status:'invalid_existing_benefit_count',issue_allowed:false};
+ const count=scalarNonNegativeInteger(existing_signup_benefit_count);
+ if(count===null) return {status:'invalid_existing_benefit_count',issue_allowed:false};
  if(count!==0) return {status:'already_issued',issue_allowed:false};
  return {
   status:'ready',
@@ -61,8 +66,8 @@ export function planSignupBenefitTransition({
  if(target==='used'){
    if(member!==auth) return {status:'member_identity_mismatch',transition_allowed:false};
    if(prior_redemption_count===undefined||prior_redemption_count===null||typeof prior_redemption_count==='boolean'||String(prior_redemption_count).trim()==='') return {status:'missing_redemption_evidence',transition_allowed:false};
-   const redemptions=Number(prior_redemption_count);
-   if(!Number.isInteger(redemptions)||redemptions<0) return {status:'invalid_redemption_count',transition_allowed:false};
+   const redemptions=scalarNonNegativeInteger(prior_redemption_count);
+   if(redemptions===null) return {status:'invalid_redemption_count',transition_allowed:false};
    if(redemptions!==0) return {status:'already_redeemed',transition_allowed:false};
    if(!CID.test(text(canonical_customer_id))||!text(reservation_id)) return {status:'redemption_context_required',transition_allowed:false};
  }
