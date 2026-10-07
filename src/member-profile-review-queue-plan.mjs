@@ -6,8 +6,16 @@ export function createReviewId(){
  return 'RV_'+crypto.randomBytes(24).toString('base64url');
 }
 
+function canonicalize(value){
+ if(Array.isArray(value)) return value.map(canonicalize);
+ if(value && typeof value==='object'){
+   return Object.fromEntries(Object.keys(value).sort().map(key=>[key,canonicalize(value[key])]));
+ }
+ return value;
+}
+
 export function reviewPayloadDigest(payload){
- const canonical=JSON.stringify(payload||{});
+ const canonical=JSON.stringify(canonicalize(payload||{}));
  return crypto.createHash('sha256').update(canonical).digest('hex');
 }
 
@@ -41,6 +49,6 @@ export function planReviewDecision({review_status,decision,identity_reverified=f
  if(text(review_status)!=='pending') return {status:'not_pending',master_write_allowed:false};
  if(!['approve','reject'].includes(text(decision))) return {status:'invalid_decision',master_write_allowed:false};
  if(text(decision)==='reject') return {status:'reject_ready',master_write_allowed:false,audit_required:true,execution_requires_separate_gate:true};
- if(!identity_reverified||!latest_version_verified) return {status:'reverification_required',master_write_allowed:false};
+ if(identity_reverified!==true||latest_version_verified!==true) return {status:'reverification_required',master_write_allowed:false};
  return {status:'approve_ready',master_write_allowed:false,audit_required:true,new_sync_event_required:true,execution_requires_separate_gate:true};
 }
