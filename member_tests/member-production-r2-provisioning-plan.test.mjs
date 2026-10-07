@@ -21,8 +21,7 @@ const BINDING='MEMBER_PRIVATE_MEDIA_BUCKET';
 const BUCKET_SHA256=crypto.createHash('sha256').update(BUCKET).digest('hex');
 
 const doc=fs.readFileSync(DOC,'utf8');
-const wranglerText=fs.readFileSync(WRANGLER,'utf8');
-const cfg=JSON.parse(wranglerText);
+const cfg=JSON.parse(fs.readFileSync(WRANGLER,'utf8'));
 const entry=fs.readFileSync(ENTRY,'utf8');
 const adapter=fs.readFileSync(ADAPTER,'utf8');
 const runtimeSources=RUNTIME_PATHS.map(path=>[path,fs.readFileSync(path,'utf8')]);
@@ -50,15 +49,17 @@ for(const unrelated of [
   assert.ok(doc.includes(`\`${unrelated}\``));
 }
 
+assert.deepEqual(
+  cfg.r2_buckets,
+  [{binding:BINDING,bucket_name:BUCKET}],
+  'default Wrangler scope must contain exactly one canonical private-media R2 binding after separate source authorization'
+);
+
 const wranglerScopes=[
   ['default',cfg],
   ...Object.entries(cfg?.env||{}).map(([name,value])=>[`env.${name}`,value])
 ];
 for(const [scopeName,scope] of wranglerScopes){
-  assert.ok(
-    !Array.isArray(scope?.r2_buckets)||scope.r2_buckets.length===0,
-    `${scopeName} must remain without R2 bindings`
-  );
   assert.notEqual(
     String(scope?.vars?.MEMBER_PRODUCTION_ROUTE_MODE||'').trim().toLowerCase(),
     'enabled',
@@ -69,12 +70,11 @@ for(const [scopeName,scope] of wranglerScopes){
     'enabled',
     `${scopeName} private-media route must remain disabled`
   );
-  const serialized=JSON.stringify(scope);
-  assert.ok(!serialized.includes(BUCKET),`${scopeName} must not configure proposed bucket`);
-  assert.ok(!serialized.includes(BINDING),`${scopeName} must not configure proposed binding`);
 }
-assert.ok(!wranglerText.includes(BUCKET),'proposed bucket must not be configured before separate authorization');
-assert.ok(!wranglerText.includes(BINDING),'proposed binding must not be configured before separate authorization');
+for(const [scopeName,scope] of Object.entries(cfg?.env||{})){
+  const bindings=Array.isArray(scope?.r2_buckets)?scope.r2_buckets:[];
+  assert.equal(bindings.length,0,`env.${scopeName} must not add another R2 binding`);
+}
 
 assert.ok(entry.includes('const MEMBER_PRODUCTION_OWNER_APPROVED=false;'));
 assert.ok(!entry.includes(BUCKET));
@@ -84,12 +84,12 @@ assert.equal(memberInvocationMatches.length,1,'Production entry must have exactl
 assert.match(
   entry,
   /const memberResponse=await handleMemberProductionRequest\(request,env,\{\s*approved:MEMBER_PRODUCTION_OWNER_APPROVED,\s*line_login_approved:false,\s*public_asset_adapter:null,\s*private_media_storage_adapter:null\s*\}\);/,
-  'Production entry must pass literal null storage adapters until separately authorized wiring is reviewed'
+  'Production entry must pass literal null storage adapters until separately authorized runtime wiring is reviewed'
 );
 
 for(const [path,source] of runtimeSources){
-  assert.ok(!source.includes(BUCKET),`${path} must not discover the proposed bucket by name`);
-  assert.ok(!source.includes(BINDING),`${path} must not discover the proposed binding from env`);
+  assert.ok(!source.includes(BUCKET),`${path} must not discover the configured bucket by name`);
+  assert.ok(!source.includes(BINDING),`${path} must not discover the configured binding from env`);
 }
 
 assert.ok(adapter.includes('createMemberPrivateMediaStorageAdapter(binding)'));
@@ -231,11 +231,11 @@ console.log(`PROPOSED_BUCKET_SHA256=${BUCKET_SHA256}`);
 console.log(`PROPOSED_BINDING=${BINDING}`);
 console.log(`WRANGLER_SCOPES_CHECKED=${wranglerScopes.length}`);
 console.log('POISON_ENV_IMPLICIT_BINDING=REJECTED');
-console.log('CANONICAL_R2_BINDING_CONFIGURED=NO');
+console.log('CANONICAL_R2_BINDING_CONFIGURED=SOURCE_ONLY');
 console.log('BUCKET_CREATE=0');
 console.log('R2_OBJECT_READ=0');
 console.log('R2_WRITE=0');
-console.log('PRODUCTION_STORAGE_BINDING_CHANGE=0');
+console.log('PRODUCTION_RUNTIME_BINDING_CONSUMPTION=0');
 console.log('PRODUCTION_STORAGE_FETCH=0');
 console.log('MEMBER_ROUTE_ACTIVATION=0');
 console.log('PRIVATE_MEDIA_ROUTE_ACTIVATION=0');
