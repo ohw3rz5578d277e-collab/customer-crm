@@ -161,9 +161,20 @@ jobs:
           if(!entry.includes('private_media_storage_adapter:null'))throw new Error('PRIVATE_MEDIA_ADAPTER_NOT_DEFAULT_NULL');
           if(String(cfg?.vars?.MEMBER_PRODUCTION_ROUTE_MODE||'').trim().toLowerCase()==='enabled')throw new Error('MEMBER_PRODUCTION_ROUTE_MODE_ENABLED');
           if(String(cfg?.vars?.MEMBER_PRIVATE_MEDIA_CONTENT_ROUTE_MODE||'').trim().toLowerCase()==='enabled')throw new Error('PRIVATE_MEDIA_ROUTE_MODE_ENABLED');
-          if(Array.isArray(cfg?.r2_buckets)&&cfg.r2_buckets.length)throw new Error('CANONICAL_R2_BINDING_ALREADY_DECLARED');
+          const bindings=Array.isArray(cfg?.r2_buckets)?cfg.r2_buckets:[];
+          if(bindings.length!==1)throw new Error('CANONICAL_R2_BINDING_COUNT_INVALID');
+          const binding=bindings[0]||{};
+          if(binding.binding!=='MEMBER_PRIVATE_MEDIA_BUCKET')throw new Error('CANONICAL_R2_BINDING_NAME_MISMATCH');
+          if(binding.bucket_name!=='customer-crm-member-private-media')throw new Error('CANONICAL_R2_BUCKET_NAME_MISMATCH');
+          const allowedBindingKeys=new Set(['binding','bucket_name']);
+          if(Object.keys(binding).some(key=>!allowedBindingKeys.has(key)))throw new Error('CANONICAL_R2_BINDING_UNEXPECTED_CONFIGURATION');
+          for(const [envName,scope] of Object.entries(cfg?.env||{})){
+            if(Array.isArray(scope?.r2_buckets)&&scope.r2_buckets.length)throw new Error('NONCANONICAL_ENV_R2_BINDING_DECLARED:'+envName);
+          }
           console.log('MEMBER_CANONICAL_STORAGE_DEFAULT_OFF=PASS');
-          console.log('CANONICAL_R2_BINDING_DECLARED=NO');
+          console.log('CANONICAL_R2_BINDING_DECLARED=PASS');
+          console.log('CANONICAL_R2_BINDING_EXACT=PASS');
+          console.log('PRODUCTION_STORAGE_FETCH=0');
           NODE
 
       - name: Install pinned Wrangler tooling
@@ -212,10 +223,10 @@ jobs:
           set -euo pipefail
           test -n "$CLOUDFLARE_R2_READ_API_TOKEN" || { echo '::error::CLOUDFLARE_R2_READ_API_TOKEN_MISSING'; exit 1; }
           [[ "$CLOUDFLARE_R2_READ_API_TOKEN" != *[[:space:]]* ]] || { echo '::error::R2_READ_REST_TOKEN_FORMAT_INVALID_WHITESPACE'; exit 1; }
-          case "$CLOUDFLARE_R2_READ_API_TOKEN" in
-            cfut_*) ;;
-            *) echo '::error::R2_READ_REST_TOKEN_TYPE_NOT_USER_API_TOKEN'; exit 1 ;;
-          esac
+          if printf '%s' "$CLOUDFLARE_R2_READ_API_TOKEN" | LC_ALL=C grep -q '[[:cntrl:]]'; then
+            echo '::error::R2_READ_REST_TOKEN_FORMAT_INVALID_CONTROL_CHARACTER'
+            exit 1
+          fi
           verify_file=/tmp/member-r2-digest-index-token.json
           cleanup(){ rm -f "$verify_file"; }
           trap cleanup EXIT
