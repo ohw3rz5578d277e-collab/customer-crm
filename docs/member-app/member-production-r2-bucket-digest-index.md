@@ -10,7 +10,7 @@ The canonical source binding is now declared as exactly:
 
 `MEMBER_PRIVATE_MEDIA_BUCKET -> customer-crm-member-private-media`
 
-This gate does not select a different bucket, approve runtime consumption, change a binding, fetch an object, activate a route, or deploy Production.
+This gate does not select a bucket automatically, approve runtime consumption, change a binding, fetch an object, activate a route, or deploy Production.
 
 ## Evidence model
 
