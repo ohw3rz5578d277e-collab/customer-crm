@@ -31,14 +31,21 @@ assert.equal(BUCKET,'customer-crm-member-private-media');
 assert.equal(BINDING,'MEMBER_PRIVATE_MEDIA_BUCKET');
 assert.equal(BUCKET_SHA256,'6f1f7fa25143081a302fcd148a52ae660195b2a31cf93a55f9ed39cf2e25f388');
 
-assert.ok(doc.includes(`Proposed bucket name: \`${BUCKET}\``));
-assert.ok(doc.includes(`Proposed Worker binding: \`${BINDING}\``));
-assert.ok(doc.includes('Authorized jurisdiction target after separate Owner approval: `default`'));
+assert.ok(doc.includes(`Canonical bucket name: \`${BUCKET}\``));
+assert.ok(doc.includes(`Canonical Worker binding: \`${BINDING}\``));
+assert.ok(doc.includes('Verified jurisdiction: `default`'));
 assert.ok(doc.includes('Public access: disabled'));
 assert.ok(doc.includes('The first bucket is private-media-only.'));
+assert.ok(doc.includes('current source-only declared-binding stage'));
+assert.ok(doc.includes(`\`${BINDING} -> ${BUCKET}\``));
+assert.ok(doc.includes('exactly one canonical R2 binding exists'));
+assert.ok(doc.includes('runtime adapter consumption remains unapproved and off'));
+assert.ok(doc.includes('Production storage fetch remains unapproved and off'));
+assert.ok(doc.includes('Member Production route and private-media route remain unapproved and off'));
+assert.ok(doc.includes('LINE Login Production activation remains unapproved'));
+assert.ok(doc.includes('Production deploy, Worker activation, and Production traffic change remain separately Owner-gated.'));
 assert.ok(doc.includes('No step inherits authorization from a previous step.'));
-assert.ok(doc.includes('candidate verify run must prove exact-one-match'));
-assert.ok(doc.includes('Adding the binding, Production deploy, private-media route activation, Member route activation, and Production storage fetch each remain separately Owner-gated.'));
+assert.ok(doc.includes('Earlier completed stages are retained here as provenance and do not authorize reruns.'));
 
 for(const unrelated of [
   'ai-manga-publisher-assets',
