@@ -46,6 +46,12 @@ CREATE TABLE IF NOT EXISTS member_customer_invitations (
 CREATE INDEX IF NOT EXISTS idx_member_customer_invitation_customer
   ON member_customer_invitations(canonical_customer_id,created_at);
 
+-- At most one unused/non-invalidated invitation may exist for a customer.
+-- Reissue must invalidate the old row and insert the replacement in one transaction.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_member_customer_invitation_one_active
+  ON member_customer_invitations(canonical_customer_id)
+  WHERE consumed_at IS NULL AND invalidated_at IS NULL;
+
 CREATE TABLE IF NOT EXISTS member_profile_change_review_queue (
   review_id TEXT PRIMARY KEY,
   member_identity_id TEXT NOT NULL,
