@@ -4,9 +4,11 @@ Baseline: 2026-10-07 JST
 
 ## Purpose
 
-Record the approved source-only stage after the first dedicated Member private-media R2 bucket was created, independently verified by read-only exact-SHA storage preflight, and separately approved for canonical binding declaration in source.
+Record the approved source-only stage after the first dedicated Member private-media R2 bucket was created, independently verified by read-only exact-SHA storage preflight, declared as the canonical Worker binding, and separately approved for source-only runtime adapter wiring.
 
-The canonical Worker binding is now declared in `wrangler.jsonc` as part of this source-only stage. This stage does not wire the binding into Production runtime code, does not read an R2 object, does not enable storage fetch or routes, and does not deploy or activate Production.
+The canonical Worker binding remains declared in `wrangler.jsonc`. The current source stage additionally passes that binding into the reviewed read-only private-media storage adapter and passes the resulting adapter explicitly into the Member Production request composition.
+
+This runtime wiring is source-only and does not authorize storage fetch, R2 object access, route activation, LINE Login Production, Production deploy, Worker activation, or traffic change.
 
 ## Verified bucket evidence
 
@@ -33,9 +35,9 @@ The only acceptable first private-media binding declaration is:
 }
 ```
 
-This source-only binding is private-media-only. Public Member assets remain unbound.
+This source binding is private-media-only. Public Member assets remain unbound.
 
-## Required source state at the declared-binding stage
+## Required source state at the runtime-wiring stage
 
 Canonical source must continue to satisfy all of the following:
 
@@ -44,33 +46,38 @@ Canonical source must continue to satisfy all of the following:
 - no additional or env-scoped R2 binding is present;
 - `MEMBER_PRODUCTION_OWNER_APPROVED` remains `false`;
 - `public_asset_adapter` remains literal `null` in the Production entry;
-- `private_media_storage_adapter` remains literal `null` in the Production entry;
+- `createMemberPrivateMediaStorageAdapter` is imported exactly once from `member-production-storage-adapter.mjs`;
+- `private_media_storage_adapter` is wired exactly as `createMemberPrivateMediaStorageAdapter(env?.MEMBER_PRIVATE_MEDIA_BUCKET)`;
+- the Production entry does not hardcode `customer-crm-member-private-media`;
 - Member Production route remains disabled;
 - private-media content route remains disabled;
+- LINE Login Production remains unactivated;
 - no Production storage fetch occurs;
-- the storage adapter remains explicit-binding and read-only.
+- the storage adapter remains explicit-binding, read-only, and get-only;
+- adapter construction itself performs no R2 object request.
 
-## Runtime consumption boundary
+## Runtime wiring boundary
 
-Binding declaration and runtime consumption remain separate gates.
+Binding declaration and source-only runtime adapter wiring are now completed source stages, but storage fetch and route activation remain separate gates.
 
-The approved source-only declaration must not, by itself:
+The approved source-only runtime wiring does not, by itself:
 
-- pass `env.MEMBER_PRIVATE_MEDIA_BUCKET` into the Production request composition;
-- create or wire `createMemberPrivateMediaStorageAdapter(env.MEMBER_PRIVATE_MEDIA_BUCKET)` in Production runtime;
+- call `storage_adapter.get(...)`;
+- read, list, write, or delete any R2 object;
 - enable Member Production routes;
 - enable private-media content routes;
 - activate LINE Login Production;
-- read any R2 object;
 - enable Production storage fetch;
 - deploy Production or activate a Worker version;
 - change Production traffic.
 
-Any transition from source declaration to runtime consumption requires a separate fresh Owner authorization at the then-current exact SHA and scope.
+The source call `createMemberPrivateMediaStorageAdapter(env?.MEMBER_PRIVATE_MEDIA_BUCKET)` only constructs a get-only adapter around the explicit canonical binding. The reviewed adapter performs `binding.get(...)` only when its returned `get(key)` method is later called. With Member route mode disabled, Member composition falls through without invoking the Member API handler or storage adapter.
+
+Any transition from source-only wiring to live Production storage fetch, route activation, or deployment requires a separate fresh Owner authorization at the then-current exact SHA and scope.
 
 ## Authorization boundaries
 
-Recording this approved source-only declaration does **not** authorize:
+Recording this approved source-only runtime wiring does **not** authorize:
 
 - any additional or different `wrangler.jsonc` R2 binding change;
 - R2 bucket create, update, rename, delete, lifecycle, CORS, domain, or public-access changes;
@@ -89,4 +96,4 @@ Recording this approved source-only declaration does **not** authorize:
 - commerce activation;
 - paid spend.
 
-No authorization from the bucket-create, read-only verification, or source-binding declaration stage carries forward automatically to runtime consumption, route activation, or Production deployment.
+No authorization from the bucket-create, read-only verification, source-binding declaration, or source-only runtime-wiring stage carries forward automatically to storage fetch, route activation, or Production deployment.
