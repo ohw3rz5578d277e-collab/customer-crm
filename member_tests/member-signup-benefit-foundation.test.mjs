@@ -9,15 +9,19 @@ assert.equal(p.commercial_definition,null);
 assert.equal(p.automatic_discount,false);
 assert.equal(p.issue_allowed,false);
 assert.equal(planSignupBenefitIssue({member_identity_id:member,prospect_id:prospect,registration_completed:true,consent_current:true}).status,'missing_existing_benefit_evidence');
+for(const missing of [null,'','   ',false]) assert.equal(planSignupBenefitIssue({member_identity_id:member,prospect_id:prospect,registration_completed:true,consent_current:true,existing_signup_benefit_count:missing}).status,'missing_existing_benefit_evidence');
 assert.equal(planSignupBenefitIssue({member_identity_id:member,prospect_id:prospect,registration_completed:true,consent_current:true,existing_signup_benefit_count:1}).status,'already_issued');
 
-p=planSignupBenefitTransition({current_state:'available',target_state:'used',entitlement_member_identity_id:member,authenticated_member_identity_id:member,canonical_customer_id:'12345678',reservation_id:'R-1',prior_redemption_count:0});
+p=planSignupBenefitTransition({current_state:'reserved',target_state:'used',entitlement_member_identity_id:member,authenticated_member_identity_id:member,canonical_customer_id:'12345678',reservation_id:'R-1',prior_redemption_count:0});
 assert.equal(p.status,'ready');
 assert.equal(p.transition_allowed,false);
 assert.equal(p.commerce_write_allowed,false);
 assert.equal(p.automatic_discount,false);
-assert.equal(planSignupBenefitTransition({current_state:'available',target_state:'used',entitlement_member_identity_id:member,authenticated_member_identity_id:member,canonical_customer_id:'12345678',reservation_id:'R-1',prior_redemption_count:1}).status,'already_redeemed');
+assert.equal(planSignupBenefitTransition({current_state:'reserved',target_state:'used',entitlement_member_identity_id:member,authenticated_member_identity_id:member,canonical_customer_id:'12345678',reservation_id:'R-1',prior_redemption_count:1}).status,'already_redeemed');
 assert.equal(planSignupBenefitTransition({current_state:'used',target_state:'available',entitlement_member_identity_id:member,authenticated_member_identity_id:member,prior_redemption_count:1}).status,'invalid_transition');
+for(const missing of [null,'','   ',false]) assert.equal(planSignupBenefitTransition({current_state:'reserved',target_state:'used',entitlement_member_identity_id:member,authenticated_member_identity_id:member,canonical_customer_id:'12345678',reservation_id:'R-1',prior_redemption_count:missing}).status,'missing_redemption_evidence');
+assert.equal(planSignupBenefitTransition({current_state:'issued',target_state:'available',entitlement_member_identity_id:member}).status,'ready');
+assert.equal(planSignupBenefitTransition({current_state:'reserved',target_state:'available',entitlement_member_identity_id:member}).status,'ready');
 
 p=planBenefitPromotionCarryForward({member_identity_id:member,prospect_id:prospect,canonical_customer_id:'12345678',current_state:'available'});
 assert.equal(p.status,'ready');
