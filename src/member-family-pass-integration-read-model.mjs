@@ -39,8 +39,8 @@ export function buildMemberFamilyPassIntegrationReadModel({
  if(count===null) return {status:'invalid_memory_count',read_ready:false};
  if(typeof entitlement_schema_applied!=='boolean') return {status:'entitlement_schema_evidence_required',read_ready:false};
  if(entitlement_schema_applied===false&&durable_black_entitlement===true) return {status:'durable_black_schema_conflict',read_ready:false};
- const pending=Number(review_pending_count);
- if(!Number.isInteger(pending)||pending<0) return {status:'invalid_review_count',read_ready:false};
+ const pending=scalarNonNegativeInteger(review_pending_count);
+ if(pending===null) return {status:'invalid_review_count',read_ready:false};
 
  const pass=computeCurrentFamilyPass(count,{
   durable_black_entitlement:durable_black_entitlement===true,
@@ -94,8 +94,8 @@ export function buildProspectMemberIntegrationReadModel({
  const PID=/^PID_[A-Za-z0-9_-]{22,}$/;
  const member=text(member_identity_id),prospect=text(prospect_id);
  if(!MID.test(member)||!PID.test(prospect)) return {status:'invalid_identity',read_ready:false};
- const pending=Number(review_pending_count);
- if(!Number.isInteger(pending)||pending<0) return {status:'invalid_review_count',read_ready:false};
+ const pending=scalarNonNegativeInteger(review_pending_count);
+ if(pending===null) return {status:'invalid_review_count',read_ready:false};
  return {
   status:'ready',
   member_identity_id:member,
