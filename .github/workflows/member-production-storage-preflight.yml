@@ -8,6 +8,8 @@ on:
       - 'tests/member-production-storage-preflight-contract.test.mjs'
       - 'docs/member-app/member-production-storage-preflight.md'
       - '.github/workflows/member-app-foundation.yml'
+      - 'src/production-index-crm-customer360-entry.js'
+      - 'src/member-production-storage-adapter.mjs'
   workflow_dispatch:
     inputs:
       expected_sha:
@@ -181,9 +183,15 @@ jobs:
           const fs=require('fs');
           const entry=fs.readFileSync('src/production-index-crm-customer360-entry.js','utf8');
           const cfg=JSON.parse(fs.readFileSync('wrangler.jsonc','utf8'));
+          const storageImport="import { createMemberPrivateMediaStorageAdapter } from './member-production-storage-adapter.mjs';";
+          const privateWiring='private_media_storage_adapter:createMemberPrivateMediaStorageAdapter(env?.MEMBER_PRIVATE_MEDIA_BUCKET)';
           if(!entry.includes('const MEMBER_PRODUCTION_OWNER_APPROVED=false;'))throw new Error('MEMBER_OWNER_FLAG_NOT_DEFAULT_OFF');
           if(!entry.includes('public_asset_adapter:null'))throw new Error('PUBLIC_ASSET_ADAPTER_NOT_DEFAULT_NULL');
-          if(!entry.includes('private_media_storage_adapter:null'))throw new Error('PRIVATE_MEDIA_ADAPTER_NOT_DEFAULT_NULL');
+          if(!entry.includes(storageImport))throw new Error('PRIVATE_MEDIA_ADAPTER_IMPORT_MISSING');
+          if(!entry.includes(privateWiring))throw new Error('PRIVATE_MEDIA_RUNTIME_WIRING_MISSING');
+          if(entry.includes('private_media_storage_adapter:null'))throw new Error('PRIVATE_MEDIA_RUNTIME_WIRING_REGRESSED_TO_NULL');
+          if(entry.includes('customer-crm-member-private-media'))throw new Error('PRIVATE_MEDIA_BUCKET_NAME_HARDCODED_IN_RUNTIME');
+          if((entry.match(/MEMBER_PRIVATE_MEDIA_BUCKET/g)||[]).length!==1)throw new Error('CANONICAL_PRIVATE_MEDIA_BINDING_REFERENCE_COUNT_INVALID');
           if(String(cfg?.vars?.MEMBER_PRODUCTION_ROUTE_MODE||'').trim().toLowerCase()==='enabled')throw new Error('MEMBER_PRODUCTION_ROUTE_MODE_ENABLED');
           if(String(cfg?.vars?.MEMBER_PRIVATE_MEDIA_CONTENT_ROUTE_MODE||'').trim().toLowerCase()==='enabled')throw new Error('PRIVATE_MEDIA_ROUTE_MODE_ENABLED');
           const bindings=Array.isArray(cfg?.r2_buckets)?cfg.r2_buckets:[];
@@ -199,6 +207,7 @@ jobs:
           console.log('MEMBER_CANONICAL_STORAGE_DEFAULT_OFF=PASS');
           console.log('CANONICAL_R2_BINDING_DECLARED=PASS');
           console.log('CANONICAL_R2_BINDING_EXACT=PASS');
+          console.log('PRIVATE_MEDIA_RUNTIME_WIRING=SOURCE_ONLY_PASS');
           console.log('PRODUCTION_STORAGE_FETCH=0');
           NODE
 
@@ -445,6 +454,7 @@ jobs:
             echo '- R2_AUTH_SECRET=CLOUDFLARE_R2_READ_API_TOKEN'
             echo '- R2_AUTH_EXPECTED_CREDENTIAL=Cloudflare REST API token (Bearer), not R2 S3 Access Key ID/Secret Access Key'
             echo '- PRODUCTION_STORAGE_BINDING_CHANGE=0'
+            echo '- PRIVATE_MEDIA_RUNTIME_WIRING=SOURCE_ONLY'
             echo '- PRODUCTION_STORAGE_FETCH=0'
             echo '- R2_OBJECT_READ=0'
             echo '- R2_WRITE=0'
