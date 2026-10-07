@@ -21,6 +21,7 @@ export function evaluateMemberStackReadiness(rows=[]){
   if(!Number.isInteger(row.unresolved_review_threads)||row.unresolved_review_threads!==0) failures.push({pr:expected.pr,reason:'unresolved_or_unknown_review_threads'});
   if(row.required_checks_passed!==true) failures.push({pr:expected.pr,reason:'required_checks_not_proven'});
   if(row.changed_files_expected!==true) failures.push({pr:expected.pr,reason:'changed_files_not_proven'});
+  if(row.parent_head_in_ancestry!==true) failures.push({pr:expected.pr,reason:'parent_head_ancestry_not_proven'});
  }
  return {
   status:failures.length?'blocked':'source_ready',
