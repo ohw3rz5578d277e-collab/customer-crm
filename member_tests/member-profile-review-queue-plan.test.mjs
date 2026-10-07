@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import {planProfileReview,planReviewDecision} from '../src/member-profile-review-queue-plan.mjs';
+import {planProfileReview,planReviewDecision,reviewPayloadDigest} from '../src/member-profile-review-queue-plan.mjs';
 
 const r=planProfileReview({reason_code:'identity_mismatch',member_identity_id:'MID_example',claimed_customer_id:'12345678',submitted_profile:{name:'Test'}});
 assert.equal(r.status,'review_required');
@@ -8,10 +8,18 @@ assert.equal(r.master_write_allowed,false);
 assert.equal(r.queue_write_allowed,false);
 assert.equal(r.admin_decision_required,true);
 assert.match(r.payload_digest_sha256,/^[0-9a-f]{64}$/);
+assert.equal(
+ reviewPayloadDigest({address:{city:'Osaka',zip:'000'},name:'A'}),
+ reviewPayloadDigest({name:'A',address:{zip:'000',city:'Osaka'}})
+);
 
 assert.equal(planProfileReview({reason_code:'unknown',member_identity_id:'MID_example'}).status,'invalid_reason');
 
 let d=planReviewDecision({review_status:'pending',decision:'approve'});
+assert.equal(d.status,'reverification_required');
+assert.equal(d.master_write_allowed,false);
+
+d=planReviewDecision({review_status:'pending',decision:'approve',identity_reverified:'false',latest_version_verified:'false'});
 assert.equal(d.status,'reverification_required');
 assert.equal(d.master_write_allowed,false);
 
