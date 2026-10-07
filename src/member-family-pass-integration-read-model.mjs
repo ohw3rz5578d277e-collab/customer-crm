@@ -24,6 +24,7 @@ export function buildMemberFamilyPassIntegrationReadModel({
  durable_black_entitlement=false,
  entitlement_schema_applied,
  black_achieved_at='',
+ durable_black_qualifying_memory_count,
  consent_current=false,
  signup_benefit_state='none',
  acquisition_source='unknown',
@@ -39,11 +40,18 @@ export function buildMemberFamilyPassIntegrationReadModel({
  if(count===null) return {status:'invalid_memory_count',read_ready:false};
  if(typeof entitlement_schema_applied!=='boolean') return {status:'entitlement_schema_evidence_required',read_ready:false};
  if(entitlement_schema_applied===false&&durable_black_entitlement===true) return {status:'durable_black_schema_conflict',read_ready:false};
+ let durableBlack=false;
+ if(durable_black_entitlement===true){
+  const achievedAt=text(black_achieved_at);
+  const qualifyingCount=scalarNonNegativeInteger(durable_black_qualifying_memory_count);
+  if(!achievedAt||qualifyingCount===null||qualifyingCount<10) return {status:'invalid_durable_black_evidence',read_ready:false};
+  durableBlack=true;
+ }
  const pending=scalarNonNegativeInteger(review_pending_count);
  if(pending===null) return {status:'invalid_review_count',read_ready:false};
 
  const pass=computeCurrentFamilyPass(count,{
-  durable_black_entitlement:durable_black_entitlement===true,
+  durable_black_entitlement:durableBlack,
   entitlement_schema_applied,
   black_achieved_at:text(black_achieved_at)
  });
