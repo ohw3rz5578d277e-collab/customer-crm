@@ -12,7 +12,7 @@ A backup must be a physically/logically separate, access-restricted Drive artifa
 
 ## Backup scope
 
-A versioned snapshot may include the minimum approved durable records needed to reconstruct:
+Every full recovery snapshot must include all mandatory reconstructable datasets:
 
 - Customer Master
 - Customer History
@@ -21,6 +21,8 @@ A versioned snapshot may include the minimum approved durable records needed to 
 - consent evidence
 - promotion/link audit metadata
 - synchronization version/event metadata
+
+A future partial/export snapshot must be explicitly typed as non-recovery and can never replace the last verified full recovery backup.
 
 Authentication secrets, session tokens, invitation raw tokens, HMAC secrets, service-account credentials, and unrelated runtime secrets must never be exported.
 
@@ -33,6 +35,7 @@ Each snapshot requires:
 - source logical version/watermark
 - record counts by logical dataset
 - deterministic manifest digest
+- cryptographic content digest for every mandatory dataset/artifact
 - previous backup reference when available
 - completion status
 
@@ -42,11 +45,13 @@ A snapshot is not considered valid until the artifact and manifest are both dura
 
 Verification is read-only and must check:
 
-- expected logical datasets are present
+- every mandatory full-recovery dataset is present
 - manifest digest matches
+- each dataset/artifact content digest is recomputed from stored snapshot bytes/records and matches the manifest
 - record counts match the manifest
 - snapshot is readable by the backup service identity
-- snapshot is not publicly shared
+- permissions exactly satisfy an explicit least-privilege allowlist
+- public, link-wide, Workspace-domain-wide, and unauthorized user/group permissions are rejected
 - no forbidden secret classes are present
 
 A failed verification must not delete or replace the last verified backup.
