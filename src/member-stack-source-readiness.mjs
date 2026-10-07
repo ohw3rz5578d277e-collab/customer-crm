@@ -6,8 +6,8 @@ export const MEMBER_STACK_EXPECTED=[
  {pr:207,head:'d45c97cc650c70551cc4aec58d14bc15f821aa13'},
  {pr:208,head:'784d99df5ba42eba9c7e3f774f0c46ea9f574ab1'},
  {pr:209,head:'1d2c76dff0705adf0239787ca683a4d62cebccbc'},
- {pr:210,head:'14ab11a77b1b53da081d98e5cb7e3804a94aa6e6'},
- {pr:211,head:'20b180eec06fc48edf35b08838168d410ea39df1'}
+ {pr:210,head:'8c2cdabbb44717c7bf0fe79cefd2ca1d310c1b28'},
+ {pr:211,head:'f510eca28b184c8b166cf13fd3618d3b3357b805'}
 ];
 
 export function evaluateMemberStackReadiness(rows=[]){
@@ -18,7 +18,9 @@ export function evaluateMemberStackReadiness(rows=[]){
   if(!row){failures.push({pr:expected.pr,reason:'missing_pr_evidence'});continue;}
   if(row.head!==expected.head) failures.push({pr:expected.pr,reason:'head_drift'});
   if(row.mergeable!==true) failures.push({pr:expected.pr,reason:'not_mergeable'});
-  if(Number(row.unresolved_review_threads)!==0) failures.push({pr:expected.pr,reason:'unresolved_review_threads'});
+  if(!Number.isInteger(row.unresolved_review_threads)||row.unresolved_review_threads!==0) failures.push({pr:expected.pr,reason:'unresolved_or_unknown_review_threads'});
+  if(row.required_checks_passed!==true) failures.push({pr:expected.pr,reason:'required_checks_not_proven'});
+  if(row.changed_files_expected!==true) failures.push({pr:expected.pr,reason:'changed_files_not_proven'});
  }
  return {
   status:failures.length?'blocked':'source_ready',
