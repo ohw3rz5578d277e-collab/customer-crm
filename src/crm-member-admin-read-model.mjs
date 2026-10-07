@@ -1,4 +1,12 @@
 const text=v=>v==null?'':String(v).trim();
+const scalarNonNegativeInteger=v=>{
+ if(typeof v==='number') return Number.isSafeInteger(v)&&v>=0?v:null;
+ if(typeof v==='string'&&/^(?:0|[1-9]\d*)$/.test(v.trim())){
+  const n=Number(v.trim());
+  return Number.isSafeInteger(n)&&n>=0?n:null;
+ }
+ return null;
+};
 
 export function buildMemberAdminReadModel({
  subject_type,
@@ -19,8 +27,8 @@ export function buildMemberAdminReadModel({
  if(type==='customer'&&!/^\d{8}$/.test(text(canonical_customer_id))) return {status:'invalid_customer_id',read_ready:false};
  if(type==='prospect'&&!/^PID_[A-Za-z0-9_-]{22,}$/.test(text(prospect_id))) return {status:'invalid_prospect_id',read_ready:false};
  if(type==='prospect'&&!/^MID_[A-Za-z0-9_-]{22,}$/.test(text(member_identity_id))) return {status:'invalid_member_identity',read_ready:false};
- const pending=Number(review_pending_count);
- if(!Number.isInteger(pending)||pending<0) return {status:'invalid_review_count',read_ready:false};
+ const pending=scalarNonNegativeInteger(review_pending_count);
+ if(pending===null) return {status:'invalid_review_count',read_ready:false};
  return {
   status:'ready',
   subject_type:type,
