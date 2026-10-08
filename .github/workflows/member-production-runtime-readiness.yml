@@ -17,10 +17,15 @@ on:
         description: Exact current main SHA authorized for read-only Member Production runtime readiness
         required: true
         type: string
+      owner_comment_id:
+        description: Exact Issue #26 Owner authorization comment ID
+        required: true
+        type: string
 
 permissions:
   contents: read
   actions: read
+  issues: read
 
 concurrency:
   group: ${{ github.event_name == 'workflow_dispatch' && 'member-production-runtime-readiness' || format('member-runtime-readiness-pr-{0}', github.event.pull_request.number) }}
@@ -59,16 +64,68 @@ jobs:
     timeout-minutes: 20
     env:
       EXPECTED_SHA_RAW: ${{ inputs.expected_sha }}
+      OWNER_COMMENT_ID_RAW: ${{ inputs.owner_comment_id }}
     steps:
-      - name: Normalize exact authorized SHA
+      - name: Verify bridge-only dispatch actor
+        shell: bash
+        env:
+          ACTOR: ${{ github.actor }}
+          TRIGGERING_ACTOR: ${{ github.triggering_actor }}
+        run: |
+          set -euo pipefail
+          test "$ACTOR" = 'github-actions[bot]' || { echo "::error::DIRECT_RUNTIME_READINESS_DISPATCH_FORBIDDEN actor=$ACTOR"; exit 1; }
+          test "$TRIGGERING_ACTOR" = 'github-actions[bot]' || { echo "::error::DIRECT_RUNTIME_READINESS_TRIGGER_FORBIDDEN actor=$TRIGGERING_ACTOR"; exit 1; }
+          echo 'MEMBER_RUNTIME_READINESS_BRIDGE_ACTOR=PASS'
+
+      - name: Normalize exact authorized SHA and Owner comment
         id: auth
         shell: bash
         run: |
           set -euo pipefail
           expected_sha="$(printf '%s' "$EXPECTED_SHA_RAW" | tr '[:upper:]' '[:lower:]')"
+          owner_comment_id="$OWNER_COMMENT_ID_RAW"
           [[ "$expected_sha" =~ ^[0-9a-f]{40}$ ]] || { echo '::error::INVALID_EXPECTED_SHA'; exit 1; }
+          [[ "$owner_comment_id" =~ ^[0-9]+$ ]] || { echo '::error::INVALID_OWNER_COMMENT_ID'; exit 1; }
           echo "expected_sha=$expected_sha" >> "$GITHUB_OUTPUT"
+          echo "owner_comment_id=$owner_comment_id" >> "$GITHUB_OUTPUT"
           echo "MEMBER_RUNTIME_READINESS_AUTHORIZED_SHA=$expected_sha"
+          echo "MEMBER_RUNTIME_READINESS_OWNER_COMMENT_ID=$owner_comment_id"
+
+      - name: Verify exact Issue #26 Owner authorization receipt
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_SHA: ${{ steps.auth.outputs.expected_sha }}
+          OWNER_COMMENT_ID: ${{ steps.auth.outputs.owner_comment_id }}
+        run: |
+          set -euo pipefail
+          response=/tmp/member-runtime-readiness-owner-receipt.json
+          cleanup(){ rm -f "$response"; }
+          trap cleanup EXIT
+          code="$(
+            curl --silent --show-error \
+              --output "$response" \
+              --write-out '%{http_code}' \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H 'Accept: application/vnd.github+json' \
+              -H 'X-GitHub-Api-Version: 2022-11-28' \
+              "https://api.github.com/repos/${GITHUB_REPOSITORY}/issues/comments/$OWNER_COMMENT_ID"
+          )"
+          test "$code" = '200' || { echo "::error::OWNER_RECEIPT_COMMENT_HTTP_$code"; exit 1; }
+          EXPECTED_BODY="/member-runtime-readiness sha=$EXPECTED_SHA" OWNER_COMMENT_ID="$OWNER_COMMENT_ID" node - "$response" <<'NODE'
+          const fs=require('fs');
+          const p=JSON.parse(fs.readFileSync(process.argv[2],'utf8'));
+          if(String(p?.id||'')!==process.env.OWNER_COMMENT_ID)throw new Error('OWNER_RECEIPT_COMMENT_ID_MISMATCH');
+          if(String(p?.user?.login||'')!=='ohw3rz5578d277e-collab')throw new Error('OWNER_RECEIPT_AUTHOR_MISMATCH');
+          const expectedIssue=`https://api.github.com/repos/${process.env.GITHUB_REPOSITORY}/issues/26`;
+          if(String(p?.issue_url||'')!==expectedIssue)throw new Error('OWNER_RECEIPT_NOT_ISSUE_26');
+          if(String(p?.body||'')!==process.env.EXPECTED_BODY)throw new Error('OWNER_RECEIPT_BODY_MISMATCH');
+          console.log('ISSUE_26_OWNER_AUTHORIZATION_RECEIPT=PASS');
+          console.log(`SOURCE_AUTHORIZATION_COMMENT_ID=${process.env.OWNER_COMMENT_ID}`);
+          console.log('OWNER_RECEIPT_BODY_PRINTED=NO');
+          NODE
+          cleanup
+          trap - EXIT
 
       - name: Checkout exact authorized SHA
         uses: actions/checkout@v4
