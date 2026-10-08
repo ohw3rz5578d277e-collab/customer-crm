@@ -24,6 +24,7 @@ export function buildMemberFamilyPassIntegrationReadModel({
  persisted_member_customer_id='',
  member_status,
  published_non_deleted_memory_count,
+ persisted_memory_count_family_id='',
  durable_black_entitlement,
  entitlement_schema_applied,
  black_achieved_at='',
@@ -38,6 +39,7 @@ export function buildMemberFamilyPassIntegrationReadModel({
  if(member_customer_binding_verified!==true||text(persisted_member_identity_id)!==member||text(persisted_member_customer_id)!==customer) return {status:'member_customer_binding_not_verified',read_ready:false};
  if(!['active','customer'].includes(text(member_status))) return {status:'member_status_not_eligible',read_ready:false};
  if(family_link_verified!==true||text(persisted_verified_family_id)!==family||text(persisted_family_customer_id)!==customer) return {status:'family_link_not_verified',read_ready:false};
+ if(text(persisted_memory_count_family_id)!==family) return {status:'memory_count_family_not_verified',read_ready:false};
  if(published_non_deleted_memory_count===undefined||published_non_deleted_memory_count===null||typeof published_non_deleted_memory_count==='boolean'||String(published_non_deleted_memory_count).trim()==='') return {status:'missing_memory_count_evidence',read_ready:false};
  const count=scalarNonNegativeInteger(published_non_deleted_memory_count);
  if(count===null) return {status:'invalid_memory_count',read_ready:false};
