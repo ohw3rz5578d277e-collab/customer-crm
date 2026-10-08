@@ -21,7 +21,11 @@ assert.ok(workflow.includes("MEMBER_PRIVATE_MEDIA_BUCKET"));
 assert.ok(workflow.includes("customer-crm-member-private-media"));
 assert.doesNotMatch(workflow,/CANONICAL_R2_BINDING_ALREADY_DECLARED/);
 assert.ok(workflow.includes("public_asset_adapter:null"));
-assert.ok(workflow.includes("private_media_storage_adapter:null"));
+assert.ok(workflow.includes("createMemberPrivateMediaStorageAdapter"));
+assert.ok(workflow.includes("env?.MEMBER_PRIVATE_MEDIA_BUCKET"));
+assert.ok(workflow.includes("private_media_storage_adapter:privateMediaStorageAdapter"));
+assert.ok(workflow.includes("PRIVATE_MEDIA_ADAPTER_SOURCE_WIRED=PASS"));
+assert.doesNotMatch(workflow,/private_media_storage_adapter:null/);
 assert.ok(workflow.includes("MEMBER_PRODUCTION_ROUTE_MODE_ENABLED"));
 assert.ok(workflow.includes("PRIVATE_MEDIA_ROUTE_MODE_ENABLED"));
 assert.ok(workflow.includes('wrangler@4.131.2'));
@@ -70,13 +74,11 @@ assert.ok(workflow.includes('R2_BUCKET_INVENTORY_PAGINATION_UNSUPPORTED'));
 assert.ok(workflow.includes('cleanup(){ rm -f /tmp/member-storage-r2-buckets-*.json; }'));
 assert.ok(workflow.includes('trap cleanup EXIT'));
 
-// Never silently expand or normalize an Owner-approved subset.
 assert.doesNotMatch(workflow,/jurisdictions=\(default eu us fedramp fedramp-high\)/);
 assert.doesNotMatch(workflow,/const jurisdictions=\['default','eu','us','fedramp','fedramp-high'\]/);
 assert.doesNotMatch(workflow,/R2_JURISDICTIONS_SCANNED=default,eu,us,fedramp,fedramp-high/);
 assert.doesNotMatch(workflow,/jurisdictions="\$\(printf '%s' "\$JURISDICTIONS_RAW" \| tr '\[:upper:\]' '\[:lower:\]'\)"/);
 
-// Both R2 auth and explicitly scoped inventory shells must be syntax-checked by PR CI.
 assert.ok(workflow.includes('- name: Verify R2 auth and inventory shell syntax'));
 assert.ok(workflow.includes('Read\\ Owner-authorized\\ R2\\ jurisdiction\\ inventory\\ without\\ object\\ access'));
 assert.ok(workflow.includes('MEMBER_STORAGE_PREFLIGHT_R2_SHELL_SYNTAX=PASS'));
@@ -85,8 +87,6 @@ assert.ok(workflow.includes('bash -n /tmp/member-storage-r2-step-1.sh'));
 assert.doesNotMatch(workflow,/error_codes="\$\(node - "\$response_file" <<'NODE'/);
 assert.ok(workflow.includes("error_codes=\"$(node -e 'const fs=require(\"fs\");"));
 
-// R2 inventory must use a dedicated least-privilege Cloudflare REST API token,
-// never the Worker-management token or R2 S3 credentials.
 assert.ok(workflow.includes('- name: Verify dedicated R2 REST API token'));
 assert.ok(workflow.includes('CLOUDFLARE_R2_READ_API_TOKEN: ${{ secrets.CLOUDFLARE_R2_READ_API_TOKEN }}'));
 assert.ok(workflow.includes('CLOUDFLARE_R2_READ_API_TOKEN_MISSING'));
@@ -115,13 +115,11 @@ const inventoryStep=workflow.slice(
 );
 assert.doesNotMatch(inventoryStep,/Authorization: Bearer \$CLOUDFLARE_API_TOKEN/);
 
-// Failure diagnostics expose Cloudflare numeric error codes only; no response messages/body are printed.
 assert.ok(workflow.includes('CF_CODES_${error_codes}'));
 assert.ok(workflow.includes('value?.code'));
 assert.doesNotMatch(workflow,/console\.log\([^\n]*payload\?\.errors[^\n]*message/);
 assert.doesNotMatch(workflow,/cat\s+[^\n]*(r2-token-verify|r2-buckets)/i);
 
-// Postflight Worker/main drift verification must still execute after an R2 auth or inventory failure.
 assert.ok(workflow.includes("if: ${{ always() && steps.active_before.outcome == 'success' }}"));
 assert.ok(workflow.includes("R2_AUTH_OUTCOME: ${{ steps.r2_auth.outcome }}"));
 assert.ok(workflow.includes("INVENTORY_OUTCOME: ${{ steps.inventory.outcome }}"));
