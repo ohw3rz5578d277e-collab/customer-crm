@@ -18,12 +18,13 @@ export function buildMemberFamilyPassIntegrationReadModel({
  family_id,
  family_link_verified=false,
  persisted_verified_family_id='',
+ persisted_family_customer_id='',
  member_customer_binding_verified=false,
  persisted_member_identity_id='',
  persisted_member_customer_id='',
  member_status,
  published_non_deleted_memory_count,
- durable_black_entitlement=false,
+ durable_black_entitlement,
  entitlement_schema_applied,
  black_achieved_at='',
  durable_black_qualifying_memory_count,
@@ -36,11 +37,12 @@ export function buildMemberFamilyPassIntegrationReadModel({
  if(!MID.test(member)||!CID.test(customer)||!family) return {status:'invalid_identity',read_ready:false};
  if(member_customer_binding_verified!==true||text(persisted_member_identity_id)!==member||text(persisted_member_customer_id)!==customer) return {status:'member_customer_binding_not_verified',read_ready:false};
  if(!['active','customer'].includes(text(member_status))) return {status:'member_status_not_eligible',read_ready:false};
- if(family_link_verified!==true||text(persisted_verified_family_id)!==family) return {status:'family_link_not_verified',read_ready:false};
+ if(family_link_verified!==true||text(persisted_verified_family_id)!==family||text(persisted_family_customer_id)!==customer) return {status:'family_link_not_verified',read_ready:false};
  if(published_non_deleted_memory_count===undefined||published_non_deleted_memory_count===null||typeof published_non_deleted_memory_count==='boolean'||String(published_non_deleted_memory_count).trim()==='') return {status:'missing_memory_count_evidence',read_ready:false};
  const count=scalarNonNegativeInteger(published_non_deleted_memory_count);
  if(count===null) return {status:'invalid_memory_count',read_ready:false};
  if(typeof entitlement_schema_applied!=='boolean') return {status:'entitlement_schema_evidence_required',read_ready:false};
+ if(typeof durable_black_entitlement!=='boolean') return {status:'durable_black_evidence_required',read_ready:false};
  if(entitlement_schema_applied===false&&durable_black_entitlement===true) return {status:'durable_black_schema_conflict',read_ready:false};
  let durableBlack=false;
  if(durable_black_entitlement===true){
