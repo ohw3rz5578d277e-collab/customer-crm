@@ -24,7 +24,13 @@ export function planSignupBenefitIssue({
  persisted_prospect_id='',
  persisted_member_identity_id='',
  member_prospect_binding_verified=false,
+ registration_completion_binding_verified=false,
+ persisted_registration_member_identity_id='',
+ persisted_registration_prospect_id='',
  consent_current=false,
+ consent_binding_verified=false,
+ persisted_consent_member_identity_id='',
+ persisted_consent_prospect_id='',
  existing_signup_benefit_count,
  persisted_benefit_count_member_identity_id='',
  persisted_benefit_count_prospect_id=''
@@ -32,6 +38,8 @@ export function planSignupBenefitIssue({
  const member=text(member_identity_id),prospect=text(prospect_id);
  if(!MID.test(member)||!PID.test(prospect)) return {status:'invalid_identity',issue_allowed:false};
  if(member_prospect_binding_verified!==true||text(persisted_prospect_id)!==prospect||text(persisted_member_identity_id)!==member) return {status:'member_prospect_binding_not_verified',issue_allowed:false};
+ if(registration_completion_binding_verified!==true||text(persisted_registration_member_identity_id)!==member||text(persisted_registration_prospect_id)!==prospect) return {status:'registration_completion_binding_not_verified',issue_allowed:false};
+ if(consent_binding_verified!==true||text(persisted_consent_member_identity_id)!==member||text(persisted_consent_prospect_id)!==prospect) return {status:'consent_binding_not_verified',issue_allowed:false};
  if(registration_completed!==true||consent_current!==true) return {status:'registration_not_complete',issue_allowed:false};
  if(existing_signup_benefit_count===undefined||existing_signup_benefit_count===null||typeof existing_signup_benefit_count==='boolean'||String(existing_signup_benefit_count).trim()==='') return {status:'missing_existing_benefit_evidence',issue_allowed:false};
  if(text(persisted_benefit_count_member_identity_id)!==member||text(persisted_benefit_count_prospect_id)!==prospect) return {status:'benefit_count_binding_not_verified',issue_allowed:false};
