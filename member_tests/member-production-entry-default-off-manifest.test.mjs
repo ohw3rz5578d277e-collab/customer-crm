@@ -33,6 +33,10 @@ pass('current source wires private adapter explicitly',manifest.candidate.privat
 pass('current source preserves callback and CRM ordering safety',manifest.candidate.inspection.exact_callback_get_only===true&&manifest.candidate.inspection.callback_exception_owner_and_mode_gated===true&&manifest.candidate.inspection.dispatch_after_boundary_before_crm===true&&manifest.candidate.inspection.existing_crm_dispatch_preserved===true);
 pass('canonical source state stays default-off with storage fetch zero',manifest.canonical_source_state.default_off_wiring_applied===true&&manifest.canonical_source_state.private_media_source_wiring_applied===true&&manifest.canonical_source_state.production_storage_fetch===false&&manifest.canonical_source_state.production_runtime_deployed===false&&manifest.canonical_source_state.production_route_activated===false);
 
+const generatedCandidateState=__test.commonResult({observedMain:freshMain,entryBlob:__test.PRE_WIRING_ENTRY_BLOB_SHA,inspection:{candidate:true},source:'generated-candidate',status:'candidate_ready',canonicalWiringApplied:false,entryPatchRequired:true});
+pass('generated candidate never claims canonical wiring already applied',generatedCandidateState.status==='candidate_ready'&&generatedCandidateState.canonical_source_state.default_off_wiring_applied===false&&generatedCandidateState.canonical_source_state.private_media_source_wiring_applied===false);
+pass('generated candidate explicitly requires entry patch before canonical source can advance',generatedCandidateState.future_patch_contract.entry_patch_required===true);
+
 const missingMain=buildMemberProductionEntryDefaultOffManifest({production_entry_source:source,base_entry_blob_sha:actualBlob,expected_entry_blob_sha:actualBlob});
 pass('missing fresh current main fails closed',missingMain.status==='current_main_sha_required');
 const wrongMain=buildMemberProductionEntryDefaultOffManifest({production_entry_source:source,observed_current_main_sha:freshMain,expected_current_main_sha:'0000000000000000000000000000000000000000',base_entry_blob_sha:actualBlob,expected_entry_blob_sha:actualBlob});
