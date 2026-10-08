@@ -3,7 +3,7 @@ import {planProspectCustomerPromotion} from '../src/member-prospect-customer-pro
 const base={
  prospect_id:'PID_abcdefghijklmnopqrstuvwxyz123456',member_identity_id:'MID_abcdefghijklmnopqrstuvwxyz123456',
  persisted_prospect_id:'PID_abcdefghijklmnopqrstuvwxyz123456',persisted_member_identity_id:'MID_abcdefghijklmnopqrstuvwxyz123456',
- canonical_customer_id:'12345678',customer_id_source:'customer_crm',existing_customer_member_binding_count:0,
+ canonical_customer_id:'12345678',customer_id_source:'customer_crm',existing_customer_member_binding_count:0,persisted_binding_count_customer_id:'12345678',
  prospect_status:'prospect',consent_history_preserved:true,acquisition_history_preserved:true,benefit_state_preserved:true
 };
 let p=planProspectCustomerPromotion(base);
@@ -15,6 +15,7 @@ assert.equal(p.automatic_merge,false);
 assert.equal(p.promotion_allowed,false);
 assert.equal(planProspectCustomerPromotion({...base,customer_id_source:'member'}).status,'invalid_customer_id_source');
 assert.equal(planProspectCustomerPromotion({...base,persisted_member_identity_id:'MID_zyxwvutsrqponmlkjihgfedcba654321'}).status,'binding_mismatch');
+assert.equal(planProspectCustomerPromotion({...base,persisted_binding_count_customer_id:'87654321'}).status,'binding_count_customer_not_verified');
 assert.equal(planProspectCustomerPromotion({...base,existing_customer_member_binding_count:1}).status,'customer_binding_collision');
 assert.equal(planProspectCustomerPromotion({...base,benefit_state_preserved:'true'}).status,'continuity_not_verified');
 const {existing_customer_member_binding_count,...missingCount}=base;
