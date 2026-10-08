@@ -14,6 +14,21 @@ const planTransition=(args={})=>planSignupBenefitTransition({
  persisted_entitlement_state:args.current_state,
  ...args
 });
+const planReservedTransition=(args={})=>{
+ const customer=args.canonical_customer_id??'12345678';
+ const reservation=args.reservation_id??'R-RESERVE';
+ const auth=args.authenticated_member_identity_id??args.entitlement_member_identity_id;
+ return planTransition({
+  authenticated_member_identity_id:auth,
+  canonical_customer_id:customer,
+  reservation_id:reservation,
+  reservation_context_binding_verified:true,
+  persisted_reservation_context_member_identity_id:auth,
+  persisted_reservation_context_customer_id:customer,
+  persisted_reservation_context_reservation_id:reservation,
+  ...args
+ });
+};
 const planUsedTransition=(args={})=>planTransition({
  persisted_redemption_entitlement_id:entitlement,
  redemption_context_binding_verified:true,
@@ -69,6 +84,14 @@ assert.equal(planTransition({current_state:'issued',target_state:'available',ent
 assert.equal(planTransition({current_state:'reserved',target_state:'available',entitlement_member_identity_id:member}).status,'ready');
 assert.equal(planTransition({current_state:'available',target_state:'reserved',entitlement_member_identity_id:member,persisted_entitlement_member_identity_id:otherMember}).status,'entitlement_member_binding_not_verified');
 assert.equal(planTransition({current_state:'reserved',target_state:'revoked',entitlement_member_identity_id:member,persisted_entitlement_member_identity_id:otherMember}).status,'entitlement_member_binding_not_verified');
+assert.equal(planTransition({current_state:'available',target_state:'reserved',entitlement_member_identity_id:member,authenticated_member_identity_id:member}).status,'reservation_context_required');
+p=planReservedTransition({current_state:'available',target_state:'reserved',entitlement_member_identity_id:member});
+assert.equal(p.status,'ready');
+assert.equal(p.canonical_customer_id,'12345678');
+assert.equal(p.reservation_id,'R-RESERVE');
+assert.equal(planReservedTransition({current_state:'available',target_state:'reserved',entitlement_member_identity_id:member,persisted_reservation_context_customer_id:'87654321'}).status,'reservation_context_binding_not_verified');
+assert.equal(planReservedTransition({current_state:'available',target_state:'reserved',entitlement_member_identity_id:member,persisted_reservation_context_reservation_id:'R-OTHER'}).status,'reservation_context_binding_not_verified');
+assert.equal(planReservedTransition({current_state:'available',target_state:'reserved',entitlement_member_identity_id:member,authenticated_member_identity_id:otherMember}).status,'member_identity_mismatch');
 
 p=planCarryForward({member_identity_id:member,prospect_id:prospect,canonical_customer_id:'12345678',current_state:'available',persisted_member_identity_id:member,persisted_prospect_id:prospect,persisted_canonical_customer_id:'12345678',promotion_verified:true});
 assert.equal(p.status,'ready');
