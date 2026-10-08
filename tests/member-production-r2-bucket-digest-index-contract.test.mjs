@@ -51,7 +51,11 @@ pass('canonical binding name locked',workflow.includes("binding.binding!=='MEMBE
 pass('canonical bucket name locked',workflow.includes("binding.bucket_name!=='customer-crm-member-private-media'"));
 pass('legacy binding absence guard removed',!workflow.includes('CANONICAL_R2_BINDING_ALREADY_DECLARED')&&!workflow.includes('CANONICAL_R2_BINDING_DECLARED=NO'));
 pass('null public adapter preserved',workflow.includes('public_asset_adapter:null'));
-pass('null private adapter preserved',workflow.includes('private_media_storage_adapter:null'));
+pass('private adapter import is required',workflow.includes("createMemberPrivateMediaStorageAdapter"));
+pass('private adapter construction uses canonical binding',workflow.includes('env?.MEMBER_PRIVATE_MEDIA_BUCKET'));
+pass('private adapter is explicitly passed',workflow.includes('private_media_storage_adapter:privateMediaStorageAdapter'));
+pass('private adapter source-wired marker emitted',workflow.includes('PRIVATE_MEDIA_ADAPTER_SOURCE_WIRED=PASS'));
+pass('legacy null private adapter guard removed',!workflow.includes('private_media_storage_adapter:null'));
 pass('member route remains fail-closed',workflow.includes('MEMBER_PRODUCTION_ROUTE_MODE_ENABLED'));
 pass('private media route remains fail-closed',workflow.includes('PRIVATE_MEDIA_ROUTE_MODE_ENABLED'));
 pass('pagination fails closed',workflow.includes('R2_BUCKET_DIGEST_INDEX_PAGINATION_UNSUPPORTED'));
