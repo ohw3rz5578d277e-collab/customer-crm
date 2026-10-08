@@ -8,6 +8,19 @@ assert.match(workflow,/workflow_dispatch:\s*\n\s*inputs:\s*\n\s*expected_sha:/);
 assert.ok(workflow.includes('Checkout exact authorized SHA'));
 assert.ok(workflow.includes('git ls-remote origin refs/heads/main'));
 assert.ok(workflow.includes('MAIN_DRIFT current=$current_main expected=$EXPECTED_SHA'));
+
+const step9Command='node member_tests/member-runtime-step9-final-gate.test.mjs';
+const step9Index=workflow.indexOf(step9Command);
+const deployReceiptIndex=workflow.indexOf('Snapshot canonical Production deploy receipt');
+const cloudflareAuthIndex=workflow.indexOf('Confirm Cloudflare authentication');
+assert.ok(step9Index>=0,'Step 9 final gate must be required by runtime readiness');
+assert.ok(workflow.includes('MEMBER_BACKEND_STEPS_1_9_FINAL_GATE=PASS'));
+assert.ok(workflow.includes('PRODUCTION_OPERATION=0'));
+assert.ok(deployReceiptIndex>step9Index,'Step 9 final gate must run before Production deploy-receipt observation');
+assert.ok(cloudflareAuthIndex>step9Index,'Step 9 final gate must run before Cloudflare Production observation');
+assert.ok(workflow.includes("'member_tests/member-runtime-step9-final-gate.test.mjs'"));
+assert.ok(workflow.includes("'docs/member-app/member-runtime-step9-final-gate-20261009.md'"));
+
 assert.ok(workflow.includes('const MEMBER_PRODUCTION_OWNER_APPROVED=false;'));
 assert.ok(workflow.includes('MEMBER_PRODUCTION_ROUTE_MODE_MUST_REMAIN_OFF_DURING_READINESS'));
 assert.ok(workflow.includes('PRIVATE_MEDIA_ROUTE_MODE_MUST_REMAIN_OFF_DURING_READINESS'));
@@ -63,5 +76,6 @@ assert.ok(bridge.includes('PRODUCTION_DEPLOY=0'));
 assert.doesNotMatch(bridge,/deploy-cloudflare\.yml\/dispatches/);
 
 console.log('MEMBER_PRODUCTION_RUNTIME_READINESS_CONTRACT=PASS');
+console.log('MEMBER_PRODUCTION_RUNTIME_READINESS_STEP9_PREREQUISITE=PASS');
 console.log('MEMBER_PRODUCTION_RUNTIME_READINESS_READ_ONLY=PASS');
 console.log('MEMBER_PRODUCTION_RUNTIME_READINESS_OWNER_GATE=PASS');
