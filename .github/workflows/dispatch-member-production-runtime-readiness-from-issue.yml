@@ -31,17 +31,26 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           COMMAND_BODY: ${{ github.event.comment.body }}
+          OWNER_COMMENT_ID: ${{ github.event.comment.id }}
         run: |
           set -euo pipefail
           command_re='^/member-runtime-readiness sha=([0-9a-f]{40})$'
           [[ "$COMMAND_BODY" =~ $command_re ]] || { echo '::error::INVALID_MEMBER_RUNTIME_READINESS_COMMAND'; exit 1; }
+          [[ "$OWNER_COMMENT_ID" =~ ^[0-9]+$ ]] || { echo '::error::INVALID_OWNER_COMMENT_ID'; exit 1; }
           expected_sha="${BASH_REMATCH[1]}"
           current_sha="$(
-            curl --fail --silent --show-error               -H "Authorization: Bearer $GH_TOKEN"               -H 'Accept: application/vnd.github+json'               -H 'X-GitHub-Api-Version: 2022-11-28'               "https://api.github.com/repos/${GITHUB_REPOSITORY}/commits/main"             | python3 -c 'import json,sys; print(json.load(sys.stdin)["sha"])'
+            curl --fail --silent --show-error \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H 'Accept: application/vnd.github+json' \
+              -H 'X-GitHub-Api-Version: 2022-11-28' \
+              "https://api.github.com/repos/${GITHUB_REPOSITORY}/commits/main" \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin)["sha"])'
           )"
           test "$current_sha" = "$expected_sha" || { echo "::error::MAIN_DRIFT expected=$expected_sha current=$current_sha"; exit 1; }
           echo "expected_sha=$expected_sha" >> "$GITHUB_OUTPUT"
+          echo "owner_comment_id=$OWNER_COMMENT_ID" >> "$GITHUB_OUTPUT"
           echo "MEMBER_RUNTIME_READINESS_AUTHORIZED_SHA=$expected_sha"
+          echo "MEMBER_RUNTIME_READINESS_OWNER_COMMENT_ID=$OWNER_COMMENT_ID"
           echo 'PRODUCTION_WRITE=0'
           echo 'PRODUCTION_DEPLOY=0'
 
@@ -54,7 +63,12 @@ jobs:
           for workflow in deploy-cloudflare.yml member-production-runtime-readiness.yml; do
             for status in queued in_progress; do
               count="$(
-                curl --fail --silent --show-error                   -H "Authorization: Bearer $GH_TOKEN"                   -H 'Accept: application/vnd.github+json'                   -H 'X-GitHub-Api-Version: 2022-11-28'                   "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/$workflow/runs?status=$status&per_page=1"                 | python3 -c 'import json,sys; print(json.load(sys.stdin)["total_count"])'
+                curl --fail --silent --show-error \
+                  -H "Authorization: Bearer $GH_TOKEN" \
+                  -H 'Accept: application/vnd.github+json' \
+                  -H 'X-GitHub-Api-Version: 2022-11-28' \
+                  "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/$workflow/runs?status=$status&per_page=1" \
+                | python3 -c 'import json,sys; print(json.load(sys.stdin)["total_count"])'
               )"
               test "$count" = '0' || { echo "::error::PRODUCTION_READINESS_LOCK_OCCUPIED workflow=$workflow status=$status count=$count"; exit 1; }
             done
@@ -66,15 +80,30 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           EXPECTED_SHA: ${{ steps.gate.outputs.expected_sha }}
+          OWNER_COMMENT_ID: ${{ steps.gate.outputs.owner_comment_id }}
         run: |
           set -euo pipefail
           payload="$(python3 - <<'PY'
           import json,os
-          print(json.dumps({'ref':'main','inputs':{'expected_sha':os.environ['EXPECTED_SHA']}}))
+          print(json.dumps({
+            'ref':'main',
+            'inputs':{
+              'expected_sha':os.environ['EXPECTED_SHA'],
+              'owner_comment_id':os.environ['OWNER_COMMENT_ID']
+            }
+          }))
           PY
           )"
           code="$(
-            curl --silent --show-error               --output /tmp/member-runtime-readiness-dispatch.txt               --write-out '%{http_code}'               --request POST               -H "Authorization: Bearer $GH_TOKEN"               -H 'Accept: application/vnd.github+json'               -H 'X-GitHub-Api-Version: 2022-11-28'               "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/member-production-runtime-readiness.yml/dispatches"               -d "$payload"
+            curl --silent --show-error \
+              --output /tmp/member-runtime-readiness-dispatch.txt \
+              --write-out '%{http_code}' \
+              --request POST \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H 'Accept: application/vnd.github+json' \
+              -H 'X-GitHub-Api-Version: 2022-11-28' \
+              "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/member-production-runtime-readiness.yml/dispatches" \
+              -d "$payload"
           )"
           test "$code" = '204' || {
             cat /tmp/member-runtime-readiness-dispatch.txt >&2 || true
@@ -82,5 +111,6 @@ jobs:
             exit 1
           }
           echo "MEMBER_RUNTIME_READINESS_DISPATCHED_SHA=$EXPECTED_SHA"
+          echo "MEMBER_RUNTIME_READINESS_DISPATCHED_OWNER_COMMENT_ID=$OWNER_COMMENT_ID"
           echo 'PRODUCTION_WRITE=0'
           echo 'PRODUCTION_DEPLOY=0'
