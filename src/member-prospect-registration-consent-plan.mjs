@@ -87,6 +87,15 @@ export function planProspectRegistrationConsent(evidence={}){
   if(termsVersion===null||privacyVersion===null||!VERSION_RE.test(termsVersion)||!VERSION_RE.test(privacyVersion)) return blocked('consent_invalid_document_identity');
   if(termsHash===null||privacyHash===null||!SHA256_HEX_RE.test(termsHash)||!SHA256_HEX_RE.test(privacyHash)) return blocked('consent_invalid_document_identity');
   if(acceptedAt===null) return blocked('consent_invalid_accepted_at');
+  if(evidence.server_accepted_at_verified!==true||evidence.accepted_at_source!=='server') return blocked('consent_server_timestamp_not_verified');
+  if(evidence.current_consent_documents_verified!==true) return blocked('consent_current_documents_not_verified');
+
+  const latestTermsVersion=strictText(evidence.latest_terms_version),latestPrivacyVersion=strictText(evidence.latest_privacy_version);
+  const latestTermsHash=strictText(evidence.latest_terms_sha256),latestPrivacyHash=strictText(evidence.latest_privacy_sha256);
+  if(latestTermsVersion===null||latestPrivacyVersion===null||!VERSION_RE.test(latestTermsVersion)||!VERSION_RE.test(latestPrivacyVersion)) return blocked('consent_invalid_latest_document_identity');
+  if(latestTermsHash===null||latestPrivacyHash===null||!SHA256_HEX_RE.test(latestTermsHash)||!SHA256_HEX_RE.test(latestPrivacyHash)) return blocked('consent_invalid_latest_document_identity');
+  if(termsVersion!==latestTermsVersion||privacyVersion!==latestPrivacyVersion||termsHash!==latestTermsHash||privacyHash!==latestPrivacyHash) return blocked('consent_document_not_current');
+
   const consentPlan=planConsentRecord({member_identity_id:memberId,terms_version:termsVersion,terms_sha256:termsHash,privacy_version:privacyVersion,privacy_sha256:privacyHash,terms_accepted:evidence.terms_accepted,privacy_accepted:evidence.privacy_accepted,accepted_at:acceptedAt});
   if(consentPlan.status!=='ready'||consentPlan.append_only!==true||consentPlan.replace_prior_consent!==false) return blocked(`consent_${consentPlan.status}`);
 
@@ -109,11 +118,12 @@ export function planProspectRegistrationConsent(evidence={}){
     return {
       status:'ready',ready:true,review_required:false,member_identity_id:memberId,prospect_id:prospectId,canonical_customer_id:null,family_id:null,
       profile_digest_sha256:profileDigest,registration_event_id:registrationEventId,consent_event_id:consentEventId,
-      consent:{member_identity_id:memberId,terms_version:consentPlan.terms_version,terms_sha256:consentPlan.terms_sha256,privacy_version:consentPlan.privacy_version,privacy_sha256:consentPlan.privacy_sha256,accepted_at:consentPlan.accepted_at,append_only:true,replace_prior_consent:false},
+      consent:{member_identity_id:memberId,terms_version:consentPlan.terms_version,terms_sha256:consentPlan.terms_sha256,privacy_version:consentPlan.privacy_version,privacy_sha256:consentPlan.privacy_sha256,accepted_at:consentPlan.accepted_at,accepted_at_source:'server',current_documents_verified:true,append_only:true,replace_prior_consent:false},
       transaction_required:true,transaction_operations:['create_member_identity','create_prospect','append_registration_event','append_consent_event'],partial_commit_allowed:false,
-      registration_completed:false,completion_requires_atomic_execution:true,server_generated_identity_verified:true,customer_id_generation:false,customer_id_from_client:false,
-      family_id_generation:false,fuzzy_identity_linking:false,raw_profile_output:false,profile_pii_long_term_storage_authorized:false,
-      write_allowed:false,execute:false,production_write_authorized:false,execution_requires_separate_gate:true
+      registration_completed:false,completion_requires_atomic_execution:true,registration_completion_requires_profile_persistence:true,
+      profile_persistence_stage:'deferred_to_google_bounded_cache_gate',profile_pii_long_term_storage_authorized:false,
+      server_generated_identity_verified:true,customer_id_generation:false,customer_id_from_client:false,family_id_generation:false,fuzzy_identity_linking:false,
+      raw_profile_output:false,write_allowed:false,execute:false,production_write_authorized:false,execution_requires_separate_gate:true
     };
   }
 
