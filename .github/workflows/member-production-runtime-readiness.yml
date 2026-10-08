@@ -7,6 +7,9 @@ on:
       - '.github/workflows/dispatch-member-production-runtime-readiness-from-issue.yml'
       - 'tests/member-production-runtime-readiness-contract.test.mjs'
       - 'docs/member-app/member-production-runtime-readiness.md'
+      - 'docs/member-app/member-runtime-release-gates.md'
+      - 'member_tests/member-runtime-step9-final-gate.test.mjs'
+      - 'docs/member-app/member-runtime-step9-final-gate-20261009.md'
       - '.github/workflows/member-app-foundation.yml'
   workflow_dispatch:
     inputs:
@@ -91,6 +94,14 @@ jobs:
         with:
           node-version: '22'
 
+      - name: Verify source-level Member backend Steps 1-9 final gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          node member_tests/member-runtime-step9-final-gate.test.mjs
+          echo 'MEMBER_BACKEND_STEPS_1_9_FINAL_GATE=PASS'
+          echo 'PRODUCTION_OPERATION=0'
+
       - name: Verify canonical default-off Member source
         shell: bash
         env:
@@ -131,7 +142,11 @@ jobs:
         run: |
           set -euo pipefail
           json="$(
-            curl --fail --silent --show-error               -H "Authorization: Bearer $GH_TOKEN"               -H 'Accept: application/vnd.github+json'               -H 'X-GitHub-Api-Version: 2022-11-28'               "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/workflows/deploy-cloudflare.yml/runs?event=workflow_dispatch&status=completed&per_page=50"
+            curl --fail --silent --show-error \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H 'Accept: application/vnd.github+json' \
+              -H 'X-GitHub-Api-Version: 2022-11-28' \
+              "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/workflows/deploy-cloudflare.yml/runs?event=workflow_dispatch&status=completed&per_page=50"
           )"
           printf '%s' "$json" > /tmp/member-runtime-deploy-runs.json
           EXPECTED_SHA="$EXPECTED_SHA" node <<'NODE'
