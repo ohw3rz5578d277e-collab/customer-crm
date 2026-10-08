@@ -72,6 +72,8 @@ const benefit=planSignupBenefitIssue({
  member_identity_id:prospect.member_identity_id,prospect_id:prospect.prospect_id,
  registration_completed:true,consent_current:true,existing_signup_benefit_count:0,
  member_prospect_binding_verified:true,persisted_member_identity_id:prospect.member_identity_id,persisted_prospect_id:prospect.prospect_id,
+ registration_completion_binding_verified:true,persisted_registration_member_identity_id:prospect.member_identity_id,persisted_registration_prospect_id:prospect.prospect_id,
+ consent_binding_verified:true,persisted_consent_member_identity_id:prospect.member_identity_id,persisted_consent_prospect_id:prospect.prospect_id,
  persisted_benefit_count_member_identity_id:prospect.member_identity_id,persisted_benefit_count_prospect_id:prospect.prospect_id
 });
 assert.equal(benefit.status,'ready');
