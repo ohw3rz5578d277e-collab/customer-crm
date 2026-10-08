@@ -10,7 +10,9 @@ const migration=fs.readFileSync(
 
 assert.match(migration,/CREATE TABLE IF NOT EXISTS member_registration_events/);
 assert.match(migration,/registration_event_id TEXT PRIMARY KEY/);
-assert.match(migration,/registration_idempotency_key TEXT NOT NULL UNIQUE/);
+assert.match(migration,/registration_idempotency_key TEXT NOT NULL,/);
+assert.doesNotMatch(migration,/registration_idempotency_key TEXT NOT NULL UNIQUE/);
+assert.match(migration,/UNIQUE \(member_identity_id, prospect_id, registration_idempotency_key\)/);
 assert.match(migration,/profile_digest_sha256 TEXT NOT NULL/);
 assert.match(migration,/CREATE TABLE IF NOT EXISTS member_consent_evidence/);
 assert.match(migration,/consent_event_id TEXT PRIMARY KEY/);
@@ -91,6 +93,7 @@ assert.equal(ready.production_write_authorized,false);
 console.log('MEMBER_PROSPECT_REGISTRATION_CONSENT_EVENT_SCHEMA=PASS');
 console.log('REGISTRATION_EVENT_APPEND_ONLY=PASS');
 console.log('CONSENT_EVENT_APPEND_ONLY=PASS');
+console.log('IDEMPOTENCY_UNIQUENESS_SCOPE=MEMBER_PROSPECT_KEY');
 console.log('RAW_PROFILE_SCHEMA_COLUMNS=0');
 console.log('PRODUCTION_SCHEMA_APPLY=0');
 console.log('PRODUCTION_WRITE=0');
