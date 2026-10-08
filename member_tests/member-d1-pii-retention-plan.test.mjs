@@ -19,7 +19,32 @@ assert.equal(p.verified_state,'VERIFIED');
 assert.equal(p.pii_access_allowed,true);
 assert.equal(p.purge_required,true);
 
+p=planPiiRetention({
+ now_ms:d(10),
+ pii_written_at_ms:t0,
+ google_synced:'false',
+ identity_verified:'false',
+ version_verified:'false'
+});
+assert.equal(p.status,'PENDING_SYNC');
+assert.equal(p.pii_access_allowed,true);
+assert.equal(p.purge_required,false);
+assert.equal(p.write_allowed,false);
+
 p=planPiiRetention({now_ms:d(30),pii_written_at_ms:t0});
+assert.equal(p.status,'DEADLINE_RECOVERY');
+assert.equal(p.pii_access_allowed,false);
+assert.equal(p.purge_required,true);
+assert.equal(p.retain_retry_audit_only,true);
+assert.equal(p.write_allowed,false);
+
+p=planPiiRetention({
+ now_ms:d(30),
+ pii_written_at_ms:t0,
+ google_synced:'false',
+ identity_verified:'false',
+ version_verified:'false'
+});
 assert.equal(p.status,'DEADLINE_RECOVERY');
 assert.equal(p.pii_access_allowed,false);
 assert.equal(p.purge_required,true);
@@ -37,6 +62,7 @@ assert.equal(p.pii_access_allowed,false);
 
 console.log('D1_PII_RETENTION_PLAN=PASS');
 console.log('HARD_RETENTION_DAYS=30');
+console.log('STRICT_VERIFICATION_EVIDENCE=YES');
 console.log('DEADLINE_EXTENDS_ON_READ=NO');
 console.log('PII_ACCESS_AFTER_DEADLINE=0');
 console.log('PRODUCTION_PURGE_EXECUTOR=0');
