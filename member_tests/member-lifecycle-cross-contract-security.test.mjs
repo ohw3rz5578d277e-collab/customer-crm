@@ -65,7 +65,7 @@ const badPromotion=planProspectCustomerPromotion({
  persisted_benefit_count_member_identity_id:prospect.member_identity_id,
  persisted_benefit_count_prospect_id:prospect.prospect_id
 });
-assert.equal(badPromotion.status,'member_prospect_binding_not_verified');
+assert.equal(badPromotion.status,'binding_mismatch');
 assert.equal(badPromotion.review_required,true);
 assert.equal(badPromotion.promotion_allowed,false);
 
