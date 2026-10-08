@@ -4,6 +4,8 @@
 
 This adapter follows the independent-backup contract and precedes any real GAS/Google deployment.
 
+It is also the server-envelope boundary used by Member backend sequence step 5. Source remains default-off and performs no network request.
+
 ## Boundary
 
 Browser clients never receive Google integration credentials and never call the privileged Google write endpoint directly.
@@ -14,22 +16,30 @@ Cloudflare/server code may later authenticate to a GAS or Google API adapter usi
 
 The candidate HMAC envelope binds:
 
-- HTTP method
-- endpoint path
-- timestamp
-- unique nonce
-- sync_event_id
+- exact HTTP method `POST`
+- exact endpoint path `/member/profile-sync`
+- safe-integer timestamp
+- unique URL-safe nonce, 22–128 characters
+- `sync_event_id`
 - SHA-256 digest of canonical request body
 
-Verification must reject stale timestamps, nonce replay, invalid signatures, and malformed event IDs.
+The managed shared secret must be at least 32 characters.
 
-Event replay semantics remain governed by profile version/digest rules; an already-seen event must never be blindly executed.
+Maximum accepted clock skew is 300000 ms (five minutes). A caller cannot expand the verification window beyond that limit.
+
+Verification rejects stale timestamps, malformed scalar/time evidence, unsupported destination/path, nonce replay, malformed event IDs, malformed canonical bodies, weak/missing secret evidence, and invalid signatures.
+
+Event replay semantics remain governed by exact sync-event/profile version/digest rules; an already-seen event must never be blindly executed.
+
+## Canonical body
+
+Canonical JSON recursively sorts object keys. Unsupported values such as `undefined`, function, symbol, bigint, and non-finite numbers fail closed instead of being silently omitted or transformed.
 
 ## Default off
 
 The source adapter only constructs/verifies envelopes. It performs no network request.
 
-Any real Google request executor must require a separate runtime feature flag/secret, exact approved destination, bounded operation type, and explicit Production authorization.
+Any real Google request executor must require a separate runtime feature flag/secret, exact approved destination, bounded operation type, exact approved release SHA, and explicit Production authorization.
 
 ## Secret handling
 
