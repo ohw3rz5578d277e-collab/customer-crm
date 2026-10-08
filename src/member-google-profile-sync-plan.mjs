@@ -4,6 +4,7 @@ const CUSTOMER_ID_RE=/^\d{8}$/;
 const PROSPECT_ID_RE=/^PID_[A-Za-z0-9_-]{22,}$/;
 const EVENT_ID_RE=/^SE_[A-Za-z0-9_-]{22,}$/;
 const DIGEST_RE=/^[0-9a-f]{64}$/i;
+const VERSION_RE=/^(0|[1-9]\d*)$/;
 const text=v=>v==null?'':String(v).trim();
 
 export function createSyncEventId(){
@@ -16,6 +17,14 @@ function canonicalize(value){
    return Object.fromEntries(Object.keys(value).sort().map(key=>[key,canonicalize(value[key])]));
  }
  return value;
+}
+
+function parseVersionEvidence(value,{min}){
+ let n;
+ if(typeof value==='number') n=value;
+ else if(typeof value==='string'&&VERSION_RE.test(value.trim())) n=Number(value.trim());
+ else return null;
+ return Number.isInteger(n)&&n>=min?n:null;
 }
 
 export function profilePayloadDigest(profile){
@@ -71,10 +80,14 @@ export function planProfileSync({
 
 export function planSyncReplay({incoming_event_id,incoming_version,incoming_digest,last_event_id,last_version,last_digest}={}){
  const ie=text(incoming_event_id), le=text(last_event_id);
- const iv=Number(incoming_version), lv=Number(last_version);
+ const iv=parseVersionEvidence(incoming_version,{min:1});
+ const lv=parseVersionEvidence(last_version,{min:0});
  const id=text(incoming_digest), ld=text(last_digest);
- const priorEvidencePresent=lv>0||Boolean(le)||Boolean(ld);
- if(!DIGEST_RE.test(id)||(priorEvidencePresent&&!DIGEST_RE.test(ld))){
+ if(iv===null||lv===null){
+   return {status:'invalid_version_evidence',review_required:true,master_write:false,history_append:false};
+ }
+ const initialBoundary=lv===0&&!le&&!ld;
+ if(!DIGEST_RE.test(id)||(!initialBoundary&&!DIGEST_RE.test(ld))){
    return {status:'invalid_replay_evidence',review_required:true,master_write:false,history_append:false};
  }
  if(ie&&ie===le){
