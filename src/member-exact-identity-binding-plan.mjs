@@ -12,6 +12,11 @@ const scalarNonNegativeInteger=v=>{
   return null;
 };
 
+const countEvidenceMissing=v=>
+  v===undefined||
+  v===null||
+  (typeof v==='string'&&v.trim()==='');
+
 function baseBlocked(status,extra={}){
   return {
     status,
@@ -86,12 +91,7 @@ export function planExactCustomerMemberFamilyBinding({
     return baseBlocked('member_customer_binding_not_verified',{review_required:true});
   }
 
-  if(
-    active_member_customer_binding_count===undefined||
-    active_member_customer_binding_count===null||
-    typeof active_member_customer_binding_count==='boolean'||
-    String(active_member_customer_binding_count).trim()===''
-  ){
+  if(countEvidenceMissing(active_member_customer_binding_count)){
     return baseBlocked('missing_member_binding_count_evidence');
   }
   if(strictText(persisted_member_binding_count_customer_id)!==customer){
@@ -119,12 +119,7 @@ export function planExactCustomerMemberFamilyBinding({
   ){
     return baseBlocked('family_link_not_verified',{review_required:true});
   }
-  if(
-    active_family_link_count===undefined||
-    active_family_link_count===null||
-    typeof active_family_link_count==='boolean'||
-    String(active_family_link_count).trim()===''
-  ){
+  if(countEvidenceMissing(active_family_link_count)){
     return baseBlocked('missing_family_link_count_evidence');
   }
   if(
@@ -220,12 +215,7 @@ export function planExactProspectMemberBinding({
   ){
     return baseBlocked('member_prospect_binding_not_verified',{review_required:true});
   }
-  if(
-    active_member_prospect_binding_count===undefined||
-    active_member_prospect_binding_count===null||
-    typeof active_member_prospect_binding_count==='boolean'||
-    String(active_member_prospect_binding_count).trim()===''
-  ){
+  if(countEvidenceMissing(active_member_prospect_binding_count)){
     return baseBlocked('missing_prospect_binding_count_evidence');
   }
   if(strictText(persisted_member_binding_count_prospect_id)!==prospect){
@@ -262,4 +252,4 @@ export function planExactProspectMemberBinding({
   };
 }
 
-export const __test={MID,PID,CID,scalarNonNegativeInteger,strictText};
+export const __test={MID,PID,CID,scalarNonNegativeInteger,countEvidenceMissing,strictText};
