@@ -6,9 +6,9 @@ Status: source/test/docs only. Not Production-ready.
 
 ## Purpose
 
-Implement backend sequence step 3 from `member-runtime-release-gates.md`: prepare a new Prospect registration bound to a server-generated Member Identity and Prospect ID, require the minimum registration profile, and bind explicit Terms/Privacy consent as append-only evidence.
+Implement backend sequence step 3 from `member-runtime-release-gates.md`: prepare a new Prospect registration bound to a server-generated Member Identity and Prospect ID, require the minimum registration profile, and bind explicit current Terms/Privacy consent as append-only evidence.
 
-This stage does not execute a registration and does not apply a schema.
+This stage does not execute a registration, persist profile PII, or apply a schema.
 
 ## Identity contract
 
@@ -35,38 +35,38 @@ The registration input must contain strict scalar, non-empty values for:
 
 Leading/trailing whitespace, arrays/objects, empty values, oversized values, and malformed email evidence fail closed.
 
-The planner computes a SHA-256 digest over the ordered profile fields. It does not return the raw profile values and does not authorize long-term PII storage. Google Customer/Prospect Master and bounded Cloudflare cache rules remain separately controlled.
+The planner computes a SHA-256 digest over the ordered profile fields. It does not return the raw profile values and does not authorize long-term PII storage.
+
+Profile persistence remains deferred to the later server-side Google synchronization / bounded Cloudflare profile-cache gate. Therefore a ready source plan explicitly keeps `registration_completed:false` and requires profile persistence before eventual registration completion.
 
 ## Consent contract
 
 The registration requires explicit Terms and Privacy acceptance through the existing `planConsentRecord(...)` foundation.
 
-The outer step-3 gate additionally rejects non-scalar document versions, document SHA-256 values, and acceptance timestamps before invoking the consent foundation so array/object coercion cannot satisfy the contract.
+The outer step-3 gate additionally requires:
+
+- strict scalar document versions and SHA-256 values;
+- literal `current_consent_documents_verified:true`;
+- exact equality between submitted Terms/Privacy versions+hashes and separately supplied latest-document evidence;
+- a strict scalar acceptance timestamp;
+- literal `server_accepted_at_verified:true`;
+- `accepted_at_source='server'`.
+
+This prevents stale policy consent, array/object coercion, and caller-selected consent timestamps from satisfying the registration contract.
 
 Consent is bound to the exact Member Identity and records:
 
 - Terms version + SHA-256;
 - Privacy version + SHA-256;
-- acceptance timestamp;
+- server acceptance timestamp;
 - `append_only:true`;
 - `replace_prior_consent:false`.
-
-A registration is never considered complete merely because this planner returns `ready`.
 
 ## Idempotency and duplicate evidence
 
 Each registration requires a canonical registration idempotency key.
 
-The deterministic registration event ID is derived from:
-
-- idempotency key;
-- Member Identity ID;
-- Prospect ID;
-- profile digest;
-- Terms/Privacy document identity;
-- acceptance timestamp.
-
-The deterministic consent event ID is additionally bound to the registration event ID.
+The deterministic registration event ID is derived from the idempotency key, exact Member/Prospect IDs, profile digest, consent document identities, and acceptance timestamp. The deterministic consent event ID is additionally bound to the registration event ID.
 
 Before a new registration can be planned, exact-scope count evidence is required for:
 
@@ -77,24 +77,28 @@ Before a new registration can be planned, exact-scope count evidence is required
 
 All four counts must be zero for a new registration.
 
-If all four counts are one, the planner treats the request as an idempotent replay only when persisted registration and consent evidence is explicitly verified and every persisted Member/Prospect/event/profile/document/time binding matches the newly-derived tuple exactly.
+If all four counts are one, the request is treated as an idempotent replay only when persisted registration and consent evidence is explicitly verified and every persisted Member/Prospect/event/profile/document/time binding matches the newly-derived tuple exactly.
 
 Partial or mismatched existing state is review-required and fails closed.
 
 ## Atomic completion contract
 
-A ready plan describes one atomic transaction containing:
+A ready plan describes one future atomic registration transaction containing:
 
 1. create Member Identity;
 2. create Prospect;
 3. append registration event;
 4. append consent event.
 
-Partial commit is forbidden. Registration completion may only be asserted by a separately authorized executor after atomic execution succeeds.
+Partial commit is forbidden. Profile persistence remains a separate required gate, so successful execution of these four operations alone must not mark registration complete.
 
 This source-only plan therefore returns:
 
 - `registration_completed:false`;
+- `completion_requires_atomic_execution:true`;
+- `registration_completion_requires_profile_persistence:true`;
+- `profile_persistence_stage='deferred_to_google_bounded_cache_gate'`;
+- `profile_pii_long_term_storage_authorized:false`;
 - `write_allowed:false`;
 - `execute:false`;
 - `production_write_authorized:false`;
@@ -109,6 +113,7 @@ This stage does **not** authorize:
 - migration/schema apply;
 - Prospect or Member Production creation;
 - consent Production write;
+- profile PII persistence;
 - Google network send or Customer/Prospect Master write;
 - CRM write or Customer mutation;
 - Customer ID generation/update/delete/merge;
