@@ -40,7 +40,7 @@ assert.match(ready.atomic_redemption.statement,/invalidated_at IS NULL/);
 assert.match(ready.atomic_redemption.statement,/expires_at > \?/);
 assert.ok(!JSON.stringify(ready).includes(token));
 
-for(const raw_token of [undefined,null,'short',['abcdefghijklmnopqrstuvwxyzABCDEFGH_1234567890'],{},Object.create(null)]){
+for(const raw_token of [undefined,null,'short',` ${token}`,`${token} `,[token],{},Object.create(null)]){
   assert.doesNotThrow(()=>planOneTimeInvitationRedemption({...base,raw_token}));
   assert.equal(planOneTimeInvitationRedemption({...base,raw_token}).status,'invalid_invitation_token');
 }
@@ -72,15 +72,18 @@ assert.equal(planOneTimeInvitationRedemption({...base,active_invitation_count_fo
 assert.equal(planOneTimeInvitationRedemption({...base,active_invitation_count_customer_id:'87654321'}).status,'active_invitation_count_scope_mismatch');
 
 for(const key of ['matching_invitation_count','active_invitation_count_for_customer']){
-  for(const malformed of [[],{},Object.create(null),-1,1.5,Number.MAX_SAFE_INTEGER+1,'01','1.0','-1']){
+  for(const malformed of [[],{},Object.create(null),-1,1.5,Number.MAX_SAFE_INTEGER+1,'01','1.0','-1',' 1']){
     assert.doesNotThrow(()=>planOneTimeInvitationRedemption({...base,[key]:malformed}));
     assert.match(planOneTimeInvitationRedemption({...base,[key]:malformed}).status,/^invalid_/);
   }
 }
 
 assert.equal(planOneTimeInvitationRedemption({...base,persisted_invitation_id:['INV_abcdefghijklmnopqrstuvwx']}).status,'invalid_persisted_invitation_id');
+assert.equal(planOneTimeInvitationRedemption({...base,persisted_invitation_id:` ${base.persisted_invitation_id}`}).status,'invalid_persisted_invitation_id');
 assert.equal(planOneTimeInvitationRedemption({...base,persisted_canonical_customer_id:['12345678']}).status,'invalid_persisted_customer_id');
+assert.equal(planOneTimeInvitationRedemption({...base,persisted_canonical_customer_id:'12345678 '}).status,'invalid_persisted_customer_id');
 assert.equal(planOneTimeInvitationRedemption({...base,persisted_token_sha256:[digest]}).status,'invalid_persisted_token_digest');
+assert.equal(planOneTimeInvitationRedemption({...base,persisted_token_sha256:`${digest} `}).status,'invalid_persisted_token_digest');
 assert.equal(planOneTimeInvitationRedemption({...base,matching_invitation_count_token_sha256:[digest]}).status,'invalid_matching_invitation_count_scope');
 assert.equal(planOneTimeInvitationRedemption({...base,active_invitation_count_customer_id:['12345678']}).status,'invalid_active_invitation_count_scope');
 
