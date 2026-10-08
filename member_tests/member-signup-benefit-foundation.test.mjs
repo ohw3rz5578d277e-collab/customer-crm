@@ -58,6 +58,7 @@ const planReleasedTransition=(args={})=>{
   persisted_release_member_identity_id:auth,
   persisted_release_customer_id:customer,
   persisted_release_reservation_id:reservation,
+  persisted_release_target_state:args.persisted_release_target_state??args.target_state,
   ...args
  });
 };
@@ -135,6 +136,7 @@ assert.equal(p.reservation_id,'R-RELEASE');
 assert.equal(planReleasedTransition({current_state:'reserved',target_state:'available',entitlement_member_identity_id:member,reservation_release_authorized:false}).status,'release_authorization_not_verified');
 assert.equal(planReleasedTransition({current_state:'reserved',target_state:'available',entitlement_member_identity_id:member,persisted_reserved_entitlement_reservation_id:'R-OTHER'}).status,'reserved_entitlement_context_binding_not_verified');
 assert.equal(planReleasedTransition({current_state:'reserved',target_state:'available',entitlement_member_identity_id:member,persisted_release_reservation_id:'R-OTHER'}).status,'release_authorization_not_verified');
+assert.equal(planReleasedTransition({current_state:'reserved',target_state:'revoked',entitlement_member_identity_id:member,persisted_release_target_state:'available'}).status,'release_authorization_not_verified');
 assert.equal(planReleasedTransition({current_state:'reserved',target_state:'expired',entitlement_member_identity_id:member}).status,'ready');
 assert.equal(planReleasedTransition({current_state:'reserved',target_state:'revoked',entitlement_member_identity_id:member}).status,'ready');
 assert.equal(planTransition({current_state:'available',target_state:'reserved',entitlement_member_identity_id:member,persisted_entitlement_member_identity_id:otherMember}).status,'entitlement_member_binding_not_verified');
