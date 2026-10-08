@@ -68,6 +68,9 @@ export function planProspectRegistrationWithConsent(evidence={}){
   if(evidence.ids_server_generated_verified!==true){
     return blocked('server_generated_identity_not_verified');
   }
+  if(evidence.consent_event_id_server_generated_verified!==true){
+    return blocked('server_generated_consent_event_not_verified');
+  }
   if(evidence.registration_request_server_verified!==true){
     return blocked('registration_request_not_verified');
   }
