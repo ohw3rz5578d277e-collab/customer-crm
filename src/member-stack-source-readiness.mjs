@@ -31,8 +31,8 @@ export function evaluateMemberStackReadiness(rows=[]){
    failures.push({pr:null,reason:'invalid_readiness_evidence'});
    continue;
   }
-  const pr=Number(row.pr);
-  if(!Number.isSafeInteger(pr)||pr<=0){
+  const pr=row.pr;
+  if(typeof pr!=='number'||!Number.isSafeInteger(pr)||pr<=0){
    failures.push({pr:null,reason:'invalid_readiness_evidence'});
    continue;
   }
