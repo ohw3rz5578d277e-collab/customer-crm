@@ -4,6 +4,7 @@ on:
   pull_request:
     branches:
       - main
+      - feat/member-profile-review-queue-plan-20261007
     paths:
       - 'src/crm-member-*.mjs'
       - 'src/member-*.mjs'
