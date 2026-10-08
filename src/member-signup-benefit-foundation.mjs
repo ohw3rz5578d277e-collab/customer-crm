@@ -96,10 +96,15 @@ export function planBenefitPromotionCarryForward({
  member_identity_id,
  prospect_id,
  canonical_customer_id,
- current_state
+ current_state,
+ persisted_prospect_id='',
+ persisted_member_identity_id='',
+ persisted_canonical_customer_id='',
+ promotion_verified=false
 }={}){
  if(!MID.test(text(member_identity_id))||!PID.test(text(prospect_id))||!CID.test(text(canonical_customer_id))) return {status:'invalid_identity',carry_forward_allowed:false};
  if(!['issued','available','reserved','used','expired','revoked'].includes(text(current_state))) return {status:'invalid_state',carry_forward_allowed:false};
+ if(promotion_verified!==true||text(persisted_prospect_id)!==text(prospect_id)||text(persisted_member_identity_id)!==text(member_identity_id)||text(persisted_canonical_customer_id)!==text(canonical_customer_id)) return {status:'promotion_binding_not_verified',carry_forward_allowed:false};
  return {
   status:'ready',
   member_identity_id:text(member_identity_id),
