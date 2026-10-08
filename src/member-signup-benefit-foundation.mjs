@@ -67,6 +67,10 @@ export function planSignupBenefitTransition({
  persisted_entitlement_member_identity_id='',
  entitlement_state_binding_verified=false,
  persisted_entitlement_state='',
+ reservation_context_binding_verified=false,
+ persisted_reservation_context_member_identity_id='',
+ persisted_reservation_context_customer_id='',
+ persisted_reservation_context_reservation_id='',
  redemption_context_binding_verified=false,
  persisted_redemption_member_identity_id='',
  persisted_redemption_customer_id='',
@@ -88,6 +92,11 @@ export function planSignupBenefitTransition({
   revoked:new Set([])
  };
  if(!allowed[current]||!allowed[current].has(target)) return {status:'invalid_transition',transition_allowed:false};
+ if(target==='reserved'){
+   if(member!==auth) return {status:'member_identity_mismatch',transition_allowed:false};
+   if(!CID.test(text(canonical_customer_id))||!text(reservation_id)) return {status:'reservation_context_required',transition_allowed:false};
+   if(reservation_context_binding_verified!==true||text(persisted_reservation_context_member_identity_id)!==auth||text(persisted_reservation_context_customer_id)!==text(canonical_customer_id)||text(persisted_reservation_context_reservation_id)!==text(reservation_id)) return {status:'reservation_context_binding_not_verified',transition_allowed:false};
+ }
  if(target==='used'){
    if(member!==auth) return {status:'member_identity_mismatch',transition_allowed:false};
    if(text(persisted_entitlement_member_identity_id)!==auth) return {status:'entitlement_member_binding_not_verified',transition_allowed:false};
