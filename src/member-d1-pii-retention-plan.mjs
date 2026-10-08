@@ -25,7 +25,10 @@ export function planPiiRetention({
  const ageDays=Math.floor((now-written)/dayMs);
  if(!pii_present) return {status:STATES.PII_PURGED,age_days:ageDays,pii_access_allowed:false,purge_required:false,write_allowed:false};
 
- const fullyVerified=!!google_synced&&!!identity_verified&&!!version_verified;
+ const googleVerified=google_synced===true;
+ const identityVerified=identity_verified===true;
+ const versionVerified=version_verified===true;
+ const fullyVerified=googleVerified&&identityVerified&&versionVerified;
  if(ageDays>=30){
    return {
      status:fullyVerified?STATES.PURGE_ELIGIBLE:STATES.DEADLINE_RECOVERY,
@@ -36,8 +39,8 @@ export function planPiiRetention({
      write_allowed:false
    };
  }
- if(!google_synced) return {status:STATES.PENDING_SYNC,age_days:ageDays,pii_access_allowed:true,purge_required:false,write_allowed:false};
- if(!identity_verified||!version_verified) return {status:STATES.SYNCED,age_days:ageDays,pii_access_allowed:true,purge_required:false,write_allowed:false};
+ if(!googleVerified) return {status:STATES.PENDING_SYNC,age_days:ageDays,pii_access_allowed:true,purge_required:false,write_allowed:false};
+ if(!identityVerified||!versionVerified) return {status:STATES.SYNCED,age_days:ageDays,pii_access_allowed:true,purge_required:false,write_allowed:false};
  return {status:STATES.PURGE_ELIGIBLE,verified_state:STATES.VERIFIED,age_days:ageDays,pii_access_allowed:true,purge_required:true,write_allowed:false};
 }
 
