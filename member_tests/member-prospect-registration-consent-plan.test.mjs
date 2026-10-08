@@ -11,22 +11,16 @@ const idempotency='reg-20261009-00000001';
 const profile={name:'Test Family',phone:'090-1234-5678',address:'Osaka, Japan',email:'family@example.com'};
 
 const base={
-  member_identity_id:member,
-  prospect_id:prospect,
-  server_generated_identity_verified:true,
-  member_identity_source:'server_generated',
-  prospect_id_source:'server_generated',
-  canonical_customer_id:null,
-  family_id:null,
-  profile,
-  terms_version:'terms-1',terms_sha256:terms,
-  privacy_version:'privacy-1',privacy_sha256:privacy,
-  terms_accepted:true,privacy_accepted:true,accepted_at:acceptedAt,
+  member_identity_id:member,prospect_id:prospect,
+  server_generated_identity_verified:true,member_identity_source:'server_generated',prospect_id_source:'server_generated',
+  canonical_customer_id:null,family_id:null,profile,
+  terms_version:'terms-1',terms_sha256:terms,privacy_version:'privacy-1',privacy_sha256:privacy,
+  latest_terms_version:'terms-1',latest_terms_sha256:terms,latest_privacy_version:'privacy-1',latest_privacy_sha256:privacy,
+  current_consent_documents_verified:true,
+  terms_accepted:true,privacy_accepted:true,accepted_at:acceptedAt,accepted_at_source:'server',server_accepted_at_verified:true,
   registration_idempotency_key:idempotency,
-  existing_member_identity_count:0,
-  existing_member_identity_count_member_identity_id:member,
-  existing_prospect_id_count:0,
-  existing_prospect_id_count_prospect_id:prospect,
+  existing_member_identity_count:0,existing_member_identity_count_member_identity_id:member,
+  existing_prospect_id_count:0,existing_prospect_id_count_prospect_id:prospect,
   existing_registration_event_count:0,
   existing_registration_event_count_member_identity_id:member,
   existing_registration_event_count_prospect_id:prospect,
@@ -50,10 +44,14 @@ assert.match(ready.registration_event_id,/^REG_[0-9a-f]{64}$/);
 assert.match(ready.consent_event_id,/^CONS_[0-9a-f]{64}$/);
 assert.equal(ready.consent.append_only,true);
 assert.equal(ready.consent.replace_prior_consent,false);
+assert.equal(ready.consent.accepted_at_source,'server');
+assert.equal(ready.consent.current_documents_verified,true);
 assert.equal(ready.transaction_required,true);
 assert.equal(ready.partial_commit_allowed,false);
 assert.equal(ready.registration_completed,false);
 assert.equal(ready.completion_requires_atomic_execution,true);
+assert.equal(ready.registration_completion_requires_profile_persistence,true);
+assert.equal(ready.profile_persistence_stage,'deferred_to_google_bounded_cache_gate');
 assert.deepEqual(ready.transaction_operations,['create_member_identity','create_prospect','append_registration_event','append_consent_event']);
 assert.equal(ready.customer_id_generation,false);
 assert.equal(ready.customer_id_from_client,false);
@@ -65,10 +63,7 @@ assert.equal(ready.write_allowed,false);
 assert.equal(ready.execute,false);
 assert.equal(ready.production_write_authorized,false);
 assert.equal(ready.execution_requires_separate_gate,true);
-assert.ok(!JSON.stringify(ready).includes(profile.name));
-assert.ok(!JSON.stringify(ready).includes(profile.phone));
-assert.ok(!JSON.stringify(ready).includes(profile.address));
-assert.ok(!JSON.stringify(ready).includes(profile.email));
+for(const value of Object.values(profile)) assert.ok(!JSON.stringify(ready).includes(value));
 
 const deterministic=planProspectRegistrationConsent({...base,profile:{...profile}});
 assert.equal(deterministic.registration_event_id,ready.registration_event_id);
@@ -85,8 +80,8 @@ assert.equal(planProspectRegistrationConsent({...base,canonical_customer_id:'123
 assert.equal(planProspectRegistrationConsent({...base,family_id:'FAM-1'}).status,'prospect_family_scope_forbidden');
 
 for(const key of ['name','phone','address','email']){
-  assert.match(planProspectRegistrationConsent({...base,profile:{...profile,[key]:[profile[key]]}}).status,new RegExp(`^invalid_profile_${key}$`));
-  assert.match(planProspectRegistrationConsent({...base,profile:{...profile,[key]:` ${profile[key]}`}}).status,new RegExp(`^invalid_profile_${key}$`));
+  assert.equal(planProspectRegistrationConsent({...base,profile:{...profile,[key]:[profile[key]]}}).status,`invalid_profile_${key}`);
+  assert.equal(planProspectRegistrationConsent({...base,profile:{...profile,[key]:` ${profile[key]}`}}).status,`invalid_profile_${key}`);
 }
 assert.equal(planProspectRegistrationConsent({...base,profile:{...profile,email:'not-an-email'}}).status,'invalid_profile_email');
 
@@ -94,9 +89,15 @@ assert.equal(planProspectRegistrationConsent({...base,terms_version:['terms-1']}
 assert.equal(planProspectRegistrationConsent({...base,terms_sha256:[terms]}).status,'consent_invalid_document_identity');
 assert.equal(planProspectRegistrationConsent({...base,privacy_version:{value:'privacy-1'}}).status,'consent_invalid_document_identity');
 assert.equal(planProspectRegistrationConsent({...base,accepted_at:[acceptedAt]}).status,'consent_invalid_accepted_at');
+assert.equal(planProspectRegistrationConsent({...base,server_accepted_at_verified:'true'}).status,'consent_server_timestamp_not_verified');
+assert.equal(planProspectRegistrationConsent({...base,accepted_at_source:'client'}).status,'consent_server_timestamp_not_verified');
+assert.equal(planProspectRegistrationConsent({...base,current_consent_documents_verified:'true'}).status,'consent_current_documents_not_verified');
+assert.equal(planProspectRegistrationConsent({...base,latest_terms_version:'terms-2'}).status,'consent_document_not_current');
+assert.equal(planProspectRegistrationConsent({...base,latest_privacy_sha256:'0'.repeat(64)}).status,'consent_document_not_current');
+assert.equal(planProspectRegistrationConsent({...base,latest_terms_sha256:[terms]}).status,'consent_invalid_latest_document_identity');
 assert.equal(planProspectRegistrationConsent({...base,terms_accepted:'true'}).status,'consent_consent_incomplete');
 assert.equal(planProspectRegistrationConsent({...base,privacy_accepted:false}).status,'consent_consent_incomplete');
-assert.equal(planProspectRegistrationConsent({...base,accepted_at:'2026-02-30T02:45:00.000Z'}).status,'consent_invalid_accepted_at');
+assert.equal(planProspectRegistrationConsent({...base,accepted_at:'2026-02-30T02:45:00.000Z',existing_consent_event_count_accepted_at:'2026-02-30T02:45:00.000Z'}).status,'consent_invalid_accepted_at');
 assert.equal(planProspectRegistrationConsent({...base,registration_idempotency_key:'short'}).status,'invalid_registration_idempotency_key');
 
 for(const key of ['existing_member_identity_count','existing_prospect_id_count','existing_registration_event_count','existing_consent_event_count']){
@@ -119,10 +120,7 @@ assert.equal(partial.review_required,true);
 
 const replayEvidence={
   ...base,
-  existing_member_identity_count:1,
-  existing_prospect_id_count:1,
-  existing_registration_event_count:1,
-  existing_consent_event_count:1,
+  existing_member_identity_count:1,existing_prospect_id_count:1,existing_registration_event_count:1,existing_consent_event_count:1,
   existing_registration_event_verified:true,
   persisted_registration_event_id:ready.registration_event_id,
   persisted_registration_member_identity_id:member,
@@ -146,7 +144,10 @@ assert.equal(planProspectRegistrationConsent({...replayEvidence,existing_consent
 
 console.log('MEMBER_PROSPECT_REGISTRATION_CONSENT_PLAN=PASS');
 console.log('PROSPECT_CUSTOMER_ID_GENERATION=0');
+console.log('CURRENT_CONSENT_EXACT_BINDING=PASS');
+console.log('SERVER_ACCEPTED_AT_REQUIRED=PASS');
 console.log('CONSENT_APPEND_ONLY=PASS');
 console.log('REGISTRATION_ATOMIC_EXECUTION_REQUIRED=YES');
+console.log('PROFILE_PERSISTENCE_DEFERRED=YES');
 console.log('RAW_PROFILE_OUTPUT=0');
 console.log('PRODUCTION_WRITE=0');
