@@ -46,3 +46,6 @@ console.log('BLACK_PHOTO_GOODS_DISCOUNT_PERCENT=10');
 console.log('BLACK_SHOOTING_FEE_DISCOUNT=0');
 console.log('PROSPECT_CUSTOMER_MEMORY_ACCESS=0');
 console.log('PRODUCTION_WRITE=0');
+
+// DURABLE_BLACK_SCHEMA_FALSE_REGRESSION
+assert.equal(buildMemberFamilyPassIntegrationReadModel({member_identity_id:mid,canonical_customer_id:'12345678',family_id:'FAM-1',family_link_verified:true,persisted_verified_family_id:'FAM-1',member_customer_binding_verified:true,persisted_member_customer_id:'12345678',member_status:'active',published_non_deleted_memory_count:10,durable_black_entitlement:true,entitlement_schema_applied:false,black_achieved_at:'2026-01-01T00:00:00Z',durable_black_qualifying_memory_count:10}).status,'durable_black_schema_conflict');
