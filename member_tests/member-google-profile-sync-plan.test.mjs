@@ -44,6 +44,22 @@ assert.equal(replay.master_write,false);
 assert.equal(replay.history_append,false);
 assert.equal(replay.execution_requires_separate_gate,true);
 
+for(const malformedLastVersion of [null,'',-1,-0.5]){
+ replay=planSyncReplay({incoming_event_id:createSyncEventId(),incoming_version:1,incoming_digest:digestA,last_event_id:'',last_version:malformedLastVersion,last_digest:''});
+ assert.equal(replay.status,'invalid_version_evidence');
+ assert.equal(replay.review_required,true);
+ assert.equal(replay.master_write,false);
+ assert.equal(replay.history_append,false);
+}
+
+for(const malformedIncomingVersion of [null,'',0,0.5,-1]){
+ replay=planSyncReplay({incoming_event_id:createSyncEventId(),incoming_version:malformedIncomingVersion,incoming_digest:digestA,last_event_id:'',last_version:0,last_digest:''});
+ assert.equal(replay.status,'invalid_version_evidence');
+ assert.equal(replay.review_required,true);
+ assert.equal(replay.master_write,false);
+ assert.equal(replay.history_append,false);
+}
+
 replay=planSyncReplay({incoming_event_id:event,incoming_version:2,incoming_digest:digestA,last_event_id:event,last_version:2,last_digest:digestA});
 assert.equal(replay.status,'idempotent_replay');
 assert.equal(replay.master_write,false);
@@ -93,6 +109,7 @@ console.log('CUSTOMER_AND_PROSPECT_STREAMS=YES');
 console.log('STRICT_IDENTITY_EVIDENCE=YES');
 console.log('NESTED_PROFILE_CANONICALIZATION=YES');
 console.log('INITIAL_SYNC_WITHOUT_PRIOR_DIGEST=YES');
+console.log('REPLAY_VERSION_EVIDENCE=STRICT_INTEGER_RANGE');
 console.log('REPLAY_DIGEST_EVIDENCE=REQUIRED_WHEN_PRIOR_EXISTS');
 console.log('EVENT_ID_CONFLICT_REVIEW=YES');
 console.log('IDEMPOTENCY=REQUIRED');
