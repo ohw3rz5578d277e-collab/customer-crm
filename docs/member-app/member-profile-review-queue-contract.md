@@ -34,7 +34,9 @@ A new review plan requires:
 
 Customer and Prospect subjects cannot be supplied together. Missing, malformed, or mixed subject evidence fails closed.
 
-The submitted profile must be an object. The durable candidate shape stores only a canonical SHA-256 payload digest. Raw submitted profile content remains ephemeral and no durable raw-PII storage is authorized by this stage.
+The submitted profile must be a canonical JSON-safe object. Undefined values, non-finite numbers, functions, class instances, cyclic structures, arrays as the top-level profile, and other ambiguous runtime values fail closed.
+
+The durable candidate shape stores only a canonical SHA-256 payload digest. Raw submitted profile content remains ephemeral and no durable raw-PII storage is authorized by this stage.
 
 ## Deterministic queue identity and idempotency
 
@@ -49,26 +51,48 @@ The deterministic review ID is derived from the exact tuple:
 - subject ID;
 - submitted-profile payload digest.
 
-Before a new review can be planned, exact-scoped existing-review count evidence must be bound to the same Member Identity, idempotency key, and payload digest.
+Before a new review can be planned, exact-scoped existing-review count evidence must be bound to the same:
+
+- Member Identity ID;
+- queue idempotency key;
+- reason code;
+- subject type;
+- subject ID;
+- payload digest.
+
+The count contract is:
 
 - count `0`: a new source-only review candidate may be planned;
 - count `1`: the request is treated as an idempotent replay only if persisted review evidence exactly matches review ID, Member, reason, subject, payload digest, and `pending` status;
-- any partial, mismatched, duplicate, malformed, or ambiguous state fails closed and is review-required.
+- count greater than `1`, malformed evidence, partial state, scope mismatch, or persisted-tuple mismatch fails closed.
 
 Queue persistence itself still requires a separate execution/Production gate.
 
 ## Administrator decision binding
 
-An approve/reject plan requires exact persisted pending-review evidence for:
+An approve/reject plan requires exact persisted review evidence for:
 
 - review ID;
 - Member Identity ID;
 - reason code;
 - subject type and subject ID;
-- payload digest;
-- pending status.
+- payload digest.
 
-The administrator actor must be explicitly verified and supplied as a strict scalar actor ID. Every decision requires an idempotency key and derives a deterministic audit decision event ID from the review, decision, actor, and payload digest.
+The administrator actor must be explicitly verified and supplied as a strict scalar actor ID. Every decision requires a decision idempotency key and derives a deterministic audit decision event ID from:
+
+- decision idempotency key;
+- review ID;
+- approve/reject decision;
+- verified administrator actor;
+- reviewed payload digest.
+
+Existing-decision count evidence is itself scoped to the exact review ID, decision idempotency key, decision, and administrator actor.
+
+For a new decision, count must be `0` and the persisted review must still be `pending`.
+
+If decision count is `1`, the request is an idempotent replay only when persisted decision evidence exactly matches the derived decision event ID, review ID, decision, administrator actor, payload digest, and the review already carries the corresponding terminal status (`approved` or `rejected`).
+
+Duplicate, partial, mismatched, or malformed decision state fails closed.
 
 ### Reject
 
@@ -91,7 +115,7 @@ Even after approval, this step **does not write Master directly**. Approval requ
 
 ## Master-write boundary
 
-For both queue creation and administrator decision planning:
+For queue creation, decision planning, and idempotent replay:
 
 - `master_write_allowed:false`
 - `google_send_allowed:false`
