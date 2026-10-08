@@ -25,12 +25,24 @@ const allowedSource=new Set(['instagram','website','meta_paid','instagram_profil
 export function createAcquisitionEventId(){return 'AQ_'+crypto.randomBytes(24).toString('base64url');}
 
 export function planAcquisitionRegistration({
- member_identity_id,prospect_id,source='unknown',campaign='',referrer='',utm_source='',utm_medium='',utm_campaign=''
+ member_identity_id,
+ prospect_id,
+ member_prospect_binding_verified=false,
+ persisted_member_identity_id='',
+ persisted_prospect_id='',
+ source='unknown',
+ campaign='',
+ referrer='',
+ utm_source='',
+ utm_medium='',
+ utm_campaign=''
 }={}){
- if(!MID.test(text(member_identity_id))||!PID.test(text(prospect_id))) return {status:'invalid_identity',record_allowed:false};
+ const member=text(member_identity_id),prospect=text(prospect_id);
+ if(!MID.test(member)||!PID.test(prospect)) return {status:'invalid_identity',record_allowed:false};
+ if(member_prospect_binding_verified!==true||text(persisted_member_identity_id)!==member||text(persisted_prospect_id)!==prospect) return {status:'member_prospect_binding_not_verified',record_allowed:false};
  const normalized=allowedSource.has(text(source))?text(source):'unknown';
  return {
-  status:'ready',event_id:createAcquisitionEventId(),member_identity_id:text(member_identity_id),prospect_id:text(prospect_id),
+  status:'ready',event_id:createAcquisitionEventId(),member_identity_id:member,prospect_id:prospect,
   source:normalized,campaign:text(campaign),referrer:text(referrer),utm_source:text(utm_source),utm_medium:text(utm_medium),utm_campaign:text(utm_campaign),
   identity_authority:false,append_only:true,record_allowed:false
  };
