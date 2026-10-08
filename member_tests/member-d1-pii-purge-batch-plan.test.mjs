@@ -19,3 +19,8 @@ assert.equal(planMemberPiiPurgeBatch({now_ms:now,rows:[row('bad',-1)]}).status,'
 assert.equal(planMemberPiiPurgeBatch({now_ms:now,rows:[{record_id:'unknown',pii_written_at_ms:now-31*day,pii_present:true}]}).status,'invalid_record_evidence');
 assert.equal(planMemberPiiPurgeBatch({now_ms:now,rows:[row('wrong',31,{google_synced:'true'})]}).status,'invalid_record_evidence');
 assert.equal(planMemberPiiPurgeBatch({now_ms:now,rows:[row('badtime',31,{pii_written_at_ms:'0'})]}).status,'invalid_record_time');
+
+assert.equal(planMemberPiiPurgeBatch({now_ms:-1,rows:[]}).status,'invalid_time');
+assert.equal(planMemberPiiPurgeBatch({now_ms:Number.MAX_SAFE_INTEGER+1,rows:[]}).status,'invalid_time');
+assert.equal(planMemberPiiPurgeBatch({now_ms:now,rows:[row('negative',31,{pii_written_at_ms:-1})]}).status,'invalid_record_time');
+assert.equal(planMemberPiiPurgeBatch({now_ms:now,rows:[row('overflow',31,{pii_written_at_ms:Number.MAX_SAFE_INTEGER+1})]}).status,'invalid_record_time');
