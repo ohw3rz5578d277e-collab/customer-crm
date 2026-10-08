@@ -90,6 +90,7 @@ export function planSignupBenefitTransition({
  persisted_release_member_identity_id='',
  persisted_release_customer_id='',
  persisted_release_reservation_id='',
+ persisted_release_target_state='',
  redemption_context_binding_verified=false,
  persisted_redemption_member_identity_id='',
  persisted_redemption_customer_id='',
@@ -120,7 +121,7 @@ export function planSignupBenefitTransition({
    if(member!==auth) return {status:'member_identity_mismatch',transition_allowed:false};
    if(!CID.test(text(canonical_customer_id))||!text(reservation_id)) return {status:'release_context_required',transition_allowed:false};
    if(reserved_entitlement_context_binding_verified!==true||text(persisted_reserved_entitlement_id)!==entitlement||text(persisted_reserved_entitlement_member_identity_id)!==auth||text(persisted_reserved_entitlement_customer_id)!==text(canonical_customer_id)||text(persisted_reserved_entitlement_reservation_id)!==text(reservation_id)) return {status:'reserved_entitlement_context_binding_not_verified',transition_allowed:false};
-   if(reservation_release_authorized!==true||release_authorization_binding_verified!==true||text(persisted_release_entitlement_id)!==entitlement||text(persisted_release_member_identity_id)!==auth||text(persisted_release_customer_id)!==text(canonical_customer_id)||text(persisted_release_reservation_id)!==text(reservation_id)) return {status:'release_authorization_not_verified',transition_allowed:false};
+   if(reservation_release_authorized!==true||release_authorization_binding_verified!==true||text(persisted_release_entitlement_id)!==entitlement||text(persisted_release_member_identity_id)!==auth||text(persisted_release_customer_id)!==text(canonical_customer_id)||text(persisted_release_reservation_id)!==text(reservation_id)||text(persisted_release_target_state)!==target) return {status:'release_authorization_not_verified',transition_allowed:false};
  }
  if(target==='used'){
    if(member!==auth) return {status:'member_identity_mismatch',transition_allowed:false};
