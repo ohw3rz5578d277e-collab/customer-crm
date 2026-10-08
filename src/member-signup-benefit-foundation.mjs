@@ -84,6 +84,12 @@ export function planSignupBenefitTransition({
  persisted_reserved_entitlement_member_identity_id='',
  persisted_reserved_entitlement_customer_id='',
  persisted_reserved_entitlement_reservation_id='',
+ reservation_release_authorized=false,
+ release_authorization_binding_verified=false,
+ persisted_release_entitlement_id='',
+ persisted_release_member_identity_id='',
+ persisted_release_customer_id='',
+ persisted_release_reservation_id='',
  redemption_context_binding_verified=false,
  persisted_redemption_member_identity_id='',
  persisted_redemption_customer_id='',
@@ -109,6 +115,12 @@ export function planSignupBenefitTransition({
    if(member!==auth) return {status:'member_identity_mismatch',transition_allowed:false};
    if(!CID.test(text(canonical_customer_id))||!text(reservation_id)) return {status:'reservation_context_required',transition_allowed:false};
    if(reservation_context_binding_verified!==true||text(persisted_reservation_context_member_identity_id)!==auth||text(persisted_reservation_context_customer_id)!==text(canonical_customer_id)||text(persisted_reservation_context_reservation_id)!==text(reservation_id)) return {status:'reservation_context_binding_not_verified',transition_allowed:false};
+ }
+ if(current==='reserved'&&['available','expired','revoked'].includes(target)){
+   if(member!==auth) return {status:'member_identity_mismatch',transition_allowed:false};
+   if(!CID.test(text(canonical_customer_id))||!text(reservation_id)) return {status:'release_context_required',transition_allowed:false};
+   if(reserved_entitlement_context_binding_verified!==true||text(persisted_reserved_entitlement_id)!==entitlement||text(persisted_reserved_entitlement_member_identity_id)!==auth||text(persisted_reserved_entitlement_customer_id)!==text(canonical_customer_id)||text(persisted_reserved_entitlement_reservation_id)!==text(reservation_id)) return {status:'reserved_entitlement_context_binding_not_verified',transition_allowed:false};
+   if(reservation_release_authorized!==true||release_authorization_binding_verified!==true||text(persisted_release_entitlement_id)!==entitlement||text(persisted_release_member_identity_id)!==auth||text(persisted_release_customer_id)!==text(canonical_customer_id)||text(persisted_release_reservation_id)!==text(reservation_id)) return {status:'release_authorization_not_verified',transition_allowed:false};
  }
  if(target==='used'){
    if(member!==auth) return {status:'member_identity_mismatch',transition_allowed:false};
