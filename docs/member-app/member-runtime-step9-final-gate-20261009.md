@@ -36,7 +36,7 @@ The Step 9 final-gate test also asserts that its own `process.versions.node` maj
 | 4 | `member-profile-review-queue-plan.test.mjs` | review queue before any Master update |
 | 5 | `member-google-profile-sync-plan.test.mjs` | server-side Google profile sync planning |
 | 5 | `member-google-sync-delivery-plan.test.mjs` | idempotent bounded delivery / retry / reconciliation planning |
-| 5 | `member-google-sync-server-adapter.test.mjs` | server-only authenticated Google sync transport boundary |
+| 5 | `member-google-server-adapter.test.mjs` | server-only authenticated Google sync transport boundary |
 | 6 | `member-d1-pii-retention-plan.test.mjs` | 7-day cache freshness and 30-day absolute PII hard-retention contract |
 | 6 | `member-profile-cache-read-gate.test.mjs` | cache read fail-closed at TTL / hard-retention boundaries |
 | 7 | `member-prospect-customer-promotion-plan.test.mjs` | exact Prospect -> canonical CRM Customer promotion planning with continuity |
