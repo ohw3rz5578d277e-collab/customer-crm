@@ -23,7 +23,7 @@ export function planPiiRetention({
    return {status:'invalid_time',write_allowed:false};
  }
  const ageDays=Math.floor((now-written)/dayMs);
- if(!pii_present) return {status:STATES.PII_PURGED,age_days:ageDays,pii_access_allowed:false,purge_required:false,write_allowed:false};
+ if(pii_present===false) return {status:STATES.PII_PURGED,age_days:ageDays,pii_access_allowed:false,purge_required:false,write_allowed:false};
 
  const googleVerified=google_synced===true;
  const identityVerified=identity_verified===true;
