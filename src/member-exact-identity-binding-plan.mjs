@@ -26,10 +26,19 @@ function baseBlocked(status,extra={}){
   };
 }
 
+function verifyActiveMemberIdentity({member,verified,persisted_id,status}){
+  if(verified!==true||text(persisted_id)!==member) return 'member_identity_record_not_verified';
+  if(text(status)!=='active') return 'member_identity_not_active';
+  return null;
+}
+
 export function planExactCustomerMemberFamilyBinding({
   member_identity_id,
   canonical_customer_id,
   family_id,
+  member_identity_record_verified=false,
+  persisted_member_identity_record_id='',
+  member_identity_status='',
   customer_id_source,
   customer_record_verified=false,
   persisted_customer_record_id='',
@@ -38,6 +47,9 @@ export function planExactCustomerMemberFamilyBinding({
   persisted_member_customer_id='',
   active_member_customer_binding_count,
   persisted_member_binding_count_customer_id='',
+  family_record_verified=false,
+  persisted_family_record_id='',
+  family_status='',
   family_link_verified=false,
   persisted_family_id='',
   persisted_family_customer_id='',
@@ -51,6 +63,13 @@ export function planExactCustomerMemberFamilyBinding({
   if(!MID.test(member)||!CID.test(customer)||!family){
     return baseBlocked('invalid_identity');
   }
+  const memberRecordFailure=verifyActiveMemberIdentity({
+    member,
+    verified:member_identity_record_verified,
+    persisted_id:persisted_member_identity_record_id,
+    status:member_identity_status
+  });
+  if(memberRecordFailure) return baseBlocked(memberRecordFailure,{review_required:true});
   if(text(customer_id_source)!=='customer_crm'){
     return baseBlocked('invalid_customer_id_source');
   }
@@ -84,6 +103,12 @@ export function planExactCustomerMemberFamilyBinding({
     return baseBlocked('ambiguous_member_customer_binding',{review_required:true});
   }
 
+  if(family_record_verified!==true||text(persisted_family_record_id)!==family){
+    return baseBlocked('family_record_not_verified',{review_required:true});
+  }
+  if(text(family_status)!=='active'){
+    return baseBlocked('family_not_active',{review_required:true});
+  }
   if(
     family_link_verified!==true||
     text(persisted_family_id)!==family||
@@ -116,6 +141,8 @@ export function planExactCustomerMemberFamilyBinding({
     member_identity_id:member,
     canonical_customer_id:customer,
     family_id:family,
+    member_identity_status:'active',
+    family_status:'active',
     customer_id_source:'customer_crm',
     customer_record_verified:true,
     member_customer_binding_verified:true,
@@ -138,6 +165,9 @@ export function planExactProspectMemberBinding({
   prospect_id,
   canonical_customer_id=null,
   family_id=null,
+  member_identity_record_verified=false,
+  persisted_member_identity_record_id='',
+  member_identity_status='',
   prospect_status,
   member_prospect_binding_verified=false,
   persisted_member_identity_id='',
@@ -156,6 +186,13 @@ export function planExactProspectMemberBinding({
   if(customer||family){
     return baseBlocked('prospect_scope_violation',{review_required:true});
   }
+  const memberRecordFailure=verifyActiveMemberIdentity({
+    member,
+    verified:member_identity_record_verified,
+    persisted_id:persisted_member_identity_record_id,
+    status:member_identity_status
+  });
+  if(memberRecordFailure) return baseBlocked(memberRecordFailure,{review_required:true});
   if(text(prospect_status)!=='prospect'){
     return baseBlocked('invalid_prospect_state');
   }
@@ -192,6 +229,7 @@ export function planExactProspectMemberBinding({
     prospect_id:prospect,
     canonical_customer_id:null,
     family_id:null,
+    member_identity_status:'active',
     member_prospect_binding_verified:true,
     active_member_prospect_binding_count:1,
     exact_binding_verified:true,
