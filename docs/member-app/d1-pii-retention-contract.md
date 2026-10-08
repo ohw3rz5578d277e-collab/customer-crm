@@ -1,16 +1,44 @@
 # D1 PII retention contract
 
-Baseline: 2026-10-07 JST
+Baseline: 2026-10-09 JST
 
 ## Roadmap phase
 
-Phase 4 follows Google Customer Master sync design.
+Member backend sequence step 6 follows the source-only Google sync delivery gate.
 
 ## Goal
 
-Cloudflare D1 may temporarily cache customer PII for operational continuity, but PII must not remain accessible beyond a hard 30-day deadline.
+Cloudflare D1 may temporarily cache customer PII for operational continuity, but:
 
-The 30-day clock is based on the PII record/version write time. Reading the cache, refreshing a Member session, or running reconciliation must not reset that clock.
+- a readable cache entry has a maximum freshness TTL of **7 days**;
+- PII for one D1 write cycle has a hard absolute retention maximum of **30 days**;
+- cache refresh, session refresh, retry, reconciliation, or Google outage must never silently extend the 30-day clock.
+
+The 30-day clock is based only on the original `pii_written_at_ms` for that D1 PII write cycle. A new post-purge cache cycle requires a separately authorized write and a new write-time evidence value.
+
+## Read boundary
+
+The Member cache read gate remains fail closed:
+
+- `now_ms`, `cached_at_ms`, and `pii_written_at_ms` must be safe non-negative integer timestamps;
+- cache verification older than the PII write cannot prove the current profile and is rejected;
+- exact identity/version verification is required;
+- age `>= 7 days` from `cached_at_ms` is not readable;
+- a verified cache younger than 7 days may be used during a temporary Google outage;
+- age `>= 30 days` from `pii_written_at_ms` always disables PII access and requires purge, before softer cache or outage checks are considered.
+
+## Refresh boundary
+
+A cache refresh plan requires all of:
+
+- Google is available;
+- exact identity verification;
+- exact profile-version verification;
+- Google version equals the expected version;
+- Google payload digest equals the expected digest;
+- Google synchronization evidence is not older than the local PII write.
+
+A successful refresh may move the **7-day cache freshness** window forward, but the resulting `cache_expires_at_ms` is capped at the original 30-day retention deadline. Refresh does not change `pii_written_at_ms` and does not reset the hard deadline.
 
 ## State machine
 
@@ -30,13 +58,27 @@ DEADLINE_RECOVERY means:
 
 ## Normal early purge
 
-Before day 30, PII becomes purge-eligible immediately after all are true:
+Before day 30, PII becomes purge-eligible only after all are exactly verified:
 
-- durable Google sync confirmed
-- exact canonical Customer ID correspondence verified
-- latest profile_version/digest verified
+- durable Google sync confirmed;
+- exact canonical identity correspondence verified;
+- latest `profile_version` equality verified;
+- latest payload digest equality verified.
 
-Failure of any check prevents early purge but never extends accessibility beyond day 30.
+Malformed or ambiguous verification evidence cannot authorize early purge.
+
+## Hard 30-day deadline precedence
+
+At or after the hard deadline, purge planning must **not** depend on healthy synchronization/verification metadata.
+
+If `pii_written_at_ms` is valid and the record has reached 30 days:
+
+- only explicit `pii_present === false` proves no purge is needed;
+- missing, malformed, stale, or contradictory sync/identity/version/digest evidence cannot suppress purge planning;
+- unverified records enter `DEADLINE_RECOVERY` and retain only non-PII retry/audit state;
+- audit preview and reconciliation carry the exact `retention_deadline_ms` so overdue work is explicit without copying PII into receipts.
+
+This precedence is required because corrupt control metadata must never turn a 30-day hard maximum into indefinite retention.
 
 ## Preserved runtime identity
 
@@ -62,10 +104,12 @@ No identity inference, fallback to another customer, or name/phone/email matchin
 
 ## Executor boundary
 
-This phase defines planning only. A future purge executor requires a separate Owner-approved exact-SHA write gate, dry-run inventory, bounded target set, audit receipt, and post-write verification.
+This step defines source-only planning, tests, dry-run preview shape, and reconciliation intent. It does **not** execute a D1 mutation.
+
+A future purge executor requires a separate Owner-approved exact-SHA write gate, dry-run inventory, bounded target set, audit receipt, and post-write verification.
 
 No automatic Production purge is authorized here.
 
 ## Authorization boundary
 
-No Production D1 write/delete, migration apply, Google operation, CRM mutation, Customer ID generation/update/delete/merge, LINE send, deploy, route activation, secret change, R2 operation, UI change, BLACK/MEMORY write, commerce activation, or paid spend is authorized.
+No Production D1 read/write/delete, migration/schema apply, Google operation, CRM mutation, Customer ID generation/update/delete/merge, Prospect/Member Production mutation, LINE send, deploy, route activation, secret change, R2 operation, UI change, BLACK/MEMORY write, commerce activation, or paid spend is authorized.
