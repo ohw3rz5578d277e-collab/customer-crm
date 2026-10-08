@@ -7,7 +7,10 @@ const bridge=fs.readFileSync('.github/workflows/dispatch-member-production-runti
 assert.match(workflow,/workflow_dispatch:\s*\n\s*inputs:\s*\n\s*expected_sha:/);
 assert.ok(workflow.includes('owner_comment_id:'));
 assert.ok(workflow.includes('issues: read'));
+assert.ok(workflow.includes('Checkout exact PR head'));
 assert.ok(workflow.includes('Checkout exact authorized SHA'));
+assert.ok(workflow.includes('persist-credentials: false'));
+assert.ok((workflow.match(/persist-credentials: false/g)||[]).length>=2);
 assert.ok(workflow.includes('git ls-remote origin refs/heads/main'));
 assert.ok(workflow.includes('MAIN_DRIFT current=$current_main expected=$EXPECTED_SHA'));
 
@@ -23,20 +26,59 @@ assert.ok(workflow.includes('EXPECTED_BODY="/member-runtime-readiness sha=$EXPEC
 assert.ok(workflow.includes('ISSUE_26_OWNER_AUTHORIZATION_RECEIPT=PASS'));
 assert.ok(workflow.includes('OWNER_RECEIPT_BODY_PRINTED=NO'));
 
+for(const path of [
+  'member_tests/member-runtime-step9-final-gate.test.mjs',
+  'docs/member-app/member-runtime-step9-final-gate-20261009.md',
+  'src/member-production-backend-sequence-readiness.mjs',
+  'src/member-production-activation-readiness-assembly.mjs',
+  'member_tests/member-production-backend-sequence-readiness.test.mjs',
+  'member_tests/member-production-activation-readiness-assembly.test.mjs',
+  'docs/member-app/member-production-backend-sequence-readiness-20261009.md'
+]){
+  assert.ok(workflow.includes(`- '${path}'`),`runtime readiness PR path missing: ${path}`);
+}
+
 const ownerReceiptIndex=workflow.indexOf('Verify exact Issue #26 Owner authorization receipt');
 const step9Command='node member_tests/member-runtime-step9-final-gate.test.mjs';
 const step9Index=workflow.indexOf(step9Command);
+const backendGateIndex=workflow.indexOf('Verify exact-SHA Member backend sequence readiness');
 const deployReceiptIndex=workflow.indexOf('Snapshot canonical Production deploy receipt');
 const cloudflareAuthIndex=workflow.indexOf('Confirm Cloudflare authentication');
+const d1ListIndex=workflow.indexOf('List pending managed Production D1 migrations');
 assert.ok(ownerReceiptIndex>=0,'Owner receipt gate must exist');
 assert.ok(step9Index>=0,'Step 9 final gate must be required by runtime readiness');
+assert.ok(backendGateIndex>=0,'exact-SHA backend sequence gate must exist');
 assert.ok(ownerReceiptIndex<step9Index,'Owner receipt must be verified before Step 9/readiness observation');
+assert.ok(step9Index<backendGateIndex,'Step 9 final gate must precede backend sequence classifier');
 assert.ok(workflow.includes('MEMBER_BACKEND_STEPS_1_9_FINAL_GATE=PASS'));
 assert.ok(workflow.includes('PRODUCTION_OPERATION=0'));
-assert.ok(deployReceiptIndex>step9Index,'Step 9 final gate must run before Production deploy-receipt observation');
-assert.ok(cloudflareAuthIndex>step9Index,'Step 9 final gate must run before Cloudflare Production observation');
-assert.ok(workflow.includes("'member_tests/member-runtime-step9-final-gate.test.mjs'"));
-assert.ok(workflow.includes("'docs/member-app/member-runtime-step9-final-gate-20261009.md'"));
+
+assert.ok(workflow.includes('node member_tests/member-production-backend-sequence-readiness.test.mjs'));
+assert.ok(workflow.includes('node member_tests/member-production-activation-readiness-assembly.test.mjs'));
+assert.ok(workflow.includes("import { buildMemberProductionBackendSequenceReadiness } from './src/member-production-backend-sequence-readiness.mjs';"));
+assert.ok(workflow.includes('release_sha:expected'));
+assert.ok(workflow.includes('step9_verified_sha:expected'));
+assert.ok(workflow.includes('step9_node_major:nodeMajor'));
+for(const evidence of [
+  'step9_final_gate_passed:true',
+  'exact_head_checkout_verified:true',
+  'workflow_exact_head_contract_verified:true',
+  'all_member_tests_workflow_contract_verified:true',
+  'steps_1_8_matrix_verified:true',
+  'cross_contract_security_verified:true',
+  'production_default_off_verified:true'
+]){
+  assert.ok(workflow.includes(evidence),`backend sequence evidence missing: ${evidence}`);
+}
+assert.ok(workflow.includes('MEMBER_BACKEND_SEQUENCE_NOT_READY:'));
+assert.ok(workflow.includes('MEMBER_BACKEND_SEQUENCE_SHA_EVIDENCE_MISMATCH'));
+assert.ok(workflow.includes('MEMBER_BACKEND_SEQUENCE_AUTHORIZATION_MUST_REMAIN_OFF'));
+assert.ok(workflow.includes('MEMBER_BACKEND_SEQUENCE_PRODUCTION_INVARIANT_VIOLATION'));
+assert.ok(workflow.includes('MEMBER_BACKEND_SEQUENCE_TECHNICAL_READINESS=PASS'));
+assert.ok(workflow.includes('MEMBER_BACKEND_SEQUENCE_PRODUCTION_ACTION_ALLOWED=0'));
+assert.ok(deployReceiptIndex>backendGateIndex,'backend sequence gate must run before Production deploy-receipt observation');
+assert.ok(cloudflareAuthIndex>backendGateIndex,'backend sequence gate must run before Cloudflare Production observation');
+assert.ok(d1ListIndex>backendGateIndex,'backend sequence gate must run before Production D1 observation');
 
 assert.ok(workflow.includes('const MEMBER_PRODUCTION_OWNER_APPROVED=false;'));
 assert.ok(workflow.includes('MEMBER_PRODUCTION_ROUTE_MODE_MUST_REMAIN_OFF_DURING_READINESS'));
@@ -98,5 +140,6 @@ assert.doesNotMatch(bridge,/deploy-cloudflare\.yml\/dispatches/);
 console.log('MEMBER_PRODUCTION_RUNTIME_READINESS_CONTRACT=PASS');
 console.log('MEMBER_PRODUCTION_RUNTIME_READINESS_OWNER_RECEIPT=PASS');
 console.log('MEMBER_PRODUCTION_RUNTIME_READINESS_STEP9_PREREQUISITE=PASS');
+console.log('MEMBER_PRODUCTION_RUNTIME_READINESS_BACKEND_SEQUENCE_GATE=PASS');
 console.log('MEMBER_PRODUCTION_RUNTIME_READINESS_READ_ONLY=PASS');
 console.log('MEMBER_PRODUCTION_RUNTIME_READINESS_OWNER_GATE=PASS');
