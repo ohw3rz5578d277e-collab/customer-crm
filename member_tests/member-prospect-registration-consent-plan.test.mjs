@@ -14,6 +14,7 @@ const base={
   consent_event_id:consentEventId,
   acquisition_source:'instagram_profile',
   ids_server_generated_verified:true,
+  consent_event_id_server_generated_verified:true,
   registration_request_server_verified:true,
   member_identity_collision_count:0,
   member_identity_count_member_identity_id:memberId,
@@ -84,6 +85,7 @@ for(const [key,value,status] of [
 }
 
 assert.equal(planProspectRegistrationWithConsent({...base,ids_server_generated_verified:'true'}).status,'server_generated_identity_not_verified');
+assert.equal(planProspectRegistrationWithConsent({...base,consent_event_id_server_generated_verified:'true'}).status,'server_generated_consent_event_not_verified');
 assert.equal(planProspectRegistrationWithConsent({...base,registration_request_server_verified:false}).status,'registration_request_not_verified');
 assert.equal(planProspectRegistrationWithConsent({...base,canonical_customer_id:'12345678'}).status,'prospect_scope_violation');
 assert.equal(planProspectRegistrationWithConsent({...base,family_id:'FAM_example'}).status,'prospect_scope_violation');
@@ -118,6 +120,7 @@ assert.ok(!migration.includes('ALTER TABLE customers'));
 
 console.log('MEMBER_PROSPECT_REGISTRATION_CONSENT_PLAN=PASS');
 console.log('PROSPECT_REGISTRATION_ALL_OR_NOTHING=PASS');
+console.log('CONSENT_EVENT_SERVER_GENERATED=PASS');
 console.log('CONSENT_APPEND_ONLY_SCHEMA=PASS');
 console.log('CUSTOMER_ID_GENERATION=0');
 console.log('CUSTOMER_MASTER_MUTATION=0');
