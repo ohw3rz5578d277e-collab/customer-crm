@@ -1,4 +1,7 @@
 const text=v=>v==null?'':String(v).trim();
+const MID=/^MID_[A-Za-z0-9_-]{22,}$/;
+const PID=/^PID_[A-Za-z0-9_-]{22,}$/;
+const CID=/^\d{8}$/;
 const scalarNonNegativeInteger=v=>{
  if(typeof v==='number') return Number.isSafeInteger(v)&&v>=0?v:null;
  if(typeof v==='string'&&/^(?:0|[1-9]\d*)$/.test(v.trim())){
@@ -13,6 +16,10 @@ export function buildMemberAdminReadModel({
  canonical_customer_id='',
  prospect_id='',
  member_identity_id='',
+ subject_member_binding_verified=false,
+ persisted_member_identity_id='',
+ persisted_subject_customer_id='',
+ persisted_subject_prospect_id='',
  member_status='unregistered',
  consent_status='missing',
  invitation_status='unissued',
@@ -22,19 +29,21 @@ export function buildMemberAdminReadModel({
  reservation_status='none',
  promotion_status='prospect'
 }={}){
- const type=text(subject_type);
+ const type=text(subject_type),customer=text(canonical_customer_id),prospect=text(prospect_id),member=text(member_identity_id);
  if(!['customer','prospect'].includes(type)) return {status:'invalid_subject_type',read_ready:false};
- if(type==='customer'&&!/^\d{8}$/.test(text(canonical_customer_id))) return {status:'invalid_customer_id',read_ready:false};
- if(type==='prospect'&&!/^PID_[A-Za-z0-9_-]{22,}$/.test(text(prospect_id))) return {status:'invalid_prospect_id',read_ready:false};
- if(type==='prospect'&&!/^MID_[A-Za-z0-9_-]{22,}$/.test(text(member_identity_id))) return {status:'invalid_member_identity',read_ready:false};
+ if(type==='customer'&&!CID.test(customer)) return {status:'invalid_customer_id',read_ready:false};
+ if(type==='prospect'&&!PID.test(prospect)) return {status:'invalid_prospect_id',read_ready:false};
+ if(!MID.test(member)) return {status:'invalid_member_identity',read_ready:false};
+ if(type==='customer'&&(subject_member_binding_verified!==true||text(persisted_member_identity_id)!==member||text(persisted_subject_customer_id)!==customer)) return {status:'subject_member_binding_not_verified',read_ready:false};
+ if(type==='prospect'&&(subject_member_binding_verified!==true||text(persisted_member_identity_id)!==member||text(persisted_subject_prospect_id)!==prospect)) return {status:'subject_member_binding_not_verified',read_ready:false};
  const pending=scalarNonNegativeInteger(review_pending_count);
  if(pending===null) return {status:'invalid_review_count',read_ready:false};
  return {
   status:'ready',
   subject_type:type,
-  canonical_customer_id:type==='customer'?text(canonical_customer_id):null,
-  prospect_id:type==='prospect'?text(prospect_id):null,
-  member_identity_id:text(member_identity_id)||null,
+  canonical_customer_id:type==='customer'?customer:null,
+  prospect_id:type==='prospect'?prospect:null,
+  member_identity_id:member,
   member_status:text(member_status),
   consent_status:text(consent_status),
   invitation_status:type==='customer'?text(invitation_status):'not_applicable',
