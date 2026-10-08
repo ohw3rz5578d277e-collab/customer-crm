@@ -24,7 +24,7 @@ function parseVersionEvidence(value,{min}){
  if(typeof value==='number') n=value;
  else if(typeof value==='string'&&VERSION_RE.test(value.trim())) n=Number(value.trim());
  else return null;
- return Number.isInteger(n)&&n>=min?n:null;
+ return Number.isSafeInteger(n)&&n>=min?n:null;
 }
 
 export function profilePayloadDigest(profile){
@@ -44,12 +44,12 @@ export function planProfileSync({
 }={}){
  const type=text(subject_type);
  const eventId=text(sync_event_id);
- const version=Number(profile_version);
- const previous=Number(previous_profile_version);
+ const version=parseVersionEvidence(profile_version,{min:1});
+ const previous=parseVersionEvidence(previous_profile_version,{min:0});
 
  if(member_identity_verified!==true) return {status:'identity_not_verified',review_required:true,send_allowed:false};
  if(!EVENT_ID_RE.test(eventId)) return {status:'invalid_sync_event_id',send_allowed:false};
- if(!Number.isInteger(version)||version<1||!Number.isInteger(previous)||previous<0||version!==previous+1){
+ if(version===null||previous===null||version!==previous+1){
    return {status:'invalid_profile_version',review_required:true,send_allowed:false};
  }
 
