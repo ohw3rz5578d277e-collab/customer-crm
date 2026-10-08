@@ -1,6 +1,12 @@
 import assert from 'node:assert/strict';
-import {planAcquisitionRegistration,planFunnelEvent as rawPlanFunnelEvent} from '../src/member-acquisition-attribution-foundation.mjs';
+import {planAcquisitionRegistration as rawPlanAcquisitionRegistration,planFunnelEvent as rawPlanFunnelEvent} from '../src/member-acquisition-attribution-foundation.mjs';
 const m='MID_abcdefghijklmnopqrstuvwxyz123456',other='MID_zyxwvutsrqponmlkjihgfedcba654321',p='PID_abcdefghijklmnopqrstuvwxyz123456';
+const planAcquisitionRegistration=(args={})=>rawPlanAcquisitionRegistration({
+ member_prospect_binding_verified:true,
+ persisted_member_identity_id:args.member_identity_id,
+ persisted_prospect_id:args.prospect_id,
+ ...args
+});
 const planFunnelEvent=(args={})=>rawPlanFunnelEvent({
  member_prospect_binding_verified:Boolean(args.prospect_id),
  persisted_prospect_member_identity_id:args.member_identity_id,
@@ -19,6 +25,9 @@ let a=planAcquisitionRegistration({member_identity_id:m,prospect_id:p,source:'in
 assert.equal(a.status,'ready');assert.equal(a.source,'instagram');assert.equal(a.identity_authority,false);assert.equal(a.record_allowed,false);
 a=planAcquisitionRegistration({member_identity_id:m,prospect_id:p,source:'evil'});
 assert.equal(a.source,'unknown');
+assert.equal(rawPlanAcquisitionRegistration({member_identity_id:m,prospect_id:p,source:'instagram'}).status,'member_prospect_binding_not_verified');
+assert.equal(planAcquisitionRegistration({member_identity_id:m,prospect_id:p,source:'instagram',persisted_member_identity_id:other}).status,'member_prospect_binding_not_verified');
+assert.equal(planAcquisitionRegistration({member_identity_id:m,prospect_id:p,source:'instagram',persisted_prospect_id:'PID_zyxwvutsrqponmlkjihgfedcba654321'}).status,'member_prospect_binding_not_verified');
 let e=planFunnelEvent({stage:'registered',member_identity_id:m,prospect_id:p,occurred_at:'2026-10-07T06:00:00Z'});
 assert.equal(e.status,'ready');assert.equal(e.append_only,true);assert.equal(e.identity_authority,false);
 assert.equal(planFunnelEvent({stage:'reserved',member_identity_id:m,canonical_customer_id:'12345678',occurred_at:'2026-10-07T06:00:00Z'}).status,'reservation_context_required');
