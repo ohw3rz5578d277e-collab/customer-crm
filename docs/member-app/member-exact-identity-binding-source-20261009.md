@@ -20,12 +20,14 @@ A Customer Member binding is source-ready only when all of the following are exa
 - persisted Member Identity exactly matches the submitted Member Identity
 - persisted Customer ID exactly matches the submitted canonical Customer ID
 - exactly one active Member <-> Customer binding exists for that canonical Customer ID
+- the binding-count evidence is explicitly scoped to that same canonical Customer ID
 - an explicit non-empty Family ID is present
 - the persisted Family group record is explicitly verified and has status `active`
 - persisted Family ID and Family Customer ID exactly match
 - exactly one active Customer <-> Family link exists for that canonical Customer ID
+- the family-link count evidence is explicitly scoped to that same canonical Customer ID
 
-Duplicate, inactive, missing, or mismatched identity evidence fails closed and routes to review. No name/address/phone/email/LINE display-name or other fuzzy identity matching is permitted.
+Duplicate, inactive, missing, or mismatched identity evidence fails closed. Binding-count scope mismatches route to review. No name/address/phone/email/LINE display-name or other fuzzy identity matching is permitted.
 
 ## Prospect binding
 
@@ -37,10 +39,12 @@ A Prospect Member binding is source-ready only when:
 - Prospect status is exactly `prospect`
 - persisted Member Identity and Prospect ID exactly match
 - exactly one active Member <-> Prospect binding exists
-- no canonical Customer ID is attached
-- no Family ID is attached
+- binding-count evidence is explicitly scoped to that same Prospect ID
+- persisted canonical Customer association is explicitly supplied as literal `null`
+- persisted Family association is explicitly supplied as literal `null`
+- persisted `promoted_customer_id` association is explicitly supplied as literal `null`
 
-Any Customer or Family identity present on a Prospect before explicit promotion is treated as a scope violation and fails closed. Disabled or review-required Member Identity records also fail closed.
+Missing scope fields are not interpreted as evidence of absence. Undefined or omitted Customer/Family/promotion evidence fails closed as `missing_prospect_scope_evidence`. Any non-null Customer, Family, or promoted-Customer association before explicit promotion is a scope violation and routes to review. Disabled or review-required Member Identity records also fail closed.
 
 ## Safety
 
