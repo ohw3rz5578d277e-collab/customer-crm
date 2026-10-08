@@ -85,9 +85,9 @@ assert.equal(doubleUse.transition_allowed,false);
 
 const customer=buildMemberFamilyPassIntegrationReadModel({
  member_identity_id:prospect.member_identity_id,canonical_customer_id:'12345678',
- family_id:'FAM-1',family_link_verified:true,persisted_verified_family_id:'FAM-1',
+ family_id:'FAM-1',family_link_verified:true,persisted_verified_family_id:'FAM-1',persisted_family_customer_id:'12345678',
  member_customer_binding_verified:true,persisted_member_identity_id:prospect.member_identity_id,persisted_member_customer_id:'12345678',member_status:'active',
- published_non_deleted_memory_count:10,entitlement_schema_applied:true
+ published_non_deleted_memory_count:10,durable_black_entitlement:false,entitlement_schema_applied:true
 });
 assert.equal(customer.family_pass.current_tier,'BLACK');
 assert.equal(customer.black_contract.threshold,10);
@@ -96,20 +96,28 @@ assert.equal(customer.black_contract.automatic_award,false);
 assert.equal(customer.write_allowed,false);
 const wrongMemberBinding=buildMemberFamilyPassIntegrationReadModel({
  member_identity_id:prospect.member_identity_id,canonical_customer_id:'12345678',
- family_id:'FAM-1',family_link_verified:true,persisted_verified_family_id:'FAM-1',
+ family_id:'FAM-1',family_link_verified:true,persisted_verified_family_id:'FAM-1',persisted_family_customer_id:'12345678',
  member_customer_binding_verified:true,persisted_member_identity_id:prospect.member_identity_id,persisted_member_customer_id:'87654321',member_status:'active',
- published_non_deleted_memory_count:10
+ published_non_deleted_memory_count:10,durable_black_entitlement:false,entitlement_schema_applied:true
 });
 assert.equal(wrongMemberBinding.status,'member_customer_binding_not_verified');
 assert.equal(wrongMemberBinding.read_ready,false);
 const wrongPersistedMember=buildMemberFamilyPassIntegrationReadModel({
  member_identity_id:prospect.member_identity_id,canonical_customer_id:'12345678',
- family_id:'FAM-1',family_link_verified:true,persisted_verified_family_id:'FAM-1',
+ family_id:'FAM-1',family_link_verified:true,persisted_verified_family_id:'FAM-1',persisted_family_customer_id:'12345678',
  member_customer_binding_verified:true,persisted_member_identity_id:'MID_zyxwvutsrqponmlkjihgfedcba654321',persisted_member_customer_id:'12345678',member_status:'active',
- published_non_deleted_memory_count:10,entitlement_schema_applied:true
+ published_non_deleted_memory_count:10,durable_black_entitlement:false,entitlement_schema_applied:true
 });
 assert.equal(wrongPersistedMember.status,'member_customer_binding_not_verified');
 assert.equal(wrongPersistedMember.read_ready,false);
+const wrongFamilyCustomer=buildMemberFamilyPassIntegrationReadModel({
+ member_identity_id:prospect.member_identity_id,canonical_customer_id:'12345678',
+ family_id:'FAM-1',family_link_verified:true,persisted_verified_family_id:'FAM-1',persisted_family_customer_id:'87654321',
+ member_customer_binding_verified:true,persisted_member_identity_id:prospect.member_identity_id,persisted_member_customer_id:'12345678',member_status:'active',
+ published_non_deleted_memory_count:10,durable_black_entitlement:false,entitlement_schema_applied:true
+});
+assert.equal(wrongFamilyCustomer.status,'family_link_not_verified');
+assert.equal(wrongFamilyCustomer.read_ready,false);
 
 console.log('MEMBER_LIFECYCLE_CROSS_CONTRACT_SECURITY=PASS');
 console.log('PROSPECT_CUSTOMER_DATA_LEAK=0');
