@@ -112,9 +112,12 @@ const customer=buildMemberFamilyPassIntegrationReadModel({
  member_identity_id:prospect.member_identity_id,canonical_customer_id:'12345678',
  family_id:'FAM-1',family_link_verified:true,persisted_verified_family_id:'FAM-1',persisted_family_customer_id:'12345678',
  member_customer_binding_verified:true,persisted_member_identity_id:prospect.member_identity_id,persisted_member_customer_id:'12345678',member_status:'active',
- published_non_deleted_memory_count:10,persisted_memory_count_family_id:'FAM-1',durable_black_entitlement:false,entitlement_schema_applied:true
+ memory_count_verified:true,published_non_deleted_memory_count:10,persisted_memory_count_family_id:'FAM-1',
+ entitlement_schema_verified:true,entitlement_schema_applied:true,durable_black_record_verified:true,persisted_durable_black_query_family_id:'FAM-1',durable_black_record_count:0,durable_black_entitlement:false
 });
 assert.equal(customer.family_pass.current_tier,'BLACK');
+assert.equal(customer.memory_scope.verified,true);
+assert.equal(customer.durable_black_evidence.record_count,0);
 assert.equal(customer.black_contract.threshold,10);
 assert.equal(customer.black_contract.photo_goods_discount_percent,10);
 assert.equal(customer.black_contract.automatic_award,false);
@@ -147,7 +150,7 @@ const wrongMemoryFamily=buildMemberFamilyPassIntegrationReadModel({
  member_identity_id:prospect.member_identity_id,canonical_customer_id:'12345678',
  family_id:'FAM-1',family_link_verified:true,persisted_verified_family_id:'FAM-1',persisted_family_customer_id:'12345678',
  member_customer_binding_verified:true,persisted_member_identity_id:prospect.member_identity_id,persisted_member_customer_id:'12345678',member_status:'active',
- published_non_deleted_memory_count:10,persisted_memory_count_family_id:'FAM-2',durable_black_entitlement:false,entitlement_schema_applied:true
+ memory_count_verified:true,published_non_deleted_memory_count:10,persisted_memory_count_family_id:'FAM-2',durable_black_entitlement:false,entitlement_schema_applied:true
 });
 assert.equal(wrongMemoryFamily.status,'memory_count_family_not_verified');
 assert.equal(wrongMemoryFamily.read_ready,false);
@@ -161,4 +164,6 @@ console.log('PII_ACCESS_AFTER_30_DAYS=0');
 console.log('DOUBLE_BENEFIT_REDEMPTION=0');
 console.log('BLACK_THRESHOLD=10');
 console.log('BLACK_AUTOMATIC_AWARD=0');
+console.log('STEP8_FAMILY_MEMORY_EVIDENCE=PASS');
+console.log('STEP8_DURABLE_BLACK_READ_EVIDENCE=PASS');
 console.log('PRODUCTION_WRITE=0');
