@@ -45,7 +45,7 @@ export function buildMemberFamilyPassIntegrationReadModel({
  if(durable_black_entitlement===true){
   const achievedAt=text(black_achieved_at);
   const qualifyingCount=scalarNonNegativeInteger(durable_black_qualifying_memory_count);
-  if(!achievedAt||qualifyingCount===null||qualifyingCount<10) return {status:'invalid_durable_black_evidence',read_ready:false};
+  if(entitlement_schema_applied!==true||!achievedAt||qualifyingCount===null||qualifyingCount<10) return {status:'invalid_durable_black_evidence',read_ready:false};
   durableBlack=true;
  }
  const pending=scalarNonNegativeInteger(review_pending_count);
