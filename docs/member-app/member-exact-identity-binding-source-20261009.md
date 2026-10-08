@@ -12,6 +12,8 @@ This is backend sequence step 1 from `member-runtime-release-gates.md`.
 
 All textual identity evidence (Member ID, Prospect ID, Customer ID, Family ID, status, and source fields) must arrive as scalar strings. Arrays, objects, boxed/string-like values, or other non-string shapes are not normalized into accepted identity evidence.
 
+Binding-count evidence is accepted only as a non-negative safe integer number or a canonical decimal-integer string. Missing/blank count evidence fails as missing evidence; booleans, arrays, objects, symbols, and other malformed shapes fail closed as invalid count evidence without coercion or exception propagation.
+
 ## Customer binding
 
 A Customer Member binding is source-ready only when all of the following are exact and persisted:
