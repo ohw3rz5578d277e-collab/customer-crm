@@ -19,6 +19,9 @@ assert.equal(evaluateMemberProfileCache({...base,pii_written_at_ms:now-30*day,ca
 assert.equal(evaluateMemberProfileCache({...base,pii_written_at_ms:now-30*day,cached_at_ms:'corrupt'}).purge_required,true);
 // Before the hard deadline, malformed cache time still fails closed as invalid_time.
 assert.equal(evaluateMemberProfileCache({...base,cached_at_ms:undefined}).status,'invalid_time');
+// A cache verification older than the PII write cannot prove the current profile version.
+assert.equal(evaluateMemberProfileCache({...base,cached_at_ms:now-3*day,pii_written_at_ms:now-2*day}).status,'stale_cache_verification');
+assert.equal(evaluateMemberProfileCache({...base,cached_at_ms:now-3*day,pii_written_at_ms:now-2*day,google_available:false}).read_allowed,false);
 // Verified, fresh cached data remains readable during a temporary Google outage.
 assert.equal(evaluateMemberProfileCache({...base,google_available:false}).read_allowed,true);
 assert.equal(evaluateMemberProfileCache({...base,google_available:false}).google_refresh_available,false);
