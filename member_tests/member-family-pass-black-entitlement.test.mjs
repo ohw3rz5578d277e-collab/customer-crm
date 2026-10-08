@@ -81,6 +81,7 @@ const noSchema=await readMemberFamilyPassForSession(
 pass('10 current MEMORIES still compute BLACK without entitlement schema',noSchema.status==='ok'&&noSchema.family_pass.current_tier==='BLACK'&&noSchema.family_pass.black_currently_qualified===true);
 pass('missing entitlement schema is honestly reported',noSchema.entitlement.schema_applied===false&&noSchema.family_pass.black_lifetime_persistence_supported===false);
 pass('count-only BLACK does not invent durable entitlement',noSchema.family_pass.black_lifetime_entitled===false&&noSchema.family_pass.tier_basis==='current_memory_count');
+pass('memory count evidence is exact Family scoped',noSchema.count_source.count_verified===true&&noSchema.count_source.evidence_family_id===familyId);
 
 const blocked=await buildMemberFamilyPassBlackAchievementPlan(
   {DB:noSchemaDb},
@@ -90,6 +91,11 @@ pass('BLACK persistence plan blocks until entitlement schema exists',blocked.sta
 pass('blocked plan executes zero writes',blocked.write_executed===false&&noSchemaDb.writes.length===0);
 
 const eligibleDb=makeDb({memoryCount:10,entitlementSchema:true,entitlement:null});
+const eligibleRead=await readMemberFamilyPassForSession(
+  {DB:eligibleDb},
+  {family_id:familyId,customer_id:customerId}
+);
+pass('empty durable BLACK query is verified for exact Family',eligibleRead.status==='ok'&&eligibleRead.entitlement.read_verified===true&&eligibleRead.entitlement.query_family_id===familyId&&eligibleRead.entitlement.record_count===0);
 const eligible=await buildMemberFamilyPassBlackAchievementPlan(
   {DB:eligibleDb},
   {family_id:familyId,customer_id:customerId}
@@ -122,6 +128,7 @@ pass('durable BLACK distinguishes current qualification from lifetime entitlemen
 pass('durable BLACK uses entitlement tier basis',durable9.family_pass.tier_basis==='durable_black_entitlement'&&durable9.family_pass.effective_black===true);
 pass('durable BLACK preserves achieved timestamp',durable9.family_pass.black_achieved_at==='2026-09-01T00:00:00.000Z');
 pass('durable BLACK marks all historical milestones achieved',durable9.family_pass.milestones.every(x=>x.achieved===true));
+pass('durable BLACK read exposes exact evidence',durable9.entitlement.read_verified===true&&durable9.entitlement.query_family_id===familyId&&durable9.entitlement.record_count===1&&durable9.entitlement.achievement_source==='published-member-memories');
 
 const persistedPlan=await buildMemberFamilyPassBlackAchievementPlan(
   {DB:durable9Db},
@@ -145,7 +152,13 @@ const invalidEntitlement=await readMemberFamilyPassForSession(
   {DB:invalidEntitlementDb},
   {family_id:familyId,customer_id:customerId}
 );
-pass('invalid entitlement evidence is not trusted',invalidEntitlement.family_pass.current_tier==='GOLD'&&invalidEntitlement.family_pass.black_lifetime_entitled===false);
+pass('invalid durable entitlement evidence fails closed',invalidEntitlement.status==='invalid_durable_black_evidence'&&invalidEntitlement.read_only===true);
+
+const invalidCount=await readMemberFamilyPassForSession(
+  {DB:makeDb({memoryCount:'10',entitlementSchema:false})},
+  {family_id:familyId,customer_id:customerId}
+);
+pass('coerced MEMORY count evidence is rejected',invalidCount.status==='invalid_memory_count_evidence');
 
 const crossFamily=await readMemberFamilyPassForSession(
   {DB:makeDb({memoryCount:10,entitlementSchema:true,entitlement:durableRow})},
@@ -160,11 +173,16 @@ const pure=computeCurrentFamilyPass(3,{
 });
 pass('pure tier calculator gives durable BLACK precedence over current count',pure.current_tier==='BLACK'&&pure.memory_count===3&&pure.tier_basis==='durable_black_entitlement');
 
-pass('entitlement normalizer requires qualifying count >=10',passTest.normalizeBlackEntitlement({...durableRow,qualifying_memory_count:9})===null);
-pass('entitlement normalizer requires black_lifetime=1',passTest.normalizeBlackEntitlement({...durableRow,black_lifetime:0})===null);
+pass('entitlement normalizer requires qualifying count >=10',passTest.normalizeBlackEntitlement({...durableRow,family_id:familyId,qualifying_memory_count:9},familyId)===null);
+pass('entitlement normalizer requires numeric black_lifetime=1',passTest.normalizeBlackEntitlement({...durableRow,family_id:familyId,black_lifetime:'1'},familyId)===null);
+pass('entitlement normalizer requires exact Family binding',passTest.normalizeBlackEntitlement({...durableRow,family_id:'fam_B'},familyId)===null);
+pass('entitlement normalizer requires canonical UTC timestamp',passTest.normalizeBlackEntitlement({...durableRow,family_id:familyId,black_achieved_at:'2026-09-01T00:00:00Z'},familyId)===null);
+pass('entitlement normalizer requires canonical achievement source',passTest.normalizeBlackEntitlement({...durableRow,family_id:familyId,achievement_source:'other-source'},familyId)===null);
+pass('valid entitlement normalizes exactly',passTest.normalizeBlackEntitlement({...durableRow,family_id:familyId},familyId)?.family_id===familyId);
 
 const readHealth=memberFamilyPassReadHealth();
 pass('read health supports durable BLACK entitlement source',readHealth.durable_black_entitlement_source_supported===true&&readHealth.entitlement_table==='member_family_pass_entitlements');
+pass('read health records strict step8 evidence',readHealth.memory_count_evidence_strict===true&&readHealth.memory_count_exact_family_binding===true&&readHealth.durable_black_exact_family_binding===true&&readHealth.durable_black_canonical_utc_required===true);
 pass('read health keeps discount enforcement disabled',readHealth.black_benefit_enforcement_ready===false&&readHealth.production_write===false);
 
 const planHealth=memberFamilyPassBlackAchievementPlanHealth();
@@ -173,3 +191,5 @@ pass('plan health requires threshold 10 and schema before award',planHealth.thre
 pass('plan health records no automatic backfill or discount enforcement',planHealth.automatic_backfill===false&&planHealth.discount_enforcement===false);
 
 console.log(`MEMBER_FAMILY_PASS_BLACK_ENTITLEMENT=${n}/${n} PASS`);
+console.log('MEMORY_COUNT_EXACT_FAMILY_EVIDENCE=PASS');
+console.log('DURABLE_BLACK_EXACT_READ_EVIDENCE=PASS');
