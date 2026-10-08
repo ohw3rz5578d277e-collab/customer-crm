@@ -15,6 +15,9 @@ assert.equal(prospect.customer_id_generation,false);
 const isolated=buildProspectMemberIntegrationReadModel({
  member_identity_id:prospect.member_identity_id,
  prospect_id:prospect.prospect_id,
+ persisted_prospect_id:prospect.prospect_id,
+ persisted_member_identity_id:prospect.member_identity_id,
+ member_prospect_binding_verified:true,
  consent_current:true,
  signup_benefit_state:'available',
  acquisition_source:'instagram'
