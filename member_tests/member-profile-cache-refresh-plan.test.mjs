@@ -1,0 +1,15 @@
+import assert from 'node:assert/strict';
+import {planMemberProfileCacheRefresh} from '../src/member-profile-cache-refresh-plan.mjs';
+const day=86400000,now=Date.UTC(2026,9,8);
+const base={now_ms:now,pii_written_at_ms:now-2*day,google_synced_at_ms:now-day,identity_verified:true,version_verified:true,google_available:true,google_version_matches:true};
+const ready=planMemberProfileCacheRefresh(base);
+assert.equal(ready.status,'refresh_ready');
+assert.equal(ready.refresh_allowed,false);
+assert.equal(ready.requires_separate_write_gate,true);
+assert.equal(ready.cache_expires_at_ms,now+6*day);
+assert.equal(planMemberProfileCacheRefresh({...base,google_available:false}).status,'google_unavailable');
+assert.equal(planMemberProfileCacheRefresh({...base,google_version_matches:false}).status,'verification_required');
+assert.equal(planMemberProfileCacheRefresh({...base,google_synced_at_ms:now-3*day}).status,'stale_google_sync');
+assert.equal(planMemberProfileCacheRefresh({...base,pii_written_at_ms:now-30*day}).status,'pii_retention_expired');
+assert.equal(planMemberProfileCacheRefresh({...base,google_synced_at_ms:now-7*day,pii_written_at_ms:now-8*day}).status,'cache_expired');
+assert.equal(planMemberProfileCacheRefresh({...base,google_synced_at_ms:now+1}).status,'invalid_time');
