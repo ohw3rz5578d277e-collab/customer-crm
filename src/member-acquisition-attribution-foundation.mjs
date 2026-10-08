@@ -22,7 +22,10 @@ function validInstant(value){
 }
 const allowedSource=new Set(['instagram','website','meta_paid','instagram_profile','organic_search','direct','referral','unknown']);
 
-export function createAcquisitionEventId(){return 'AQ_'+crypto.randomBytes(24).toString('base64url');}
+export function createAcquisitionEventId(seed=''){
+ const stable=text(seed);
+ return stable?`AQ_${crypto.createHash('sha256').update(stable).digest('base64url')}`:`AQ_${crypto.randomBytes(24).toString('base64url')}`;
+}
 
 export function planAcquisitionRegistration({
  member_identity_id,
@@ -55,6 +58,7 @@ export function planFunnelEvent({
  canonical_customer_id='',
  reservation_id='',
  occurred_at,
+ idempotency_key='',
  member_prospect_binding_verified=false,
  persisted_prospect_member_identity_id='',
  persisted_prospect_id='',
@@ -68,11 +72,13 @@ export function planFunnelEvent({
  persisted_reservation_customer_id=''
 }={}){
  const stages=new Set(['registered','inquiry','reserved','shot','repeat']);
- const stageName=text(stage),member=text(member_identity_id),prospect=text(prospect_id),customer=text(canonical_customer_id),reservation=text(reservation_id);
+ const stageName=text(stage),member=text(member_identity_id),prospect=text(prospect_id),customer=text(canonical_customer_id),reservation=text(reservation_id),idempotency=text(idempotency_key);
  if(!stages.has(stageName)||!MID.test(member)) return {status:'invalid_event',record_allowed:false};
  if(customer&&!CID.test(customer)) return {status:'invalid_customer_id',record_allowed:false};
  if(prospect&&!PID.test(prospect)) return {status:'invalid_prospect_id',record_allowed:false};
+ if(!prospect&&!customer) return {status:'lifecycle_binding_required',record_allowed:false};
  if(!validInstant(occurred_at)) return {status:'invalid_time',record_allowed:false};
+ if(!idempotency||idempotency.length>256) return {status:'idempotency_key_required',record_allowed:false};
  const reservationBacked=['reserved','shot','repeat'].includes(stageName);
  if(reservationBacked&&!reservation) return {status:'reservation_context_required',record_allowed:false};
  if(prospect&&(member_prospect_binding_verified!==true||text(persisted_prospect_member_identity_id)!==member||text(persisted_prospect_id)!==prospect)) return {status:'member_prospect_binding_not_verified',record_allowed:false};
@@ -82,5 +88,6 @@ export function planFunnelEvent({
   if(prospect&&text(persisted_reservation_prospect_id)!==prospect) return {status:'reservation_binding_not_verified',record_allowed:false};
   if(customer&&text(persisted_reservation_customer_id)!==customer) return {status:'reservation_binding_not_verified',record_allowed:false};
  }
- return {status:'ready',event_id:createAcquisitionEventId(),stage:stageName,member_identity_id:member,prospect_id:prospect||null,canonical_customer_id:customer||null,reservation_id:reservation||null,occurred_at:text(occurred_at),append_only:true,identity_authority:false,record_allowed:false};
+ const eventSeed=JSON.stringify(['member_funnel_v1',idempotency,stageName,member,prospect,customer,reservation,text(occurred_at)]);
+ return {status:'ready',event_id:createAcquisitionEventId(eventSeed),stage:stageName,member_identity_id:member,prospect_id:prospect||null,canonical_customer_id:customer||null,reservation_id:reservation||null,occurred_at:text(occurred_at),append_only:true,identity_authority:false,record_allowed:false};
 }
