@@ -90,6 +90,16 @@ assert.equal(replay.status,'idempotent_replay');
 assert.equal(replay.master_write,false);
 assert.equal(replay.history_append,false);
 
+replay=planSyncReplay({incoming_event_id:event,incoming_version:2,incoming_digest:digestA.toUpperCase(),last_event_id:event,last_version:2,last_digest:digestA});
+assert.equal(replay.status,'idempotent_replay');
+assert.equal(replay.master_write,false);
+assert.equal(replay.history_append,false);
+
+replay=planSyncReplay({incoming_event_id:event,incoming_version:2,incoming_digest:digestA,last_event_id:event,last_version:2,last_digest:digestA.toUpperCase()});
+assert.equal(replay.status,'idempotent_replay');
+assert.equal(replay.master_write,false);
+assert.equal(replay.history_append,false);
+
 replay=planSyncReplay({incoming_event_id:event,incoming_version:2,incoming_digest:'',last_event_id:event,last_version:2,last_digest:''});
 assert.equal(replay.status,'invalid_replay_evidence');
 assert.equal(replay.review_required,true);
@@ -145,6 +155,7 @@ console.log('PROFILE_VERSION_EVIDENCE=SAFE_INTEGER_RANGE');
 console.log('REPLAY_EVENT_EVIDENCE=REQUIRED');
 console.log('INITIAL_PRIOR_STATE_EVIDENCE=EMPTY_ONLY');
 console.log('REPLAY_DIGEST_EVIDENCE=REQUIRED_WHEN_PRIOR_EXISTS');
+console.log('REPLAY_DIGEST_CASE=NORMALIZED');
 console.log('EVENT_ID_CONFLICT_REVIEW=YES');
 console.log('IDEMPOTENCY=REQUIRED');
 console.log('HISTORY_APPEND=REQUIRED');
