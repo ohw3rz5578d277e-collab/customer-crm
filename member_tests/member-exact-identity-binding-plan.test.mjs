@@ -9,6 +9,9 @@ const customerReady={
   member_identity_id:mid,
   canonical_customer_id:cid,
   family_id:'FAM-1',
+  member_identity_record_verified:true,
+  persisted_member_identity_record_id:mid,
+  member_identity_status:'active',
   customer_id_source:'customer_crm',
   customer_record_verified:true,
   persisted_customer_record_id:cid,
@@ -17,6 +20,9 @@ const customerReady={
   persisted_member_customer_id:cid,
   active_member_customer_binding_count:1,
   persisted_member_binding_count_customer_id:cid,
+  family_record_verified:true,
+  persisted_family_record_id:'FAM-1',
+  family_status:'active',
   family_link_verified:true,
   persisted_family_id:'FAM-1',
   persisted_family_customer_id:cid,
@@ -27,10 +33,20 @@ const customerReady={
 let r=planExactCustomerMemberFamilyBinding(customerReady);
 assert.equal(r.status,'ready');
 assert.equal(r.exact_binding_verified,true);
+assert.equal(r.member_identity_status,'active');
+assert.equal(r.family_status,'active');
 assert.equal(r.write_allowed,false);
 assert.equal(r.customer_id_generation,false);
 assert.equal(r.family_id_generation,false);
 assert.equal(r.fuzzy_identity_linking,false);
+
+r=planExactCustomerMemberFamilyBinding({...customerReady,member_identity_record_verified:'true'});
+assert.equal(r.status,'member_identity_record_not_verified');
+assert.equal(r.review_required,true);
+
+r=planExactCustomerMemberFamilyBinding({...customerReady,member_identity_status:'disabled'});
+assert.equal(r.status,'member_identity_not_active');
+assert.equal(r.review_required,true);
 
 r=planExactCustomerMemberFamilyBinding({...customerReady,customer_record_verified:'true'});
 assert.equal(r.status,'customer_record_not_verified');
@@ -49,6 +65,14 @@ assert.equal(r.review_required,true);
 r=planExactCustomerMemberFamilyBinding({...customerReady,active_member_customer_binding_count:Number.MAX_SAFE_INTEGER+1});
 assert.equal(r.status,'invalid_member_binding_count');
 
+r=planExactCustomerMemberFamilyBinding({...customerReady,family_record_verified:'true'});
+assert.equal(r.status,'family_record_not_verified');
+assert.equal(r.review_required,true);
+
+r=planExactCustomerMemberFamilyBinding({...customerReady,family_status:'inactive'});
+assert.equal(r.status,'family_not_active');
+assert.equal(r.review_required,true);
+
 r=planExactCustomerMemberFamilyBinding({...customerReady,family_link_verified:false});
 assert.equal(r.status,'family_link_not_verified');
 
@@ -63,6 +87,9 @@ assert.equal(r.review_required,true);
 const prospectReady={
   member_identity_id:mid,
   prospect_id:pid,
+  member_identity_record_verified:true,
+  persisted_member_identity_record_id:mid,
+  member_identity_status:'active',
   prospect_status:'prospect',
   member_prospect_binding_verified:true,
   persisted_member_identity_id:mid,
@@ -74,6 +101,7 @@ const prospectReady={
 r=planExactProspectMemberBinding(prospectReady);
 assert.equal(r.status,'ready');
 assert.equal(r.exact_binding_verified,true);
+assert.equal(r.member_identity_status,'active');
 assert.equal(r.canonical_customer_id,null);
 assert.equal(r.family_id,null);
 assert.equal(r.prospect_access_to_customer_data,false);
@@ -86,6 +114,13 @@ assert.equal(r.review_required,true);
 
 r=planExactProspectMemberBinding({...prospectReady,family_id:'FAM-1'});
 assert.equal(r.status,'prospect_scope_violation');
+
+r=planExactProspectMemberBinding({...prospectReady,member_identity_record_verified:'true'});
+assert.equal(r.status,'member_identity_record_not_verified');
+
+r=planExactProspectMemberBinding({...prospectReady,member_identity_status:'review_required'});
+assert.equal(r.status,'member_identity_not_active');
+assert.equal(r.review_required,true);
 
 r=planExactProspectMemberBinding({...prospectReady,member_prospect_binding_verified:'true'});
 assert.equal(r.status,'member_prospect_binding_not_verified');
@@ -102,8 +137,10 @@ r=planExactProspectMemberBinding({...prospectReady,active_member_prospect_bindin
 assert.equal(r.status,'invalid_prospect_binding_count');
 
 console.log('MEMBER_EXACT_IDENTITY_BINDING=PASS');
+console.log('MEMBER_IDENTITY_STATUS=ACTIVE_REQUIRED');
 console.log('CUSTOMER_MEMBER_BINDING=EXACT_ONE');
 console.log('CUSTOMER_FAMILY_BINDING=EXACT_ONE');
+console.log('FAMILY_STATUS=ACTIVE_REQUIRED');
 console.log('PROSPECT_CUSTOMER_DATA_ACCESS=0');
 console.log('CUSTOMER_ID_GENERATION=0');
 console.log('FAMILY_ID_GENERATION=0');
