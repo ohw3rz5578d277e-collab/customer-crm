@@ -13,8 +13,16 @@ export const CLEAN_MEMBER_STACK_ORIGINS=Object.freeze([
 export const CLEAN_MEMBER_STACK_BASE='9d282bc2c1906379f33b7d0d8d28604c26cc3881';
 export function validateCleanMemberStackOrigins(rows=[]){
  if(!Array.isArray(rows)||rows.length!==CLEAN_MEMBER_STACK_ORIGINS.length) return {status:'blocked',reason:'origin_count_mismatch'};
+ const byPr=new Map();
+ for(const row of rows){
+  if(!row||typeof row!=='object'||Array.isArray(row)||typeof row.pr!=='number'||!Number.isSafeInteger(row.pr)||row.pr<=0){
+   return {status:'blocked',reason:'invalid_origin_evidence'};
+  }
+  if(byPr.has(row.pr)) return {status:'blocked',reason:'duplicate_origin_evidence',pr:row.pr};
+  byPr.set(row.pr,row);
+ }
  for(const [pr,head] of CLEAN_MEMBER_STACK_ORIGINS){
-  const row=rows.find(x=>Number(x.pr)===pr);
+  const row=byPr.get(pr);
   if(!row||row.head!==head||row.review_threads_resolved!==true) return {status:'blocked',reason:'origin_evidence_mismatch',pr};
  }
  return {status:'provenance_verified',production_ready:false,merge_allowed:false};
