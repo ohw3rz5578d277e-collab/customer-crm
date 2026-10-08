@@ -10,9 +10,38 @@ export const MEMBER_STACK_EXPECTED=[
  {pr:211,head:'f510eca28b184c8b166cf13fd3618d3b3357b805'}
 ];
 
+const readinessResult=failures=>({
+ status:failures.length?'blocked':'source_ready',
+ failures,
+ merge_order:MEMBER_STACK_EXPECTED.map(x=>x.pr),
+ exact_head_required:true,
+ sequential_merge_required:true,
+ refresh_after_each_merge:true,
+ production_ready:false,
+ production_deploy_allowed:false,
+ production_write_allowed:false
+});
+
 export function evaluateMemberStackReadiness(rows=[]){
- const byPr=new Map((rows||[]).map(x=>[Number(x.pr),x]));
  const failures=[];
+ if(!Array.isArray(rows)) return readinessResult([{pr:null,reason:'invalid_readiness_evidence'}]);
+ const byPr=new Map();
+ for(const row of rows){
+  if(!row||typeof row!=='object'||Array.isArray(row)){
+   failures.push({pr:null,reason:'invalid_readiness_evidence'});
+   continue;
+  }
+  const pr=Number(row.pr);
+  if(!Number.isSafeInteger(pr)||pr<=0){
+   failures.push({pr:null,reason:'invalid_readiness_evidence'});
+   continue;
+  }
+  if(byPr.has(pr)){
+   failures.push({pr,reason:'duplicate_pr_evidence'});
+   continue;
+  }
+  byPr.set(pr,row);
+ }
  for(const expected of MEMBER_STACK_EXPECTED){
   const row=byPr.get(expected.pr);
   if(!row){failures.push({pr:expected.pr,reason:'missing_pr_evidence'});continue;}
@@ -23,15 +52,5 @@ export function evaluateMemberStackReadiness(rows=[]){
   if(row.changed_files_expected!==true) failures.push({pr:expected.pr,reason:'changed_files_not_proven'});
   if(row.parent_head_in_ancestry!==true) failures.push({pr:expected.pr,reason:'parent_head_ancestry_not_proven'});
  }
- return {
-  status:failures.length?'blocked':'source_ready',
-  failures,
-  merge_order:MEMBER_STACK_EXPECTED.map(x=>x.pr),
-  exact_head_required:true,
-  sequential_merge_required:true,
-  refresh_after_each_merge:true,
-  production_ready:false,
-  production_deploy_allowed:false,
-  production_write_allowed:false
- };
+ return readinessResult(failures);
 }
