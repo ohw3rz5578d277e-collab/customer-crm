@@ -93,7 +93,7 @@ export function planExactCustomerMemberFamilyBinding({
     return baseBlocked('missing_member_binding_count_evidence');
   }
   if(text(persisted_member_binding_count_customer_id)!==customer){
-    return baseBlocked('member_binding_count_customer_not_verified');
+    return baseBlocked('member_binding_count_customer_not_verified',{review_required:true});
   }
   const memberBindingCount=scalarNonNegativeInteger(active_member_customer_binding_count);
   if(memberBindingCount===null){
@@ -125,7 +125,7 @@ export function planExactCustomerMemberFamilyBinding({
     return baseBlocked('missing_family_link_count_evidence');
   }
   if(text(persisted_family_link_count_customer_id)!==customer){
-    return baseBlocked('family_link_count_customer_not_verified');
+    return baseBlocked('family_link_count_customer_not_verified',{review_required:true});
   }
   const familyLinkCount=scalarNonNegativeInteger(active_family_link_count);
   if(familyLinkCount===null){
@@ -163,8 +163,9 @@ export function planExactCustomerMemberFamilyBinding({
 export function planExactProspectMemberBinding({
   member_identity_id,
   prospect_id,
-  canonical_customer_id=null,
-  family_id=null,
+  canonical_customer_id,
+  family_id,
+  persisted_promoted_customer_id,
   member_identity_record_verified=false,
   persisted_member_identity_record_id='',
   member_identity_status='',
@@ -177,13 +178,22 @@ export function planExactProspectMemberBinding({
 }={}){
   const member=text(member_identity_id);
   const prospect=text(prospect_id);
-  const customer=text(canonical_customer_id);
-  const family=text(family_id);
 
   if(!MID.test(member)||!PID.test(prospect)){
     return baseBlocked('invalid_identity');
   }
-  if(customer||family){
+  if(
+    canonical_customer_id===undefined||
+    family_id===undefined||
+    persisted_promoted_customer_id===undefined
+  ){
+    return baseBlocked('missing_prospect_scope_evidence');
+  }
+  if(
+    canonical_customer_id!==null||
+    family_id!==null||
+    persisted_promoted_customer_id!==null
+  ){
     return baseBlocked('prospect_scope_violation',{review_required:true});
   }
   const memberRecordFailure=verifyActiveMemberIdentity({
@@ -212,7 +222,7 @@ export function planExactProspectMemberBinding({
     return baseBlocked('missing_prospect_binding_count_evidence');
   }
   if(text(persisted_member_binding_count_prospect_id)!==prospect){
-    return baseBlocked('prospect_binding_count_subject_not_verified');
+    return baseBlocked('prospect_binding_count_subject_not_verified',{review_required:true});
   }
   const bindingCount=scalarNonNegativeInteger(active_member_prospect_binding_count);
   if(bindingCount===null){
@@ -229,6 +239,7 @@ export function planExactProspectMemberBinding({
     prospect_id:prospect,
     canonical_customer_id:null,
     family_id:null,
+    promoted_customer_id:null,
     member_identity_status:'active',
     member_prospect_binding_verified:true,
     active_member_prospect_binding_count:1,
