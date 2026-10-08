@@ -6,6 +6,7 @@ const token='abcdefghijklmnopqrstuvwxyzABCDEFGH_1234567890';
 const digest=crypto.createHash('sha256').update(token).digest('hex');
 const base={
   raw_token:token,
+  server_now_verified:true,
   now:'2026-10-09T00:00:00.000Z',
   invitation_record_verified:true,
   persisted_invitation_id:'INV_abcdefghijklmnopqrstuvwx',
@@ -25,6 +26,7 @@ assert.equal(ready.status,'ready');
 assert.equal(ready.ready,true);
 assert.equal(ready.canonical_customer_id,'12345678');
 assert.equal(ready.token_digest_verified,true);
+assert.equal(ready.server_now_verified,true);
 assert.equal(ready.single_use,true);
 assert.equal(ready.customer_id_from_server_record,true);
 assert.equal(ready.customer_id_from_client,false);
@@ -33,11 +35,18 @@ assert.equal(ready.execute,false);
 assert.equal(ready.production_write_authorized,false);
 assert.equal(ready.execution_requires_separate_gate,true);
 assert.equal(ready.atomic_redemption.mode,'single_statement_compare_and_set');
+assert.equal(ready.atomic_redemption.database_clock_required,true);
+assert.equal(ready.atomic_redemption.expiry_rechecked_at_execution,true);
+assert.equal(ready.atomic_redemption.active_cardinality_rechecked_at_execution,true);
 assert.equal(ready.atomic_redemption.success_requires_affected_rows,1);
 assert.equal(ready.atomic_redemption.retry_without_revalidation,false);
+assert.match(ready.atomic_redemption.statement,/SET consumed_at = strftime/);
 assert.match(ready.atomic_redemption.statement,/consumed_at IS NULL/);
 assert.match(ready.atomic_redemption.statement,/invalidated_at IS NULL/);
-assert.match(ready.atomic_redemption.statement,/expires_at > \?/);
+assert.match(ready.atomic_redemption.statement,/expires_at > strftime/);
+assert.match(ready.atomic_redemption.statement,/NOT EXISTS/);
+assert.match(ready.atomic_redemption.statement,/other\.canonical_customer_id = \?/);
+assert.equal(ready.atomic_redemption.binds.length,6);
 assert.ok(!JSON.stringify(ready).includes(token));
 
 for(const raw_token of [undefined,null,'short',` ${token}`,`${token} `,[token],{},Object.create(null)]){
@@ -45,6 +54,8 @@ for(const raw_token of [undefined,null,'short',` ${token}`,`${token} `,[token],{
   assert.equal(planOneTimeInvitationRedemption({...base,raw_token}).status,'invalid_invitation_token');
 }
 
+assert.equal(planOneTimeInvitationRedemption({...base,server_now_verified:'true'}).status,'server_now_not_verified');
+assert.equal(planOneTimeInvitationRedemption({...base,server_now_verified:false}).status,'server_now_not_verified');
 assert.equal(planOneTimeInvitationRedemption({...base,invitation_record_verified:'true'}).status,'invitation_record_not_verified');
 assert.equal(planOneTimeInvitationRedemption({...base,invitation_record_verified:false}).status,'invitation_record_not_verified');
 
@@ -90,5 +101,7 @@ assert.equal(planOneTimeInvitationRedemption({...base,active_invitation_count_cu
 console.log('MEMBER_INVITATION_REDEMPTION_PLAN=PASS');
 console.log('RAW_INVITATION_TOKEN_OUTPUT=0');
 console.log('ATOMIC_COMPARE_AND_SET=PASS');
+console.log('EXECUTION_TIME_EXPIRY_RECHECK=PASS');
+console.log('EXECUTION_TIME_ACTIVE_CARDINALITY_RECHECK=PASS');
 console.log('CUSTOMER_ID_FROM_CLIENT=0');
 console.log('PRODUCTION_WRITE=0');
