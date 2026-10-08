@@ -17,9 +17,10 @@ The public invitation carries only a high-entropy opaque raw token. The server:
 3. looks up the persisted invitation by the digest and requires an exact-one match;
 4. verifies that the returned row itself is trusted persisted evidence;
 5. derives canonical Customer ID only from that persisted row, never from client input;
-6. requires persisted `consumed_at` and `invalidated_at` evidence to be present explicitly; omitted evidence is not treated as NULL;
-7. rejects revoked, already-consumed, expired, malformed, duplicate, mismatched or ambiguously-scoped evidence;
-8. requires the customer's active invitation cardinality to be exactly one and scopes that count to the same canonical Customer ID.
+6. requires a verified server-side current time for validation;
+7. requires persisted `consumed_at` and `invalidated_at` evidence to be present explicitly; omitted evidence is not treated as NULL;
+8. rejects revoked, already-consumed, expired, malformed, duplicate, mismatched or ambiguously-scoped evidence;
+9. requires the customer's active invitation cardinality to be exactly one and scopes that count to the same canonical Customer ID.
 
 All textual IDs/digests/timestamps are strict scalar strings. Arrays, objects and other non-scalar shapes do not coerce into accepted evidence. Count evidence accepts only safe non-negative integer numbers or canonical decimal strings.
 
@@ -29,7 +30,9 @@ All textual IDs/digests/timestamps are strict scalar strings. Arrays, objects an
 
 `YYYY-MM-DDTHH:mm:ss.sssZ`
 
-Invalid or normalized-away calendar dates fail closed. An invitation is expired when `now >= expires_at`.
+Invalid or normalized-away calendar dates fail closed. An invitation is expired when validated `now >= expires_at`.
+
+Validation time alone is not sufficient for redemption because execution may be delayed. The atomic redemption statement therefore rechecks expiry using the database execution-time UTC clock.
 
 ## Raw-token handling
 
@@ -43,19 +46,30 @@ A validated invitation produces a source-only compare-and-set statement equivale
 
 ```sql
 UPDATE member_customer_invitations
-SET consumed_at = ?
+SET consumed_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
 WHERE invitation_id = ?
   AND canonical_customer_id = ?
   AND token_sha256 = ?
   AND expires_at = ?
   AND consumed_at IS NULL
   AND invalidated_at IS NULL
-  AND expires_at > ?
+  AND expires_at > strftime('%Y-%m-%dT%H:%M:%fZ','now')
+  AND NOT EXISTS (
+    SELECT 1
+    FROM member_customer_invitations AS other
+    WHERE other.canonical_customer_id = ?
+      AND other.invitation_id <> ?
+      AND other.consumed_at IS NULL
+      AND other.invalidated_at IS NULL
+      AND other.expires_at > strftime('%Y-%m-%dT%H:%M:%fZ','now')
+  )
 ```
+
+The execution-time predicates intentionally recheck both expiry and exact active-invitation cardinality. This closes the race where an invitation expires, is revoked/consumed, or is superseded by another active invitation after validation but before redemption.
 
 Redemption succeeds only if the eventual execution reports exactly one affected row.
 
-Zero affected rows means stale/racing evidence or prior redemption/revocation/expiry. The caller must not retry the same mutation blindly; it must re-read and revalidate first.
+Zero affected rows means stale/racing evidence or prior redemption/revocation/expiry/supersession. The caller must not retry the same mutation blindly; it must re-read and revalidate first.
 
 This compare-and-set prevents two concurrent requests from both successfully consuming the same invitation.
 
