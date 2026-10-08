@@ -46,10 +46,10 @@ export function buildMemberFamilyPassIntegrationReadModel({
  if(count===null) return {status:'invalid_memory_count',read_ready:false};
  if(typeof entitlement_schema_applied!=='boolean') return {status:'entitlement_schema_evidence_required',read_ready:false};
  if(typeof durable_black_entitlement!=='boolean') return {status:'durable_black_evidence_required',read_ready:false};
+ if(text(persisted_durable_black_family_id)!==family) return {status:'durable_black_family_not_verified',read_ready:false};
  if(entitlement_schema_applied===false&&durable_black_entitlement===true) return {status:'durable_black_schema_conflict',read_ready:false};
  let durableBlack=false;
  if(durable_black_entitlement===true){
-  if(text(persisted_durable_black_family_id)!==family) return {status:'durable_black_family_not_verified',read_ready:false};
   const achievedAt=text(black_achieved_at);
   const qualifyingCount=scalarNonNegativeInteger(durable_black_qualifying_memory_count);
   if(entitlement_schema_applied!==true||!achievedAt||qualifyingCount===null||qualifyingCount<10) return {status:'invalid_durable_black_evidence',read_ready:false};
