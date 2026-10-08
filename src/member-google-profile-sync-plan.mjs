@@ -3,6 +3,7 @@ import crypto from 'node:crypto';
 const CUSTOMER_ID_RE=/^\d{8}$/;
 const PROSPECT_ID_RE=/^PID_[A-Za-z0-9_-]{22,}$/;
 const EVENT_ID_RE=/^SE_[A-Za-z0-9_-]{22,}$/;
+const DIGEST_RE=/^[0-9a-f]{64}$/i;
 const text=v=>v==null?'':String(v).trim();
 
 export function createSyncEventId(){
@@ -72,6 +73,9 @@ export function planSyncReplay({incoming_event_id,incoming_version,incoming_dige
  const ie=text(incoming_event_id), le=text(last_event_id);
  const iv=Number(incoming_version), lv=Number(last_version);
  const id=text(incoming_digest), ld=text(last_digest);
+ if(!DIGEST_RE.test(id)||!DIGEST_RE.test(ld)){
+   return {status:'invalid_replay_evidence',review_required:true,master_write:false,history_append:false};
+ }
  if(ie&&ie===le){
    if(iv===lv&&id===ld) return {status:'idempotent_replay',master_write:false,history_append:false};
    return {status:'event_replay_conflict',review_required:true,master_write:false,history_append:false};
