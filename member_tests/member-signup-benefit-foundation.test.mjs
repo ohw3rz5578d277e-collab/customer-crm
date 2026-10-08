@@ -31,7 +31,7 @@ for(const malformed of [['0'],{value:0},0n]) assert.equal(planSignupBenefitTrans
 assert.equal(planSignupBenefitTransition({current_state:'issued',target_state:'available',entitlement_member_identity_id:member}).status,'ready');
 assert.equal(planSignupBenefitTransition({current_state:'reserved',target_state:'available',entitlement_member_identity_id:member}).status,'ready');
 
-p=planBenefitPromotionCarryForward({member_identity_id:member,prospect_id:prospect,canonical_customer_id:'12345678',current_state:'available'});
+p=planBenefitPromotionCarryForward({member_identity_id:member,prospect_id:prospect,canonical_customer_id:'12345678',current_state:'available',persisted_member_identity_id:member,persisted_prospect_id:prospect,persisted_canonical_customer_id:'12345678',promotion_verified:true});
 assert.equal(p.status,'ready');
 assert.equal(p.state_reset,false);
 assert.equal(p.reissue,false);
@@ -42,3 +42,6 @@ console.log('DOUBLE_REDEMPTION=BLOCKED');
 console.log('PROSPECT_PROMOTION_REISSUE=0');
 console.log('AUTOMATIC_DISCOUNT=0');
 console.log('COMMERCE_WRITE=0');
+
+assert.equal(planBenefitPromotionCarryForward({member_identity_id:member,prospect_id:prospect,canonical_customer_id:'12345678',current_state:'available'}).status,'promotion_binding_not_verified');
+assert.equal(planBenefitPromotionCarryForward({member_identity_id:member,prospect_id:prospect,canonical_customer_id:'12345678',current_state:'available',persisted_member_identity_id:member,persisted_prospect_id:prospect,persisted_canonical_customer_id:'87654321',promotion_verified:true}).status,'promotion_binding_not_verified');
