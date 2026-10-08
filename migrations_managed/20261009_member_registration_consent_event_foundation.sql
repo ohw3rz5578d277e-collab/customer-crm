@@ -4,7 +4,7 @@
 
 CREATE TABLE IF NOT EXISTS member_registration_events (
   registration_event_id TEXT PRIMARY KEY,
-  registration_idempotency_key TEXT NOT NULL UNIQUE,
+  registration_idempotency_key TEXT NOT NULL,
   member_identity_id TEXT NOT NULL,
   prospect_id TEXT NOT NULL,
   profile_digest_sha256 TEXT NOT NULL,
