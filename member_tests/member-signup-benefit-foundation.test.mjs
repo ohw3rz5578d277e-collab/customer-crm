@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
-import {planSignupBenefitIssue,planSignupBenefitTransition,planBenefitPromotionCarryForward} from '../src/member-signup-benefit-foundation.mjs';
+import {planSignupBenefitIssue as rawPlanSignupBenefitIssue,planSignupBenefitTransition,planBenefitPromotionCarryForward} from '../src/member-signup-benefit-foundation.mjs';
 const member='MID_abcdefghijklmnopqrstuvwxyz123456';
 const prospect='PID_abcdefghijklmnopqrstuvwxyz123456';
+const planSignupBenefitIssue=(args={})=>rawPlanSignupBenefitIssue({persisted_benefit_count_member_identity_id:args.member_identity_id,persisted_benefit_count_prospect_id:args.prospect_id,...args});
 assert.equal(planSignupBenefitIssue({member_identity_id:member,prospect_id:prospect,registration_completed:true,consent_current:true,existing_signup_benefit_count:0}).status,'member_prospect_binding_not_verified');
 assert.equal(planSignupBenefitIssue({member_identity_id:member,prospect_id:prospect,persisted_member_identity_id:member,persisted_prospect_id:'PID_zyxwvutsrqponmlkjihgfedcba654321',member_prospect_binding_verified:true,registration_completed:true,consent_current:true,existing_signup_benefit_count:0}).status,'member_prospect_binding_not_verified');
 assert.equal(planSignupBenefitIssue({member_identity_id:member,prospect_id:prospect,persisted_member_identity_id:'MID_zyxwvutsrqponmlkjihgfedcba654321',persisted_prospect_id:prospect,member_prospect_binding_verified:true,registration_completed:true,consent_current:true,existing_signup_benefit_count:0}).status,'member_prospect_binding_not_verified');
@@ -12,6 +13,7 @@ assert.equal(p.state,'issued');
 assert.equal(p.commercial_definition,null);
 assert.equal(p.automatic_discount,false);
 assert.equal(p.issue_allowed,false);
+assert.equal(planSignupBenefitIssue({member_identity_id:member,prospect_id:prospect,member_prospect_binding_verified:true,persisted_member_identity_id:member,persisted_prospect_id:prospect,registration_completed:true,consent_current:true,existing_signup_benefit_count:0,persisted_benefit_count_prospect_id:'PID_zyxwvutsrqponmlkjihgfedcba654321'}).status,'benefit_count_binding_not_verified');
 assert.equal(planSignupBenefitIssue({member_identity_id:member,prospect_id:prospect,member_prospect_binding_verified:true,persisted_member_identity_id:member,persisted_prospect_id:prospect,registration_completed:true,consent_current:true}).status,'missing_existing_benefit_evidence');
 for(const missing of [null,'','   ',false]) assert.equal(planSignupBenefitIssue({member_identity_id:member,prospect_id:prospect,member_prospect_binding_verified:true,persisted_member_identity_id:member,persisted_prospect_id:prospect,registration_completed:true,consent_current:true,existing_signup_benefit_count:missing}).status,'missing_existing_benefit_evidence');
 assert.equal(planSignupBenefitIssue({member_identity_id:member,prospect_id:prospect,member_prospect_binding_verified:true,persisted_member_identity_id:member,persisted_prospect_id:prospect,registration_completed:true,consent_current:true,existing_signup_benefit_count:1}).status,'already_issued');
