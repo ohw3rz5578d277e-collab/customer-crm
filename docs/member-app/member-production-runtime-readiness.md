@@ -8,34 +8,54 @@ It does not deploy a Worker, enable Member routes, activate Member sessions or L
 
 The source-level Member backend sequence Steps 1 through 9 must already pass on the exact authorized SHA before this workflow is allowed to observe any Production prerequisite.
 
+## Authorization path
+
+Runtime readiness is **bridge-only**. A direct Actions UI `workflow_dispatch` is not an authorized path.
+
+The only authorized path is an exact Owner comment on release-gate issue #26:
+
+`/member-runtime-readiness sha=<exact-current-main-sha>`
+
+The issue-comment bridge must:
+
+1. verify issue #26;
+2. verify both the GitHub actor and comment author are the Owner;
+3. verify the exact command shape;
+4. verify the supplied SHA is the exact current `main` SHA;
+5. pass both the exact SHA and exact Owner comment ID into the readiness workflow.
+
+The readiness workflow itself then independently requires the bridge-dispatch bot actor/triggering actor and fetches the exact comment ID from GitHub. It fails closed unless the comment ID, author, issue URL and exact command body all match the expected Owner authorization receipt.
+
+This prevents a direct/manual workflow dispatch or an unrelated workflow dispatch from being accepted as authorized readiness evidence.
+
 ## Source prerequisite
 
 Before any GitHub Production release-receipt lookup, Cloudflare authentication, Production secret-name read, or Production D1 read, the workflow must:
 
-1. check out the exact Owner-authorized current-main SHA;
-2. confirm that current `main` is still that exact SHA;
-3. use Node 22;
-4. execute `member_tests/member-runtime-step9-final-gate.test.mjs` successfully.
+1. verify the exact Issue #26 Owner authorization receipt;
+2. check out the exact Owner-authorized current-main SHA;
+3. confirm that current `main` is still that exact SHA;
+4. use Node 22;
+5. execute `member_tests/member-runtime-step9-final-gate.test.mjs` successfully.
 
 The Step 9 final gate re-verifies the source-level Steps 1 through 8 representative security/regression contracts, the exact-PR-HEAD/all-Member-tests CI contract, cross-contract security, and Production-default-off behavior.
 
-If the Step 9 final gate fails, the readiness workflow fails closed before any Production observation.
+If the Owner receipt or Step 9 final gate fails, the readiness workflow fails closed before any Production observation.
 
 ## Exact Owner command
 
-After this workflow hardening is merged, a later **fresh explicit Owner authorization** is still required before dispatching:
+After this workflow hardening is merged, a later **fresh explicit Owner authorization** is still required before dispatching through issue #26:
 
 `/member-runtime-readiness sha=<exact-current-main-sha>`
-
-The bridge is pinned to release-gate issue #26 and the Owner actor.
 
 Merging this source/test/docs hardening does **not** authorize the command or the workflow dispatch.
 
 ## Read-only evidence
 
-After the source prerequisite passes, the workflow records:
+After the authorization and source prerequisites pass, the workflow records:
 
 - exact current main SHA;
+- exact Owner authorization comment receipt;
 - canonical Member source remains default-off;
 - `MEMBER_PRODUCTION_OWNER_APPROVED=false`;
 - canonical `MEMBER_PRODUCTION_ROUTE_MODE` remains not enabled;
@@ -46,7 +66,7 @@ After the source prerequisite passes, the workflow records:
 - Member Production D1 migration pending list;
 - exact Member schema tables and migration tracking.
 
-No secret value is printed.
+No secret value or Owner comment body is printed.
 
 ## Required Member secret names
 
