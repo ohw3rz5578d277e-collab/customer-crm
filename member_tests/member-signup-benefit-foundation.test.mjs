@@ -39,6 +39,28 @@ const planReservedTransition=(args={})=>{
   ...args
  });
 };
+const planReleasedTransition=(args={})=>{
+ const customer=args.canonical_customer_id??'12345678';
+ const reservation=args.reservation_id??'R-RELEASE';
+ const auth=args.authenticated_member_identity_id??args.entitlement_member_identity_id;
+ return planTransition({
+  authenticated_member_identity_id:auth,
+  canonical_customer_id:customer,
+  reservation_id:reservation,
+  reserved_entitlement_context_binding_verified:true,
+  persisted_reserved_entitlement_id:entitlement,
+  persisted_reserved_entitlement_member_identity_id:auth,
+  persisted_reserved_entitlement_customer_id:customer,
+  persisted_reserved_entitlement_reservation_id:reservation,
+  reservation_release_authorized:true,
+  release_authorization_binding_verified:true,
+  persisted_release_entitlement_id:entitlement,
+  persisted_release_member_identity_id:auth,
+  persisted_release_customer_id:customer,
+  persisted_release_reservation_id:reservation,
+  ...args
+ });
+};
 const planUsedTransition=(args={})=>{
  const auth=args.authenticated_member_identity_id;
  const customer=args.canonical_customer_id;
@@ -105,7 +127,16 @@ assert.equal(planTransition({current_state:'used',target_state:'available',entit
 for(const missing of [null,'','   ',false]) assert.equal(planUsedTransition({current_state:'reserved',target_state:'used',entitlement_member_identity_id:member,authenticated_member_identity_id:member,canonical_customer_id:'12345678',reservation_id:'R-1',prior_redemption_count:missing}).status,'missing_redemption_evidence');
 for(const malformed of [['0'],{value:0},0n]) assert.equal(planUsedTransition({current_state:'reserved',target_state:'used',entitlement_member_identity_id:member,authenticated_member_identity_id:member,canonical_customer_id:'12345678',reservation_id:'R-1',prior_redemption_count:malformed}).status,'invalid_redemption_count');
 assert.equal(planTransition({current_state:'issued',target_state:'available',entitlement_member_identity_id:member}).status,'ready');
-assert.equal(planTransition({current_state:'reserved',target_state:'available',entitlement_member_identity_id:member}).status,'ready');
+assert.equal(planTransition({current_state:'reserved',target_state:'available',entitlement_member_identity_id:member}).status,'member_identity_mismatch');
+p=planReleasedTransition({current_state:'reserved',target_state:'available',entitlement_member_identity_id:member});
+assert.equal(p.status,'ready');
+assert.equal(p.canonical_customer_id,'12345678');
+assert.equal(p.reservation_id,'R-RELEASE');
+assert.equal(planReleasedTransition({current_state:'reserved',target_state:'available',entitlement_member_identity_id:member,reservation_release_authorized:false}).status,'release_authorization_not_verified');
+assert.equal(planReleasedTransition({current_state:'reserved',target_state:'available',entitlement_member_identity_id:member,persisted_reserved_entitlement_reservation_id:'R-OTHER'}).status,'reserved_entitlement_context_binding_not_verified');
+assert.equal(planReleasedTransition({current_state:'reserved',target_state:'available',entitlement_member_identity_id:member,persisted_release_reservation_id:'R-OTHER'}).status,'release_authorization_not_verified');
+assert.equal(planReleasedTransition({current_state:'reserved',target_state:'expired',entitlement_member_identity_id:member}).status,'ready');
+assert.equal(planReleasedTransition({current_state:'reserved',target_state:'revoked',entitlement_member_identity_id:member}).status,'ready');
 assert.equal(planTransition({current_state:'available',target_state:'reserved',entitlement_member_identity_id:member,persisted_entitlement_member_identity_id:otherMember}).status,'entitlement_member_binding_not_verified');
 assert.equal(planTransition({current_state:'reserved',target_state:'revoked',entitlement_member_identity_id:member,persisted_entitlement_member_identity_id:otherMember}).status,'entitlement_member_binding_not_verified');
 assert.equal(planTransition({current_state:'available',target_state:'reserved',entitlement_member_identity_id:member,authenticated_member_identity_id:member}).status,'reservation_context_required');
