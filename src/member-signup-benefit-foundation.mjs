@@ -76,6 +76,7 @@ export function planSignupBenefitTransition({
  const entitlement=text(entitlement_id),member=text(entitlement_member_identity_id),auth=text(authenticated_member_identity_id);
  if(!MID.test(member)) return {status:'invalid_entitlement_member_identity',transition_allowed:false};
  if(!BEN.test(entitlement)) return {status:'transition_entitlement_required',transition_allowed:false};
+ if(entitlement_member_binding_verified!==true||text(persisted_entitlement_id)!==entitlement||text(persisted_entitlement_member_identity_id)!==member) return {status:'entitlement_member_binding_not_verified',transition_allowed:false};
  if(entitlement_state_binding_verified!==true||text(persisted_entitlement_id)!==entitlement||text(persisted_entitlement_state)!==current) return {status:'entitlement_state_binding_not_verified',transition_allowed:false};
 
  const allowed={
@@ -89,7 +90,7 @@ export function planSignupBenefitTransition({
  if(!allowed[current]||!allowed[current].has(target)) return {status:'invalid_transition',transition_allowed:false};
  if(target==='used'){
    if(member!==auth) return {status:'member_identity_mismatch',transition_allowed:false};
-   if(entitlement_member_binding_verified!==true||text(persisted_entitlement_id)!==entitlement||text(persisted_entitlement_member_identity_id)!==auth) return {status:'entitlement_member_binding_not_verified',transition_allowed:false};
+   if(text(persisted_entitlement_member_identity_id)!==auth) return {status:'entitlement_member_binding_not_verified',transition_allowed:false};
    if(prior_redemption_count===undefined||prior_redemption_count===null||typeof prior_redemption_count==='boolean'||String(prior_redemption_count).trim()==='') return {status:'missing_redemption_evidence',transition_allowed:false};
    if(text(persisted_redemption_entitlement_id)!==entitlement) return {status:'redemption_count_binding_not_verified',transition_allowed:false};
    const redemptions=scalarNonNegativeInteger(prior_redemption_count);
@@ -118,19 +119,28 @@ export function planBenefitPromotionCarryForward({
  prospect_id,
  canonical_customer_id,
  current_state,
+ entitlement_id='',
  persisted_prospect_id='',
  persisted_member_identity_id='',
  persisted_canonical_customer_id='',
- promotion_verified=false
+ promotion_verified=false,
+ entitlement_binding_verified=false,
+ persisted_entitlement_id='',
+ persisted_entitlement_member_identity_id='',
+ persisted_entitlement_state=''
 }={}){
- if(!MID.test(text(member_identity_id))||!PID.test(text(prospect_id))||!CID.test(text(canonical_customer_id))) return {status:'invalid_identity',carry_forward_allowed:false};
- if(!['issued','available','reserved','used','expired','revoked'].includes(text(current_state))) return {status:'invalid_state',carry_forward_allowed:false};
- if(promotion_verified!==true||text(persisted_prospect_id)!==text(prospect_id)||text(persisted_member_identity_id)!==text(member_identity_id)||text(persisted_canonical_customer_id)!==text(canonical_customer_id)) return {status:'promotion_binding_not_verified',carry_forward_allowed:false};
+ const member=text(member_identity_id),prospect=text(prospect_id),customer=text(canonical_customer_id),current=text(current_state),entitlement=text(entitlement_id);
+ if(!MID.test(member)||!PID.test(prospect)||!CID.test(customer)) return {status:'invalid_identity',carry_forward_allowed:false};
+ if(!['issued','available','reserved','used','expired','revoked'].includes(current)) return {status:'invalid_state',carry_forward_allowed:false};
+ if(!BEN.test(entitlement)) return {status:'carry_forward_entitlement_required',carry_forward_allowed:false};
+ if(entitlement_binding_verified!==true||text(persisted_entitlement_id)!==entitlement||text(persisted_entitlement_member_identity_id)!==member||text(persisted_entitlement_state)!==current) return {status:'entitlement_carry_forward_binding_not_verified',carry_forward_allowed:false};
+ if(promotion_verified!==true||text(persisted_prospect_id)!==prospect||text(persisted_member_identity_id)!==member||text(persisted_canonical_customer_id)!==customer) return {status:'promotion_binding_not_verified',carry_forward_allowed:false};
  return {
   status:'ready',
-  member_identity_id:text(member_identity_id),
-  canonical_customer_id:text(canonical_customer_id),
-  state:text(current_state),
+  entitlement_id:entitlement,
+  member_identity_id:member,
+  canonical_customer_id:customer,
+  state:current,
   state_reset:false,
   reissue:false,
   carry_forward_allowed:false,
