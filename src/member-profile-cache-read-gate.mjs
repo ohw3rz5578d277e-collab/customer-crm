@@ -10,6 +10,7 @@ export function evaluateMemberProfileCache({now_ms,cached_at_ms,pii_written_at_m
  // not be suppressed by a missing/corrupt cache timestamp or softer gates.
  if(now_ms-pii_written_at_ms>=30*DAY_MS) return {status:'pii_retention_expired',read_allowed:false,purge_required:true};
  if(!validAt(cached_at_ms)) return {status:'invalid_time',read_allowed:false};
+ if(cached_at_ms<pii_written_at_ms) return {status:'stale_cache_verification',read_allowed:false};
  if(identity_verified!==true||version_verified!==true) return {status:'verification_required',read_allowed:false};
  if(now_ms-cached_at_ms>=7*DAY_MS) return {status:'cache_expired',read_allowed:false};
  // A verified, unexpired cache is permitted during a temporary Google outage.
