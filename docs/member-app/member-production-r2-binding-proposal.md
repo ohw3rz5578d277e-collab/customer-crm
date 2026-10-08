@@ -90,3 +90,34 @@ Recording this approved source-only declaration does **not** authorize:
 - paid spend.
 
 No authorization from the bucket-create, read-only verification, or source-binding declaration stage carries forward automatically to runtime consumption, route activation, or Production deployment.
+
+
+## Source-only runtime wiring stage — 2026-10-08
+
+Owner authorization at baseline main `c2ee3a2d79af72fccea3d38d776d060d516e99f9` permits the next source-only stage only.
+
+The Production entry may now construct:
+
+`createMemberPrivateMediaStorageAdapter(env.MEMBER_PRIVATE_MEDIA_BUCKET)`
+
+and pass that read-only adapter explicitly as:
+
+`private_media_storage_adapter`
+
+to Member Production request composition.
+
+This is wiring in source only. Adapter construction must not call R2. Because `MEMBER_PRODUCTION_OWNER_APPROVED` remains `false` and Member route modes remain disabled, this stage must not cause an R2 object fetch.
+
+The following remain invariant:
+
+- `MEMBER_PRODUCTION_OWNER_APPROVED=false`;
+- `MEMBER_PRODUCTION_ROUTE_MODE` is not enabled;
+- `MEMBER_PRIVATE_MEDIA_CONTENT_ROUTE_MODE` is not enabled;
+- LINE Login Production remains unapproved;
+- adapter remains read-only and get-only;
+- `public_asset_adapter:null` remains unchanged;
+- no R2 object read/write/list/delete is executed;
+- no Production storage fetch is executed;
+- no Production deploy, Worker activation, or traffic change is executed.
+
+Any route activation, Production fetch, deploy, merge to main, or broader storage operation requires a separate fresh Owner authorization.
