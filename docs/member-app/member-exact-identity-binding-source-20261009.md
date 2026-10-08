@@ -8,6 +8,10 @@ Canonical main at construction:
 
 This is backend sequence step 1 from `member-runtime-release-gates.md`.
 
+## Evidence shape
+
+All textual identity evidence (Member ID, Prospect ID, Customer ID, Family ID, status, and source fields) must arrive as scalar strings. Arrays, objects, boxed/string-like values, or other non-string shapes are not normalized into accepted identity evidence.
+
 ## Customer binding
 
 A Customer Member binding is source-ready only when all of the following are exact and persisted:
@@ -24,10 +28,13 @@ A Customer Member binding is source-ready only when all of the following are exa
 - an explicit non-empty Family ID is present
 - the persisted Family group record is explicitly verified and has status `active`
 - persisted Family ID and Family Customer ID exactly match
-- exactly one active Customer <-> Family link exists for that canonical Customer ID
-- the family-link count evidence is explicitly scoped to that same canonical Customer ID
+- the exact Customer <-> Family link is explicitly verified as active/non-deleted
+- exactly one active Customer <-> Family link exists
+- the active-family count evidence is explicitly scoped to both the same canonical Customer ID and the same Family ID
 
-Duplicate, inactive, missing, or mismatched identity evidence fails closed. Binding-count scope mismatches route to review. No name/address/phone/email/LINE display-name or other fuzzy identity matching is permitted.
+This prevents a soft-deleted historical Family link from being paired with the active-link count of a different Family.
+
+Duplicate, inactive, missing, malformed-shape, or mismatched identity evidence fails closed. Binding-count scope mismatches route to review. No name/address/phone/email/LINE display-name or other fuzzy identity matching is permitted.
 
 ## Prospect binding
 
