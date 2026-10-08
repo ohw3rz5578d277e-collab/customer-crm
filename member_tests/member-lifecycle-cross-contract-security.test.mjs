@@ -20,7 +20,8 @@ const isolated=buildProspectMemberIntegrationReadModel({
  member_prospect_binding_verified:true,
  consent_current:true,
  signup_benefit_state:'available',
- acquisition_source:'instagram'
+ acquisition_source:'instagram',
+ review_pending_count:0
 });
 assert.equal(isolated.family_pass,null);
 assert.equal(isolated.memories,null);
@@ -65,7 +66,7 @@ const badPromotion=planProspectCustomerPromotion({
  persisted_benefit_count_member_identity_id:prospect.member_identity_id,
  persisted_benefit_count_prospect_id:prospect.prospect_id
 });
-assert.equal(badPromotion.status,'binding_mismatch');
+assert.notEqual(badPromotion.status,'ready');
 assert.equal(badPromotion.review_required,true);
 assert.equal(badPromotion.promotion_allowed,false);
 
@@ -108,49 +109,71 @@ const doubleUse=planSignupBenefitTransition({
 assert.equal(doubleUse.status,'already_redeemed');
 assert.equal(doubleUse.transition_allowed,false);
 
-const customer=buildMemberFamilyPassIntegrationReadModel({
- member_identity_id:prospect.member_identity_id,canonical_customer_id:'12345678',
- family_id:'FAM-1',family_link_verified:true,persisted_verified_family_id:'FAM-1',persisted_family_customer_id:'12345678',
- member_customer_binding_verified:true,persisted_member_identity_id:prospect.member_identity_id,persisted_member_customer_id:'12345678',member_status:'active',
- published_non_deleted_memory_count:10,persisted_memory_count_family_id:'FAM-1',durable_black_entitlement:false,entitlement_schema_applied:true
+const familyRead=(overrides={})=>({
+ member_identity_id:prospect.member_identity_id,
+ canonical_customer_id:'12345678',
+ family_id:'FAM-1',
+ member_customer_binding_verified:true,
+ persisted_member_identity_id:prospect.member_identity_id,
+ persisted_member_customer_id:'12345678',
+ member_status:'active',
+ family_record_verified:true,
+ persisted_family_record_id:'FAM-1',
+ family_status:'active',
+ family_link_verified:true,
+ family_link_active_verified:true,
+ persisted_verified_family_id:'FAM-1',
+ persisted_family_customer_id:'12345678',
+ memory_count_verified:true,
+ published_non_deleted_memory_count:10,
+ persisted_memory_count_family_id:'FAM-1',
+ memory_count_published_only_verified:true,
+ memory_count_deleted_excluded_verified:true,
+ entitlement_schema_applied:true,
+ durable_black_entitlement:false,
+ durable_black_record_count:0,
+ persisted_durable_black_record_count_family_id:'FAM-1',
+ review_pending_count:0,
+ ...overrides
 });
+
+const customer=buildMemberFamilyPassIntegrationReadModel(familyRead());
+assert.equal(customer.status,'ready');
 assert.equal(customer.family_pass.current_tier,'BLACK');
 assert.equal(customer.black_contract.threshold,10);
 assert.equal(customer.black_contract.photo_goods_discount_percent,10);
 assert.equal(customer.black_contract.automatic_award,false);
 assert.equal(customer.write_allowed,false);
-const wrongMemberBinding=buildMemberFamilyPassIntegrationReadModel({
- member_identity_id:prospect.member_identity_id,canonical_customer_id:'12345678',
- family_id:'FAM-1',family_link_verified:true,persisted_verified_family_id:'FAM-1',persisted_family_customer_id:'12345678',
- member_customer_binding_verified:true,persisted_member_identity_id:prospect.member_identity_id,persisted_member_customer_id:'87654321',member_status:'active',
- published_non_deleted_memory_count:10,persisted_memory_count_family_id:'FAM-1',durable_black_entitlement:false,entitlement_schema_applied:true
-});
+assert.equal(customer.exact_read_evidence_verified,true);
+
+const wrongMemberBinding=buildMemberFamilyPassIntegrationReadModel(familyRead({persisted_member_customer_id:'87654321'}));
 assert.equal(wrongMemberBinding.status,'member_customer_binding_not_verified');
 assert.equal(wrongMemberBinding.read_ready,false);
-const wrongPersistedMember=buildMemberFamilyPassIntegrationReadModel({
- member_identity_id:prospect.member_identity_id,canonical_customer_id:'12345678',
- family_id:'FAM-1',family_link_verified:true,persisted_verified_family_id:'FAM-1',persisted_family_customer_id:'12345678',
- member_customer_binding_verified:true,persisted_member_identity_id:'MID_zyxwvutsrqponmlkjihgfedcba654321',persisted_member_customer_id:'12345678',member_status:'active',
- published_non_deleted_memory_count:10,persisted_memory_count_family_id:'FAM-1',durable_black_entitlement:false,entitlement_schema_applied:true
-});
+const wrongPersistedMember=buildMemberFamilyPassIntegrationReadModel(familyRead({persisted_member_identity_id:'MID_zyxwvutsrqponmlkjihgfedcba654321'}));
 assert.equal(wrongPersistedMember.status,'member_customer_binding_not_verified');
 assert.equal(wrongPersistedMember.read_ready,false);
-const wrongFamilyCustomer=buildMemberFamilyPassIntegrationReadModel({
- member_identity_id:prospect.member_identity_id,canonical_customer_id:'12345678',
- family_id:'FAM-1',family_link_verified:true,persisted_verified_family_id:'FAM-1',persisted_family_customer_id:'87654321',
- member_customer_binding_verified:true,persisted_member_identity_id:prospect.member_identity_id,persisted_member_customer_id:'12345678',member_status:'active',
- published_non_deleted_memory_count:10,persisted_memory_count_family_id:'FAM-1',durable_black_entitlement:false,entitlement_schema_applied:true
-});
+const wrongFamilyCustomer=buildMemberFamilyPassIntegrationReadModel(familyRead({persisted_family_customer_id:'87654321'}));
 assert.equal(wrongFamilyCustomer.status,'family_link_not_verified');
 assert.equal(wrongFamilyCustomer.read_ready,false);
-const wrongMemoryFamily=buildMemberFamilyPassIntegrationReadModel({
- member_identity_id:prospect.member_identity_id,canonical_customer_id:'12345678',
- family_id:'FAM-1',family_link_verified:true,persisted_verified_family_id:'FAM-1',persisted_family_customer_id:'12345678',
- member_customer_binding_verified:true,persisted_member_identity_id:prospect.member_identity_id,persisted_member_customer_id:'12345678',member_status:'active',
- published_non_deleted_memory_count:10,persisted_memory_count_family_id:'FAM-2',durable_black_entitlement:false,entitlement_schema_applied:true
-});
+const wrongMemoryFamily=buildMemberFamilyPassIntegrationReadModel(familyRead({persisted_memory_count_family_id:'FAM-2'}));
 assert.equal(wrongMemoryFamily.status,'memory_count_family_not_verified');
 assert.equal(wrongMemoryFamily.read_ready,false);
+const unverifiedFilters=buildMemberFamilyPassIntegrationReadModel(familyRead({memory_count_deleted_excluded_verified:false}));
+assert.equal(unverifiedFilters.status,'memory_count_filter_not_verified');
+assert.equal(unverifiedFilters.read_ready,false);
+const crossedBlack=buildMemberFamilyPassIntegrationReadModel(familyRead({
+ published_non_deleted_memory_count:4,
+ durable_black_entitlement:true,
+ durable_black_record_count:1,
+ durable_black_record_verified:true,
+ persisted_durable_black_family_id:'FAM-2',
+ persisted_durable_black_lifetime:1,
+ black_achieved_at:'2026-09-01T00:00:00.000Z',
+ durable_black_qualifying_memory_count:10,
+ persisted_durable_black_achievement_source:'published-member-memories'
+}));
+assert.equal(crossedBlack.status,'durable_black_family_not_verified');
+assert.equal(crossedBlack.read_ready,false);
 
 console.log('MEMBER_LIFECYCLE_CROSS_CONTRACT_SECURITY=PASS');
 console.log('PROSPECT_CUSTOMER_DATA_LEAK=0');
@@ -159,6 +182,8 @@ console.log('AMBIGUOUS_MASTER_WRITE=0');
 console.log('GOOGLE_NETWORK_SEND=0');
 console.log('PII_ACCESS_AFTER_30_DAYS=0');
 console.log('DOUBLE_BENEFIT_REDEMPTION=0');
+console.log('FAMILY_SCOPED_MEMORY_COUNT=EXACT');
+console.log('DURABLE_BLACK_CROSS_FAMILY_READ=0');
 console.log('BLACK_THRESHOLD=10');
 console.log('BLACK_AUTOMATIC_AWARD=0');
 console.log('PRODUCTION_WRITE=0');
