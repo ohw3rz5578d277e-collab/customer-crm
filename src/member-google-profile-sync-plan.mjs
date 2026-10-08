@@ -73,7 +73,8 @@ export function planSyncReplay({incoming_event_id,incoming_version,incoming_dige
  const ie=text(incoming_event_id), le=text(last_event_id);
  const iv=Number(incoming_version), lv=Number(last_version);
  const id=text(incoming_digest), ld=text(last_digest);
- if(!DIGEST_RE.test(id)||!DIGEST_RE.test(ld)){
+ const priorEvidencePresent=lv>0||Boolean(le)||Boolean(ld);
+ if(!DIGEST_RE.test(id)||(priorEvidencePresent&&!DIGEST_RE.test(ld))){
    return {status:'invalid_replay_evidence',review_required:true,master_write:false,history_append:false};
  }
  if(ie&&ie===le){
