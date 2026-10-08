@@ -61,7 +61,10 @@ export function planSignupBenefitTransition({
  canonical_customer_id='',
  reservation_id='',
  prior_redemption_count,
- persisted_redemption_entitlement_id=''
+ persisted_redemption_entitlement_id='',
+ entitlement_member_binding_verified=false,
+ persisted_entitlement_id='',
+ persisted_entitlement_member_identity_id=''
 }={}){
  const current=text(current_state),target=text(target_state);
  const entitlement=text(entitlement_id),member=text(entitlement_member_identity_id),auth=text(authenticated_member_identity_id);
@@ -79,6 +82,7 @@ export function planSignupBenefitTransition({
  if(target==='used'){
    if(member!==auth) return {status:'member_identity_mismatch',transition_allowed:false};
    if(!BEN.test(entitlement)) return {status:'redemption_entitlement_required',transition_allowed:false};
+   if(entitlement_member_binding_verified!==true||text(persisted_entitlement_id)!==entitlement||text(persisted_entitlement_member_identity_id)!==auth) return {status:'entitlement_member_binding_not_verified',transition_allowed:false};
    if(prior_redemption_count===undefined||prior_redemption_count===null||typeof prior_redemption_count==='boolean'||String(prior_redemption_count).trim()==='') return {status:'missing_redemption_evidence',transition_allowed:false};
    if(text(persisted_redemption_entitlement_id)!==entitlement) return {status:'redemption_count_binding_not_verified',transition_allowed:false};
    const redemptions=scalarNonNegativeInteger(prior_redemption_count);
