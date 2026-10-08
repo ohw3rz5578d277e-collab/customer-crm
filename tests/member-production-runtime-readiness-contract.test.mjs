@@ -5,15 +5,32 @@ const workflow=fs.readFileSync('.github/workflows/member-production-runtime-read
 const bridge=fs.readFileSync('.github/workflows/dispatch-member-production-runtime-readiness-from-issue.yml','utf8');
 
 assert.match(workflow,/workflow_dispatch:\s*\n\s*inputs:\s*\n\s*expected_sha:/);
+assert.ok(workflow.includes('owner_comment_id:'));
+assert.ok(workflow.includes('issues: read'));
 assert.ok(workflow.includes('Checkout exact authorized SHA'));
 assert.ok(workflow.includes('git ls-remote origin refs/heads/main'));
 assert.ok(workflow.includes('MAIN_DRIFT current=$current_main expected=$EXPECTED_SHA'));
 
+assert.ok(workflow.includes("test \"$ACTOR\" = 'github-actions[bot]'"));
+assert.ok(workflow.includes("test \"$TRIGGERING_ACTOR\" = 'github-actions[bot]'"));
+assert.ok(workflow.includes('DIRECT_RUNTIME_READINESS_DISPATCH_FORBIDDEN'));
+assert.ok(workflow.includes('DIRECT_RUNTIME_READINESS_TRIGGER_FORBIDDEN'));
+assert.ok(workflow.includes('Verify exact Issue #26 Owner authorization receipt'));
+assert.ok(workflow.includes('issues/comments/$OWNER_COMMENT_ID'));
+assert.ok(workflow.includes("if(String(p?.user?.login||'')!=='ohw3rz5578d277e-collab')"));
+assert.ok(workflow.includes("/issues/26`"));
+assert.ok(workflow.includes('EXPECTED_BODY="/member-runtime-readiness sha=$EXPECTED_SHA"'));
+assert.ok(workflow.includes('ISSUE_26_OWNER_AUTHORIZATION_RECEIPT=PASS'));
+assert.ok(workflow.includes('OWNER_RECEIPT_BODY_PRINTED=NO'));
+
+const ownerReceiptIndex=workflow.indexOf('Verify exact Issue #26 Owner authorization receipt');
 const step9Command='node member_tests/member-runtime-step9-final-gate.test.mjs';
 const step9Index=workflow.indexOf(step9Command);
 const deployReceiptIndex=workflow.indexOf('Snapshot canonical Production deploy receipt');
 const cloudflareAuthIndex=workflow.indexOf('Confirm Cloudflare authentication');
+assert.ok(ownerReceiptIndex>=0,'Owner receipt gate must exist');
 assert.ok(step9Index>=0,'Step 9 final gate must be required by runtime readiness');
+assert.ok(ownerReceiptIndex<step9Index,'Owner receipt must be verified before Step 9/readiness observation');
 assert.ok(workflow.includes('MEMBER_BACKEND_STEPS_1_9_FINAL_GATE=PASS'));
 assert.ok(workflow.includes('PRODUCTION_OPERATION=0'));
 assert.ok(deployReceiptIndex>step9Index,'Step 9 final gate must run before Production deploy-receipt observation');
@@ -67,6 +84,9 @@ assert.ok(bridge.includes("github.event.issue.number == 26"));
 assert.ok(bridge.includes("github.actor == 'ohw3rz5578d277e-collab'"));
 assert.ok(bridge.includes("github.event.comment.user.login == 'ohw3rz5578d277e-collab'"));
 assert.ok(bridge.includes("command_re='^/member-runtime-readiness sha=([0-9a-f]{40})$'"));
+assert.ok(bridge.includes('OWNER_COMMENT_ID: ${{ github.event.comment.id }}'));
+assert.ok(bridge.includes('owner_comment_id=$OWNER_COMMENT_ID'));
+assert.ok(bridge.includes("'owner_comment_id':os.environ['OWNER_COMMENT_ID']"));
 assert.ok(bridge.includes('MAIN_DRIFT expected=$expected_sha current=$current_sha'));
 assert.ok(bridge.includes('deploy-cloudflare.yml member-production-runtime-readiness.yml'));
 assert.ok(bridge.includes('PRODUCTION_READINESS_LOCK_OCCUPIED'));
@@ -76,6 +96,7 @@ assert.ok(bridge.includes('PRODUCTION_DEPLOY=0'));
 assert.doesNotMatch(bridge,/deploy-cloudflare\.yml\/dispatches/);
 
 console.log('MEMBER_PRODUCTION_RUNTIME_READINESS_CONTRACT=PASS');
+console.log('MEMBER_PRODUCTION_RUNTIME_READINESS_OWNER_RECEIPT=PASS');
 console.log('MEMBER_PRODUCTION_RUNTIME_READINESS_STEP9_PREREQUISITE=PASS');
 console.log('MEMBER_PRODUCTION_RUNTIME_READINESS_READ_ONLY=PASS');
 console.log('MEMBER_PRODUCTION_RUNTIME_READINESS_OWNER_GATE=PASS');
