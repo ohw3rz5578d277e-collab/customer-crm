@@ -10,7 +10,9 @@ export const CLEAN_MEMBER_STACK_ORIGINS=Object.freeze([
  [211,'f510eca28b184c8b166cf13fd3618d3b3357b805'],
  [212,'f0b81986e62051834bc7d2cc83be062207065548']
 ]);
-export const CLEAN_MEMBER_STACK_BASE='9d282bc2c1906379f33b7d0d8d28604c26cc3881';
+export const CLEAN_MEMBER_STACK_ORIGINAL_CONSTRUCTION_BASE='9d282bc2c1906379f33b7d0d8d28604c26cc3881';
+export const CLEAN_MEMBER_STACK_SOURCE_CANDIDATE='1de2de91d4378df134acc1bee0afadf78dcca671';
+export const CLEAN_MEMBER_STACK_BASE='90b83b8126b0851e3728d904b875347e19191f49';
 export function validateCleanMemberStackOrigins(rows=[]){
  if(!Array.isArray(rows)||rows.length!==CLEAN_MEMBER_STACK_ORIGINS.length) return {status:'blocked',reason:'origin_count_mismatch'};
  for(const [pr,head] of CLEAN_MEMBER_STACK_ORIGINS){
