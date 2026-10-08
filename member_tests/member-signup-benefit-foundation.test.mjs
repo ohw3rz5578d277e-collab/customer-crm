@@ -4,6 +4,8 @@ const member='MID_abcdefghijklmnopqrstuvwxyz123456';
 const prospect='PID_abcdefghijklmnopqrstuvwxyz123456';
 assert.equal(planSignupBenefitIssue({member_identity_id:member,prospect_id:prospect,registration_completed:true,consent_current:true,existing_signup_benefit_count:0}).status,'member_prospect_binding_not_verified');
 assert.equal(planSignupBenefitIssue({member_identity_id:member,prospect_id:prospect,persisted_member_identity_id:member,persisted_prospect_id:'PID_zyxwvutsrqponmlkjihgfedcba654321',member_prospect_binding_verified:true,registration_completed:true,consent_current:true,existing_signup_benefit_count:0}).status,'member_prospect_binding_not_verified');
+assert.equal(planSignupBenefitIssue({member_identity_id:member,prospect_id:prospect,persisted_member_identity_id:'MID_zyxwvutsrqponmlkjihgfedcba654321',persisted_prospect_id:prospect,member_prospect_binding_verified:true,registration_completed:true,consent_current:true,existing_signup_benefit_count:0}).status,'member_prospect_binding_not_verified');
+// BENEFIT_CROSS_MEMBER_BINDING_REGRESSION
 let p=planSignupBenefitIssue({member_identity_id:member,prospect_id:prospect,member_prospect_binding_verified:true,persisted_member_identity_id:member,persisted_prospect_id:prospect,registration_completed:true,consent_current:true,existing_signup_benefit_count:0});
 assert.equal(p.status,'ready');
 assert.equal(p.state,'issued');
