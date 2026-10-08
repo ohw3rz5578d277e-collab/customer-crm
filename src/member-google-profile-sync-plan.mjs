@@ -82,23 +82,25 @@ export function planSyncReplay({incoming_event_id,incoming_version,incoming_dige
  const ie=text(incoming_event_id), le=text(last_event_id);
  const iv=parseVersionEvidence(incoming_version,{min:1});
  const lv=parseVersionEvidence(last_version,{min:0});
- const id=text(incoming_digest), ld=text(last_digest);
+ const idRaw=text(incoming_digest), ldRaw=text(last_digest);
  if(iv===null||lv===null){
    return {status:'invalid_version_evidence',review_required:true,master_write:false,history_append:false};
  }
  if(!EVENT_ID_RE.test(ie)){
    return {status:'invalid_event_evidence',review_required:true,master_write:false,history_append:false};
  }
- const initialBoundary=lv===0&&!le&&!ld;
+ const initialBoundary=lv===0&&!le&&!ldRaw;
  if(lv===0&&!initialBoundary){
    return {status:'invalid_prior_state_evidence',review_required:true,master_write:false,history_append:false};
  }
  if(lv>0&&!EVENT_ID_RE.test(le)){
    return {status:'invalid_event_evidence',review_required:true,master_write:false,history_append:false};
  }
- if(!DIGEST_RE.test(id)||(!initialBoundary&&!DIGEST_RE.test(ld))){
+ if(!DIGEST_RE.test(idRaw)||(!initialBoundary&&!DIGEST_RE.test(ldRaw))){
    return {status:'invalid_replay_evidence',review_required:true,master_write:false,history_append:false};
  }
+ const id=idRaw.toLowerCase();
+ const ld=initialBoundary?'':ldRaw.toLowerCase();
  if(ie===le){
    if(iv===lv&&id===ld) return {status:'idempotent_replay',master_write:false,history_append:false};
    return {status:'event_replay_conflict',review_required:true,master_write:false,history_append:false};
