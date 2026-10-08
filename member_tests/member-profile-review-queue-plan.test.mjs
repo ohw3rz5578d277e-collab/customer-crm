@@ -1,41 +1,205 @@
 import assert from 'node:assert/strict';
 import {planProfileReview,planReviewDecision,reviewPayloadDigest} from '../src/member-profile-review-queue-plan.mjs';
 
-const r=planProfileReview({reason_code:'identity_mismatch',member_identity_id:'MID_example',claimed_customer_id:'12345678',submitted_profile:{name:'Test'}});
+const member='MID_abcdefghijklmnopqrstuvwxyz123456';
+const prospect='PID_abcdefghijklmnopqrstuvwxyz123456';
+const profile={name:'Test',address:{city:'Osaka',zip:'000'}};
+const digest=reviewPayloadDigest(profile);
+const key='review-20261009-0001';
+
+const base={
+ reason_code:'identity_mismatch',
+ member_identity_id:member,
+ member_identity_authenticated:true,
+ authenticated_member_identity_id:member,
+ claimed_customer_id:'12345678',
+ prospect_id:'',
+ submitted_profile:profile,
+ queue_idempotency_key:key,
+ existing_review_count:0,
+ existing_review_count_member_identity_id:member,
+ existing_review_count_idempotency_key:key,
+ existing_review_count_reason_code:'identity_mismatch',
+ existing_review_count_subject_type:'customer',
+ existing_review_count_subject_id:'12345678',
+ existing_review_count_payload_digest_sha256:digest
+};
+
+const r=planProfileReview(base);
 assert.equal(r.status,'review_required');
+assert.equal(r.ready,true);
 assert.equal(r.customer_message,'変更内容を受け付けました');
+assert.equal(r.member_identity_id,member);
+assert.equal(r.subject_type,'customer');
+assert.equal(r.subject_id,'12345678');
+assert.equal(r.claimed_customer_id,'12345678');
+assert.equal(r.prospect_id,null);
 assert.equal(r.master_write_allowed,false);
 assert.equal(r.queue_write_allowed,false);
+assert.equal(r.google_send_allowed,false);
 assert.equal(r.admin_decision_required,true);
-assert.match(r.payload_digest_sha256,/^[0-9a-f]{64}$/);
+assert.equal(r.queue_persistence_requires_separate_gate,true);
+assert.equal(r.master_update_blocked_until_review_decision,true);
+assert.equal(r.raw_profile_durable_storage_authorized,false);
+assert.match(r.review_id,/^RV_[0-9a-f]{64}$/);
+assert.equal(r.payload_digest_sha256,digest);
 assert.equal(
  reviewPayloadDigest({address:{city:'Osaka',zip:'000'},name:'A'}),
  reviewPayloadDigest({name:'A',address:{zip:'000',city:'Osaka'}})
 );
+assert.throws(()=>reviewPayloadDigest({bad:undefined}),/invalid_review_payload/);
 
-assert.equal(planProfileReview({reason_code:'unknown',member_identity_id:'MID_example'}).status,'invalid_reason');
+const deterministic=planProfileReview({...base,submitted_profile:{address:{zip:'000',city:'Osaka'},name:'Test'}});
+assert.equal(deterministic.review_id,r.review_id);
+assert.equal(deterministic.payload_digest_sha256,r.payload_digest_sha256);
+const changedProfile={...profile,name:'Changed'};
+const changedDigest=reviewPayloadDigest(changedProfile);
+const changed=planProfileReview({...base,submitted_profile:changedProfile,existing_review_count_payload_digest_sha256:changedDigest});
+assert.notEqual(changed.review_id,r.review_id);
 
-let d=planReviewDecision({review_status:'pending',decision:'approve'});
+assert.equal(planProfileReview({...base,reason_code:'unknown'}).status,'invalid_reason');
+assert.equal(planProfileReview({...base,member_identity_id:['x']}).status,'invalid_member_identity');
+assert.equal(planProfileReview({...base,member_identity_authenticated:'true'}).status,'member_identity_not_authenticated');
+assert.equal(planProfileReview({...base,authenticated_member_identity_id:'MID_zyxwvutsrqponmlkjihgfedcba654321'}).status,'member_identity_not_authenticated');
+assert.equal(planProfileReview({...base,prospect_id:prospect}).status,'invalid_review_subject');
+assert.equal(planProfileReview({...base,claimed_customer_id:'',prospect_id:''}).status,'invalid_review_subject');
+assert.equal(planProfileReview({...base,claimed_customer_id:'123',prospect_id:''}).status,'invalid_customer_id');
+assert.equal(planProfileReview({...base,claimed_customer_id:'',prospect_id:'PID_bad'}).status,'invalid_prospect_id');
+assert.equal(planProfileReview({...base,submitted_profile:[]}).status,'invalid_submitted_profile');
+assert.equal(planProfileReview({...base,submitted_profile:{bad:undefined}}).status,'invalid_submitted_profile');
+assert.equal(planProfileReview({...base,queue_idempotency_key:'short'}).status,'invalid_queue_idempotency_key');
+assert.equal(planProfileReview({...base,existing_review_count:'01'}).status,'invalid_existing_review_count');
+assert.equal(planProfileReview({...base,existing_review_count_member_identity_id:'MID_zyxwvutsrqponmlkjihgfedcba654321'}).status,'review_count_scope_mismatch');
+assert.equal(planProfileReview({...base,existing_review_count_idempotency_key:'review-20261009-wrong'}).status,'review_count_scope_mismatch');
+assert.equal(planProfileReview({...base,existing_review_count_reason_code:'binding_mismatch'}).status,'review_count_scope_mismatch');
+assert.equal(planProfileReview({...base,existing_review_count_subject_type:'prospect'}).status,'review_count_scope_mismatch');
+assert.equal(planProfileReview({...base,existing_review_count_subject_id:'87654321'}).status,'review_count_scope_mismatch');
+assert.equal(planProfileReview({...base,existing_review_count_payload_digest_sha256:'0'.repeat(64)}).status,'review_count_scope_mismatch');
+
+const prospectBase={
+ ...base,
+ claimed_customer_id:'',prospect_id:prospect,
+ existing_review_count_subject_type:'prospect',
+ existing_review_count_subject_id:prospect
+};
+const prospectReview=planProfileReview(prospectBase);
+assert.equal(prospectReview.status,'review_required');
+assert.equal(prospectReview.subject_type,'prospect');
+assert.equal(prospectReview.subject_id,prospect);
+
+const replayEvidence={
+ ...base,
+ existing_review_count:1,
+ persisted_review_verified:true,
+ persisted_review_id:r.review_id,
+ persisted_review_member_identity_id:member,
+ persisted_review_reason_code:'identity_mismatch',
+ persisted_review_subject_type:'customer',
+ persisted_review_subject_id:'12345678',
+ persisted_review_payload_digest_sha256:digest,
+ persisted_review_status:'pending'
+};
+const replay=planProfileReview(replayEvidence);
+assert.equal(replay.status,'review_already_pending');
+assert.equal(replay.idempotent_replay,true);
+assert.equal(replay.master_write_allowed,false);
+assert.equal(planProfileReview({...replayEvidence,persisted_review_subject_id:'87654321'}).status,'review_replay_evidence_mismatch');
+assert.equal(planProfileReview({...replayEvidence,persisted_review_status:'approved'}).status,'review_replay_evidence_mismatch');
+assert.equal(planProfileReview({...base,existing_review_count:2}).status,'review_state_conflict');
+
+const decisionBase={
+ review_id:r.review_id,
+ member_identity_id:member,
+ reason_code:'identity_mismatch',
+ subject_type:'customer',
+ subject_id:'12345678',
+ payload_digest_sha256:digest,
+ persisted_review_verified:true,
+ persisted_review_id:r.review_id,
+ persisted_review_member_identity_id:member,
+ persisted_review_reason_code:'identity_mismatch',
+ persisted_review_subject_type:'customer',
+ persisted_review_subject_id:'12345678',
+ persisted_review_payload_digest_sha256:digest,
+ persisted_review_status:'pending',
+ admin_actor_verified:true,
+ admin_actor_id:'owner-admin',
+ decision_idempotency_key:'decision-20261009-0001',
+ existing_decision_count:0,
+ existing_decision_count_review_id:r.review_id,
+ existing_decision_count_idempotency_key:'decision-20261009-0001',
+ existing_decision_count_admin_actor_id:'owner-admin'
+};
+const withDecision=(decision,extra={})=>({...decisionBase,decision,existing_decision_count_decision:decision,...extra});
+
+let d=planReviewDecision(withDecision('approve'));
 assert.equal(d.status,'reverification_required');
 assert.equal(d.master_write_allowed,false);
 
-d=planReviewDecision({review_status:'pending',decision:'approve',identity_reverified:'false',latest_version_verified:'false'});
+d=planReviewDecision(withDecision('approve',{identity_reverified:'true',identity_reverified_member_identity_id:member}));
 assert.equal(d.status,'reverification_required');
 assert.equal(d.master_write_allowed,false);
 
-d=planReviewDecision({review_status:'pending',decision:'approve',identity_reverified:true,latest_version_verified:true});
+d=planReviewDecision(withDecision('approve',{identity_reverified:true,identity_reverified_member_identity_id:member,latest_version_verified:true,latest_version_verified_subject_type:'customer',latest_version_verified_subject_id:'12345678',verified_current_profile_version:3}));
 assert.equal(d.status,'approve_ready');
 assert.equal(d.master_write_allowed,false);
+assert.equal(d.google_send_allowed,false);
 assert.equal(d.new_sync_event_required,true);
+assert.equal(d.step5_google_sync_required,true);
+assert.equal(d.verified_current_profile_version,3);
+assert.match(d.decision_event_id,/^RVD_[0-9a-f]{64}$/);
 assert.equal(d.execution_requires_separate_gate,true);
 
-d=planReviewDecision({review_status:'pending',decision:'reject'});
-assert.equal(d.status,'reject_ready');
-assert.equal(d.master_write_allowed,false);
-assert.equal(d.audit_required,true);
+const d2=planReviewDecision(withDecision('approve',{identity_reverified:true,identity_reverified_member_identity_id:member,latest_version_verified:true,latest_version_verified_subject_type:'customer',latest_version_verified_subject_id:'12345678',verified_current_profile_version:3}));
+assert.equal(d2.decision_event_id,d.decision_event_id);
+
+const reject=planReviewDecision(withDecision('reject'));
+assert.equal(reject.status,'reject_ready');
+assert.equal(reject.master_write_allowed,false);
+assert.equal(reject.google_send_allowed,false);
+assert.equal(reject.audit_required,true);
+assert.equal(reject.execution_requires_separate_gate,true);
+
+assert.equal(planReviewDecision(withDecision('reject',{persisted_review_subject_id:'87654321'})).status,'persisted_review_binding_mismatch');
+assert.equal(planReviewDecision(withDecision('reject',{admin_actor_verified:'true'})).status,'admin_actor_not_verified');
+assert.equal(planReviewDecision(withDecision('reject',{admin_actor_id:['owner-admin']})).status,'invalid_admin_actor');
+assert.equal(planReviewDecision(withDecision('reject',{existing_decision_count:'01'})).status,'invalid_existing_decision_count');
+assert.equal(planReviewDecision(withDecision('reject',{existing_decision_count_review_id:'RV_'+('0'.repeat(64))})).status,'decision_count_scope_mismatch');
+assert.equal(planReviewDecision(withDecision('approve',{identity_reverified:true,identity_reverified_member_identity_id:member,latest_version_verified:true,latest_version_verified_subject_type:'prospect',latest_version_verified_subject_id:'12345678',verified_current_profile_version:3})).status,'latest_version_reverification_required');
+assert.equal(planReviewDecision(withDecision('approve',{identity_reverified:true,identity_reverified_member_identity_id:member,latest_version_verified:true,latest_version_verified_subject_type:'customer',latest_version_verified_subject_id:'12345678',verified_current_profile_version:'03'})).status,'invalid_verified_profile_version');
+
+const decisionReplay=planReviewDecision(withDecision('approve',{
+ existing_decision_count:1,
+ persisted_review_status:'approved',
+ persisted_decision_verified:true,
+ persisted_decision_event_id:d.decision_event_id,
+ persisted_decision_review_id:r.review_id,
+ persisted_decision_decision:'approve',
+ persisted_decision_admin_actor_id:'owner-admin',
+ persisted_decision_payload_digest_sha256:digest
+}));
+assert.equal(decisionReplay.status,'decision_already_recorded');
+assert.equal(decisionReplay.idempotent_replay,true);
+assert.equal(decisionReplay.master_write_allowed,false);
+assert.equal(planReviewDecision(withDecision('approve',{
+ existing_decision_count:1,
+ persisted_review_status:'approved',
+ persisted_decision_verified:true,
+ persisted_decision_event_id:'RVD_'+('0'.repeat(64)),
+ persisted_decision_review_id:r.review_id,
+ persisted_decision_decision:'approve',
+ persisted_decision_admin_actor_id:'owner-admin',
+ persisted_decision_payload_digest_sha256:digest
+})).status,'decision_replay_evidence_mismatch');
+assert.equal(planReviewDecision(withDecision('reject',{existing_decision_count:2})).status,'decision_state_conflict');
+assert.equal(planReviewDecision(withDecision('reject',{persisted_review_status:'approved'})).status,'not_pending');
 
 console.log('MEMBER_PROFILE_REVIEW_QUEUE_PLAN=PASS');
+console.log('DETERMINISTIC_REVIEW_ID=PASS');
+console.log('EXACT_REVIEW_BINDING=PASS');
+console.log('EXACT_DECISION_BINDING=PASS');
 console.log('AMBIGUOUS_MASTER_WRITE=0');
 console.log('ADMIN_DECISION_REQUIRED=YES');
 console.log('APPROVAL_REVERIFY_REQUIRED=YES');
+console.log('STEP5_GOOGLE_SYNC_REQUIRED=YES');
 console.log('PRODUCTION_QUEUE_WRITE=0');
