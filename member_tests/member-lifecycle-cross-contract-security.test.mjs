@@ -82,7 +82,10 @@ const doubleUse=planSignupBenefitTransition({
  entitlement_member_identity_id:prospect.member_identity_id,
  authenticated_member_identity_id:prospect.member_identity_id,
  canonical_customer_id:'12345678',reservation_id:'R-1',prior_redemption_count:1,
- persisted_redemption_entitlement_id:entitlement
+ persisted_redemption_entitlement_id:entitlement,
+ entitlement_member_binding_verified:true,
+ persisted_entitlement_id:entitlement,
+ persisted_entitlement_member_identity_id:prospect.member_identity_id
 });
 assert.equal(doubleUse.status,'already_redeemed');
 assert.equal(doubleUse.transition_allowed,false);
