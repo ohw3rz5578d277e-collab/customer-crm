@@ -32,7 +32,7 @@ const stepMatrix=[
   {step:4,file:'member-profile-review-queue-plan.test.mjs',contract:'profile review queue before Master updates'},
   {step:5,file:'member-google-profile-sync-plan.test.mjs',contract:'server-side Google profile sync plan'},
   {step:5,file:'member-google-sync-delivery-plan.test.mjs',contract:'idempotent bounded Google sync delivery and reconciliation plan'},
-  {step:5,file:'member-google-sync-server-adapter.test.mjs',contract:'server-only authenticated Google sync transport boundary'},
+  {step:5,file:'member-google-server-adapter.test.mjs',contract:'server-only authenticated Google sync transport boundary'},
   {step:6,file:'member-d1-pii-retention-plan.test.mjs',contract:'7-day cache / 30-day hard PII retention contract'},
   {step:6,file:'member-profile-cache-read-gate.test.mjs',contract:'profile cache read gate and hard-retention cap'},
   {step:7,file:'member-prospect-customer-promotion-plan.test.mjs',contract:'exact Prospect to canonical CRM Customer promotion plan'},
