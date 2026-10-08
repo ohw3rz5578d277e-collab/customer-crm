@@ -91,6 +91,28 @@ pass('health does not claim Production binding or activation',
   && health.production_write===false
 );
 
+let sourceOnlyWiringCalls=0;
+const sourceOnlyBinding={
+  async get(){
+    sourceOnlyWiringCalls+=1;
+    throw new Error('route-off source wiring must not fetch R2');
+  }
+};
+const sourceOnlyAdapter=createMemberPrivateMediaStorageAdapter(sourceOnlyBinding);
+pass('private adapter creation does not access R2',sourceOnlyAdapter!==null&&sourceOnlyWiringCalls===0);
+
+const {handleMemberProductionRequest}=await import('../src/member-production-request-composition.mjs');
+const routeOffResult=await handleMemberProductionRequest(
+  new Request('https://member.example.test/api/member/memories/mem_A/media'),
+  {MEMBER_PRODUCTION_ROUTE_MODE:'disabled'},
+  {
+    approved:false,
+    private_media_storage_adapter:sourceOnlyAdapter,
+    api_handler:async()=>{throw new Error('route-off composition must not dispatch');}
+  }
+);
+pass('route OFF with wired private adapter performs no R2 fetch',routeOffResult===null&&sourceOnlyWiringCalls===0);
+
 console.log('MEMBER_PRODUCTION_STORAGE_ADAPTER_FOUNDATION=PASS');
 console.log('PRODUCTION_BINDING_CHANGE=0');
 console.log('PRODUCTION_STORAGE_FETCH=0');

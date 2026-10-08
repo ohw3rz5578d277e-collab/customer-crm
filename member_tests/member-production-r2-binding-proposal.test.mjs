@@ -6,7 +6,6 @@ const DOC='docs/member-app/member-production-r2-binding-proposal.md';
 const WRANGLER='wrangler.jsonc';
 const ENTRY='src/production-index-crm-customer360-entry.js';
 const ADAPTER='src/member-production-storage-adapter.mjs';
-
 const BUCKET='customer-crm-member-private-media';
 const BINDING='MEMBER_PRIVATE_MEDIA_BUCKET';
 const BUCKET_SHA256='6f1f7fa25143081a302fcd148a52ae660195b2a31cf93a55f9ed39cf2e25f388';
@@ -28,46 +27,25 @@ assert.ok(doc.includes(`inspected main SHA: \`${VERIFIED_MAIN}\``));
 assert.ok(doc.includes(`"binding": "${BINDING}"`));
 assert.ok(doc.includes(`"bucket_name": "${BUCKET}"`));
 assert.ok(doc.includes('Public Member assets remain unbound.'));
-assert.ok(doc.includes('Binding declaration and runtime consumption remain separate gates.'));
-assert.ok(doc.includes('does **not** authorize'));
+assert.ok(doc.includes('Source-only runtime wiring stage — 2026-10-08'));
+assert.ok(doc.includes('Adapter construction must not call R2.'));
+assert.ok(doc.includes('this stage must not cause an R2 object fetch'));
 
-assert.deepEqual(
-  cfg.r2_buckets,
-  [{binding:BINDING,bucket_name:BUCKET}],
-  'default Wrangler scope must declare exactly one canonical private-media R2 binding'
-);
-
-const scopes=[
-  ['default',cfg],
-  ...Object.entries(cfg?.env||{}).map(([name,value])=>[`env.${name}`,value])
-];
+assert.deepEqual(cfg.r2_buckets,[{binding:BINDING,bucket_name:BUCKET}],'default Wrangler scope must declare exactly one canonical private-media R2 binding');
+const scopes=[['default',cfg],...Object.entries(cfg?.env||{}).map(([name,value])=>[`env.${name}`,value])];
 for(const [scopeName,scope] of scopes){
-  assert.notEqual(
-    String(scope?.vars?.MEMBER_PRODUCTION_ROUTE_MODE||'').trim().toLowerCase(),
-    'enabled',
-    `${scopeName} Member Production route must remain disabled`
-  );
-  assert.notEqual(
-    String(scope?.vars?.MEMBER_PRIVATE_MEDIA_CONTENT_ROUTE_MODE||'').trim().toLowerCase(),
-    'enabled',
-    `${scopeName} private-media route must remain disabled`
-  );
+  assert.notEqual(String(scope?.vars?.MEMBER_PRODUCTION_ROUTE_MODE||'').trim().toLowerCase(),'enabled',`${scopeName} Member Production route must remain disabled`);
+  assert.notEqual(String(scope?.vars?.MEMBER_PRIVATE_MEDIA_CONTENT_ROUTE_MODE||'').trim().toLowerCase(),'enabled',`${scopeName} private-media route must remain disabled`);
 }
-for(const [scopeName,scope] of Object.entries(cfg?.env||{})){
-  assert.ok(
-    !Array.isArray(scope?.r2_buckets)||scope.r2_buckets.length===0,
-    `env.${scopeName} must not add another R2 binding`
-  );
-}
+for(const [scopeName,scope] of Object.entries(cfg?.env||{}))assert.ok(!Array.isArray(scope?.r2_buckets)||scope.r2_buckets.length===0,`env.${scopeName} must not add another R2 binding`);
 
 assert.ok(entry.includes('const MEMBER_PRODUCTION_OWNER_APPROVED=false;'));
-assert.match(
-  entry,
-  /public_asset_adapter:null,\s*private_media_storage_adapter:null/,
-  'Production entry must keep both storage adapters null while binding consumption remains separately gated'
-);
-assert.ok(!entry.includes(BUCKET));
-assert.ok(!entry.includes(BINDING));
+assert.ok(entry.includes("import { createMemberPrivateMediaStorageAdapter } from './member-production-storage-adapter.mjs';"));
+assert.ok(entry.includes('createMemberPrivateMediaStorageAdapter(env?.MEMBER_PRIVATE_MEDIA_BUCKET)'));
+assert.ok(entry.includes('private_media_storage_adapter:privateMediaStorageAdapter'));
+assert.ok(entry.includes('public_asset_adapter:null'));
+assert.ok(entry.includes('line_login_approved:false'));
+assert.ok(!entry.includes(BUCKET),'Production entry must consume binding name, not hardcode bucket name');
 
 assert.ok(adapter.includes('createMemberPrivateMediaStorageAdapter(binding)'));
 assert.ok(adapter.includes('implicit_env_binding:false'));
@@ -81,8 +59,7 @@ console.log('MEMBER_R2_BINDING_SOURCE_CONTRACT=PASS');
 console.log(`CANONICAL_BUCKET_SHA256=${BUCKET_SHA256}`);
 console.log(`CANONICAL_BINDING=${BINDING}`);
 console.log(`READ_ONLY_VERIFICATION_RUN=${READ_ONLY_RUN}`);
-console.log('CANONICAL_R2_BINDING_CONFIGURED=SOURCE_ONLY');
-console.log('PRODUCTION_RUNTIME_BINDING_CONSUMPTION=0');
+console.log('PRODUCTION_RUNTIME_BINDING_WIRING=SOURCE_ONLY');
 console.log('PRODUCTION_STORAGE_FETCH=0');
 console.log('R2_OBJECT_READ=0');
 console.log('R2_WRITE=0');

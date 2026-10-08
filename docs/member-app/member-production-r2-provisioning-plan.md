@@ -1,16 +1,18 @@
 # MIZUNO PHOTO MEMBER — Production R2 Provisioning Plan
 
-Baseline: 2026-10-07 JST
+Baseline: 2026-10-08 JST
 
 ## Purpose
 
-Record the completed provisioning history and the current source-only declared-binding stage for the dedicated Cloudflare R2 bucket used for Member private media.
+Record the completed provisioning history and the current **source-only runtime-wiring stage** for the dedicated Member private-media R2 bucket.
 
-The canonical source binding is now declared in `wrangler.jsonc` as exactly:
+Canonical binding:
 
 `MEMBER_PRIVATE_MEDIA_BUCKET -> customer-crm-member-private-media`
 
-This source declaration does not wire the binding into Production runtime, does not enable Production storage fetch, does not activate Member/private-media routes or LINE Login Production, and does not deploy or activate Production traffic.
+The binding is now explicitly consumed in source by `createMemberPrivateMediaStorageAdapter(env.MEMBER_PRIVATE_MEDIA_BUCKET)` and passed to Member Production request composition as `private_media_storage_adapter`.
+
+This stage does **not** enable a Member route, private-media content route, LINE Login Production, Production storage fetch, deploy, Worker activation, or Production traffic.
 
 ## Canonical private-media target
 
@@ -24,13 +26,11 @@ This source declaration does not wire the binding into Production runtime, does 
 - CORS: none by default
 - Lifecycle / retention rule: none by default
 
-The earlier create response validated `Standard`. The later read-only list verification did not independently expose storage-class metadata for the candidate record, so this plan does not treat list-level storage class as fresh independent evidence.
+The first bucket is private-media-only. Public Member assets remain unbound.
 
-The first bucket is private-media-only. Public Member assets remain unbound and must not reuse this binding automatically.
+## Current source-only runtime-wiring state
 
-## Current source-only declared-binding state
-
-Canonical source now requires exactly one default-scope R2 binding:
+Exactly one canonical R2 binding exists:
 
 ```json
 {
@@ -39,28 +39,30 @@ Canonical source now requires exactly one default-scope R2 binding:
 }
 ```
 
-The declared-binding stage remains default-off at runtime:
+Current invariants:
 
 - `MEMBER_PRODUCTION_OWNER_APPROVED` remains `false`;
-- `public_asset_adapter` remains literal `null` in the Production entry;
-- `private_media_storage_adapter` remains literal `null` in the Production entry;
-- runtime adapter consumption remains unapproved and off;
+- `public_asset_adapter` remains literal `null`;
+- the private binding is explicitly wrapped with `createMemberPrivateMediaStorageAdapter(...)`;
+- the resulting read-only adapter is passed explicitly as `private_media_storage_adapter`;
+- adapter creation itself performs no R2 access;
+- route OFF prevents the adapter from being used and therefore prevents R2 object fetch;
 - Production storage fetch remains unapproved and off;
 - Member Production route and private-media route remain unapproved and off;
 - LINE Login Production activation remains unapproved;
 - no env-scoped or additional R2 binding is permitted;
 - public Member asset storage remains unbound.
 
-Binding declaration and runtime consumption remain separate gates.
+Source wiring and Production storage fetch remain separate gates.
 
 ## Explicit binding contract
 
-`MEMBER_PRIVATE_MEDIA_BUCKET` is the only approved source binding identifier for the first private-media bucket.
+`MEMBER_PRIVATE_MEDIA_BUCKET` is the only approved binding identifier for the first private-media bucket.
 
-The application must continue to receive any storage adapter explicitly. Source code must not:
+The Production entry may explicitly read that exact binding to construct the approved read-only adapter. Lower Member composition layers must not:
 
-- discover an R2 bucket by name at runtime;
-- enumerate account buckets at runtime;
+- discover an R2 bucket by bucket name;
+- enumerate account buckets;
 - infer a binding from arbitrary `env` keys;
 - fall back to another R2 binding;
 - reuse album, manga, Instagram, or unrelated storage;
@@ -68,99 +70,89 @@ The application must continue to receive any storage adapter explicitly. Source 
 
 ## Existing bucket isolation
 
-The following existing account buckets are unrelated and must not be reused for Member private media:
+The following existing account buckets remain unrelated and must not be reused:
 
 - `ai-manga-publisher-assets`
 - `album-originals`
 - `album-previews`
 - `instagram-thumbs`
 
-Their presence is inventory evidence only. No ownership or lifecycle relationship with Customer CRM / Member is implied.
-
 ## Object-access contract
 
-The existing Member Production storage adapter remains read-only and exposes only `get(storage_key)`.
+The Member Production storage adapter remains read-only and get-only.
 
 For private media:
 
-- storage keys remain relative;
-- storage keys must not begin with `/`;
+- storage keys remain relative and may not begin with `/`;
 - URL, traversal, backslash, query, fragment, control-character, surrounding-whitespace, and overlong-key forms remain rejected;
-- no `put`, `delete`, multipart upload, object listing, bucket listing, or mutation is added by this provisioning plan.
+- no `put`, `delete`, multipart upload, object listing, bucket listing, or mutation is exposed;
+- adapter construction must not call `get()`;
+- route OFF must result in zero R2 object fetches.
 
-The source binding declaration does not itself authorize calling `get()` against Production storage.
+The current source-only wiring does not authorize executing `get()` against Production R2.
 
 ## Provisioning sequence and current stage
 
-Each stage is separately gated. Earlier completed stages are retained here as provenance and do not authorize reruns.
+Earlier completed stages are provenance only and do not authorize reruns.
 
 1. Source-only provisioning plan was reviewed and merged.
 2. The Owner separately authorized creation of exactly one R2 bucket named `customer-crm-member-private-media` in jurisdiction `default`.
-3. Exactly one bucket-create attempt that reached the create POST created the canonical bucket; this history is not authorization to create, recreate, update, or delete it again.
-4. A separately authorized read-only verification proved the canonical bucket digest matched exactly once within the authorized `default` jurisdiction inventory.
+3. The canonical bucket was created once.
+4. A separately authorized read-only verification proved the canonical bucket digest matched exactly once.
 5. A source-only binding proposal was reviewed and merged.
-6. The current stage declares exactly one canonical source binding in `wrangler.jsonc`: `MEMBER_PRIVATE_MEDIA_BUCKET -> customer-crm-member-private-media`.
-7. Runtime adapter wiring remains a separate future Owner gate.
-8. Production storage fetch remains a separate future Owner gate.
-9. Member Production route activation, private-media route activation, and LINE Login Production activation remain separate future Owner gates.
-10. Production deploy, Worker activation, and Production traffic change remain separately Owner-gated.
+6. Exactly one canonical source binding was declared in `wrangler.jsonc`.
+7. The Owner separately authorized the current source-only runtime adapter wiring at main `c2ee3a2d79af72fccea3d38d776d060d516e99f9`.
+8. The current stage wires the canonical binding into the explicit read-only private-media adapter while all Member routes remain off.
+9. Production storage fetch remains a separate future Owner gate.
+10. Member Production route activation, private-media route activation, and LINE Login Production activation remain separate future Owner gates.
+11. Production deploy, Worker activation, and Production traffic change remain separately Owner-gated.
 
 No step inherits authorization from a previous step.
 
 ## Fail-closed conditions
 
-Stop without mutation if any of the following occurs:
+Stop without mutation if:
 
-- current main SHA drift during an authorized read-only gate;
-- active Production Worker version drift during a read-only gate;
-- canonical `wrangler.jsonc` R2 binding count is not exactly one;
-- the declared binding differs from `MEMBER_PRIVATE_MEDIA_BUCKET`;
-- the declared bucket differs from `customer-crm-member-private-media`;
-- any additional or env-scoped R2 binding appears;
-- any unrelated existing bucket would be reused;
-- runtime storage adapter consumption appears before separate authorization;
-- Production storage fetch appears before separate authorization;
-- Member Production route or private-media route is unexpectedly enabled;
+- the canonical R2 binding count is not exactly one;
+- the binding or bucket name differs from the canonical mapping;
+- any additional/env-scoped R2 binding appears;
+- the public asset adapter becomes wired by this stage;
+- the private adapter exposes mutation methods;
+- adapter construction performs R2 access;
+- an R2 object fetch occurs while Member route mode is OFF;
+- `MEMBER_PRODUCTION_OWNER_APPROVED` becomes true;
+- Member Production/private-media route is unexpectedly enabled;
 - LINE Login Production is unexpectedly activated.
 
 ## Authorization boundaries
 
-This source-only declared-binding plan does **not** authorize:
+This stage does **not** authorize:
 
-- adding, removing, renaming, or otherwise changing the canonical R2 binding beyond the already reviewed source declaration;
-- R2 bucket creation, recreation, update, rename, deletion, or lifecycle changes;
+- R2 bucket create/recreate/update/rename/delete/lifecycle changes;
 - R2 object read, write, list, multipart upload, or delete;
-- runtime consumption of `env.MEMBER_PRIVATE_MEDIA_BUCKET`;
-- `createMemberPrivateMediaStorageAdapter(env.MEMBER_PRIVATE_MEDIA_BUCKET)` in Production runtime;
 - Production storage fetch;
 - `MEMBER_PRODUCTION_OWNER_APPROVED=true`;
 - `MEMBER_PRODUCTION_ROUTE_MODE=enabled`;
 - `MEMBER_PRIVATE_MEDIA_CONTENT_ROUTE_MODE=enabled`;
-- Member Production route or private-media route activation;
+- Member Production or private-media route activation;
 - LINE Login Production activation;
-- Cloudflare token or secret creation, change, deletion, or revoke;
-- Production deploy;
-- Worker activation;
-- Production traffic change;
+- token/secret creation, change, deletion, or revoke;
+- Production deploy, Worker activation, or Production traffic change;
 - Production D1 read/write or migration apply;
-- CRM write;
-- LINE send;
-- Customer ID generation, update, delete, or merge;
-- security policy change;
-- commerce activation;
-- paid spend.
+- CRM write, LINE send, or Customer ID mutation;
+- security policy change, commerce activation, or paid spend;
+- merge to main.
 
 ## Current expected source state
 
-Canonical source at this declared-binding stage must satisfy all of the following:
-
 - exactly one canonical R2 binding exists: `MEMBER_PRIVATE_MEDIA_BUCKET -> customer-crm-member-private-media`;
-- Member Production Owner approval remains false;
-- public and private Production storage adapters remain literal `null`;
-- runtime adapter consumption remains off;
+- Owner approval remains false;
+- public adapter remains literal `null`;
+- private adapter is explicitly source-wired from `MEMBER_PRIVATE_MEDIA_BUCKET`;
+- adapter is read-only/get-only;
 - Production storage fetch remains off;
 - Member Production route remains disabled;
 - private-media route remains disabled;
 - LINE Login Production remains unactivated;
 - public Member asset storage remains unbound;
-- no additional or env-scoped R2 binding exists.
+- no additional/env-scoped R2 binding exists.
