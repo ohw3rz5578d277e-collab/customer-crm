@@ -29,14 +29,24 @@ const planReservedTransition=(args={})=>{
   ...args
  });
 };
-const planUsedTransition=(args={})=>planTransition({
- persisted_redemption_entitlement_id:entitlement,
- redemption_context_binding_verified:true,
- persisted_redemption_member_identity_id:args.authenticated_member_identity_id,
- persisted_redemption_customer_id:args.canonical_customer_id,
- persisted_redemption_reservation_id:args.reservation_id,
- ...args
-});
+const planUsedTransition=(args={})=>{
+ const auth=args.authenticated_member_identity_id;
+ const customer=args.canonical_customer_id;
+ const reservation=args.reservation_id;
+ return planTransition({
+  persisted_redemption_entitlement_id:entitlement,
+  reserved_entitlement_context_binding_verified:true,
+  persisted_reserved_entitlement_id:entitlement,
+  persisted_reserved_entitlement_member_identity_id:auth,
+  persisted_reserved_entitlement_customer_id:customer,
+  persisted_reserved_entitlement_reservation_id:reservation,
+  redemption_context_binding_verified:true,
+  persisted_redemption_member_identity_id:auth,
+  persisted_redemption_customer_id:customer,
+  persisted_redemption_reservation_id:reservation,
+  ...args
+ });
+};
 const planCarryForward=(args={})=>planBenefitPromotionCarryForward({
  entitlement_id:entitlement,
  entitlement_binding_verified:true,
@@ -74,6 +84,8 @@ assert.equal(planUsedTransition({current_state:'reserved',target_state:'used',en
 assert.equal(planUsedTransition({current_state:'reserved',target_state:'used',entitlement_member_identity_id:otherMember,authenticated_member_identity_id:otherMember,canonical_customer_id:'12345678',reservation_id:'R-1',prior_redemption_count:0,persisted_entitlement_member_identity_id:member}).status,'entitlement_member_binding_not_verified');
 assert.equal(planUsedTransition({current_state:'reserved',target_state:'used',entitlement_member_identity_id:member,authenticated_member_identity_id:member,canonical_customer_id:'12345678',reservation_id:'R-1',prior_redemption_count:0,entitlement_member_binding_verified:false}).status,'entitlement_member_binding_not_verified');
 assert.equal(planUsedTransition({current_state:'reserved',target_state:'used',entitlement_member_identity_id:member,authenticated_member_identity_id:member,canonical_customer_id:'12345678',reservation_id:'R-1',prior_redemption_count:0,persisted_entitlement_state:'expired'}).status,'entitlement_state_binding_not_verified');
+assert.equal(planUsedTransition({current_state:'reserved',target_state:'used',entitlement_member_identity_id:member,authenticated_member_identity_id:member,canonical_customer_id:'12345678',reservation_id:'R-1',prior_redemption_count:0,persisted_reserved_entitlement_reservation_id:'R-2'}).status,'reserved_entitlement_context_binding_not_verified');
+assert.equal(planUsedTransition({current_state:'reserved',target_state:'used',entitlement_member_identity_id:member,authenticated_member_identity_id:member,canonical_customer_id:'12345678',reservation_id:'R-1',prior_redemption_count:0,persisted_reserved_entitlement_customer_id:'87654321'}).status,'reserved_entitlement_context_binding_not_verified');
 assert.equal(planUsedTransition({current_state:'reserved',target_state:'used',entitlement_member_identity_id:member,authenticated_member_identity_id:member,canonical_customer_id:'12345678',reservation_id:'R-1',prior_redemption_count:0,persisted_redemption_customer_id:'87654321'}).status,'redemption_context_binding_not_verified');
 assert.equal(planUsedTransition({current_state:'reserved',target_state:'used',entitlement_member_identity_id:member,authenticated_member_identity_id:member,canonical_customer_id:'12345678',reservation_id:'R-1',prior_redemption_count:0,persisted_redemption_reservation_id:'R-2'}).status,'redemption_context_binding_not_verified');
 assert.equal(planSignupBenefitTransition({current_state:'reserved',target_state:'used',entitlement_member_identity_id:member,authenticated_member_identity_id:member,canonical_customer_id:'12345678',reservation_id:'R-1',prior_redemption_count:0}).status,'transition_entitlement_required');
