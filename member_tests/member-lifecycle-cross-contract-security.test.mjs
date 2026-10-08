@@ -67,7 +67,7 @@ assert.equal(expired.purge_required,true);
 
 const benefit=planSignupBenefitIssue({
  member_identity_id:prospect.member_identity_id,prospect_id:prospect.prospect_id,
- registration_completed:true,consent_current:true,existing_signup_benefit_count:0
+ registration_completed:true,consent_current:true,existing_signup_benefit_count:0,member_prospect_binding_verified:true,persisted_member_identity_id:prospect.member_identity_id,persisted_prospect_id:prospect.prospect_id
 });
 assert.equal(benefit.status,'ready');
 assert.equal(benefit.issue_allowed,false);
@@ -82,7 +82,7 @@ assert.equal(doubleUse.transition_allowed,false);
 
 const customer=buildMemberFamilyPassIntegrationReadModel({
  member_identity_id:prospect.member_identity_id,canonical_customer_id:'12345678',
- family_id:'FAM-1',family_link_verified:true,
+ family_id:'FAM-1',family_link_verified:true,persisted_verified_family_id:'FAM-1',
  member_customer_binding_verified:true,persisted_member_customer_id:'12345678',member_status:'active',
  published_non_deleted_memory_count:10,entitlement_schema_applied:true
 });
@@ -93,7 +93,7 @@ assert.equal(customer.black_contract.automatic_award,false);
 assert.equal(customer.write_allowed,false);
 const wrongMemberBinding=buildMemberFamilyPassIntegrationReadModel({
  member_identity_id:prospect.member_identity_id,canonical_customer_id:'12345678',
- family_id:'FAM-1',family_link_verified:true,
+ family_id:'FAM-1',family_link_verified:true,persisted_verified_family_id:'FAM-1',
  member_customer_binding_verified:true,persisted_member_customer_id:'87654321',member_status:'active',
  published_non_deleted_memory_count:10
 });
