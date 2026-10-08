@@ -13,6 +13,8 @@ export function planMemberPiiPurgeBatch({rows,now_ms,max_batch_size=100}={}){
   if(!row||typeof row!=='object'||Array.isArray(row)||typeof row.record_id!=='string'||!/^[-A-Za-z0-9_]{1,128}$/.test(row.record_id)||seen.has(row.record_id))
    return {status:'invalid_record',execution_allowed:false,operations:[]};
   seen.add(row.record_id);
+  if(typeof row.pii_present!=='boolean'||typeof row.google_synced!=='boolean'||typeof row.identity_verified!=='boolean'||typeof row.version_verified!=='boolean') return {status:'invalid_record_evidence',execution_allowed:false,operations:[]};
+  if(typeof row.pii_written_at_ms!=='number'||!Number.isFinite(row.pii_written_at_ms)) return {status:'invalid_record_time',execution_allowed:false,operations:[]};
   const decision=planPiiRetention({now_ms,pii_written_at_ms:row.pii_written_at_ms,google_synced:row.google_synced===true,identity_verified:row.identity_verified===true,version_verified:row.version_verified===true,pii_present:row.pii_present===true});
   if(decision.status==='invalid_time') return {status:'invalid_record_time',execution_allowed:false,operations:[]};
   if(decision.purge_required) operations.push({record_id:row.record_id,action:'PURGE_PII',deadline_recovery:decision.status==='DEADLINE_RECOVERY',retain_retry_audit_only:decision.retain_retry_audit_only===true});
