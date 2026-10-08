@@ -1,10 +1,18 @@
 import assert from 'node:assert/strict';
 import {planSignupBenefitIssue as rawPlanSignupBenefitIssue,planSignupBenefitTransition,planBenefitPromotionCarryForward} from '../src/member-signup-benefit-foundation.mjs';
 const member='MID_abcdefghijklmnopqrstuvwxyz123456';
+const otherMember='MID_zyxwvutsrqponmlkjihgfedcba654321';
 const prospect='PID_abcdefghijklmnopqrstuvwxyz123456';
 const entitlement='BEN_abcdefghijklmnopqrstuvwxyz123456';
 const planSignupBenefitIssue=(args={})=>rawPlanSignupBenefitIssue({persisted_benefit_count_member_identity_id:args.member_identity_id,persisted_benefit_count_prospect_id:args.prospect_id,...args});
-const planUsedTransition=(args={})=>planSignupBenefitTransition({entitlement_id:entitlement,persisted_redemption_entitlement_id:entitlement,...args});
+const planUsedTransition=(args={})=>planSignupBenefitTransition({
+ entitlement_id:entitlement,
+ persisted_redemption_entitlement_id:entitlement,
+ entitlement_member_binding_verified:true,
+ persisted_entitlement_id:entitlement,
+ persisted_entitlement_member_identity_id:args.entitlement_member_identity_id,
+ ...args
+});
 assert.equal(planSignupBenefitIssue({member_identity_id:member,prospect_id:prospect,registration_completed:true,consent_current:true,existing_signup_benefit_count:0}).status,'member_prospect_binding_not_verified');
 assert.equal(planSignupBenefitIssue({member_identity_id:member,prospect_id:prospect,persisted_member_identity_id:member,persisted_prospect_id:'PID_zyxwvutsrqponmlkjihgfedcba654321',member_prospect_binding_verified:true,registration_completed:true,consent_current:true,existing_signup_benefit_count:0}).status,'member_prospect_binding_not_verified');
 assert.equal(planSignupBenefitIssue({member_identity_id:member,prospect_id:prospect,persisted_member_identity_id:'MID_zyxwvutsrqponmlkjihgfedcba654321',persisted_prospect_id:prospect,member_prospect_binding_verified:true,registration_completed:true,consent_current:true,existing_signup_benefit_count:0}).status,'member_prospect_binding_not_verified');
@@ -31,6 +39,8 @@ assert.equal(p.automatic_discount,false);
 assert.equal(p.entitlement_id,entitlement);
 assert.equal(planUsedTransition({current_state:'reserved',target_state:'used',entitlement_member_identity_id:member,authenticated_member_identity_id:member,canonical_customer_id:'12345678',reservation_id:'R-1',prior_redemption_count:1}).status,'already_redeemed');
 assert.equal(planUsedTransition({current_state:'reserved',target_state:'used',entitlement_member_identity_id:member,authenticated_member_identity_id:member,canonical_customer_id:'12345678',reservation_id:'R-1',prior_redemption_count:0,persisted_redemption_entitlement_id:'BEN_zyxwvutsrqponmlkjihgfedcba654321'}).status,'redemption_count_binding_not_verified');
+assert.equal(planUsedTransition({current_state:'reserved',target_state:'used',entitlement_member_identity_id:otherMember,authenticated_member_identity_id:otherMember,canonical_customer_id:'12345678',reservation_id:'R-1',prior_redemption_count:0,persisted_entitlement_member_identity_id:member}).status,'entitlement_member_binding_not_verified');
+assert.equal(planUsedTransition({current_state:'reserved',target_state:'used',entitlement_member_identity_id:member,authenticated_member_identity_id:member,canonical_customer_id:'12345678',reservation_id:'R-1',prior_redemption_count:0,entitlement_member_binding_verified:false}).status,'entitlement_member_binding_not_verified');
 assert.equal(planSignupBenefitTransition({current_state:'reserved',target_state:'used',entitlement_member_identity_id:member,authenticated_member_identity_id:member,canonical_customer_id:'12345678',reservation_id:'R-1',prior_redemption_count:0}).status,'redemption_entitlement_required');
 assert.equal(planSignupBenefitTransition({current_state:'used',target_state:'available',entitlement_member_identity_id:member,authenticated_member_identity_id:member,prior_redemption_count:1}).status,'invalid_transition');
 for(const missing of [null,'','   ',false]) assert.equal(planUsedTransition({current_state:'reserved',target_state:'used',entitlement_member_identity_id:member,authenticated_member_identity_id:member,canonical_customer_id:'12345678',reservation_id:'R-1',prior_redemption_count:missing}).status,'missing_redemption_evidence');
