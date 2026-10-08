@@ -1,8 +1,10 @@
 import { readMemberFamilyByCustomer } from './crm-member-family-identity.mjs';
 
-const BUILD='member-family-pass-read-model-20260924-02';
+const BUILD='member-family-pass-read-model-20261009-step8';
 const CUSTOMER_ID_RE=/^\d{8}$/;
 const MAX_FAMILY_ID=128;
+const BLACK_ACHIEVEMENT_SOURCE='published-member-memories';
+const UTC_INSTANT_RE=/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 
 const TIERS=[
   {code:'FAMILY',threshold:1},
@@ -13,6 +15,14 @@ const TIERS=[
 ];
 
 const text=v=>v==null?'':String(v).trim();
+const strictText=v=>typeof v==='string'?v.trim():'';
+const strictNonNegativeInteger=v=>typeof v==='number'&&Number.isSafeInteger(v)&&v>=0?v:null;
+
+function canonicalUtcInstant(value){
+  if(typeof value!=='string'||!UTC_INSTANT_RE.test(value))return false;
+  const ms=Date.parse(value);
+  return Number.isFinite(ms)&&new Date(ms).toISOString()===value;
+}
 
 function json(data,status=200){
   return new Response(JSON.stringify(data),{
@@ -76,16 +86,21 @@ async function authorizeSession(env,session){
   };
 }
 
-function normalizeBlackEntitlement(row){
-  if(!row||Number(row.black_lifetime)!==1)return null;
-  const achievedAt=text(row.black_achieved_at);
-  const count=Number(row.qualifying_memory_count);
-  if(!achievedAt||!Number.isInteger(count)||count<10)return null;
+function normalizeBlackEntitlement(row,expectedFamilyId){
+  const expected=strictText(expectedFamilyId);
+  if(!row||!expected)return null;
+  if(strictText(row.family_id)!==expected)return null;
+  if(row.black_lifetime!==1)return null;
+  const achievedAt=strictText(row.black_achieved_at);
+  const count=strictNonNegativeInteger(row.qualifying_memory_count);
+  if(!canonicalUtcInstant(achievedAt)||count===null||count<10)return null;
+  if(strictText(row.achievement_source)!==BLACK_ACHIEVEMENT_SOURCE)return null;
   return {
+    family_id:expected,
     black_lifetime:true,
     black_achieved_at:achievedAt,
     qualifying_memory_count:count,
-    achievement_source:text(row.achievement_source)||'published-member-memories'
+    achievement_source:BLACK_ACHIEVEMENT_SOURCE
   };
 }
 
@@ -162,11 +177,21 @@ export async function readMemberFamilyPassForSession(env,session){
         AND COALESCE(deleted_at,'')=''`,
     [auth.family_id]
   );
+  const memoryCount=strictNonNegativeInteger(row?.memory_count);
+  if(memoryCount===null){
+    return {
+      status:'invalid_memory_count_evidence',
+      family_id:auth.family_id,
+      customer_id:auth.customer_id,
+      read_only:true
+    };
+  }
 
   const entitlementSchemaApplied=await tableExists(env,'member_family_pass_entitlements');
   let entitlement=null;
+  let entitlementRecordCount=0;
   if(entitlementSchemaApplied){
-    entitlement=normalizeBlackEntitlement(await first(
+    const entitlementRow=await first(
       env,
       `SELECT family_id,black_lifetime,black_achieved_at,qualifying_memory_count,achievement_source
          FROM member_family_pass_entitlements
@@ -174,10 +199,19 @@ export async function readMemberFamilyPassForSession(env,session){
           AND black_lifetime=1
         LIMIT 1`,
       [auth.family_id]
-    ));
+    );
+    entitlementRecordCount=entitlementRow?1:0;
+    entitlement=normalizeBlackEntitlement(entitlementRow,auth.family_id);
+    if(entitlementRow&&!entitlement){
+      return {
+        status:'invalid_durable_black_evidence',
+        family_id:auth.family_id,
+        customer_id:auth.customer_id,
+        read_only:true
+      };
+    }
   }
 
-  const memoryCount=Number(row?.memory_count||0);
   const pass=computeCurrentFamilyPass(memoryCount,{
     durable_black_entitlement:!!entitlement,
     entitlement_schema_applied:entitlementSchemaApplied,
@@ -191,6 +225,10 @@ export async function readMemberFamilyPassForSession(env,session){
     family_pass:pass,
     entitlement:{
       schema_applied:entitlementSchemaApplied,
+      schema_verified:true,
+      read_verified:entitlementSchemaApplied,
+      query_family_id:auth.family_id,
+      record_count:entitlementSchemaApplied?entitlementRecordCount:null,
       durable_black:!!entitlement,
       black_achieved_at:entitlement?.black_achieved_at||null,
       qualifying_memory_count:entitlement?.qualifying_memory_count??null,
@@ -204,6 +242,8 @@ export async function readMemberFamilyPassForSession(env,session){
     count_source:{
       table:'member_memories',
       family_scoped:true,
+      evidence_family_id:auth.family_id,
+      count_verified:true,
       published_only:true,
       deleted_hidden:true,
       one_memory_equals_one_shoot:true
@@ -225,6 +265,9 @@ export async function handleMemberFamilyPassReadRequest(request,env,memberSessio
   if(result.status==='family_access_denied')return json({ok:false,error:'family_access_denied'},403);
   if(result.status==='member_memory_schema_not_applied'){
     return json({ok:false,error:'member_memory_schema_not_applied'},409);
+  }
+  if(result.status==='invalid_memory_count_evidence'||result.status==='invalid_durable_black_evidence'){
+    return json({ok:false,error:result.status,review_required:true},409);
   }
   if(result.status==='schema_not_applied'){
     return json({ok:false,error:'member_family_schema_not_applied'},409);
@@ -249,6 +292,8 @@ export function memberFamilyPassReadHealth(){
     request_family_id_input:false,
     explicit_family_link_required:true,
     count_source:'published_non_deleted_member_memories',
+    memory_count_evidence_strict:true,
+    memory_count_exact_family_binding:true,
     one_memory_equals_one_shoot:true,
     thresholds:{
       family:1,
@@ -258,6 +303,9 @@ export function memberFamilyPassReadHealth(){
       black:10
     },
     durable_black_entitlement_source_supported:true,
+    durable_black_exact_family_binding:true,
+    durable_black_canonical_utc_required:true,
+    durable_black_achievement_source:BLACK_ACHIEVEMENT_SOURCE,
     black_lifetime_persistence_supported:true,
     entitlement_table:'member_family_pass_entitlements',
     entitlement_schema_optional_for_backward_compatibility:true,
@@ -271,7 +319,10 @@ export function memberFamilyPassReadHealth(){
 
 export const __test={
   TIERS,
+  BLACK_ACHIEVEMENT_SOURCE,
   validSession,
+  strictNonNegativeInteger,
+  canonicalUtcInstant,
   normalizeBlackEntitlement,
   computeCurrentFamilyPass
 };
