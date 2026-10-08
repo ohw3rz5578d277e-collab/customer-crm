@@ -6,7 +6,7 @@ const INVITE_TOKEN_RE=/^[A-Za-z0-9_-]{32,256}$/;
 const SHA256_HEX_RE=/^[0-9a-f]{64}$/;
 const UTC_INSTANT_RE=/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 const hasOwn=(obj,key)=>Object.prototype.hasOwnProperty.call(obj,key);
-const strictText=value=>typeof value==='string'?value.trim():null;
+const strictText=value=>typeof value==='string'?value:null;
 
 function parseCount(value){
   if(typeof value==='number'){
