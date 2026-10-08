@@ -1,0 +1,73 @@
+import crypto from 'node:crypto';
+
+const CUSTOMER_ID_RE=/^\d{8}$/;
+const PROSPECT_ID_RE=/^PID_[A-Za-z0-9_-]{22,}$/;
+const EVENT_ID_RE=/^SE_[A-Za-z0-9_-]{22,}$/;
+const text=v=>v==null?'':String(v).trim();
+
+export function createSyncEventId(){
+  return 'SE_'+crypto.randomBytes(24).toString('base64url');
+}
+
+export function profilePayloadDigest(profile){
+  const keys=Object.keys(profile||{}).sort();
+  const canonical=JSON.stringify(Object.fromEntries(keys.map(k=>[k,profile[k]])));
+  return crypto.createHash('sha256').update(canonical).digest('hex');
+}
+
+export function planProfileSync({
+ subject_type,
+ customer_id='',
+ prospect_id='',
+ member_identity_verified=false,
+ profile_version,
+ previous_profile_version,
+ sync_event_id,
+ profile={}
+}={}){
+ const type=text(subject_type);
+ const eventId=text(sync_event_id);
+ const version=Number(profile_version);
+ const previous=Number(previous_profile_version);
+
+ if(!member_identity_verified) return {status:'identity_not_verified',review_required:true,send_allowed:false};
+ if(!EVENT_ID_RE.test(eventId)) return {status:'invalid_sync_event_id',send_allowed:false};
+ if(!Number.isInteger(version)||version<1||!Number.isInteger(previous)||previous<0||version!==previous+1){
+   return {status:'invalid_profile_version',review_required:true,send_allowed:false};
+ }
+
+ let subjectId='';
+ if(type==='customer'){
+   subjectId=text(customer_id);
+   if(!CUSTOMER_ID_RE.test(subjectId)) return {status:'invalid_customer_id',send_allowed:false};
+ } else if(type==='prospect'){
+   subjectId=text(prospect_id);
+   if(!PROSPECT_ID_RE.test(subjectId)) return {status:'invalid_prospect_id',send_allowed:false};
+ } else {
+   return {status:'invalid_subject_type',send_allowed:false};
+ }
+
+ return {
+   status:'ready',
+   subject_type:type,
+   subject_id:subjectId,
+   sync_event_id:eventId,
+   profile_version:version,
+   payload_digest_sha256:profilePayloadDigest(profile),
+   idempotency_required:true,
+   history_append_required:true,
+   browser_direct_google_access:false,
+   send_allowed:false
+ };
+}
+
+export function planSyncReplay({incoming_event_id,incoming_version,incoming_digest,last_event_id,last_version,last_digest}={}){
+ const ie=text(incoming_event_id), le=text(last_event_id);
+ const iv=Number(incoming_version), lv=Number(last_version);
+ const id=text(incoming_digest), ld=text(last_digest);
+ if(ie&&ie===le) return {status:'idempotent_replay',master_write:false,history_append:false};
+ if(iv<lv) return {status:'stale_version',master_write:false,history_append:false};
+ if(iv===lv&&id!==ld) return {status:'version_digest_conflict',review_required:true,master_write:false,history_append:false};
+ if(iv!==lv+1) return {status:'version_gap',review_required:true,master_write:false,history_append:false};
+ return {status:'accept_next_version',master_write:false,history_append:false,execution_requires_separate_gate:true};
+}
