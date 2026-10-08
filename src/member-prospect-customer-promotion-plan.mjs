@@ -19,6 +19,7 @@ export function planProspectCustomerPromotion({
  canonical_customer_id,
  customer_id_source,
  existing_customer_member_binding_count,
+ persisted_binding_count_customer_id='',
  prospect_status,
  consent_history_preserved=false,
  acquisition_history_preserved=false,
@@ -30,6 +31,7 @@ export function planProspectCustomerPromotion({
  if(text(persisted_prospect_id)!==prospect||text(persisted_member_identity_id)!==member) return {status:'binding_mismatch',review_required:true,promotion_allowed:false};
  if(prospect_status===undefined||prospect_status===null||text(prospect_status)===''||existing_customer_member_binding_count===undefined||existing_customer_member_binding_count===null||typeof existing_customer_member_binding_count==='boolean'||String(existing_customer_member_binding_count).trim()==='') return {status:'missing_persisted_evidence',promotion_allowed:false};
  if(text(prospect_status)!=='prospect') return {status:'invalid_prospect_state',promotion_allowed:false};
+ if(text(persisted_binding_count_customer_id)!==customer) return {status:'binding_count_customer_not_verified',promotion_allowed:false};
  const bindingCount=scalarNonNegativeInteger(existing_customer_member_binding_count);
  if(bindingCount===null) return {status:'invalid_binding_count',promotion_allowed:false};
  if(bindingCount!==0) return {status:'customer_binding_collision',review_required:true,promotion_allowed:false};
