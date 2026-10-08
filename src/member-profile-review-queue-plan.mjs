@@ -6,6 +6,7 @@ const CUSTOMER_ID_RE=/^\d{8}$/;
 const PROSPECT_ID_RE=/^PID_[A-Za-z0-9_-]{22,}$/;
 const IDEMPOTENCY_KEY_RE=/^[A-Za-z0-9._:-]{16,128}$/;
 const REVIEW_ID_RE=/^RV_[0-9a-f]{64}$/;
+const DECISION_ID_RE=/^RVD_[0-9a-f]{64}$/;
 const DIGEST_RE=/^[0-9a-f]{64}$/;
 const strictText=value=>typeof value==='string'&&value.trim()===value?value:null;
 
@@ -22,24 +23,43 @@ function blocked(status,{review_required=false}={}){
  };
 }
 
+function isCanonicalJsonValue(value,seen=new Set()){
+ if(value===null||typeof value==='string'||typeof value==='boolean') return true;
+ if(typeof value==='number') return Number.isFinite(value);
+ if(Array.isArray(value)){
+  if(seen.has(value)) return false;
+  seen.add(value);
+  const ok=value.every(item=>isCanonicalJsonValue(item,seen));
+  seen.delete(value);
+  return ok;
+ }
+ if(typeof value==='object'){
+  const proto=Object.getPrototypeOf(value);
+  if(proto!==Object.prototype&&proto!==null) return false;
+  if(seen.has(value)) return false;
+  seen.add(value);
+  const ok=Object.keys(value).every(key=>isCanonicalJsonValue(value[key],seen));
+  seen.delete(value);
+  return ok;
+ }
+ return false;
+}
+
 function canonicalize(value){
  if(Array.isArray(value)) return value.map(canonicalize);
- if(value&&typeof value==='object'){
-  return Object.fromEntries(Object.keys(value).sort().map(key=>[key,canonicalize(value[key])]));
- }
+ if(value&&typeof value==='object') return Object.fromEntries(Object.keys(value).sort().map(key=>[key,canonicalize(value[key])]));
  return value;
 }
 
 export function reviewPayloadDigest(payload){
+ if(!isCanonicalJsonValue(payload)) throw new Error('invalid_review_payload');
  const canonical=JSON.stringify(canonicalize(payload));
  return crypto.createHash('sha256').update(canonical).digest('hex');
 }
 
 export function createReviewId({queue_idempotency_key,member_identity_id,reason_code,subject_type,subject_id,payload_digest_sha256}={}){
  const key=strictText(queue_idempotency_key),member=strictText(member_identity_id),reason=strictText(reason_code),type=strictText(subject_type),subject=strictText(subject_id),digest=strictText(payload_digest_sha256);
- if(key===null||!IDEMPOTENCY_KEY_RE.test(key)||member===null||!MEMBER_ID_RE.test(member)||!ALLOWED_REASONS.has(reason)||!['customer','prospect'].includes(type)||subject===null||digest===null||!DIGEST_RE.test(digest)){
-  throw new Error('invalid_review_identity_evidence');
- }
+ if(key===null||!IDEMPOTENCY_KEY_RE.test(key)||member===null||!MEMBER_ID_RE.test(member)||!ALLOWED_REASONS.has(reason)||!['customer','prospect'].includes(type)||subject===null||digest===null||!DIGEST_RE.test(digest)) throw new Error('invalid_review_identity_evidence');
  return `RV_${crypto.createHash('sha256').update(JSON.stringify([key,member,reason,type,subject,digest])).digest('hex')}`;
 }
 
@@ -80,7 +100,7 @@ export function planProfileReview(evidence={}){
 
  const subject=subjectFromEvidence(evidence);
  if(!subject.ok) return blocked(subject.status,{review_required:subject.status==='invalid_review_subject'});
- if(!evidence.submitted_profile||typeof evidence.submitted_profile!=='object'||Array.isArray(evidence.submitted_profile)) return blocked('invalid_submitted_profile');
+ if(!evidence.submitted_profile||typeof evidence.submitted_profile!=='object'||Array.isArray(evidence.submitted_profile)||!isCanonicalJsonValue(evidence.submitted_profile)) return blocked('invalid_submitted_profile');
  const payloadDigest=reviewPayloadDigest(evidence.submitted_profile);
 
  const key=strictText(evidence.queue_idempotency_key);
@@ -89,34 +109,22 @@ export function planProfileReview(evidence={}){
 
  const count=parseCount(evidence.existing_review_count);
  if(count===null) return blocked('invalid_existing_review_count',{review_required:true});
- if(!exactText(evidence,'existing_review_count_member_identity_id',member)||!exactText(evidence,'existing_review_count_idempotency_key',key)||!exactText(evidence,'existing_review_count_payload_digest_sha256',payloadDigest)){
-  return blocked('review_count_scope_mismatch',{review_required:true});
- }
+ const countScopeVerified=exactText(evidence,'existing_review_count_member_identity_id',member)&&
+  exactText(evidence,'existing_review_count_idempotency_key',key)&&
+  exactText(evidence,'existing_review_count_reason_code',reason)&&
+  exactText(evidence,'existing_review_count_subject_type',subject.subject_type)&&
+  exactText(evidence,'existing_review_count_subject_id',subject.subject_id)&&
+  exactText(evidence,'existing_review_count_payload_digest_sha256',payloadDigest);
+ if(!countScopeVerified) return blocked('review_count_scope_mismatch',{review_required:true});
 
  if(count===0){
   return {
-   status:'review_required',
-   ready:true,
-   review_required:true,
-   review_id:reviewId,
-   reason_code:reason,
-   member_identity_id:member,
-   subject_type:subject.subject_type,
-   subject_id:subject.subject_id,
-   claimed_customer_id:subject.claimed_customer_id,
-   prospect_id:subject.prospect_id,
-   payload_digest_sha256:payloadDigest,
-   submitted_profile_ephemeral:true,
-   raw_profile_durable_storage_authorized:false,
-   customer_message:'変更内容を受け付けました',
-   admin_decision_required:true,
-   queue_persistence_requires_separate_gate:true,
-   master_update_blocked_until_review_decision:true,
-   master_write_allowed:false,
-   queue_write_allowed:false,
-   google_send_allowed:false,
-   execute:false,
-   production_write_authorized:false
+   status:'review_required',ready:true,review_required:true,review_id:reviewId,reason_code:reason,member_identity_id:member,
+   subject_type:subject.subject_type,subject_id:subject.subject_id,claimed_customer_id:subject.claimed_customer_id,prospect_id:subject.prospect_id,
+   payload_digest_sha256:payloadDigest,submitted_profile_ephemeral:true,raw_profile_durable_storage_authorized:false,
+   customer_message:'変更内容を受け付けました',admin_decision_required:true,queue_persistence_requires_separate_gate:true,
+   master_update_blocked_until_review_decision:true,master_write_allowed:false,queue_write_allowed:false,google_send_allowed:false,
+   execute:false,production_write_authorized:false
   };
  }
 
@@ -131,17 +139,10 @@ export function planProfileReview(evidence={}){
    exactText(evidence,'persisted_review_status','pending');
   if(!persistedVerified) return blocked('review_replay_evidence_mismatch',{review_required:true});
   return {
-   ...blocked('review_already_pending',{review_required:true}),
-   review_id:reviewId,
-   member_identity_id:member,
-   subject_type:subject.subject_type,
-   subject_id:subject.subject_id,
-   payload_digest_sha256:payloadDigest,
-   idempotent_replay:true,
-   admin_decision_required:true
+   ...blocked('review_already_pending',{review_required:true}),review_id:reviewId,member_identity_id:member,subject_type:subject.subject_type,
+   subject_id:subject.subject_id,payload_digest_sha256:payloadDigest,idempotent_replay:true,admin_decision_required:true
   };
  }
-
  return blocked('review_state_conflict',{review_required:true});
 }
 
@@ -151,9 +152,15 @@ export function planReviewDecision(evidence={}){
  if(reviewId===null||!REVIEW_ID_RE.test(reviewId)||member===null||!MEMBER_ID_RE.test(member)||reason===null||!ALLOWED_REASONS.has(reason)||!['customer','prospect'].includes(type)||subject===null||digest===null||!DIGEST_RE.test(digest)) return blocked('invalid_review_identity');
  if(type==='customer'&&!CUSTOMER_ID_RE.test(subject)) return blocked('invalid_customer_id');
  if(type==='prospect'&&!PROSPECT_ID_RE.test(subject)) return blocked('invalid_prospect_id');
- if(evidence.persisted_review_verified!==true||!exactText(evidence,'persisted_review_id',reviewId)||!exactText(evidence,'persisted_review_member_identity_id',member)||!exactText(evidence,'persisted_review_reason_code',reason)||!exactText(evidence,'persisted_review_subject_type',type)||!exactText(evidence,'persisted_review_subject_id',subject)||!exactText(evidence,'persisted_review_payload_digest_sha256',digest)||!exactText(evidence,'persisted_review_status','pending')){
-  return blocked('persisted_review_binding_mismatch',{review_required:true});
- }
+ const persistedReviewBound=evidence.persisted_review_verified===true&&
+  exactText(evidence,'persisted_review_id',reviewId)&&
+  exactText(evidence,'persisted_review_member_identity_id',member)&&
+  exactText(evidence,'persisted_review_reason_code',reason)&&
+  exactText(evidence,'persisted_review_subject_type',type)&&
+  exactText(evidence,'persisted_review_subject_id',subject)&&
+  exactText(evidence,'persisted_review_payload_digest_sha256',digest);
+ if(!persistedReviewBound) return blocked('persisted_review_binding_mismatch',{review_required:true});
+
  if(evidence.admin_actor_verified!==true) return blocked('admin_actor_not_verified');
  const adminActor=strictText(evidence.admin_actor_id);
  if(adminActor===null||adminActor.length<3||adminActor.length>128) return blocked('invalid_admin_actor');
@@ -162,6 +169,29 @@ export function planReviewDecision(evidence={}){
  const key=strictText(evidence.decision_idempotency_key);
  if(key===null||!IDEMPOTENCY_KEY_RE.test(key)) return blocked('invalid_decision_idempotency_key');
  const decisionEventId=`RVD_${crypto.createHash('sha256').update(JSON.stringify([key,reviewId,decision,adminActor,digest])).digest('hex')}`;
+
+ const decisionCount=parseCount(evidence.existing_decision_count);
+ if(decisionCount===null) return blocked('invalid_existing_decision_count',{review_required:true});
+ const decisionScopeVerified=exactText(evidence,'existing_decision_count_review_id',reviewId)&&
+  exactText(evidence,'existing_decision_count_idempotency_key',key)&&
+  exactText(evidence,'existing_decision_count_decision',decision)&&
+  exactText(evidence,'existing_decision_count_admin_actor_id',adminActor);
+ if(!decisionScopeVerified) return blocked('decision_count_scope_mismatch',{review_required:true});
+
+ if(decisionCount===1){
+  const finalStatus=decision==='approve'?'approved':'rejected';
+  const persistedDecisionVerified=evidence.persisted_decision_verified===true&&
+   exactText(evidence,'persisted_decision_event_id',decisionEventId)&&
+   exactText(evidence,'persisted_decision_review_id',reviewId)&&
+   exactText(evidence,'persisted_decision_decision',decision)&&
+   exactText(evidence,'persisted_decision_admin_actor_id',adminActor)&&
+   exactText(evidence,'persisted_decision_payload_digest_sha256',digest)&&
+   exactText(evidence,'persisted_review_status',finalStatus);
+  if(!persistedDecisionVerified) return blocked('decision_replay_evidence_mismatch',{review_required:true});
+  return {...blocked('decision_already_recorded'),review_id:reviewId,decision_event_id:decisionEventId,decision,idempotent_replay:true};
+ }
+ if(decisionCount>1) return blocked('decision_state_conflict',{review_required:true});
+ if(!exactText(evidence,'persisted_review_status','pending')) return blocked('not_pending',{review_required:true});
 
  if(decision==='reject'){
   return {
@@ -177,10 +207,10 @@ export function planReviewDecision(evidence={}){
  if(version===null) return blocked('invalid_verified_profile_version',{review_required:true});
  return {
   status:'approve_ready',ready:true,review_id:reviewId,decision_event_id:decisionEventId,decision:'approve',member_identity_id:member,subject_type:type,subject_id:subject,
-  payload_digest_sha256:digest,verified_current_profile_version:version,audit_required:true,new_sync_event_required:true,
-  step5_google_sync_required:true,master_write_allowed:false,queue_write_allowed:false,google_send_allowed:false,execute:false,production_write_authorized:false,
+  payload_digest_sha256:digest,verified_current_profile_version:version,audit_required:true,new_sync_event_required:true,step5_google_sync_required:true,
+  master_write_allowed:false,queue_write_allowed:false,google_send_allowed:false,execute:false,production_write_authorized:false,
   execution_requires_separate_gate:true
  };
 }
 
-export const __test={MEMBER_ID_RE,CUSTOMER_ID_RE,PROSPECT_ID_RE,IDEMPOTENCY_KEY_RE,REVIEW_ID_RE,DIGEST_RE,parseCount};
+export const __test={MEMBER_ID_RE,CUSTOMER_ID_RE,PROSPECT_ID_RE,IDEMPOTENCY_KEY_RE,REVIEW_ID_RE,DECISION_ID_RE,DIGEST_RE,parseCount,isCanonicalJsonValue};
