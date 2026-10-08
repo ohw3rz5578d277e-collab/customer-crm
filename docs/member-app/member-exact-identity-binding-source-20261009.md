@@ -13,6 +13,7 @@ This is backend sequence step 1 from `member-runtime-release-gates.md`.
 A Customer Member binding is source-ready only when all of the following are exact and persisted:
 
 - valid Member Identity
+- the persisted Member Identity record is explicitly verified and has status `active`
 - canonical 8-digit Customer ID
 - Customer ID source is `customer_crm`
 - canonical Customer record is explicitly verified
@@ -20,16 +21,18 @@ A Customer Member binding is source-ready only when all of the following are exa
 - persisted Customer ID exactly matches the submitted canonical Customer ID
 - exactly one active Member <-> Customer binding exists for that canonical Customer ID
 - an explicit non-empty Family ID is present
+- the persisted Family group record is explicitly verified and has status `active`
 - persisted Family ID and Family Customer ID exactly match
 - exactly one active Customer <-> Family link exists for that canonical Customer ID
 
-Duplicate or mismatched bindings fail closed and route to review. No name/address/phone/email/LINE display-name or other fuzzy identity matching is permitted.
+Duplicate, inactive, missing, or mismatched identity evidence fails closed and routes to review. No name/address/phone/email/LINE display-name or other fuzzy identity matching is permitted.
 
 ## Prospect binding
 
 A Prospect Member binding is source-ready only when:
 
 - valid Member Identity
+- the persisted Member Identity record is explicitly verified and has status `active`
 - valid Prospect ID
 - Prospect status is exactly `prospect`
 - persisted Member Identity and Prospect ID exactly match
@@ -37,7 +40,7 @@ A Prospect Member binding is source-ready only when:
 - no canonical Customer ID is attached
 - no Family ID is attached
 
-Any Customer or Family identity present on a Prospect before explicit promotion is treated as a scope violation and fails closed.
+Any Customer or Family identity present on a Prospect before explicit promotion is treated as a scope violation and fails closed. Disabled or review-required Member Identity records also fail closed.
 
 ## Safety
 
