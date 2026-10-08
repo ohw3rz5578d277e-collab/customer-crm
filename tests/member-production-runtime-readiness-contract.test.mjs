@@ -137,9 +137,17 @@ assert.ok(bridge.includes('PRODUCTION_WRITE=0'));
 assert.ok(bridge.includes('PRODUCTION_DEPLOY=0'));
 assert.doesNotMatch(bridge,/deploy-cloudflare\.yml\/dispatches/);
 
+const commandMatchIndex=bridge.indexOf('[[ "$COMMAND_BODY" =~ $command_re ]]');
+const shaCaptureIndex=bridge.indexOf('expected_sha="${BASH_REMATCH[1]}"');
+const ownerCommentValidationIndex=bridge.indexOf('[[ "$OWNER_COMMENT_ID" =~ ^[0-9]+$ ]]');
+assert.ok(commandMatchIndex>=0,'bridge command regex gate missing');
+assert.ok(shaCaptureIndex>commandMatchIndex,'BASH_REMATCH SHA must be captured immediately after command regex');
+assert.ok(ownerCommentValidationIndex>shaCaptureIndex,'Owner comment regex must not overwrite BASH_REMATCH before SHA capture');
+
 console.log('MEMBER_PRODUCTION_RUNTIME_READINESS_CONTRACT=PASS');
 console.log('MEMBER_PRODUCTION_RUNTIME_READINESS_OWNER_RECEIPT=PASS');
 console.log('MEMBER_PRODUCTION_RUNTIME_READINESS_STEP9_PREREQUISITE=PASS');
 console.log('MEMBER_PRODUCTION_RUNTIME_READINESS_BACKEND_SEQUENCE_GATE=PASS');
 console.log('MEMBER_PRODUCTION_RUNTIME_READINESS_READ_ONLY=PASS');
 console.log('MEMBER_PRODUCTION_RUNTIME_READINESS_OWNER_GATE=PASS');
+console.log('MEMBER_PRODUCTION_RUNTIME_READINESS_BASH_REMATCH_CAPTURE=PASS');
