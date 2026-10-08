@@ -1,0 +1,12 @@
+import assert from 'node:assert/strict';
+import {buildMemberPiiPurgeAuditPreview} from '../src/member-d1-pii-purge-audit-preview.mjs';
+const now=Date.UTC(2026,9,8),day=86400000;
+const row={record_id:'record_1',pii_written_at_ms:now-31*day,pii_present:true,google_synced:false,identity_verified:false,version_verified:false};
+const result=buildMemberPiiPurgeAuditPreview({rows:[row],now_ms:now});
+assert.equal(result.status,'preview_ready');
+assert.equal(result.execution_allowed,false);
+assert.equal(result.operation_count,1);
+assert.equal(result.receipts[0].result,'NOT_EXECUTED');
+assert.equal(result.receipts[0].deadline_recovery,true);
+assert.equal(result.receipts[0].pii_in_receipt,false);
+assert.equal(buildMemberPiiPurgeAuditPreview({rows:[{...row,google_synced:'true'}],now_ms:now}).status,'invalid_record_evidence');
