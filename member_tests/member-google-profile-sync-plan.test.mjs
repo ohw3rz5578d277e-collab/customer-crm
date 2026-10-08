@@ -65,6 +65,26 @@ for(const malformedIncomingVersion of [null,'',0,0.5,-1,'9007199254740992','9007
  assert.equal(replay.history_append,false);
 }
 
+for(const malformedIncomingEvent of [null,'','SE_short','not-an-event']){
+ replay=planSyncReplay({incoming_event_id:malformedIncomingEvent,incoming_version:1,incoming_digest:digestA,last_event_id:'',last_version:0,last_digest:''});
+ assert.equal(replay.status,'invalid_event_evidence');
+ assert.equal(replay.review_required,true);
+ assert.equal(replay.master_write,false);
+ assert.equal(replay.history_append,false);
+}
+
+replay=planSyncReplay({incoming_event_id:createSyncEventId(),incoming_version:1,incoming_digest:digestA,last_event_id:createSyncEventId(),last_version:0,last_digest:''});
+assert.equal(replay.status,'invalid_prior_state_evidence');
+assert.equal(replay.review_required,true);
+assert.equal(replay.master_write,false);
+assert.equal(replay.history_append,false);
+
+replay=planSyncReplay({incoming_event_id:createSyncEventId(),incoming_version:1,incoming_digest:digestA,last_event_id:'',last_version:0,last_digest:digestB});
+assert.equal(replay.status,'invalid_prior_state_evidence');
+assert.equal(replay.review_required,true);
+assert.equal(replay.master_write,false);
+assert.equal(replay.history_append,false);
+
 replay=planSyncReplay({incoming_event_id:event,incoming_version:2,incoming_digest:digestA,last_event_id:event,last_version:2,last_digest:digestA});
 assert.equal(replay.status,'idempotent_replay');
 assert.equal(replay.master_write,false);
@@ -83,7 +103,13 @@ assert.equal(replay.master_write,false);
 assert.equal(replay.history_append,false);
 
 replay=planSyncReplay({incoming_event_id:createSyncEventId(),incoming_version:2,incoming_digest:digestB,last_event_id:'',last_version:1,last_digest:''});
-assert.equal(replay.status,'invalid_replay_evidence');
+assert.equal(replay.status,'invalid_event_evidence');
+assert.equal(replay.review_required,true);
+assert.equal(replay.master_write,false);
+assert.equal(replay.history_append,false);
+
+replay=planSyncReplay({incoming_event_id:createSyncEventId(),incoming_version:2,incoming_digest:digestB,last_event_id:'not-an-event',last_version:1,last_digest:digestA});
+assert.equal(replay.status,'invalid_event_evidence');
 assert.equal(replay.review_required,true);
 assert.equal(replay.master_write,false);
 assert.equal(replay.history_append,false);
@@ -116,6 +142,8 @@ console.log('NESTED_PROFILE_CANONICALIZATION=YES');
 console.log('INITIAL_SYNC_WITHOUT_PRIOR_DIGEST=YES');
 console.log('REPLAY_VERSION_EVIDENCE=SAFE_INTEGER_RANGE');
 console.log('PROFILE_VERSION_EVIDENCE=SAFE_INTEGER_RANGE');
+console.log('REPLAY_EVENT_EVIDENCE=REQUIRED');
+console.log('INITIAL_PRIOR_STATE_EVIDENCE=EMPTY_ONLY');
 console.log('REPLAY_DIGEST_EVIDENCE=REQUIRED_WHEN_PRIOR_EXISTS');
 console.log('EVENT_ID_CONFLICT_REVIEW=YES');
 console.log('IDEMPOTENCY=REQUIRED');
