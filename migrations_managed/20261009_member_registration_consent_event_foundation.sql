@@ -63,7 +63,7 @@ CREATE TABLE IF NOT EXISTS member_consent_evidence (
   CHECK (length(privacy_version) BETWEEN 1 AND 64),
   CHECK (length(terms_sha256) = 64 AND terms_sha256 NOT GLOB '*[^0-9a-f]*'),
   CHECK (length(privacy_sha256) = 64 AND privacy_sha256 NOT GLOB '*[^0-9a-f]*'),
-  CHECK (evidence_source IN ('prospect_registration','member_reconsent'))
+  CHECK (evidence_source = 'prospect_registration')
 );
 
 CREATE INDEX IF NOT EXISTS idx_member_consent_evidence_member_time
@@ -102,4 +102,5 @@ END;
 -- * Customer / Family linkage
 -- * UPDATE / DELETE path for event evidence
 -- * raw profile PII storage
+-- * member re-consent schema (separate future contract)
 -- * LINE / Google / R2 side effects
