@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 const MID=/^MID_[A-Za-z0-9_-]{22,}$/;
 const PID=/^PID_[A-Za-z0-9_-]{22,}$/;
 const CID=/^\d{8}$/;
+const BEN=/^BEN_[A-Za-z0-9_-]{22,}$/;
 const text=v=>v==null?'':String(v).trim();
 const scalarNonNegativeInteger=v=>{
  if(typeof v==='number') return Number.isSafeInteger(v)&&v>=0?v:null;
@@ -54,14 +55,16 @@ export function planSignupBenefitIssue({
 export function planSignupBenefitTransition({
  current_state,
  target_state,
+ entitlement_id='',
  entitlement_member_identity_id,
  authenticated_member_identity_id,
  canonical_customer_id='',
  reservation_id='',
- prior_redemption_count
+ prior_redemption_count,
+ persisted_redemption_entitlement_id=''
 }={}){
  const current=text(current_state),target=text(target_state);
- const member=text(entitlement_member_identity_id),auth=text(authenticated_member_identity_id);
+ const entitlement=text(entitlement_id),member=text(entitlement_member_identity_id),auth=text(authenticated_member_identity_id);
  if(!MID.test(member)) return {status:'invalid_entitlement_member_identity',transition_allowed:false};
 
  const allowed={
@@ -75,7 +78,9 @@ export function planSignupBenefitTransition({
  if(!allowed[current]||!allowed[current].has(target)) return {status:'invalid_transition',transition_allowed:false};
  if(target==='used'){
    if(member!==auth) return {status:'member_identity_mismatch',transition_allowed:false};
+   if(!BEN.test(entitlement)) return {status:'redemption_entitlement_required',transition_allowed:false};
    if(prior_redemption_count===undefined||prior_redemption_count===null||typeof prior_redemption_count==='boolean'||String(prior_redemption_count).trim()==='') return {status:'missing_redemption_evidence',transition_allowed:false};
+   if(text(persisted_redemption_entitlement_id)!==entitlement) return {status:'redemption_count_binding_not_verified',transition_allowed:false};
    const redemptions=scalarNonNegativeInteger(prior_redemption_count);
    if(redemptions===null) return {status:'invalid_redemption_count',transition_allowed:false};
    if(redemptions!==0) return {status:'already_redeemed',transition_allowed:false};
@@ -85,6 +90,7 @@ export function planSignupBenefitTransition({
   status:'ready',
   from:current,
   to:target,
+  entitlement_id:BEN.test(entitlement)?entitlement:null,
   preserve_member_identity:true,
   canonical_customer_id:CID.test(text(canonical_customer_id))?text(canonical_customer_id):null,
   reservation_id:text(reservation_id)||null,
