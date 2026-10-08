@@ -9,3 +9,6 @@ assert.equal(plan.items.length,1);
 assert.equal(plan.items[0].needs_deadline_recovery,true);
 assert.equal(plan.items[0].reconciliation_state,'PENDING_EXECUTION');
 assert.equal(planMemberPiiPurgeReconciliation({rows:[{...expired,record_id:'rec_2',identity_verified:'true'}],now_ms:now}).status,'invalid_record_evidence');
+
+assert.equal(planMemberPiiPurgeReconciliation({rows:[expired],now_ms:Number.MAX_SAFE_INTEGER+1}).status,'invalid_time');
+assert.equal(planMemberPiiPurgeReconciliation({rows:[{...expired,pii_written_at_ms:-1}],now_ms:now}).status,'invalid_record_time');
