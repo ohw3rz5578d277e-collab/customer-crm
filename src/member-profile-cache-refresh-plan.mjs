@@ -1,0 +1,13 @@
+import {evaluateMemberProfileCache} from './member-profile-cache-read-gate.mjs';
+
+// Source-only decision: no Google, D1, or network access.
+export function planMemberProfileCacheRefresh({now_ms,pii_written_at_ms,google_synced_at_ms,identity_verified=false,version_verified=false,google_available=false,google_version_matches=false}={}){
+ const valid=t=>typeof t==='number'&&Number.isSafeInteger(t)&&t>=0&&t<=now_ms;
+ if(!valid(now_ms)||!valid(pii_written_at_ms)||!valid(google_synced_at_ms)) return {status:'invalid_time',refresh_allowed:false};
+ if(google_available!==true) return {status:'google_unavailable',refresh_allowed:false};
+ if(identity_verified!==true||version_verified!==true||google_version_matches!==true) return {status:'verification_required',refresh_allowed:false};
+ if(google_synced_at_ms<pii_written_at_ms) return {status:'stale_google_sync',refresh_allowed:false};
+ const decision=evaluateMemberProfileCache({now_ms,cached_at_ms:google_synced_at_ms,pii_written_at_ms,identity_verified,version_verified,google_available});
+ if(decision.status!=='ready') return {status:decision.status,refresh_allowed:false};
+ return {status:'refresh_ready',refresh_allowed:false,requires_separate_write_gate:true,cache_expires_at_ms:Math.min(google_synced_at_ms+7*86400000,pii_written_at_ms+30*86400000)};
+}
