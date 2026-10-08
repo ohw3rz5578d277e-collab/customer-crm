@@ -183,7 +183,9 @@ jobs:
           const cfg=JSON.parse(fs.readFileSync('wrangler.jsonc','utf8'));
           if(!entry.includes('const MEMBER_PRODUCTION_OWNER_APPROVED=false;'))throw new Error('MEMBER_OWNER_FLAG_NOT_DEFAULT_OFF');
           if(!entry.includes('public_asset_adapter:null'))throw new Error('PUBLIC_ASSET_ADAPTER_NOT_DEFAULT_NULL');
-          if(!entry.includes('private_media_storage_adapter:null'))throw new Error('PRIVATE_MEDIA_ADAPTER_NOT_DEFAULT_NULL');
+          if(!entry.includes("import { createMemberPrivateMediaStorageAdapter } from './member-production-storage-adapter.mjs';"))throw new Error('PRIVATE_MEDIA_ADAPTER_IMPORT_MISSING');
+          if(!entry.includes('const privateMediaStorageAdapter=createMemberPrivateMediaStorageAdapter(env?.MEMBER_PRIVATE_MEDIA_BUCKET);'))throw new Error('PRIVATE_MEDIA_ADAPTER_CONSTRUCTION_MISSING');
+          if(!entry.includes('private_media_storage_adapter:privateMediaStorageAdapter'))throw new Error('PRIVATE_MEDIA_ADAPTER_NOT_SOURCE_WIRED');
           if(String(cfg?.vars?.MEMBER_PRODUCTION_ROUTE_MODE||'').trim().toLowerCase()==='enabled')throw new Error('MEMBER_PRODUCTION_ROUTE_MODE_ENABLED');
           if(String(cfg?.vars?.MEMBER_PRIVATE_MEDIA_CONTENT_ROUTE_MODE||'').trim().toLowerCase()==='enabled')throw new Error('PRIVATE_MEDIA_ROUTE_MODE_ENABLED');
           const bindings=Array.isArray(cfg?.r2_buckets)?cfg.r2_buckets:[];
@@ -197,6 +199,7 @@ jobs:
             if(Array.isArray(scope?.r2_buckets)&&scope.r2_buckets.length)throw new Error('NONCANONICAL_ENV_R2_BINDING_DECLARED:'+envName);
           }
           console.log('MEMBER_CANONICAL_STORAGE_DEFAULT_OFF=PASS');
+          console.log('PRIVATE_MEDIA_ADAPTER_SOURCE_WIRED=PASS');
           console.log('CANONICAL_R2_BINDING_DECLARED=PASS');
           console.log('CANONICAL_R2_BINDING_EXACT=PASS');
           console.log('PRODUCTION_STORAGE_FETCH=0');
