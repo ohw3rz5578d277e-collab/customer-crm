@@ -1,0 +1,17 @@
+import assert from 'node:assert/strict';
+import {planMemberPiiPurgeBatch} from '../src/member-d1-pii-purge-batch-plan.mjs';
+const day=86400000,now=Date.UTC(2026,9,8);
+const row=(id,age,extra={})=>({record_id:id,pii_written_at_ms:now-age*day,pii_present:true,...extra});
+let result=planMemberPiiPurgeBatch({now_ms:now,rows:[row('expired',30),row('fresh',1)]});
+assert.equal(result.status,'ready');
+assert.equal(result.execution_allowed,false);
+assert.equal(result.operations.length,1);
+assert.equal(result.operations[0].record_id,'expired');
+assert.equal(result.operations[0].deadline_recovery,true);
+assert.equal(result.contains_pii,false);
+result=planMemberPiiPurgeBatch({now_ms:now,rows:[row('verified',1,{google_synced:true,identity_verified:true,version_verified:true})]});
+assert.equal(result.operations.length,1);
+assert.equal(result.operations[0].deadline_recovery,false);
+assert.equal(planMemberPiiPurgeBatch({now_ms:now,rows:[row('same',30),row('same',30)]}).status,'invalid_record');
+assert.equal(planMemberPiiPurgeBatch({now_ms:now,rows:[row('a',30),row('b',30)],max_batch_size:1}).status,'batch_limit_exceeded');
+assert.equal(planMemberPiiPurgeBatch({now_ms:now,rows:[row('bad',-1)]}).status,'invalid_record_time');
