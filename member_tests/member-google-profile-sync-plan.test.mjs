@@ -22,6 +22,11 @@ assert.equal(prospect.send_allowed,false);
 assert.equal(planProfileSync({...customer,subject_type:'customer',customer_id:'12345678',member_identity_verified:false}).status,'identity_not_verified');
 assert.equal(planProfileSync({...customer,subject_type:'customer',customer_id:'12345678',member_identity_verified:'false'}).status,'identity_not_verified');
 assert.equal(planProfileSync({...customer,subject_type:'customer',customer_id:'12345678',member_identity_verified:'true'}).status,'identity_not_verified');
+assert.equal(planProfileSync({
+ subject_type:'customer',customer_id:'12345678',member_identity_verified:true,
+ profile_version:'9007199254740993',previous_profile_version:'9007199254740992',
+ sync_event_id:createSyncEventId(),profile:{name:'unsafe'}
+}).status,'invalid_profile_version');
 
 const nestedA={
  name:'A',
@@ -44,7 +49,7 @@ assert.equal(replay.master_write,false);
 assert.equal(replay.history_append,false);
 assert.equal(replay.execution_requires_separate_gate,true);
 
-for(const malformedLastVersion of [null,'',-1,-0.5]){
+for(const malformedLastVersion of [null,'',-1,-0.5,'9007199254740992']){
  replay=planSyncReplay({incoming_event_id:createSyncEventId(),incoming_version:1,incoming_digest:digestA,last_event_id:'',last_version:malformedLastVersion,last_digest:''});
  assert.equal(replay.status,'invalid_version_evidence');
  assert.equal(replay.review_required,true);
@@ -52,7 +57,7 @@ for(const malformedLastVersion of [null,'',-1,-0.5]){
  assert.equal(replay.history_append,false);
 }
 
-for(const malformedIncomingVersion of [null,'',0,0.5,-1]){
+for(const malformedIncomingVersion of [null,'',0,0.5,-1,'9007199254740992','9007199254740993']){
  replay=planSyncReplay({incoming_event_id:createSyncEventId(),incoming_version:malformedIncomingVersion,incoming_digest:digestA,last_event_id:'',last_version:0,last_digest:''});
  assert.equal(replay.status,'invalid_version_evidence');
  assert.equal(replay.review_required,true);
@@ -109,7 +114,8 @@ console.log('CUSTOMER_AND_PROSPECT_STREAMS=YES');
 console.log('STRICT_IDENTITY_EVIDENCE=YES');
 console.log('NESTED_PROFILE_CANONICALIZATION=YES');
 console.log('INITIAL_SYNC_WITHOUT_PRIOR_DIGEST=YES');
-console.log('REPLAY_VERSION_EVIDENCE=STRICT_INTEGER_RANGE');
+console.log('REPLAY_VERSION_EVIDENCE=SAFE_INTEGER_RANGE');
+console.log('PROFILE_VERSION_EVIDENCE=SAFE_INTEGER_RANGE');
 console.log('REPLAY_DIGEST_EVIDENCE=REQUIRED_WHEN_PRIOR_EXISTS');
 console.log('EVENT_ID_CONFLICT_REVIEW=YES');
 console.log('IDEMPOTENCY=REQUIRED');
