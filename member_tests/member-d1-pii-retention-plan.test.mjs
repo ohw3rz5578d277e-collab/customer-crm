@@ -51,6 +51,18 @@ assert.equal(p.purge_required,true);
 assert.equal(p.retain_retry_audit_only,true);
 assert.equal(p.write_allowed,false);
 
+for(const ambiguousPresence of [null,0,'']){
+ p=planPiiRetention({
+   now_ms:d(31),
+   pii_written_at_ms:t0,
+   pii_present:ambiguousPresence
+ });
+ assert.equal(p.status,'DEADLINE_RECOVERY');
+ assert.equal(p.pii_access_allowed,false);
+ assert.equal(p.purge_required,true);
+ assert.equal(p.retain_retry_audit_only,true);
+}
+
 p=planPiiRetention({now_ms:d(30),pii_written_at_ms:t0,google_synced:true,identity_verified:true,version_verified:true});
 assert.equal(p.status,'PURGE_ELIGIBLE');
 assert.equal(p.pii_access_allowed,false);
@@ -59,10 +71,12 @@ assert.equal(p.purge_required,true);
 p=planPiiRetention({now_ms:d(31),pii_written_at_ms:t0,pii_present:false});
 assert.equal(p.status,'PII_PURGED');
 assert.equal(p.pii_access_allowed,false);
+assert.equal(p.purge_required,false);
 
 console.log('D1_PII_RETENTION_PLAN=PASS');
 console.log('HARD_RETENTION_DAYS=30');
 console.log('STRICT_VERIFICATION_EVIDENCE=YES');
+console.log('PII_PURGED_REQUIRES_EXPLICIT_FALSE=YES');
 console.log('DEADLINE_EXTENDS_ON_READ=NO');
 console.log('PII_ACCESS_AFTER_DEADLINE=0');
 console.log('PRODUCTION_PURGE_EXECUTOR=0');
