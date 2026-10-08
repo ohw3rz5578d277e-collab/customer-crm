@@ -8,6 +8,7 @@ const planAcquisitionRegistration=(args={})=>rawPlanAcquisitionRegistration({
  ...args
 });
 const planFunnelEvent=(args={})=>rawPlanFunnelEvent({
+ idempotency_key:args.idempotency_key??`TEST:${args.stage??'unknown'}:${args.member_identity_id??''}:${args.prospect_id??''}:${args.canonical_customer_id??''}:${args.reservation_id??''}:${args.occurred_at??''}`,
  member_prospect_binding_verified:Boolean(args.prospect_id),
  persisted_prospect_member_identity_id:args.member_identity_id,
  persisted_prospect_id:args.prospect_id,
@@ -30,6 +31,11 @@ assert.equal(planAcquisitionRegistration({member_identity_id:m,prospect_id:p,sou
 assert.equal(planAcquisitionRegistration({member_identity_id:m,prospect_id:p,source:'instagram',persisted_prospect_id:'PID_zyxwvutsrqponmlkjihgfedcba654321'}).status,'member_prospect_binding_not_verified');
 let e=planFunnelEvent({stage:'registered',member_identity_id:m,prospect_id:p,occurred_at:'2026-10-07T06:00:00Z'});
 assert.equal(e.status,'ready');assert.equal(e.append_only,true);assert.equal(e.identity_authority,false);
+const retry=planFunnelEvent({stage:'registered',member_identity_id:m,prospect_id:p,occurred_at:'2026-10-07T06:00:00Z',idempotency_key:'registration-source-event-1'});
+const retryAgain=planFunnelEvent({stage:'registered',member_identity_id:m,prospect_id:p,occurred_at:'2026-10-07T06:00:00Z',idempotency_key:'registration-source-event-1'});
+assert.equal(retry.status,'ready');assert.equal(retryAgain.status,'ready');assert.equal(retry.event_id,retryAgain.event_id);
+assert.equal(rawPlanFunnelEvent({stage:'registered',member_identity_id:m,occurred_at:'2026-10-07T06:00:00Z',idempotency_key:'orphan-event'}).status,'lifecycle_binding_required');
+assert.equal(rawPlanFunnelEvent({stage:'registered',member_identity_id:m,prospect_id:p,occurred_at:'2026-10-07T06:00:00Z',member_prospect_binding_verified:true,persisted_prospect_member_identity_id:m,persisted_prospect_id:p}).status,'idempotency_key_required');
 assert.equal(planFunnelEvent({stage:'reserved',member_identity_id:m,canonical_customer_id:'12345678',occurred_at:'2026-10-07T06:00:00Z'}).status,'reservation_context_required');
 assert.equal(planFunnelEvent({stage:'registered',member_identity_id:m,prospect_id:p,occurred_at:'2026-02-30T00:00:00Z'}).status,'invalid_time');
 assert.equal(planFunnelEvent({stage:'registered',member_identity_id:m,prospect_id:p,occurred_at:'2026-04-31T09:00:00+09:00'}).status,'invalid_time');
