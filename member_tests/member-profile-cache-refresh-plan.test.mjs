@@ -14,5 +14,9 @@ assert.equal(planMemberProfileCacheRefresh({...base,pii_written_at_ms:now-30*day
 assert.equal(planMemberProfileCacheRefresh({...base,pii_written_at_ms:now-30*day,google_available:false}).status,'pii_retention_expired');
 assert.equal(planMemberProfileCacheRefresh({...base,pii_written_at_ms:now-30*day,google_available:false}).purge_required,true);
 assert.equal(planMemberProfileCacheRefresh({...base,pii_written_at_ms:now-30*day,identity_verified:false}).status,'pii_retention_expired');
+assert.equal(planMemberProfileCacheRefresh({...base,pii_written_at_ms:now-30*day,google_synced_at_ms:undefined}).status,'pii_retention_expired');
+assert.equal(planMemberProfileCacheRefresh({...base,pii_written_at_ms:now-30*day,google_synced_at_ms:undefined}).purge_required,true);
+assert.equal(planMemberProfileCacheRefresh({...base,pii_written_at_ms:now-30*day,google_synced_at_ms:'corrupt'}).purge_required,true);
+assert.equal(planMemberProfileCacheRefresh({...base,google_synced_at_ms:undefined}).status,'invalid_time');
 assert.equal(planMemberProfileCacheRefresh({...base,google_synced_at_ms:now-7*day,pii_written_at_ms:now-8*day}).status,'cache_expired');
 assert.equal(planMemberProfileCacheRefresh({...base,google_synced_at_ms:now+1}).status,'invalid_time');
