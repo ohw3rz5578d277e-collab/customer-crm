@@ -82,6 +82,10 @@ assert.equal(r.review_required,true);
 r=planExactCustomerMemberFamilyBinding({...customerReady,active_member_customer_binding_count:Number.MAX_SAFE_INTEGER+1});
 assert.equal(r.status,'invalid_member_binding_count');
 
+assert.doesNotThrow(()=>planExactCustomerMemberFamilyBinding({...customerReady,active_member_customer_binding_count:Object.create(null)}));
+r=planExactCustomerMemberFamilyBinding({...customerReady,active_member_customer_binding_count:Object.create(null)});
+assert.equal(r.status,'invalid_member_binding_count');
+
 r=planExactCustomerMemberFamilyBinding({...customerReady,family_record_verified:'true'});
 assert.equal(r.status,'family_record_not_verified');
 assert.equal(r.review_required,true);
@@ -115,6 +119,10 @@ assert.equal(r.review_required,true);
 r=planExactCustomerMemberFamilyBinding({...customerReady,active_family_link_count:0});
 assert.equal(r.status,'ambiguous_family_link');
 assert.equal(r.review_required,true);
+
+assert.doesNotThrow(()=>planExactCustomerMemberFamilyBinding({...customerReady,active_family_link_count:Object.create(null)}));
+r=planExactCustomerMemberFamilyBinding({...customerReady,active_family_link_count:Object.create(null)});
+assert.equal(r.status,'invalid_family_link_count');
 
 const prospectReady={
   member_identity_id:mid,
@@ -202,8 +210,13 @@ assert.equal(r.review_required,true);
 r=planExactProspectMemberBinding({...prospectReady,active_member_prospect_binding_count:'9007199254740992'});
 assert.equal(r.status,'invalid_prospect_binding_count');
 
+assert.doesNotThrow(()=>planExactProspectMemberBinding({...prospectReady,active_member_prospect_binding_count:Object.create(null)}));
+r=planExactProspectMemberBinding({...prospectReady,active_member_prospect_binding_count:Object.create(null)});
+assert.equal(r.status,'invalid_prospect_binding_count');
+
 console.log('MEMBER_EXACT_IDENTITY_BINDING=PASS');
 console.log('TEXTUAL_IDENTITY_EVIDENCE=STRICT_STRING_ONLY');
+console.log('COUNT_EVIDENCE=MALFORMED_SHAPES_FAIL_CLOSED');
 console.log('MEMBER_IDENTITY_STATUS=ACTIVE_REQUIRED');
 console.log('CUSTOMER_MEMBER_BINDING=EXACT_ONE');
 console.log('CUSTOMER_FAMILY_BINDING=EXACT_ACTIVE_ONE');
