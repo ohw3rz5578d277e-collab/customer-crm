@@ -18,7 +18,9 @@ Implement backend sequence step 3 from `member-runtime-release-gates.md` without
 The planner requires:
 
 - canonical server-generated `member_identity_id` and `prospect_id`;
+- a canonical server-generated `consent_event_id`;
 - literal `ids_server_generated_verified === true`;
+- literal `consent_event_id_server_generated_verified === true`;
 - literal `registration_request_server_verified === true`;
 - exact zero-collision evidence for Member Identity, Prospect ID and consent event ID;
 - each collision count scoped to the exact corresponding ID;
