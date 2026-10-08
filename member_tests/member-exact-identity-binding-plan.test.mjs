@@ -24,10 +24,12 @@ const customerReady={
   persisted_family_record_id:'FAM-1',
   family_status:'active',
   family_link_verified:true,
+  family_link_active_verified:true,
   persisted_family_id:'FAM-1',
   persisted_family_customer_id:cid,
   active_family_link_count:1,
-  persisted_family_link_count_customer_id:cid
+  persisted_family_link_count_customer_id:cid,
+  persisted_family_link_count_family_id:'FAM-1'
 };
 
 let r=planExactCustomerMemberFamilyBinding(customerReady);
@@ -35,18 +37,29 @@ assert.equal(r.status,'ready');
 assert.equal(r.exact_binding_verified,true);
 assert.equal(r.member_identity_status,'active');
 assert.equal(r.family_status,'active');
+assert.equal(r.family_link_active_verified,true);
 assert.equal(r.write_allowed,false);
 assert.equal(r.customer_id_generation,false);
 assert.equal(r.family_id_generation,false);
 assert.equal(r.fuzzy_identity_linking,false);
 
+r=planExactCustomerMemberFamilyBinding({...customerReady,member_identity_id:[mid]});
+assert.equal(r.status,'invalid_identity');
+
 r=planExactCustomerMemberFamilyBinding({...customerReady,member_identity_record_verified:'true'});
 assert.equal(r.status,'member_identity_record_not_verified');
+assert.equal(r.review_required,true);
+
+r=planExactCustomerMemberFamilyBinding({...customerReady,member_identity_status:['active']});
+assert.equal(r.status,'member_identity_not_active');
 assert.equal(r.review_required,true);
 
 r=planExactCustomerMemberFamilyBinding({...customerReady,member_identity_status:'disabled'});
 assert.equal(r.status,'member_identity_not_active');
 assert.equal(r.review_required,true);
+
+r=planExactCustomerMemberFamilyBinding({...customerReady,customer_id_source:['customer_crm']});
+assert.equal(r.status,'invalid_customer_id_source');
 
 r=planExactCustomerMemberFamilyBinding({...customerReady,customer_record_verified:'true'});
 assert.equal(r.status,'customer_record_not_verified');
@@ -73,6 +86,9 @@ r=planExactCustomerMemberFamilyBinding({...customerReady,family_record_verified:
 assert.equal(r.status,'family_record_not_verified');
 assert.equal(r.review_required,true);
 
+r=planExactCustomerMemberFamilyBinding({...customerReady,family_status:['active']});
+assert.equal(r.status,'family_not_active');
+
 r=planExactCustomerMemberFamilyBinding({...customerReady,family_status:'inactive'});
 assert.equal(r.status,'family_not_active');
 assert.equal(r.review_required,true);
@@ -80,12 +96,20 @@ assert.equal(r.review_required,true);
 r=planExactCustomerMemberFamilyBinding({...customerReady,family_link_verified:false});
 assert.equal(r.status,'family_link_not_verified');
 
+r=planExactCustomerMemberFamilyBinding({...customerReady,family_link_active_verified:false});
+assert.equal(r.status,'family_link_not_verified');
+assert.equal(r.review_required,true);
+
 r=planExactCustomerMemberFamilyBinding({...customerReady,persisted_family_customer_id:'87654321'});
 assert.equal(r.status,'family_link_not_verified');
 assert.equal(r.review_required,true);
 
 r=planExactCustomerMemberFamilyBinding({...customerReady,persisted_family_link_count_customer_id:'87654321'});
-assert.equal(r.status,'family_link_count_customer_not_verified');
+assert.equal(r.status,'family_link_count_scope_not_verified');
+assert.equal(r.review_required,true);
+
+r=planExactCustomerMemberFamilyBinding({...customerReady,persisted_family_link_count_family_id:'FAM-2'});
+assert.equal(r.status,'family_link_count_scope_not_verified');
 assert.equal(r.review_required,true);
 
 r=planExactCustomerMemberFamilyBinding({...customerReady,active_family_link_count:0});
@@ -120,6 +144,9 @@ assert.equal(r.prospect_access_to_customer_data,false);
 assert.equal(r.customer_id_generation,false);
 assert.equal(r.write_allowed,false);
 
+r=planExactProspectMemberBinding({...prospectReady,prospect_id:[pid]});
+assert.equal(r.status,'invalid_identity');
+
 r=planExactProspectMemberBinding({...prospectReady,canonical_customer_id:undefined});
 assert.equal(r.status,'missing_prospect_scope_evidence');
 assert.equal(r.review_required,false);
@@ -147,6 +174,9 @@ assert.equal(r.status,'prospect_scope_violation');
 r=planExactProspectMemberBinding({...prospectReady,member_identity_record_verified:'true'});
 assert.equal(r.status,'member_identity_record_not_verified');
 
+r=planExactProspectMemberBinding({...prospectReady,member_identity_status:['active']});
+assert.equal(r.status,'member_identity_not_active');
+
 r=planExactProspectMemberBinding({...prospectReady,member_identity_status:'review_required'});
 assert.equal(r.status,'member_identity_not_active');
 assert.equal(r.review_required,true);
@@ -157,6 +187,9 @@ assert.equal(r.status,'member_prospect_binding_not_verified');
 r=planExactProspectMemberBinding({...prospectReady,persisted_member_identity_id:'MID_zyxwvutsrqponmlkjihgfedcba'});
 assert.equal(r.status,'member_prospect_binding_not_verified');
 assert.equal(r.review_required,true);
+
+r=planExactProspectMemberBinding({...prospectReady,persisted_prospect_id:[pid]});
+assert.equal(r.status,'member_prospect_binding_not_verified');
 
 r=planExactProspectMemberBinding({...prospectReady,persisted_member_binding_count_prospect_id:'PID_zyxwvutsrqponmlkjihgfedcba'});
 assert.equal(r.status,'prospect_binding_count_subject_not_verified');
@@ -170,9 +203,11 @@ r=planExactProspectMemberBinding({...prospectReady,active_member_prospect_bindin
 assert.equal(r.status,'invalid_prospect_binding_count');
 
 console.log('MEMBER_EXACT_IDENTITY_BINDING=PASS');
+console.log('TEXTUAL_IDENTITY_EVIDENCE=STRICT_STRING_ONLY');
 console.log('MEMBER_IDENTITY_STATUS=ACTIVE_REQUIRED');
 console.log('CUSTOMER_MEMBER_BINDING=EXACT_ONE');
-console.log('CUSTOMER_FAMILY_BINDING=EXACT_ONE');
+console.log('CUSTOMER_FAMILY_BINDING=EXACT_ACTIVE_ONE');
+console.log('FAMILY_COUNT_SCOPE=CUSTOMER_AND_FAMILY');
 console.log('FAMILY_STATUS=ACTIVE_REQUIRED');
 console.log('PROSPECT_SCOPE_EVIDENCE=EXPLICIT_NULL_REQUIRED');
 console.log('PROSPECT_PROMOTED_CUSTOMER=EXPLICIT_NULL_REQUIRED');
