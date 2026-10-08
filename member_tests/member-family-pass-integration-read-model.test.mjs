@@ -29,7 +29,7 @@ const durableBlack=buildMemberFamilyPassIntegrationReadModel({member_identity_id
 assert.equal(durableBlack.status,'ready');
 assert.equal(durableBlack.family_pass.black_lifetime_entitled,true);
 assert.equal(buildMemberFamilyPassIntegrationReadModel({member_identity_id:mid,canonical_customer_id:'12345678',family_id:'FAM-1',family_link_verified:true,persisted_verified_family_id:'FAM-1',member_customer_binding_verified:true,persisted_member_customer_id:'12345678',member_status:'active',published_non_deleted_memory_count:'9'.repeat(400),entitlement_schema_applied:true}).status,'invalid_memory_count');
-r=buildProspectMemberIntegrationReadModel({member_identity_id:mid,prospect_id:pid,consent_current:true,signup_benefit_state:'available',acquisition_source:'instagram'});
+r=buildProspectMemberIntegrationReadModel({member_identity_id:mid,prospect_id:pid,persisted_member_identity_id:mid,persisted_prospect_id:pid,member_prospect_binding_verified:true,consent_current:true,signup_benefit_state:'available',acquisition_source:'instagram'});
 assert.equal(r.status,'ready');
 assert.equal(r.canonical_customer_id,null);
 assert.equal(r.family_pass,null);
@@ -38,7 +38,7 @@ assert.equal(r.prospect_access_to_customer_memories,false);
 assert.equal(r.customer_id_generation,false);
 for(const malformed of [false,['0'],{value:0},0n,'9'.repeat(400),Number.MAX_SAFE_INTEGER+1]){
  assert.equal(buildMemberFamilyPassIntegrationReadModel({member_identity_id:mid,canonical_customer_id:'12345678',family_id:'FAM-1',family_link_verified:true,persisted_verified_family_id:'FAM-1',member_customer_binding_verified:true,persisted_member_customer_id:'12345678',member_status:'active',published_non_deleted_memory_count:1,entitlement_schema_applied:true,review_pending_count:malformed}).status,'invalid_review_count');
- assert.equal(buildProspectMemberIntegrationReadModel({member_identity_id:mid,prospect_id:pid,review_pending_count:malformed}).status,'invalid_review_count');
+ assert.equal(buildProspectMemberIntegrationReadModel({member_identity_id:mid,prospect_id:pid,persisted_member_identity_id:mid,persisted_prospect_id:pid,member_prospect_binding_verified:true,review_pending_count:malformed}).status,'invalid_review_count');
 }
 console.log('MEMBER_FAMILY_PASS_INTEGRATION_READ_MODEL=PASS');
 console.log('BLACK_THRESHOLD=10');
@@ -55,3 +55,6 @@ const validDurableBlack=buildMemberFamilyPassIntegrationReadModel({member_identi
 assert.equal(validDurableBlack.status,'ready');
 assert.equal(validDurableBlack.family_pass.black_lifetime_entitled,true);
 assert.equal(validDurableBlack.black_contract.shooting_fee_discount,false);
+
+assert.equal(buildProspectMemberIntegrationReadModel({member_identity_id:mid,prospect_id:pid}).status,'member_prospect_binding_not_verified');
+assert.equal(buildProspectMemberIntegrationReadModel({member_identity_id:mid,prospect_id:pid,persisted_member_identity_id:mid,persisted_prospect_id:'PID_zyxwvutsrqponmlkjihgfedcba654321',member_prospect_binding_verified:true}).status,'member_prospect_binding_not_verified');
