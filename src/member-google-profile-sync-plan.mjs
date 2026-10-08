@@ -86,11 +86,20 @@ export function planSyncReplay({incoming_event_id,incoming_version,incoming_dige
  if(iv===null||lv===null){
    return {status:'invalid_version_evidence',review_required:true,master_write:false,history_append:false};
  }
+ if(!EVENT_ID_RE.test(ie)){
+   return {status:'invalid_event_evidence',review_required:true,master_write:false,history_append:false};
+ }
  const initialBoundary=lv===0&&!le&&!ld;
+ if(lv===0&&!initialBoundary){
+   return {status:'invalid_prior_state_evidence',review_required:true,master_write:false,history_append:false};
+ }
+ if(lv>0&&!EVENT_ID_RE.test(le)){
+   return {status:'invalid_event_evidence',review_required:true,master_write:false,history_append:false};
+ }
  if(!DIGEST_RE.test(id)||(!initialBoundary&&!DIGEST_RE.test(ld))){
    return {status:'invalid_replay_evidence',review_required:true,master_write:false,history_append:false};
  }
- if(ie&&ie===le){
+ if(ie===le){
    if(iv===lv&&id===ld) return {status:'idempotent_replay',master_write:false,history_append:false};
    return {status:'event_replay_conflict',review_required:true,master_write:false,history_append:false};
  }
