@@ -95,6 +95,9 @@ export function buildMemberFamilyPassIntegrationReadModel({
 export function buildProspectMemberIntegrationReadModel({
  member_identity_id,
  prospect_id,
+ persisted_prospect_id='',
+ persisted_member_identity_id='',
+ member_prospect_binding_verified=false,
  consent_current=false,
  signup_benefit_state='none',
  acquisition_source='unknown',
@@ -103,6 +106,7 @@ export function buildProspectMemberIntegrationReadModel({
  const PID=/^PID_[A-Za-z0-9_-]{22,}$/;
  const member=text(member_identity_id),prospect=text(prospect_id);
  if(!MID.test(member)||!PID.test(prospect)) return {status:'invalid_identity',read_ready:false};
+ if(member_prospect_binding_verified!==true||text(persisted_prospect_id)!==prospect||text(persisted_member_identity_id)!==member) return {status:'member_prospect_binding_not_verified',read_ready:false};
  const pending=scalarNonNegativeInteger(review_pending_count);
  if(pending===null) return {status:'invalid_review_count',read_ready:false};
  return {
