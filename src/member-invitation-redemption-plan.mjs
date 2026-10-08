@@ -5,6 +5,7 @@ const INVITATION_ID_RE=/^[A-Za-z0-9_-]{16,128}$/;
 const INVITE_TOKEN_RE=/^[A-Za-z0-9_-]{32,256}$/;
 const SHA256_HEX_RE=/^[0-9a-f]{64}$/;
 const UTC_INSTANT_RE=/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+const DB_UTC_NOW="strftime('%Y-%m-%dT%H:%M:%fZ','now')";
 const hasOwn=(obj,key)=>Object.prototype.hasOwnProperty.call(obj,key);
 const strictText=value=>typeof value==='string'?value:null;
 
@@ -67,6 +68,9 @@ export function planOneTimeInvitationRedemption(evidence={}){
     return blocked('invalid_invitation_token');
   }
 
+  if(evidence.server_now_verified!==true){
+    return blocked('server_now_not_verified');
+  }
   const nowText=strictText(evidence.now);
   const nowEpoch=parseUtcInstant(nowText);
   if(nowEpoch===null) return blocked('invalid_now_evidence');
@@ -148,14 +152,23 @@ export function planOneTimeInvitationRedemption(evidence={}){
 
   const statement=[
     'UPDATE member_customer_invitations',
-    'SET consumed_at = ?',
+    `SET consumed_at = ${DB_UTC_NOW}`,
     'WHERE invitation_id = ?',
     '  AND canonical_customer_id = ?',
     '  AND token_sha256 = ?',
     '  AND expires_at = ?',
     '  AND consumed_at IS NULL',
     '  AND invalidated_at IS NULL',
-    '  AND expires_at > ?'
+    `  AND expires_at > ${DB_UTC_NOW}`,
+    '  AND NOT EXISTS (',
+    '    SELECT 1',
+    '    FROM member_customer_invitations AS other',
+    '    WHERE other.canonical_customer_id = ?',
+    '      AND other.invitation_id <> ?',
+    '      AND other.consumed_at IS NULL',
+    '      AND other.invalidated_at IS NULL',
+    `      AND other.expires_at > ${DB_UTC_NOW}`,
+    '  )'
   ].join('\n');
 
   return {
@@ -168,6 +181,8 @@ export function planOneTimeInvitationRedemption(evidence={}){
     token_sha256:computedDigest,
     token_digest_verified:true,
     invitation_record_verified:true,
+    server_now_verified:true,
+    validated_at:nowText,
     single_use:true,
     customer_id_from_server_record:true,
     customer_id_from_client:false,
@@ -176,7 +191,10 @@ export function planOneTimeInvitationRedemption(evidence={}){
     atomic_redemption:{
       mode:'single_statement_compare_and_set',
       statement,
-      binds:[nowText,invitationId,customerId,computedDigest,expiresAt,nowText],
+      binds:[invitationId,customerId,computedDigest,expiresAt,customerId,invitationId],
+      database_clock_required:true,
+      active_cardinality_rechecked_at_execution:true,
+      expiry_rechecked_at_execution:true,
       success_requires_affected_rows:1,
       zero_rows_status:'redemption_conflict_or_stale_evidence',
       retry_without_revalidation:false
@@ -198,6 +216,7 @@ export const __test={
   INVITE_TOKEN_RE,
   SHA256_HEX_RE,
   UTC_INSTANT_RE,
+  DB_UTC_NOW,
   parseCount,
   parseUtcInstant
 };
