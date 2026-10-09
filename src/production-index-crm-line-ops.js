@@ -3,6 +3,7 @@
 // build: customer-crm-api-line-ops-20260614-01
 // Canonical Owner App Shell owns all visible LINE UI.
 // This wrapper preserves historical API compatibility only and MUST NOT inject browser UI.
+// It also removes retired visual-only admin-user UI emitted by the older secure wrapper.
 // ======================================================
 
 import app from "./production-index-crm-list-workbench-safety.js";
@@ -22,6 +23,21 @@ async function addColumn(db, table, def){ try { await db.prepare(`ALTER TABLE ${
 async function all(env, sql, binds=[]){ try { const s=env.DB.prepare(sql); const r=binds.length?await s.bind(...binds).all():await s.all(); return r.results||[]; } catch(_) { return []; } }
 async function first(env, sql, binds=[]){ try { const s=env.DB.prepare(sql); return binds.length?await s.bind(...binds).first():await s.first(); } catch(_) { return null; } }
 async function run(env, sql, binds=[]){ try { const s=env.DB.prepare(sql); return binds.length?await s.bind(...binds).run():await s.run(); } catch(e){ return { error:String(e && e.message || e) }; } }
+
+export function stripLegacyAdminUserUi(html){
+  let source=String(html||"");
+  source=source.replace(/<style\b[^>]*\bid=["']crm-admin-users-style["'][^>]*>[\s\S]*?<\/style>/gi,"");
+  source=source.replace(/<div\b[^>]*\bid=["']crmUserFab["'][^>]*>[\s\S]*?<script\b[^>]*\bid=["']crm-admin-users-script["'][^>]*>[\s\S]*?<\/script>/gi,"");
+  return source;
+}
+
+async function scrubLegacyHtmlResponse(response){
+  const contentType=response?.headers?.get("content-type")||"";
+  if(!contentType.toLowerCase().includes("text/html")) return response;
+  const headers=new Headers(response.headers);
+  headers.delete("content-length");
+  return new Response(stripLegacyAdminUserUi(await response.text()),{status:response.status,statusText:response.statusText,headers});
+}
 
 async function ensureSchema(env){
   if(!env.DB) throw new Error("D1 DB binding(DB) is missing");
@@ -139,7 +155,7 @@ export default {
         const u = await requireUser(request, env); if(!u.ok) return u.response;
         return json(await logs(env, url));
       }
-      return app.fetch(request, env, ctx);
+      return scrubLegacyHtmlResponse(await app.fetch(request, env, ctx));
     }catch(e){
       return json({ ok:false, build:BUILD, message:String(e && e.message || e) }, 500);
     }
