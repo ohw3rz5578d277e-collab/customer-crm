@@ -28,6 +28,18 @@ const lifecycleTriggerTargets=new Map([
 ]);
 const lifecycleAuxObjects=[...lifecycleIndexTargets.keys(),...lifecycleTriggerTargets.keys()];
 const lifecycleTableSet=new Set(lifecycleTables);
+const expectedLifecycleObjectsByMigration=new Map([
+  ['20261007_member_identity_prospect_foundation.sql',{
+    tables:['member_identities','member_prospects','member_customer_invitations','member_profile_change_review_queue'],
+    indexes:['idx_member_identity_customer','idx_member_identity_prospect','idx_member_customer_invitation_customer'],
+    triggers:[]
+  }],
+  ['20261009_member_registration_consent_event_foundation.sql',{
+    tables:['member_registration_events','member_consent_evidence'],
+    indexes:['idx_member_registration_events_member_time','idx_member_registration_events_prospect_time','idx_member_consent_evidence_member_time','idx_member_consent_evidence_prospect_time'],
+    triggers:['trg_member_registration_events_no_update','trg_member_registration_events_no_delete','trg_member_consent_evidence_no_update','trg_member_consent_evidence_no_delete']
+  }]
+]);
 
 function openQuote(ch){
   if(ch==="'" || ch==='"' || ch==='`') return {open:ch,close:ch,doubled:true};
@@ -115,14 +127,26 @@ function splitSqlStatements(raw) {
   return statements;
 }
 
+function assertExactObjectSet(actual, expected, kind, migration){
+  const actualSet=new Set(actual);
+  const expectedSet=new Set(expected);
+  assert.equal(actual.length,expected.length,`${migration} ${kind} exact object count mismatch`);
+  assert.equal(actualSet.size,expectedSet.size,`${migration} ${kind} contains duplicate or missing canonical objects`);
+  assert.deepEqual([...actualSet].sort(),[...expectedSet].sort(),`${migration} ${kind} exact object set mismatch`);
+}
+
 function auditSchemaOnlyMigration(raw, migration) {
   const sql=stripSqlComments(raw);
+  const createdTables=[];
+  const createdIndexes=[];
+  const createdTriggers=[];
   const triggerBlocks=[...sql.matchAll(/CREATE\s+TRIGGER\s+IF\s+NOT\s+EXISTS[\s\S]*?\bEND\s*;/gi)].map(match=>match[0]);
   for(const block of triggerBlocks){
     const match=block.match(/^CREATE\s+TRIGGER\s+IF\s+NOT\s+EXISTS\s+([A-Za-z0-9_]+)\s+BEFORE\s+(?:UPDATE|DELETE)\s+ON\s+([A-Za-z0-9_]+)\s+BEGIN\s+SELECT\s+RAISE\(ABORT,\s*'[^']+'\)\s*;\s*END\s*;$/i);
     assert.ok(match,`${migration} contains an unexpected trigger body`);
     const [,triggerName,targetTable]=match;
     assert.equal(lifecycleTriggerTargets.get(triggerName),targetTable,`${migration} contains unauthorized trigger name or target: ${triggerName}`);
+    createdTriggers.push(triggerName);
   }
   const topLevel=sql.replace(/CREATE\s+TRIGGER\s+IF\s+NOT\s+EXISTS[\s\S]*?\bEND\s*;/gi,' ');
   assert.doesNotMatch(topLevel,/(^|;)\s*(?:INSERT|UPDATE|DELETE|REPLACE|TRUNCATE)\b/im,`${migration} contains top-level DML`);
@@ -134,14 +158,23 @@ function auditSchemaOnlyMigration(raw, migration) {
     const table=statement.match(/^CREATE\s+TABLE\s+IF\s+NOT\s+EXISTS\s+([A-Za-z0-9_]+)\s*\(/i);
     if(table){
       assert.ok(lifecycleTableSet.has(table[1]),`${migration} creates unauthorized table: ${table[1]}`);
+      createdTables.push(table[1]);
       continue;
     }
     const index=statement.match(/^CREATE\s+(?:UNIQUE\s+)?INDEX\s+IF\s+NOT\s+EXISTS\s+([A-Za-z0-9_]+)\s+ON\s+([A-Za-z0-9_]+)\s*\(/i);
     if(index){
       assert.equal(lifecycleIndexTargets.get(index[1]),index[2],`${migration} creates unauthorized index name or target: ${index[1]}`);
+      createdIndexes.push(index[1]);
       continue;
     }
     assert.fail(`${migration} contains non-schema or unauthorized top-level statement`);
+  }
+
+  const expected=expectedLifecycleObjectsByMigration.get(migration);
+  if(expected){
+    assertExactObjectSet(createdTables,expected.tables,'tables',migration);
+    assertExactObjectSet(createdIndexes,expected.indexes,'indexes',migration);
+    assertExactObjectSet(createdTriggers,expected.triggers,'triggers',migration);
   }
 }
 
@@ -189,6 +222,21 @@ assert.throws(
   ()=>auditSchemaOnlyMigration("CREATE TRIGGER IF NOT EXISTS trg_member_registration_events_no_update BEFORE UPDATE ON customers BEGIN SELECT RAISE(ABORT, 'x'); END;",'wrong-trigger-target-regression.sql'),
   /unauthorized trigger name or target/,
   'lifecycle triggers may target only their exact lifecycle tables'
+);
+
+const identityMigrationRaw=fs.readFileSync('migrations_managed/20261007_member_identity_prospect_foundation.sql','utf8');
+const identityWithoutRequiredIndex=identityMigrationRaw.replace(/CREATE\s+UNIQUE\s+INDEX\s+IF\s+NOT\s+EXISTS\s+idx_member_identity_customer[\s\S]*?;\s*/i,'');
+assert.throws(
+  ()=>auditSchemaOnlyMigration(identityWithoutRequiredIndex,'20261007_member_identity_prospect_foundation.sql'),
+  /indexes exact object count mismatch|indexes exact object set mismatch|duplicate or missing canonical objects/,
+  'omitting a required lifecycle index must fail before apply'
+);
+const consentMigrationRaw=fs.readFileSync('migrations_managed/20261009_member_registration_consent_event_foundation.sql','utf8');
+const consentWithoutRequiredTrigger=consentMigrationRaw.replace(/CREATE\s+TRIGGER\s+IF\s+NOT\s+EXISTS\s+trg_member_consent_evidence_no_delete[\s\S]*?\bEND\s*;\s*/i,'');
+assert.throws(
+  ()=>auditSchemaOnlyMigration(consentWithoutRequiredTrigger,'20261009_member_registration_consent_event_foundation.sql'),
+  /triggers exact object count mismatch|triggers exact object set mismatch|duplicate or missing canonical objects/,
+  'omitting a required append-only lifecycle trigger must fail before apply'
 );
 
 assert.ok(workflow.includes('workflow_dispatch:'),'workflow_dispatch missing');
