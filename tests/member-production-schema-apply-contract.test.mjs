@@ -11,13 +11,23 @@ const lifecycleMigrations=[
 const lifecycleTables=[
   'member_identities','member_prospects','member_customer_invitations','member_profile_change_review_queue','member_registration_events','member_consent_evidence'
 ];
-const lifecycleAuxObjects=[
-  'idx_member_identity_customer','idx_member_identity_prospect','idx_member_customer_invitation_customer',
-  'idx_member_registration_events_member_time','idx_member_registration_events_prospect_time',
-  'idx_member_consent_evidence_member_time','idx_member_consent_evidence_prospect_time',
-  'trg_member_registration_events_no_update','trg_member_registration_events_no_delete',
-  'trg_member_consent_evidence_no_update','trg_member_consent_evidence_no_delete'
-];
+const lifecycleIndexTargets=new Map([
+  ['idx_member_identity_customer','member_identities'],
+  ['idx_member_identity_prospect','member_identities'],
+  ['idx_member_customer_invitation_customer','member_customer_invitations'],
+  ['idx_member_registration_events_member_time','member_registration_events'],
+  ['idx_member_registration_events_prospect_time','member_registration_events'],
+  ['idx_member_consent_evidence_member_time','member_consent_evidence'],
+  ['idx_member_consent_evidence_prospect_time','member_consent_evidence']
+]);
+const lifecycleTriggerTargets=new Map([
+  ['trg_member_registration_events_no_update','member_registration_events'],
+  ['trg_member_registration_events_no_delete','member_registration_events'],
+  ['trg_member_consent_evidence_no_update','member_consent_evidence'],
+  ['trg_member_consent_evidence_no_delete','member_consent_evidence']
+]);
+const lifecycleAuxObjects=[...lifecycleIndexTargets.keys(),...lifecycleTriggerTargets.keys()];
+const lifecycleTableSet=new Set(lifecycleTables);
 
 function openQuote(ch){
   if(ch==="'" || ch==='"' || ch==='`') return {open:ch,close:ch,doubled:true};
@@ -109,7 +119,10 @@ function auditSchemaOnlyMigration(raw, migration) {
   const sql=stripSqlComments(raw);
   const triggerBlocks=[...sql.matchAll(/CREATE\s+TRIGGER\s+IF\s+NOT\s+EXISTS[\s\S]*?\bEND\s*;/gi)].map(match=>match[0]);
   for(const block of triggerBlocks){
-    assert.match(block,/^CREATE\s+TRIGGER\s+IF\s+NOT\s+EXISTS\s+[A-Za-z0-9_]+\s+BEFORE\s+(?:UPDATE|DELETE)\s+ON\s+[A-Za-z0-9_]+\s+BEGIN\s+SELECT\s+RAISE\(ABORT,\s*'[^']+'\)\s*;\s*END\s*;$/i,`${migration} contains an unexpected trigger body`);
+    const match=block.match(/^CREATE\s+TRIGGER\s+IF\s+NOT\s+EXISTS\s+([A-Za-z0-9_]+)\s+BEFORE\s+(?:UPDATE|DELETE)\s+ON\s+([A-Za-z0-9_]+)\s+BEGIN\s+SELECT\s+RAISE\(ABORT,\s*'[^']+'\)\s*;\s*END\s*;$/i);
+    assert.ok(match,`${migration} contains an unexpected trigger body`);
+    const [,triggerName,targetTable]=match;
+    assert.equal(lifecycleTriggerTargets.get(triggerName),targetTable,`${migration} contains unauthorized trigger name or target: ${triggerName}`);
   }
   const topLevel=sql.replace(/CREATE\s+TRIGGER\s+IF\s+NOT\s+EXISTS[\s\S]*?\bEND\s*;/gi,' ');
   assert.doesNotMatch(topLevel,/(^|;)\s*(?:INSERT|UPDATE|DELETE|REPLACE|TRUNCATE)\b/im,`${migration} contains top-level DML`);
@@ -117,34 +130,65 @@ function auditSchemaOnlyMigration(raw, migration) {
   const statements=splitSqlStatements(topLevel);
   assert.ok(statements.length>0,`${migration} is empty`);
   for(const statement of statements){
-    assert.match(statement,/^CREATE\s+(?:UNIQUE\s+)?(?:TABLE|INDEX)\s+IF\s+NOT\s+EXISTS\b/i,`${migration} contains non-schema top-level statement`);
+    assert.doesNotMatch(statement,/\bAS\s+SELECT\b/i,`${migration} contains data-populating CREATE TABLE AS SELECT`);
+    const table=statement.match(/^CREATE\s+TABLE\s+IF\s+NOT\s+EXISTS\s+([A-Za-z0-9_]+)\s*\(/i);
+    if(table){
+      assert.ok(lifecycleTableSet.has(table[1]),`${migration} creates unauthorized table: ${table[1]}`);
+      continue;
+    }
+    const index=statement.match(/^CREATE\s+(?:UNIQUE\s+)?INDEX\s+IF\s+NOT\s+EXISTS\s+([A-Za-z0-9_]+)\s+ON\s+([A-Za-z0-9_]+)\s*\(/i);
+    if(index){
+      assert.equal(lifecycleIndexTargets.get(index[1]),index[2],`${migration} creates unauthorized index name or target: ${index[1]}`);
+      continue;
+    }
+    assert.fail(`${migration} contains non-schema or unauthorized top-level statement`);
   }
 }
 
 assert.throws(
   ()=>auditSchemaOnlyMigration("CREATE TABLE IF NOT EXISTS harmless (note TEXT DEFAULT '--'); DELETE FROM member_registration_events;",'quote-aware-regression.sql'),
-  /top-level DML|non-schema top-level statement/,
+  /top-level DML|non-schema|unauthorized/,
   'SQL comment markers inside quoted literals must not hide following top-level DML'
 );
 assert.throws(
   ()=>auditSchemaOnlyMigration("CREATE TABLE IF NOT EXISTS harmless (note TEXT DEFAULT '/* not a comment */'); DROP TABLE member_identities;",'quote-aware-block-comment-regression.sql'),
-  /destructive top-level DDL|non-schema top-level statement/,
+  /destructive top-level DDL|non-schema|unauthorized/,
   'SQL block-comment markers inside quoted literals must not hide following destructive DDL'
 );
 assert.throws(
   ()=>auditSchemaOnlyMigration("CREATE TABLE IF NOT EXISTS [harmless--name] (id TEXT); DELETE FROM member_registration_events;",'bracket-quoted-line-comment-regression.sql'),
-  /top-level DML|non-schema top-level statement/,
+  /top-level DML|non-schema|unauthorized/,
   'SQLite bracket-quoted identifiers containing -- must not hide following top-level DML'
 );
 assert.throws(
   ()=>auditSchemaOnlyMigration("CREATE TABLE IF NOT EXISTS [harmless/*name*/] (id TEXT); DROP TABLE member_identities;",'bracket-quoted-block-comment-regression.sql'),
-  /destructive top-level DDL|non-schema top-level statement/,
+  /destructive top-level DDL|non-schema|unauthorized/,
   'SQLite bracket-quoted identifiers containing block-comment markers must not hide following destructive DDL'
 );
 assert.throws(
   ()=>auditSchemaOnlyMigration("CREATE TABLE IF NOT EXISTS [unterminated--name (id TEXT);",'unterminated-bracket-identifier.sql'),
   /unterminated SQL quoted literal or identifier/,
   'unterminated bracket-quoted identifiers must fail closed'
+);
+assert.throws(
+  ()=>auditSchemaOnlyMigration('CREATE TABLE IF NOT EXISTS copied_customers AS SELECT * FROM customers;','ctas-data-copy-regression.sql'),
+  /data-populating CREATE TABLE AS SELECT|non-schema|unauthorized/,
+  'CREATE TABLE AS SELECT must be rejected because it materializes Production data'
+);
+assert.throws(
+  ()=>auditSchemaOnlyMigration('CREATE TABLE IF NOT EXISTS member_identities_copy (id TEXT);','unexpected-table-regression.sql'),
+  /unauthorized table/,
+  'only exact lifecycle table names may be created'
+);
+assert.throws(
+  ()=>auditSchemaOnlyMigration('CREATE INDEX IF NOT EXISTS idx_member_identity_customer ON customers(id);','wrong-index-target-regression.sql'),
+  /unauthorized index name or target/,
+  'lifecycle indexes may target only their exact lifecycle tables'
+);
+assert.throws(
+  ()=>auditSchemaOnlyMigration("CREATE TRIGGER IF NOT EXISTS trg_member_registration_events_no_update BEFORE UPDATE ON customers BEGIN SELECT RAISE(ABORT, 'x'); END;",'wrong-trigger-target-regression.sql'),
+  /unauthorized trigger name or target/,
+  'lifecycle triggers may target only their exact lifecycle tables'
 );
 
 assert.ok(workflow.includes('workflow_dispatch:'),'workflow_dispatch missing');
