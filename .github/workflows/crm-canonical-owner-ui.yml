@@ -12,6 +12,7 @@ on:
       - 'src/crm-customer-list-daily-operations.mjs'
       - 'src/crm-customer360-*.mjs'
       - 'src/customer-identity-resolver.mjs'
+      - 'src/production-index-crm-line-ops.js'
       - 'src/production-index-crm-customer360-entry.js'
       - 'src/production-index-crm-browser-root-entry.js'
       - 'migrations_managed/20260903_customer360_profile_auto_enrichment.sql'
@@ -61,8 +62,11 @@ jobs:
           done
           test ! -e src/crm-mobile-owner-interaction-recovery.mjs
           test ! -e src/crm-owner-view-state.mjs
-          test ! -e src/production-index-crm-line-ops.js
+          test -f src/production-index-crm-line-ops.js
+          ! grep -E 'injectLineOpsButton|crm-line-ops-style|crm-line-ops-script|lineOpsOpen|crm-lineops-fab' src/production-index-crm-line-ops.js
           echo 'LEGACY_OWNER_UI_SOURCE_FILES=0'
+          echo 'LINE_OPS_LEGACY_UI_INJECTION=0'
+          echo 'LINE_OPS_API_COMPATIBILITY=PRESERVED'
           echo 'IDENTITY_SOURCE_CHANGE=0'
           echo "AUTHORIZED_ADDITIVE_MIGRATION_COUNT=${#migrations[@]}"
           echo 'PRODUCTION_D1_WRITE=0'
@@ -100,6 +104,7 @@ jobs:
           node --check src/crm-customer360-profile-enrichment.mjs
           node --check src/crm-customer360-line-profile-extraction.mjs
           node --check src/crm-customer360-profile-ui-client.mjs
+          node --check src/production-index-crm-line-ops.js
           node --check src/production-index-crm-customer360-entry.js
           node tests/crm-customer-list-direct-nav.mjs
           node tests/customer360-read-only-status.mjs
