@@ -16,13 +16,7 @@ const DB={
   }
 };
 
-const env={
-  CRM_LOCAL_TEST_AUTH:'1',
-  DB,
-  RESERVATION_SERVICE:{},
-  LINE_SERVICE:{}
-};
-
+const env={CRM_LOCAL_TEST_AUTH:'1',DB,RESERVATION_SERVICE:{},LINE_SERVICE:{}};
 const direct=await customer360ReadOnlyStatus(env);
 assert.equal(direct.ok,true);
 assert.equal(direct.read_only,true);
@@ -55,18 +49,14 @@ assert.deepEqual(sqlSeen,['SELECT 1 AS ok']);
 assert.equal(writeMethodTouches,0);
 
 let unauthorizedDbTouched=0;
-const unauthorizedEnv={
-  DB:{
-    prepare(){unauthorizedDbTouched++;throw new Error('UNAUTHORIZED_STATUS_MUST_NOT_TOUCH_DB')}
-  }
-};
+const unauthorizedEnv={DB:{prepare(){unauthorizedDbTouched++;throw new Error('UNAUTHORIZED_STATUS_MUST_NOT_TOUCH_DB')}}};
 const unauthorized=await handleCustomer360Request(new Request('https://example.test/api/customer360/status'),unauthorizedEnv);
 assert.equal(unauthorized.status,401);
 assert.equal((await unauthorized.json()).error,'authentication_required');
 assert.equal(unauthorizedDbTouched,0);
 
 const runtimeSrc=fs.readFileSync('src/crm-customer360-runtime.mjs','utf8');
-const ownerSrc=fs.readFileSync('src/crm-mobile-owner-interaction-recovery.mjs','utf8');
+const ownerSrc=fs.readFileSync('src/crm-owner-app-shell.mjs','utf8');
 const start=runtimeSrc.indexOf('export async function customer360ReadOnlyStatus');
 const end=runtimeSrc.indexOf('export async function customerListData',start);
 assert.ok(start>=0&&end>start,'read-only status function missing');
@@ -74,10 +64,12 @@ const statusSrc=runtimeSrc.slice(start,end);
 assert.ok(statusSrc.includes("'SELECT 1 AS ok'"));
 assert.doesNotMatch(statusSrc,/\b(?:INSERT|UPDATE|DELETE|CREATE|ALTER|DROP|REPLACE)\b/i);
 assert.doesNotMatch(statusSrc,/\.run\s*\(/);
-assert.ok(ownerSrc.includes("fetch('/api/customer360/status'"));
-assert.ok(!ownerSrc.includes("fetch('/api/crm-health-check'"));
+assert.ok(ownerSrc.includes("fetch('/api/customer360/status'"),'canonical Owner shell must use read-only status endpoint');
+assert.ok(!ownerSrc.includes("fetch('/api/crm-health-check'"),'canonical Owner shell must not use legacy mutating health endpoint');
+assert.ok(!fs.existsSync('src/crm-mobile-owner-interaction-recovery.mjs'),'retired legacy Owner recovery source must not remain');
 
 console.log('CUSTOMER360_READ_ONLY_STATUS=PASS');
+console.log('OWNER_STATUS_CANONICAL_SHELL=PASS');
 console.log('OWNER_STATUS_D1_WRITE=0');
 console.log('OWNER_STATUS_SCHEMA_REPAIR=0');
 console.log('OWNER_STATUS_CUSTOMER_WRITE=0');
