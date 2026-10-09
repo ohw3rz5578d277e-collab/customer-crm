@@ -12,13 +12,13 @@ const lifecycleTables=[
   'member_identities','member_prospects','member_customer_invitations','member_profile_change_review_queue','member_registration_events','member_consent_evidence'
 ];
 const lifecycleIndexContracts=new Map([
-  ['idx_member_identity_customer',{target:'member_identities',unique:true}],
-  ['idx_member_identity_prospect',{target:'member_identities',unique:true}],
-  ['idx_member_customer_invitation_customer',{target:'member_customer_invitations',unique:false}],
-  ['idx_member_registration_events_member_time',{target:'member_registration_events',unique:false}],
-  ['idx_member_registration_events_prospect_time',{target:'member_registration_events',unique:false}],
-  ['idx_member_consent_evidence_member_time',{target:'member_consent_evidence',unique:false}],
-  ['idx_member_consent_evidence_prospect_time',{target:'member_consent_evidence',unique:false}]
+  ['idx_member_identity_customer',{target:'member_identities',unique:true,columns:'canonical_customer_id',predicate:'canonical_customer_id IS NOT NULL'}],
+  ['idx_member_identity_prospect',{target:'member_identities',unique:true,columns:'prospect_id',predicate:'prospect_id IS NOT NULL'}],
+  ['idx_member_customer_invitation_customer',{target:'member_customer_invitations',unique:false,columns:'canonical_customer_id,created_at',predicate:''}],
+  ['idx_member_registration_events_member_time',{target:'member_registration_events',unique:false,columns:'member_identity_id,accepted_at,registration_event_id',predicate:''}],
+  ['idx_member_registration_events_prospect_time',{target:'member_registration_events',unique:false,columns:'prospect_id,accepted_at,registration_event_id',predicate:''}],
+  ['idx_member_consent_evidence_member_time',{target:'member_consent_evidence',unique:false,columns:'member_identity_id,accepted_at,consent_event_id',predicate:''}],
+  ['idx_member_consent_evidence_prospect_time',{target:'member_consent_evidence',unique:false,columns:'prospect_id,accepted_at,consent_event_id',predicate:''}]
 ]);
 const lifecycleTriggerContracts=new Map([
   ['trg_member_registration_events_no_update',{target:'member_registration_events',operation:'UPDATE'}],
@@ -217,13 +217,15 @@ function auditSchemaOnlyMigration(raw, migration) {
       createdTables.push(table[1]);
       continue;
     }
-    const index=statement.match(/^CREATE\s+(UNIQUE\s+)?INDEX\s+IF\s+NOT\s+EXISTS\s+([A-Za-z0-9_]+)\s+ON\s+([A-Za-z0-9_]+)\s*\(/i);
+    const index=statement.match(/^CREATE\s+(UNIQUE\s+)?INDEX\s+IF\s+NOT\s+EXISTS\s+([A-Za-z0-9_]+)\s+ON\s+([A-Za-z0-9_]+)\s*\(([^()]+)\)\s*(?:WHERE\s+(.+))?$/i);
     if(index){
-      const [,uniqueRaw,indexName,targetTable]=index;
+      const [,uniqueRaw,indexName,targetTable,columnsRaw,predicateRaw]=index;
       const contract=lifecycleIndexContracts.get(indexName);
       assert.ok(contract,`${migration} creates unauthorized index name: ${indexName}`);
       assert.equal(targetTable,contract.target,`${migration} creates unauthorized index target: ${indexName}`);
       assert.equal(Boolean(uniqueRaw),contract.unique,`${migration} creates index with wrong uniqueness: ${indexName}`);
+      assert.equal(columnsRaw.replace(/\s+/g,''),contract.columns,`${migration} creates index with wrong columns: ${indexName}`);
+      assert.equal((predicateRaw||'').trim().replace(/\s+/g,' ').toUpperCase(),contract.predicate.toUpperCase(),`${migration} creates index with wrong predicate: ${indexName}`);
       createdIndexes.push(indexName);
       continue;
     }
@@ -306,6 +308,17 @@ assert.throws(
   /wrong uniqueness/,
   'non-unique lifecycle indexes must not silently become unique'
 );
+
+for(const sql of [
+  'CREATE UNIQUE INDEX IF NOT EXISTS idx_member_identity_customer ON member_identities(prospect_id) WHERE canonical_customer_id IS NOT NULL;',
+  'CREATE UNIQUE INDEX IF NOT EXISTS idx_member_identity_customer ON member_identities(canonical_customer_id) WHERE canonical_customer_id IS NULL;',
+  'CREATE UNIQUE INDEX IF NOT EXISTS idx_member_identity_customer ON member_identities(canonical_customer_id);',
+  'CREATE INDEX IF NOT EXISTS idx_member_registration_events_member_time ON member_registration_events(accepted_at,member_identity_id,registration_event_id);',
+  'CREATE INDEX IF NOT EXISTS idx_member_customer_invitation_customer ON member_customer_invitations(canonical_customer_id,created_at) WHERE created_at IS NOT NULL;',
+  'CREATE UNIQUE INDEX IF NOT EXISTS idx_member_identity_customer ON member_identities(lower(canonical_customer_id)) WHERE canonical_customer_id IS NOT NULL;'
+]){
+  assert.throws(()=>auditSchemaOnlyMigration(sql,'index-definition-regression.sql'),/wrong columns|wrong predicate|non-schema|unauthorized/,'index column, expression, order and partial-predicate drift must fail before apply');
+}
 
 const identityMigrationRaw=fs.readFileSync('migrations_managed/20261007_member_identity_prospect_foundation.sql','utf8');
 const identityWithoutRequiredIndex=identityMigrationRaw.replace(/CREATE\s+UNIQUE\s+INDEX\s+IF\s+NOT\s+EXISTS\s+idx_member_identity_customer[\s\S]*?;\s*/i,'');
