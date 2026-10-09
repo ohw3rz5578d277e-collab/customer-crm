@@ -19,6 +19,12 @@ const lifecycleAuxObjects=[
   'trg_member_consent_evidence_no_update','trg_member_consent_evidence_no_delete'
 ];
 
+function openQuote(ch){
+  if(ch==="'" || ch==='"' || ch==='`') return {open:ch,close:ch,doubled:true};
+  if(ch==='[') return {open:'[',close:']',doubled:false};
+  return null;
+}
+
 function stripSqlComments(raw) {
   let out='';
   let quote=null;
@@ -27,8 +33,8 @@ function stripSqlComments(raw) {
     const next=raw[i+1];
     if(quote){
       out+=ch;
-      if(ch===quote){
-        if(next===quote){
+      if(ch===quote.close){
+        if(quote.doubled && next===quote.close){
           out+=next;
           i+=1;
         }else{
@@ -37,8 +43,9 @@ function stripSqlComments(raw) {
       }
       continue;
     }
-    if(ch==="'" || ch==='"' || ch==='`'){
-      quote=ch;
+    const opened=openQuote(ch);
+    if(opened){
+      quote=opened;
       out+=ch;
       continue;
     }
@@ -59,7 +66,7 @@ function stripSqlComments(raw) {
     }
     out+=ch;
   }
-  if(quote) throw new Error('unterminated SQL quoted literal');
+  if(quote) throw new Error('unterminated SQL quoted literal or identifier');
   return out;
 }
 
@@ -72,8 +79,8 @@ function splitSqlStatements(raw) {
     const next=raw[i+1];
     current+=ch;
     if(quote){
-      if(ch===quote){
-        if(next===quote){
+      if(ch===quote.close){
+        if(quote.doubled && next===quote.close){
           current+=next;
           i+=1;
         }else{
@@ -82,8 +89,9 @@ function splitSqlStatements(raw) {
       }
       continue;
     }
-    if(ch==="'" || ch==='"' || ch==='`'){
-      quote=ch;
+    const opened=openQuote(ch);
+    if(opened){
+      quote=opened;
       continue;
     }
     if(ch===';'){
@@ -92,7 +100,7 @@ function splitSqlStatements(raw) {
       current='';
     }
   }
-  if(quote) throw new Error('unterminated SQL quoted literal');
+  if(quote) throw new Error('unterminated SQL quoted literal or identifier');
   if(current.trim()) statements.push(current.trim());
   return statements;
 }
@@ -122,6 +130,21 @@ assert.throws(
   ()=>auditSchemaOnlyMigration("CREATE TABLE IF NOT EXISTS harmless (note TEXT DEFAULT '/* not a comment */'); DROP TABLE member_identities;",'quote-aware-block-comment-regression.sql'),
   /destructive top-level DDL|non-schema top-level statement/,
   'SQL block-comment markers inside quoted literals must not hide following destructive DDL'
+);
+assert.throws(
+  ()=>auditSchemaOnlyMigration("CREATE TABLE IF NOT EXISTS [harmless--name] (id TEXT); DELETE FROM member_registration_events;",'bracket-quoted-line-comment-regression.sql'),
+  /top-level DML|non-schema top-level statement/,
+  'SQLite bracket-quoted identifiers containing -- must not hide following top-level DML'
+);
+assert.throws(
+  ()=>auditSchemaOnlyMigration("CREATE TABLE IF NOT EXISTS [harmless/*name*/] (id TEXT); DROP TABLE member_identities;",'bracket-quoted-block-comment-regression.sql'),
+  /destructive top-level DDL|non-schema top-level statement/,
+  'SQLite bracket-quoted identifiers containing block-comment markers must not hide following destructive DDL'
+);
+assert.throws(
+  ()=>auditSchemaOnlyMigration("CREATE TABLE IF NOT EXISTS [unterminated--name (id TEXT);",'unterminated-bracket-identifier.sql'),
+  /unterminated SQL quoted literal or identifier/,
+  'unterminated bracket-quoted identifiers must fail closed'
 );
 
 assert.ok(workflow.includes('workflow_dispatch:'),'workflow_dispatch missing');
