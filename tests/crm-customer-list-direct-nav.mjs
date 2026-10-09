@@ -5,6 +5,7 @@ const owner=fs.readFileSync('src/crm-owner-view-state-v2.mjs','utf8');
 const shell=fs.readFileSync('src/crm-owner-app-shell.mjs','utf8');
 const entry=fs.readFileSync('src/production-index-crm-customer360-entry.js','utf8');
 const lineOps=fs.readFileSync('src/production-index-crm-line-ops.js','utf8');
+const secure=fs.readFileSync('src/secure-index.js','utf8');
 
 function assert(ok,msg){if(!ok)throw new Error(msg)}
 assert(direct.includes('window.__crmCustomer360UI={showList,showHome,focusSearch,refreshList}'),'stable Customer360 UI API missing');
@@ -50,6 +51,10 @@ assert(lineOps.includes('/api/line-ops/dashboard')&&lineOps.includes('/api/line-
 assert(!lineOps.includes('injectLineOpsButton'),'LINE ops wrapper must not inject legacy browser UI');
 assert(!lineOps.includes('crm-line-ops-style')&&!lineOps.includes('crm-line-ops-script'),'legacy LINE ops UI assets must be removed');
 assert(!lineOps.includes('lineOpsOpen')&&!lineOps.includes('crm-lineops-fab'),'legacy LINE ops buttons must be removed from source');
+assert(secure.includes('crmUserFab')&&secure.includes('crm-admin-users-script'),'historical secure wrapper fixture changed; re-audit legacy admin UI boundary');
+assert(lineOps.includes('export function stripLegacyAdminUserUi'),'legacy admin user UI scrub helper missing');
+assert(lineOps.includes('scrubLegacyHtmlResponse(await app.fetch(request, env, ctx))'),'legacy HTML boundary scrub is not applied to downstream HTML');
+assert(lineOps.includes("crm-admin-users-style")&&lineOps.includes("crm-admin-users-script")&&lineOps.includes("crmUserFab"),'legacy admin UI scrub markers incomplete');
 console.log('CUSTOMER_LIST_DIRECT_NAV_CONTRACT=PASS');
 console.log('CANONICAL_OWNER_VIEW_STATE_CONTRACT=PASS');
 console.log('OWNER_NAV_BIND_ONCE_CONTRACT=PASS');
@@ -57,6 +62,7 @@ console.log('OWNER_APP_SHELL_CANONICAL_UIX=PASS');
 console.log('LEGACY_MOBILE_RECOVERY_PRODUCTION_COMPOSITION=0');
 console.log('LEGACY_OWNER_UI_SOURCE_FILES=0');
 console.log('LINE_OPS_API_COMPATIBILITY_UI_INJECTION=0');
+console.log('LEGACY_ADMIN_USER_UI_HTML_BOUNDARY_SCRUB=PASS');
 console.log('HIDDEN_BUTTON_PRIMARY_ROUTING=REMOVED_FROM_PRIMARY');
 console.log('LINE_TO_CUSTOMER_ONE_TAP_CONTRACT=PASS');
 console.log('IDENTITY_SOURCE_CHANGE=0');
