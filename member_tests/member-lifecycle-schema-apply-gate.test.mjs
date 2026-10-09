@@ -70,7 +70,7 @@ for(const value of Object.values(exactPre.invariant))assert.equal(value,false);
 console.log('PASS all non-schema side effects remain unauthorized');
 
 const applyWorkflow=fs.readFileSync('.github/workflows/member-lifecycle-schema-apply.yml','utf8');
-const bridgeWorkflow=fs.readFileSync('.github/workflows/dispatch-member-lifecycle-schema-apply-from-issue.yml','utf8');
+const lifecycleBridge=fs.readFileSync('.github/workflows/dispatch-member-lifecycle-schema-apply-from-issue.yml','utf8');
 for(const token of [
   'Verify bridge-only dispatch actor',
   'Verify exact runtime readiness receipt',
@@ -98,9 +98,33 @@ for(const token of [
   '/member-lifecycle-schema-apply sha=',
   'readiness_run=',
   'APPLY_MEMBER_LIFECYCLE_SCHEMA',
-  'PRODUCTION_MUTATION_QUEUE_POLICY=REJECT_AND_RETRY'
-])assert.ok(bridgeWorkflow.includes(token),`missing bridge contract token: ${token}`);
-console.log('PASS workflow and bridge contract surface');
+  'PRODUCTION_MUTATION_QUEUE_POLICY=REJECT_AND_RETRY',
+  'PRODUCTION_MUTATION_FILTER=ACTUAL_MUTATIONS_ONLY'
+])assert.ok(lifecycleBridge.includes(token),`missing lifecycle bridge contract token: ${token}`);
+console.log('PASS workflow and lifecycle bridge contract surface');
+
+const mutationBridges=[
+  ['deploy',fs.readFileSync('.github/workflows/dispatch-production-deploy-from-issue.yml','utf8')],
+  ['legacy-schema',fs.readFileSync('.github/workflows/dispatch-member-schema-apply-from-issue.yml','utf8')],
+  ['lifecycle-schema',lifecycleBridge],
+  ['runtime-secret-stage',fs.readFileSync('.github/workflows/dispatch-member-production-runtime-secret-stage-from-issue.yml','utf8')],
+  ['version-promotion',fs.readFileSync('.github/workflows/dispatch-member-production-version-promotion-from-issue.yml','utf8')]
+];
+for(const [name,source] of mutationBridges){
+  for(const token of [
+    'dispatch-member-lifecycle-schema-apply-from-issue.yml',
+    'member-lifecycle-schema-apply.yml',
+    'PRODUCTION_MUTATION_BUSY_RETRY_REQUIRED',
+    'PRODUCTION_MUTATION_QUEUE_POLICY=REJECT_AND_RETRY',
+    'workflow_dispatch',
+    'queued',
+    'in_progress',
+    'waiting',
+    'pending',
+    'requested'
+  ])assert.ok(source.includes(token),`${name} mutation bridge missing lifecycle mutual exclusion token: ${token}`);
+}
+console.log('PASS all five Production mutation bridges reject while lifecycle schema mutation is queued or running');
 
 console.log('MEMBER_LIFECYCLE_SCHEMA_APPLY_GATE=PASS');
 console.log('PRODUCTION_SCHEMA_APPLY=0');
