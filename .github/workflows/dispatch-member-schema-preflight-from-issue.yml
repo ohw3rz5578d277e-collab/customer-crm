@@ -1,5 +1,8 @@
 name: Dispatch Member schema preflight from release-gate issue
 
+run-name: >-
+  ${{ startsWith(github.event.comment.body, '/member-schema-preflight ') && 'Production read-only bridge: member-schema-preflight' || 'Production bridge: ignored' }}
+
 on:
   issue_comment:
     types: [created]
@@ -15,7 +18,7 @@ concurrency:
 
 jobs:
   dispatch:
-    name: Validate Member schema preflight command and dispatch
+    name: Validate Member lifecycle schema preflight command and dispatch
     if: >-
       github.event.issue.number == 26 &&
       github.event.issue.pull_request == null &&
@@ -32,36 +35,60 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           COMMAND_BODY: ${{ github.event.comment.body }}
+          OWNER_COMMENT_ID: ${{ github.event.comment.id }}
         run: |
           set -euo pipefail
           command_re='^/member-schema-preflight sha=([0-9a-f]{40})$'
           [[ "$COMMAND_BODY" =~ $command_re ]] || { echo '::error::INVALID_MEMBER_SCHEMA_PREFLIGHT_COMMAND'; exit 1; }
           expected_sha="${BASH_REMATCH[1]}"
+          [[ "$OWNER_COMMENT_ID" =~ ^[0-9]+$ ]] || { echo '::error::INVALID_OWNER_COMMENT_ID'; exit 1; }
 
           current_sha="$(
-            curl --fail --silent --show-error               -H "Authorization: Bearer $GH_TOKEN"               -H 'Accept: application/vnd.github+json'               -H 'X-GitHub-Api-Version: 2022-11-28'               "https://api.github.com/repos/${GITHUB_REPOSITORY}/commits/main"             | python3 -c 'import json,sys; print(json.load(sys.stdin)["sha"])'
+            curl --fail --silent --show-error \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H 'Accept: application/vnd.github+json' \
+              -H 'X-GitHub-Api-Version: 2022-11-28' \
+              "https://api.github.com/repos/${GITHUB_REPOSITORY}/commits/main" \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin)["sha"])'
           )"
           test "$current_sha" = "$expected_sha" || { echo "::error::MAIN_DRIFT expected=$expected_sha current=$current_sha"; exit 1; }
           echo "expected_sha=$expected_sha" >> "$GITHUB_OUTPUT"
+          echo "owner_comment_id=$OWNER_COMMENT_ID" >> "$GITHUB_OUTPUT"
           echo "MEMBER_SCHEMA_PREFLIGHT_AUTHORIZED_SHA=$expected_sha"
+          echo "MEMBER_SCHEMA_PREFLIGHT_OWNER_COMMENT_ID=$OWNER_COMMENT_ID"
           echo 'BRIDGE_PRODUCTION_WRITE=0'
           echo 'MEMBER_SCHEMA_APPLY=0'
           echo 'PRODUCTION_DEPLOY=0'
 
-      - name: Dispatch read-only Member schema preflight
+      - name: Dispatch read-only Member lifecycle schema preflight
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           EXPECTED_SHA: ${{ steps.gate.outputs.expected_sha }}
+          OWNER_COMMENT_ID: ${{ steps.gate.outputs.owner_comment_id }}
         run: |
           set -euo pipefail
           payload="$(python3 - <<'PY'
           import json,os
-          print(json.dumps({'ref':'main','inputs':{'expected_sha':os.environ['EXPECTED_SHA']}}))
+          print(json.dumps({
+            'ref':'main',
+            'inputs':{
+              'expected_sha':os.environ['EXPECTED_SHA'],
+              'owner_comment_id':os.environ['OWNER_COMMENT_ID']
+            }
+          }))
           PY
           )"
           code="$(
-            curl --silent --show-error               --output /tmp/member-schema-preflight-dispatch.txt               --write-out '%{http_code}'               --request POST               -H "Authorization: Bearer $GH_TOKEN"               -H 'Accept: application/vnd.github+json'               -H 'X-GitHub-Api-Version: 2022-11-28'               "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/member-production-schema-preflight.yml/dispatches"               -d "$payload"
+            curl --silent --show-error \
+              --output /tmp/member-schema-preflight-dispatch.txt \
+              --write-out '%{http_code}' \
+              --request POST \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H 'Accept: application/vnd.github+json' \
+              -H 'X-GitHub-Api-Version: 2022-11-28' \
+              "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/member-production-schema-preflight.yml/dispatches" \
+              -d "$payload"
           )"
           test "$code" = '204' || {
             cat /tmp/member-schema-preflight-dispatch.txt >&2 || true
@@ -69,6 +96,7 @@ jobs:
             exit 1
           }
           echo "MEMBER_SCHEMA_PREFLIGHT_DISPATCHED_SHA=$EXPECTED_SHA"
+          echo "MEMBER_SCHEMA_PREFLIGHT_DISPATCHED_OWNER_COMMENT_ID=$OWNER_COMMENT_ID"
           echo 'BRIDGE_PRODUCTION_WRITE=0'
           echo 'MEMBER_SCHEMA_APPLY=0'
           echo 'PRODUCTION_DEPLOY=0'

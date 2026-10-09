@@ -14,7 +14,7 @@ permissions:
 
 jobs:
   dispatch:
-    name: Validate Member schema apply command and dispatch
+    name: Validate Member lifecycle schema apply command and dispatch
     if: >-
       github.event.issue.number == 26 &&
       github.event.issue.pull_request == null &&
@@ -34,10 +34,11 @@ jobs:
           OWNER_COMMENT_ID: ${{ github.event.comment.id }}
         run: |
           set -euo pipefail
-          command_re='^/member-schema-apply sha=([0-9a-f]{40}) preflight_run=([0-9]+) confirm=APPLY_MEMBER_SCHEMA$'
-          [[ "$COMMAND_BODY" =~ $command_re ]] || { echo '::error::INVALID_MEMBER_SCHEMA_APPLY_COMMAND'; exit 1; }
+          command_re='^/member-schema-apply sha=([0-9a-f]{40}) preflight_run=([0-9]+) confirm=APPLY_MEMBER_LIFECYCLE_SCHEMA$'
+          [[ "$COMMAND_BODY" =~ $command_re ]] || { echo '::error::INVALID_MEMBER_LIFECYCLE_SCHEMA_APPLY_COMMAND'; exit 1; }
           expected_sha="${BASH_REMATCH[1]}"
           preflight_run_id="${BASH_REMATCH[2]}"
+          [[ "$OWNER_COMMENT_ID" =~ ^[0-9]+$ ]] || { echo '::error::INVALID_OWNER_COMMENT_ID'; exit 1; }
           current_sha="$(
             curl --fail --silent --show-error \
               -H "Authorization: Bearer $GH_TOKEN" \
@@ -50,9 +51,9 @@ jobs:
           echo "expected_sha=$expected_sha" >> "$GITHUB_OUTPUT"
           echo "preflight_run_id=$preflight_run_id" >> "$GITHUB_OUTPUT"
           echo "owner_comment_id=$OWNER_COMMENT_ID" >> "$GITHUB_OUTPUT"
-          echo "MEMBER_SCHEMA_APPLY_AUTHORIZED_SHA=$expected_sha"
-          echo "MEMBER_SCHEMA_APPLY_PREFLIGHT_RUN_ID=$preflight_run_id"
-          echo "MEMBER_SCHEMA_APPLY_OWNER_COMMENT_ID=$OWNER_COMMENT_ID"
+          echo "MEMBER_LIFECYCLE_SCHEMA_APPLY_AUTHORIZED_SHA=$expected_sha"
+          echo "MEMBER_LIFECYCLE_SCHEMA_APPLY_PREFLIGHT_RUN_ID=$preflight_run_id"
+          echo "MEMBER_LIFECYCLE_SCHEMA_APPLY_OWNER_COMMENT_ID=$OWNER_COMMENT_ID"
           echo 'PRODUCTION_DEPLOY=0'
           echo 'MEMBER_ROUTE_ACTIVATION=0'
 
@@ -94,7 +95,7 @@ jobs:
           echo 'PRODUCTION_MUTATION_QUEUE_POLICY=REJECT_AND_RETRY'
           echo 'PRODUCTION_MUTATION_FILTER=ACTUAL_MUTATIONS_ONLY'
 
-      - name: Dispatch Member schema-only apply
+      - name: Dispatch lifecycle-only Member schema apply
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -111,7 +112,7 @@ jobs:
               'expected_sha':os.environ['EXPECTED_SHA'],
               'preflight_run_id':os.environ['PREFLIGHT_RUN_ID'],
               'owner_comment_id':os.environ['OWNER_COMMENT_ID'],
-              'confirmation':'APPLY_MEMBER_SCHEMA'
+              'confirmation':'APPLY_MEMBER_LIFECYCLE_SCHEMA'
             }
           }))
           PY
@@ -129,10 +130,10 @@ jobs:
           )"
           test "$code" = '204' || {
             cat /tmp/member-schema-apply-dispatch.txt >&2 || true
-            echo "::error::MEMBER_SCHEMA_APPLY_DISPATCH_FAILED_HTTP_$code"
+            echo "::error::MEMBER_LIFECYCLE_SCHEMA_APPLY_DISPATCH_FAILED_HTTP_$code"
             exit 1
           }
-          echo "MEMBER_SCHEMA_APPLY_DISPATCHED_SHA=$EXPECTED_SHA"
-          echo "MEMBER_SCHEMA_APPLY_DISPATCHED_PREFLIGHT_RUN=$PREFLIGHT_RUN_ID"
+          echo "MEMBER_LIFECYCLE_SCHEMA_APPLY_DISPATCHED_SHA=$EXPECTED_SHA"
+          echo "MEMBER_LIFECYCLE_SCHEMA_APPLY_DISPATCHED_PREFLIGHT_RUN=$PREFLIGHT_RUN_ID"
           echo 'PRODUCTION_DEPLOY=0'
           echo 'MEMBER_ROUTE_ACTIVATION=0'
