@@ -31,6 +31,8 @@ for(const path of [
   'docs/member-app/member-runtime-step9-final-gate-20261009.md',
   'src/member-production-backend-sequence-readiness.mjs',
   'src/member-production-activation-readiness-assembly.mjs',
+  'src/member-production-runtime-schema-readiness.mjs',
+  'tests/member-production-runtime-schema-readiness.test.mjs',
   'member_tests/member-production-backend-sequence-readiness.test.mjs',
   'member_tests/member-production-activation-readiness-assembly.test.mjs',
   'docs/member-app/member-production-backend-sequence-readiness-20261009.md'
@@ -97,10 +99,36 @@ for(const name of [
 assert.ok(workflow.includes('SECRET_VALUES_PRINTED=NO'));
 assert.ok(workflow.includes('d1 migrations list customer-crm-db --remote'));
 assert.ok(workflow.includes('d1 execute customer-crm-db --remote --json --command "SELECT name,type FROM sqlite_master'));
+
+for(const table of [
+  'member_identities',
+  'member_prospects',
+  'member_customer_invitations',
+  'member_profile_change_review_queue',
+  'member_registration_events',
+  'member_consent_evidence'
+]){
+  assert.ok(workflow.includes(table),`lifecycle schema table receipt missing from workflow: ${table}`);
+}
+for(const migration of [
+  '20261007_member_identity_prospect_foundation.sql',
+  '20261009_member_registration_consent_event_foundation.sql'
+]){
+  assert.ok(workflow.includes(migration),`lifecycle migration receipt missing from workflow: ${migration}`);
+}
+
+assert.ok(workflow.includes("import { classifyMemberProductionRuntimeSchema } from './src/member-production-runtime-schema-readiness.mjs';"));
+assert.ok(workflow.includes('MEMBER_SCHEMA_RUNTIME_STATUS='));
+assert.ok(workflow.includes('MEMBER_LIFECYCLE_REQUIRED_MIGRATION_COUNT=2'));
+assert.ok(workflow.includes('MEMBER_LIFECYCLE_PENDING_MIGRATION_COUNT='));
+assert.ok(workflow.includes('MEMBER_LIFECYCLE_PENDING_MIGRATIONS='));
+assert.ok(workflow.includes('MEMBER_UNKNOWN_PENDING_MIGRATION_COUNT='));
+assert.ok(workflow.includes('MEMBER_SCHEMA_RUNTIME_BLOCKERS='));
+assert.ok(workflow.includes('MEMBER_SCHEMA_RUNTIME_READINESS_BLOCKED:'));
 assert.ok(workflow.includes('MEMBER_SCHEMA_RUNTIME_RECEIPT=ALREADY_APPLIED_CONFIRMED'));
 assert.ok(workflow.includes('MEMBER_PENDING_MIGRATION_COUNT=0'));
-assert.ok(workflow.includes('MEMBER_SCHEMA_TABLE_COUNT=11'));
-assert.ok(workflow.includes('MEMBER_SCHEMA_TRACKED_MIGRATION_COUNT=9'));
+assert.ok(workflow.includes('MEMBER_SCHEMA_TABLE_COUNT=17'));
+assert.ok(workflow.includes('MEMBER_SCHEMA_TRACKED_MIGRATION_COUNT=11'));
 
 for(const zero of [
   'MEMBER_PRODUCTION_OWNER_APPROVED_ACTIVATION=0',
@@ -148,6 +176,7 @@ console.log('MEMBER_PRODUCTION_RUNTIME_READINESS_CONTRACT=PASS');
 console.log('MEMBER_PRODUCTION_RUNTIME_READINESS_OWNER_RECEIPT=PASS');
 console.log('MEMBER_PRODUCTION_RUNTIME_READINESS_STEP9_PREREQUISITE=PASS');
 console.log('MEMBER_PRODUCTION_RUNTIME_READINESS_BACKEND_SEQUENCE_GATE=PASS');
+console.log('MEMBER_PRODUCTION_RUNTIME_READINESS_LIFECYCLE_SCHEMA_CLASSIFICATION=PASS');
 console.log('MEMBER_PRODUCTION_RUNTIME_READINESS_BRIDGE_REMATCH_ORDER=PASS');
 console.log('MEMBER_PRODUCTION_RUNTIME_READINESS_READ_ONLY=PASS');
 console.log('MEMBER_PRODUCTION_RUNTIME_READINESS_OWNER_GATE=PASS');
