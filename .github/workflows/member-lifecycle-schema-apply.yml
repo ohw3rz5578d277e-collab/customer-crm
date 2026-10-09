@@ -349,6 +349,17 @@ jobs:
           console.log('LIFECYCLE_SCHEMA_APPLY_SCOPE=EXACT_TWO_PENDING_ONLY');
           NODE
 
+      - name: Last exact current-main gate immediately before apply
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ steps.auth.outputs.expected_sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA" || { echo '::error::LAST_CHECKOUT_SHA_DRIFT'; exit 1; }
+          current_main="$(git ls-remote origin refs/heads/main | awk '{print $1}')"
+          test "$current_main" = "$EXPECTED_SHA" || { echo "::error::LAST_MAIN_DRIFT expected=$EXPECTED_SHA current=$current_main"; exit 1; }
+          echo 'LAST_EXACT_SHA_GATE=PASS'
+
       - name: Apply exact pending Member lifecycle managed migrations
         id: apply_lifecycle
         continue-on-error: true
