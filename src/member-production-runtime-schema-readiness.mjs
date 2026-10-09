@@ -53,27 +53,35 @@ function extractPendingSqlNames(output) {
   )];
 }
 
-function extractReceiptNames(output) {
+function extractReceiptState(output) {
   try {
     const parsed = JSON.parse(String(output || ''));
     const chunks = Array.isArray(parsed) ? parsed : [parsed];
     const names = [];
+    const tableNames = [];
     for (const chunk of chunks) {
       const rows = Array.isArray(chunk?.results) ? chunk.results : [];
       for (const row of rows) {
-        if (typeof row?.name === 'string' && row.name) names.push(row.name);
+        if (typeof row?.name !== 'string' || !row.name) continue;
+        names.push(row.name);
+        if (row?.type === 'table') tableNames.push(row.name);
       }
     }
-    return { names: [...new Set(names)], malformed: false };
+    return {
+      names: [...new Set(names)],
+      tableNames: [...new Set(tableNames)],
+      malformed: false
+    };
   } catch {
-    return { names: [], malformed: true };
+    return { names: [], tableNames: [], malformed: true };
   }
 }
 
 export function classifyMemberProductionRuntimeSchema({ pendingOutput, schemaOutput } = {}) {
   const pendingNames = extractPendingSqlNames(pendingOutput);
-  const receipt = extractReceiptNames(schemaOutput);
+  const receipt = extractReceiptState(schemaOutput);
   const receiptNames = new Set(receipt.names);
+  const receiptTableNames = new Set(receipt.tableNames);
 
   const lifecycleNames = MEMBER_RUNTIME_LIFECYCLE_MIGRATIONS.map(item => item.name);
   const knownMigrations = new Set([
@@ -85,12 +93,12 @@ export function classifyMemberProductionRuntimeSchema({ pendingOutput, schemaOut
   const lifecyclePending = pendingNames.filter(name => lifecycleNames.includes(name));
   const unknownPending = pendingNames.filter(name => !knownMigrations.has(name));
 
-  const presentLegacyTables = MEMBER_RUNTIME_LEGACY_TABLES.filter(name => receiptNames.has(name));
+  const presentLegacyTables = MEMBER_RUNTIME_LEGACY_TABLES.filter(name => receiptTableNames.has(name));
   const trackedLegacyMigrations = MEMBER_RUNTIME_LEGACY_MIGRATIONS.filter(name => receiptNames.has(name));
-  const missingLegacyTables = MEMBER_RUNTIME_LEGACY_TABLES.filter(name => !receiptNames.has(name));
+  const missingLegacyTables = MEMBER_RUNTIME_LEGACY_TABLES.filter(name => !receiptTableNames.has(name));
   const missingLegacyTrackedMigrations = MEMBER_RUNTIME_LEGACY_MIGRATIONS.filter(name => !receiptNames.has(name));
 
-  const presentLifecycleTables = MEMBER_RUNTIME_LIFECYCLE_TABLES.filter(name => receiptNames.has(name));
+  const presentLifecycleTables = MEMBER_RUNTIME_LIFECYCLE_TABLES.filter(name => receiptTableNames.has(name));
   const trackedLifecycleMigrations = lifecycleNames.filter(name => receiptNames.has(name));
 
   const blockers = [];
@@ -104,8 +112,8 @@ export function classifyMemberProductionRuntimeSchema({ pendingOutput, schemaOut
   for (const migration of MEMBER_RUNTIME_LIFECYCLE_MIGRATIONS) {
     const pending = lifecyclePending.includes(migration.name);
     const tracked = receiptNames.has(migration.name);
-    const presentTables = migration.tables.filter(name => receiptNames.has(name));
-    const missingTables = migration.tables.filter(name => !receiptNames.has(name));
+    const presentTables = migration.tables.filter(name => receiptTableNames.has(name));
+    const missingTables = migration.tables.filter(name => !receiptTableNames.has(name));
 
     if (pending) {
       if (tracked) blockers.push(`pending_lifecycle_migration_already_tracked:${migration.name}`);
