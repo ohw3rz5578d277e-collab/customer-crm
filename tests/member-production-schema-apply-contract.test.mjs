@@ -171,7 +171,7 @@ function extractTopLevelTriggerBlocks(sql) {
 }
 
 function replaceSpansWithWhitespace(raw, spans) {
-  const chars=[...raw];
+  const chars=raw.split('');
   for(const [start,end] of spans){
     for(let i=start;i<end;i+=1){
       if(chars[i] !== '\n' && chars[i] !== '\r') chars[i]=' ';
@@ -237,6 +237,14 @@ function auditSchemaOnlyMigration(raw, migration) {
     assertExactObjectSet(createdTriggers,expected.triggers,'triggers',migration);
   }
 }
+
+const utf16SpanPrefix='😀TRIGGER😀;';
+const utf16SpanSuffix='DELETE FROM member_registration_events;';
+assert.equal(
+  replaceSpansWithWhitespace(utf16SpanPrefix+utf16SpanSuffix,[[0,utf16SpanPrefix.length]]),
+  ' '.repeat(utf16SpanPrefix.length)+utf16SpanSuffix,
+  'trigger-span blanking must preserve JavaScript UTF-16 code-unit offsets around non-BMP text'
+);
 
 assert.throws(
   ()=>auditSchemaOnlyMigration("CREATE TABLE IF NOT EXISTS harmless (note TEXT DEFAULT '--'); DELETE FROM member_registration_events;",'quote-aware-regression.sql'),
@@ -323,6 +331,15 @@ assert.throws(
   ()=>auditSchemaOnlyMigration(quotedFakeTrigger,'20261009_member_registration_consent_event_foundation.sql'),
   /triggers exact object count mismatch|triggers exact object set mismatch|duplicate or missing canonical objects/,
   'trigger-shaped text inside a quoted SQL default must not count as a real trigger'
+);
+const emojiTriggerThenDml=consentMigrationRaw.replace(
+  /('member_consent_evidence_append_only'\);\s*END;\s*)(-- Intentionally absent:)/,
+  (_whole,triggerTail,comment)=>triggerTail.replace("'member_consent_evidence_append_only'",`'member_consent_evidence_append_only${'😀'.repeat(64)}'`)+`\nDELETE FROM member_registration_events;\n\n${comment}`
+);
+assert.throws(
+  ()=>auditSchemaOnlyMigration(emojiTriggerThenDml,'20261009_member_registration_consent_event_foundation.sql'),
+  /top-level DML/,
+  'non-BMP text inside a valid trigger must not shift UTF-16 spans and hide following top-level DML'
 );
 
 assert.ok(workflow.includes('workflow_dispatch:'),'workflow_dispatch missing');
