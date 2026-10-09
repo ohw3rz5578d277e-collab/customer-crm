@@ -370,7 +370,7 @@ assert.ok(workflow.includes("r.get('head_sha')==os.environ['EXPECTED_SHA']"),'ex
 assert.ok(workflow.includes("r.get('path')=='.github/workflows/member-production-schema-preflight.yml'"),'canonical preflight receipt check missing');
 assert.ok(workflow.includes('requireMemberLifecyclePreApplyState'),'pre-apply lifecycle state gate missing');
 assert.ok(workflow.includes('requireMemberLifecyclePostApplyState'),'post-apply lifecycle state gate missing');
-assert.ok(workflow.includes('SELECT name,type,tbl_name FROM sqlite_master'),'schema object type/table binding read missing');
+assert.ok(workflow.includes('SELECT name,type,tbl_name FROM sqlite_master WHERE name COLLATE NOCASE IN ('),'schema object type/table binding read missing');
 
 const applyMatches=workflow.match(/d1 migrations apply customer-crm-db --remote/g)||[];
 assert.equal(applyMatches.length,1,'schema apply workflow must contain exactly one D1 migration apply command');

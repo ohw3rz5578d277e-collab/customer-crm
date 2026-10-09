@@ -42,6 +42,11 @@ function sameSet(values, expected) {
   return expected.every(value => actual.has(value));
 }
 
+// SQLite NOCASE folds ASCII identifiers only; Unicode lookalikes stay distinct.
+function sqliteIdentifierKey(value) {
+  return value.replace(/[A-Z]/g, ch => ch.toLowerCase());
+}
+
 function extractSchemaObjects(schemaOutput) {
   try {
     const parsed = JSON.parse(String(schemaOutput || ''));
@@ -52,10 +57,10 @@ function extractSchemaObjects(schemaOutput) {
       for (const row of rows) {
         if (typeof row?.name !== 'string' || !row.name) continue;
         if (typeof row?.type !== 'string' || !row.type) continue;
-        byName.set(row.name, Object.freeze({
+        byName.set(sqliteIdentifierKey(row.name), Object.freeze({
           name: row.name,
           type: row.type,
-          tbl_name: typeof row?.tbl_name === 'string' ? row.tbl_name : ''
+          tbl_name: typeof row?.tbl_name === 'string' ? sqliteIdentifierKey(row.tbl_name) : ''
         }));
       }
     }

@@ -23,7 +23,7 @@ assert.ok(workflow.includes('git ls-remote origin refs/heads/main'),'fresh curre
 assert.ok(workflow.includes('/issues/comments/$OWNER_COMMENT_ID'),'Owner comment receipt lookup missing');
 assert.ok(workflow.includes("endswith('/issues/26')"),'Owner comment issue #26 check missing');
 assert.ok(workflow.includes('d1 migrations list customer-crm-db --remote'),'pending migration read missing');
-assert.ok(workflow.includes('SELECT name,type,tbl_name FROM sqlite_master'),'schema object type/table binding read missing');
+assert.ok(workflow.includes('SELECT name,type,tbl_name FROM sqlite_master WHERE name COLLATE NOCASE IN ('),'schema object type/table binding read missing');
 assert.ok(workflow.includes('requireMemberLifecyclePreApplyState'),'lifecycle pre-apply classifier missing');
 assert.ok(workflow.includes('MEMBER_SCHEMA_PREFLIGHT_CLASSIFICATION=${result.status}'),'classification evidence missing');
 assert.ok(workflow.includes('MEMBER_SCHEMA_APPLY=0'),'schema apply zero declaration missing');

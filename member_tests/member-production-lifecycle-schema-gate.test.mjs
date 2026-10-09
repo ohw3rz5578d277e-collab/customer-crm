@@ -98,4 +98,15 @@ assert.throws(
   /BLOCKED_MEMBER_LIFECYCLE_SCHEMA_POST_APPLY/
 );
 
+// Every case-variant lifecycle name must block a supposedly clean pre-apply state.
+for (const object of MEMBER_LIFECYCLE_SCHEMA_OBJECTS) {
+  for (const name of [object.name.toUpperCase(), object.name.replace(/^./, ch => ch.toUpperCase())]) {
+    const result = classifyMemberLifecycleSchemaGate({
+      pendingOutput: exactPending,
+      schemaOutput: schemaOutput({extraObjects: [{...object, name, tbl_name: object.tbl_name.toUpperCase()}]})
+    });
+    assert.equal(result.pre_apply_ready, false, `case-variant collision: ${name}`);
+    assert.equal(result.status, 'BLOCKED_LIFECYCLE_SCHEMA_STATE');
+  }
+}
 console.log('MEMBER_PRODUCTION_LIFECYCLE_SCHEMA_GATE=PASS');
