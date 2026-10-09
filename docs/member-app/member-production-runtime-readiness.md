@@ -105,12 +105,52 @@ Missing names are readiness blockers, not permission to create them.
 
 ## Schema receipt
 
-The read-only runtime receipt requires:
+The runtime schema classifier separates the already-established Member schema from the newer backend lifecycle schema required by Steps 1 through 9.
+
+### Established Member schema
+
+The existing Production receipt requires all of the following:
+
+- eleven established Member/Family tables present;
+- nine `20260924_member_*` migrations tracked;
+- zero pending migration from that established set.
+
+### Backend lifecycle schema
+
+The backend lifecycle sequence additionally requires these two exact managed migrations:
+
+- `20261007_member_identity_prospect_foundation.sql`
+- `20261009_member_registration_consent_event_foundation.sql`
+
+Together they provide six required lifecycle tables:
+
+- `member_identities`
+- `member_prospects`
+- `member_customer_invitations`
+- `member_profile_change_review_queue`
+- `member_registration_events`
+- `member_consent_evidence`
+
+These migration source files remain **source-only candidates** until a separate fresh exact-SHA Owner schema authorization explicitly approves Production migration apply.
+
+When either lifecycle migration appears in the Production pending list, runtime readiness must classify it as:
+
+`BLOCKED_KNOWN_LIFECYCLE_MIGRATIONS_PENDING`
+
+This is an expected fail-closed blocker, not an `unknownPending` error and not authorization to apply the migration.
+
+When a lifecycle migration is no longer pending, the readiness classifier requires both its exact migration receipt and all tables owned by that migration. Missing receipts, missing tables, contradictory pending/tracked state, or partial schema evidence fail closed as `BLOCKED_SCHEMA_RECEIPT_INCONSISTENT`.
+
+Any pending SQL migration outside the known established and lifecycle sets remains an `unknown_pending_migrations` blocker.
+
+A fully schema-ready receipt therefore requires:
 
 - zero pending managed migrations;
-- all eleven Member/Family tables present;
-- all nine Member migrations tracked;
-- classification equivalent to `ALREADY_APPLIED_CONFIRMED`.
+- all seventeen required Member/Family/lifecycle tables present;
+- all eleven required Member migrations tracked;
+- classification `ALREADY_APPLIED_CONFIRMED`.
+
+The classifier is implemented in `src/member-production-runtime-schema-readiness.mjs` and is covered by `tests/member-production-runtime-schema-readiness.test.mjs`.
 
 ## Important limitation
 
