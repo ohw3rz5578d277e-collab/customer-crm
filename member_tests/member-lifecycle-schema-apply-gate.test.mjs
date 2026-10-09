@@ -77,6 +77,7 @@ for(const token of [
   'Require exact two-lifecycle-pending pre-apply state',
   'Final exact current-main gate immediately before mutation',
   'Final exact lifecycle pending-state gate',
+  'Last exact current-main gate immediately before apply',
   'continue-on-error: true',
   'if: ${{ always() }}',
   'MEMBER_SCHEMA_TABLE_COUNT=17',
@@ -84,6 +85,15 @@ for(const token of [
   'AUTOMATIC_RETRY=0',
   'AUTOMATIC_ROLLBACK=0'
 ])assert.ok(applyWorkflow.includes(token),`missing apply contract token: ${token}`);
+
+const finalStateIndex=applyWorkflow.indexOf('Final exact lifecycle pending-state gate');
+const lastMainIndex=applyWorkflow.indexOf('Last exact current-main gate immediately before apply');
+const applyIndex=applyWorkflow.indexOf('Apply exact pending Member lifecycle managed migrations');
+assert.ok(finalStateIndex>=0,'final lifecycle state gate missing');
+assert.ok(lastMainIndex>finalStateIndex,'last exact-main gate must follow final state classification');
+assert.ok(applyIndex>lastMainIndex,'apply must occur after last exact-main gate');
+console.log('PASS last exact-main gate is after final state gate and immediately before apply path');
+
 for(const token of [
   '/member-lifecycle-schema-apply sha=',
   'readiness_run=',
