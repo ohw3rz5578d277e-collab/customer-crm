@@ -5,25 +5,30 @@ on:
     paths:
       - '.github/workflows/member-production-schema-apply.yml'
       - '.github/workflows/dispatch-member-schema-apply-from-issue.yml'
-      - 'migrations_managed/20260924_member_*.sql'
+      - 'migrations_managed/20261007_member_identity_prospect_foundation.sql'
+      - 'migrations_managed/20261009_member_registration_consent_event_foundation.sql'
+      - 'src/member-production-runtime-schema-readiness.mjs'
+      - 'src/member-production-lifecycle-schema-gate.mjs'
+      - 'member_tests/member-production-lifecycle-schema-gate.test.mjs'
       - 'tests/member-production-schema-apply-contract.test.mjs'
+      - 'tests/member-production-lifecycle-schema-gate.test.mjs'
       - 'docs/member-app/member-production-schema-apply.md'
   workflow_dispatch:
     inputs:
       expected_sha:
-        description: Exact current main SHA authorized for Member schema apply
+        description: Exact current main SHA authorized for lifecycle-only Member schema apply
         required: true
         type: string
       preflight_run_id:
-        description: Successful exact-SHA Member schema preflight run ID
+        description: Successful exact-SHA lifecycle schema preflight run ID
         required: true
         type: string
       owner_comment_id:
-        description: Owner authorization issue comment ID from release-gate issue #26
+        description: Exact Owner authorization issue comment ID from release-gate issue #26
         required: true
         type: string
       confirmation:
-        description: Exact confirmation token
+        description: Exact lifecycle schema confirmation token
         required: true
         type: string
 
@@ -38,7 +43,7 @@ concurrency:
 
 jobs:
   contract:
-    name: Member schema apply contract
+    name: Member lifecycle schema apply contract
     if: ${{ github.event_name == 'pull_request' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -47,23 +52,23 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha }}
-
+          persist-credentials: false
       - name: Assert exact PR head
         shell: bash
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
-
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
           node-version: '22'
-
-      - name: Verify Member schema apply contract
-        run: node tests/member-production-schema-apply-contract.test.mjs
+      - name: Verify lifecycle schema apply contract
+        run: |
+          node tests/member-production-schema-apply-contract.test.mjs
+          node tests/member-production-lifecycle-schema-gate.test.mjs
 
   apply:
-    name: Exact-SHA Member Production schema apply
+    name: Exact-SHA Member Production lifecycle schema apply
     if: ${{ github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-latest
     timeout-minutes: 25
@@ -82,19 +87,17 @@ jobs:
           [[ "$expected_sha" =~ ^[0-9a-f]{40}$ ]] || { echo '::error::INVALID_EXPECTED_SHA'; exit 1; }
           [[ "$PREFLIGHT_RUN_ID_RAW" =~ ^[0-9]+$ ]] || { echo '::error::INVALID_PREFLIGHT_RUN_ID'; exit 1; }
           [[ "$OWNER_COMMENT_ID_RAW" =~ ^[0-9]+$ ]] || { echo '::error::INVALID_OWNER_COMMENT_ID'; exit 1; }
-          test "$CONFIRMATION_RAW" = 'APPLY_MEMBER_SCHEMA' || { echo '::error::INVALID_MEMBER_SCHEMA_APPLY_CONFIRMATION'; exit 1; }
+          test "$CONFIRMATION_RAW" = 'APPLY_MEMBER_LIFECYCLE_SCHEMA' || { echo '::error::INVALID_MEMBER_LIFECYCLE_SCHEMA_APPLY_CONFIRMATION'; exit 1; }
           echo "expected_sha=$expected_sha" >> "$GITHUB_OUTPUT"
           echo "preflight_run_id=$PREFLIGHT_RUN_ID_RAW" >> "$GITHUB_OUTPUT"
           echo "owner_comment_id=$OWNER_COMMENT_ID_RAW" >> "$GITHUB_OUTPUT"
-          echo "MEMBER_SCHEMA_APPLY_AUTHORIZED_SHA=$expected_sha"
-          echo "MEMBER_SCHEMA_APPLY_CONFIRMATION=PASS"
-
+          echo "MEMBER_LIFECYCLE_SCHEMA_APPLY_AUTHORIZED_SHA=$expected_sha"
       - name: Checkout exact authorized SHA
         uses: actions/checkout@v4
         with:
           ref: ${{ steps.auth.outputs.expected_sha }}
           fetch-depth: 0
-
+          persist-credentials: false
       - name: Exact SHA and current-main gate
         shell: bash
         env:
@@ -106,9 +109,7 @@ jobs:
           test "$actual_sha" = "$EXPECTED_SHA" || { echo "::error::CHECKOUT_SHA_MISMATCH actual=$actual_sha expected=$EXPECTED_SHA"; exit 1; }
           test "$current_main" = "$EXPECTED_SHA" || { echo "::error::MAIN_DRIFT current=$current_main expected=$EXPECTED_SHA"; exit 1; }
           echo 'EXACT_SHA_GATE=PASS'
-          echo "CURRENT_MAIN_SHA=$current_main"
-
-      - name: Verify Owner authorization comment
+      - name: Verify exact Owner authorization comment
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -117,22 +118,17 @@ jobs:
           OWNER_COMMENT_ID: ${{ steps.auth.outputs.owner_comment_id }}
         run: |
           set -euo pipefail
-          curl --fail --silent --show-error             -H "Authorization: Bearer $GH_TOKEN"             -H 'Accept: application/vnd.github+json'             -H 'X-GitHub-Api-Version: 2022-11-28'             "https://api.github.com/repos/$GITHUB_REPOSITORY/issues/comments/$OWNER_COMMENT_ID"             > /tmp/member-schema-owner-comment.json
-          EXPECTED_BODY="/member-schema-apply sha=$EXPECTED_SHA preflight_run=$PREFLIGHT_RUN_ID confirm=APPLY_MEMBER_SCHEMA"           python3 - <<'PY'
+          curl --fail --silent --show-error -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' -H 'X-GitHub-Api-Version: 2022-11-28' "https://api.github.com/repos/$GITHUB_REPOSITORY/issues/comments/$OWNER_COMMENT_ID" > /tmp/member-schema-owner-comment.json
+          export EXPECTED_BODY="/member-schema-apply sha=$EXPECTED_SHA preflight_run=$PREFLIGHT_RUN_ID confirm=APPLY_MEMBER_LIFECYCLE_SCHEMA"
+          python3 - <<'PY'
           import json, os
-          with open('/tmp/member-schema-owner-comment.json', encoding='utf-8') as f:
-              c=json.load(f)
-          expected=os.environ['EXPECTED_BODY']
-          if c.get('user',{}).get('login')!='ohw3rz5578d277e-collab':
-              raise SystemExit('OWNER_COMMENT_ACTOR_MISMATCH')
-          if c.get('body')!=expected:
-              raise SystemExit('OWNER_COMMENT_BODY_MISMATCH')
-          if not str(c.get('issue_url','')).endswith('/issues/26'):
-              raise SystemExit('OWNER_COMMENT_ISSUE_MISMATCH')
+          with open('/tmp/member-schema-owner-comment.json', encoding='utf-8') as f: c=json.load(f)
+          if c.get('user',{}).get('login')!='ohw3rz5578d277e-collab': raise SystemExit('OWNER_COMMENT_ACTOR_MISMATCH')
+          if c.get('body')!=os.environ['EXPECTED_BODY']: raise SystemExit('OWNER_COMMENT_BODY_MISMATCH')
+          if not str(c.get('issue_url','')).endswith('/issues/26'): raise SystemExit('OWNER_COMMENT_ISSUE_MISMATCH')
           print('OWNER_AUTHORIZATION_COMMENT=PASS')
           PY
-
-      - name: Verify successful exact-SHA preflight receipt
+      - name: Verify successful exact-SHA lifecycle preflight receipt
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -140,38 +136,25 @@ jobs:
           PREFLIGHT_RUN_ID: ${{ steps.auth.outputs.preflight_run_id }}
         run: |
           set -euo pipefail
-          curl --fail --silent --show-error             -H "Authorization: Bearer $GH_TOKEN"             -H 'Accept: application/vnd.github+json'             -H 'X-GitHub-Api-Version: 2022-11-28'             "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/runs/$PREFLIGHT_RUN_ID"             > /tmp/member-schema-preflight-run.json
+          curl --fail --silent --show-error -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' -H 'X-GitHub-Api-Version: 2022-11-28' "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/runs/$PREFLIGHT_RUN_ID" > /tmp/member-schema-preflight-run.json
           python3 - <<'PY'
           import json, os
-          with open('/tmp/member-schema-preflight-run.json', encoding='utf-8') as f:
-              r=json.load(f)
-          expected_sha=os.environ['EXPECTED_SHA']
-          expected_id=int(os.environ['PREFLIGHT_RUN_ID'])
-          checks={
-              'id': r.get('id')==expected_id,
-              'status': r.get('status')=='completed',
-              'conclusion': r.get('conclusion')=='success',
-              'head_sha': r.get('head_sha')==expected_sha,
-              'event': r.get('event')=='workflow_dispatch',
-              'path': r.get('path')=='.github/workflows/member-production-schema-preflight.yml',
-          }
+          with open('/tmp/member-schema-preflight-run.json', encoding='utf-8') as f: r=json.load(f)
+          checks={'id':r.get('id')==int(os.environ['PREFLIGHT_RUN_ID']),'status':r.get('status')=='completed','conclusion':r.get('conclusion')=='success','head_sha':r.get('head_sha')==os.environ['EXPECTED_SHA'],'event':r.get('event')=='workflow_dispatch','path':r.get('path')=='.github/workflows/member-production-schema-preflight.yml'}
           bad=[k for k,v in checks.items() if not v]
-          if bad:
-              raise SystemExit('INVALID_PREFLIGHT_RECEIPT:'+','.join(bad))
-          print('MEMBER_SCHEMA_PREFLIGHT_RECEIPT=PASS')
+          if bad: raise SystemExit('INVALID_LIFECYCLE_PREFLIGHT_RECEIPT:'+','.join(bad))
+          print('MEMBER_LIFECYCLE_SCHEMA_PREFLIGHT_RECEIPT=PASS')
           PY
-
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
           node-version: '22'
-
-      - name: Verify Member schema apply contract
-        run: node tests/member-production-schema-apply-contract.test.mjs
-
+      - name: Verify lifecycle schema apply contract
+        run: |
+          node tests/member-production-schema-apply-contract.test.mjs
+          node tests/member-production-lifecycle-schema-gate.test.mjs
       - name: Install Wrangler tooling
         run: npm install --no-save wrangler@4.36.0
-
       - name: Confirm Cloudflare authentication
         shell: bash
         env:
@@ -182,8 +165,7 @@ jobs:
           npx wrangler whoami >/tmp/member-schema-apply-whoami.txt
           test -s /tmp/member-schema-apply-whoami.txt
           echo 'CLOUDFLARE_AUTH=PASS'
-
-      - name: List pending migrations immediately before apply
+      - name: List pending migrations immediately before lifecycle apply
         id: pending_before
         uses: cloudflare/wrangler-action@v4
         with:
@@ -191,85 +173,41 @@ jobs:
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           wranglerVersion: '4'
           command: d1 migrations list customer-crm-db --remote
-
-      - name: Read Member schema immediately before apply
+      - name: Read exact Member schema object receipts immediately before apply
         id: schema_before
         uses: cloudflare/wrangler-action@v4
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           wranglerVersion: '4'
-          command: d1 execute customer-crm-db --remote --json --command "SELECT name,type FROM sqlite_master WHERE name IN ('customer_family_groups','customer_family_customer_links','member_memories','member_memory_media','member_memory_favorites','member_favorite_mutation_rate_limits','member_family_pass_entitlements','member_public_assets','member_creative_templates','member_shop_products','member_news_items') ORDER BY name; SELECT name FROM d1_migrations_managed WHERE name LIKE '20260924_member_%' ORDER BY name;"
-
-      - name: Require exact clean all-nine-pending state
+          command: d1 execute customer-crm-db --remote --json --command "SELECT name,type,tbl_name FROM sqlite_master WHERE name COLLATE NOCASE IN ('customer_family_groups','customer_family_customer_links','member_memories','member_memory_media','member_memory_favorites','member_favorite_mutation_rate_limits','member_family_pass_entitlements','member_public_assets','member_creative_templates','member_shop_products','member_news_items','member_identities','member_prospects','member_customer_invitations','member_profile_change_review_queue','member_registration_events','member_consent_evidence','idx_member_identity_customer','idx_member_identity_prospect','idx_member_customer_invitation_customer','idx_member_registration_events_member_time','idx_member_registration_events_prospect_time','idx_member_consent_evidence_member_time','idx_member_consent_evidence_prospect_time','trg_member_registration_events_no_update','trg_member_registration_events_no_delete','trg_member_consent_evidence_no_update','trg_member_consent_evidence_no_delete') ORDER BY name; SELECT name FROM d1_migrations_managed WHERE name IN ('20260924_member_creative_catalog_foundation.sql','20260924_member_family_identity_foundation.sql','20260924_member_family_pass_entitlement_foundation.sql','20260924_member_favorite_mutation_rate_limit_foundation.sql','20260924_member_memory_core_foundation.sql','20260924_member_memory_favorites_foundation.sql','20260924_member_news_catalog_foundation.sql','20260924_member_public_asset_registry_foundation.sql','20260924_member_shop_catalog_foundation.sql','20261007_member_identity_prospect_foundation.sql','20261009_member_registration_consent_event_foundation.sql') ORDER BY name;"
+      - name: Require exact two-lifecycle-migration pending state
         shell: bash
         env:
           PENDING_OUTPUT: ${{ steps.pending_before.outputs.command-output }}
           REMOTE_OUTPUT: ${{ steps.schema_before.outputs.command-output }}
         run: |
           set -euo pipefail
-          node <<'NODE'
-          const pending=process.env.PENDING_OUTPUT||'';
-          const remote=process.env.REMOTE_OUTPUT||'';
-          const known=[
-            '20260924_member_creative_catalog_foundation.sql',
-            '20260924_member_family_identity_foundation.sql',
-            '20260924_member_family_pass_entitlement_foundation.sql',
-            '20260924_member_favorite_mutation_rate_limit_foundation.sql',
-            '20260924_member_memory_core_foundation.sql',
-            '20260924_member_memory_favorites_foundation.sql',
-            '20260924_member_news_catalog_foundation.sql',
-            '20260924_member_public_asset_registry_foundation.sql',
-            '20260924_member_shop_catalog_foundation.sql'
-          ];
-          const expectedTables=[
-            'customer_family_groups',
-            'customer_family_customer_links',
-            'member_memories',
-            'member_memory_media',
-            'member_memory_favorites',
-            'member_favorite_mutation_rate_limits',
-            'member_family_pass_entitlements',
-            'member_public_assets',
-            'member_creative_templates',
-            'member_shop_products',
-            'member_news_items'
-          ];
-          const files=[];
-          for(const match of pending.matchAll(/[A-Za-z0-9_.-]+\.sql/g)){
-            if(!files.includes(match[0]))files.push(match[0]);
-          }
-          const unknown=files.filter(x=>!known.includes(x));
-          const pendingMember=files.filter(x=>known.includes(x));
-          const missing=known.filter(x=>!pendingMember.includes(x));
-          const tables=expectedTables.filter(x=>remote.includes(x));
-          const tracked=known.filter(x=>remote.includes(x));
-          if(unknown.length)throw new Error('BLOCKED_NON_MEMBER_PENDING_MIGRATION:'+unknown.join(','));
-          if(pendingMember.length!==known.length||missing.length||tables.length||tracked.length){
-            throw new Error('BLOCKED_MEMBER_SCHEMA_NOT_ALL_9_PENDING_CLEAN:'+
-              'pending='+pendingMember.length+
-              ',missing='+(missing.join(',')||'NONE')+
-              ',tables='+tables.length+
-              ',tracked='+tracked.length);
-          }
-          console.log('MEMBER_SCHEMA_PRE_APPLY_CLASSIFICATION=ALL_9_PENDING_CLEAN');
-          console.log('MEMBER_SCHEMA_APPLY_PENDING_COUNT=9');
+          node --input-type=module <<'NODE'
+          import { requireMemberLifecyclePreApplyState } from './src/member-production-lifecycle-schema-gate.mjs';
+          const result=requireMemberLifecyclePreApplyState({pendingOutput:process.env.PENDING_OUTPUT||'',schemaOutput:process.env.REMOTE_OUTPUT||''});
+          console.log(`MEMBER_SCHEMA_PRE_APPLY_CLASSIFICATION=${result.status}`);
+          console.log(`MEMBER_SCHEMA_APPLY_PENDING_COUNT=${result.runtime.pending.lifecycle.length}`);
+          console.log(`MEMBER_SCHEMA_APPLY_PENDING_MIGRATIONS=${result.runtime.pending.lifecycle.join(',')}`);
           console.log('PRODUCTION_DEPLOY=0');
           console.log('MEMBER_ROUTE_ACTIVATION=0');
           console.log('CRM_WRITE=0');
           console.log('LINE_SEND=0');
           NODE
-
-      - name: Apply exact pending Member managed migrations
-        id: apply_member_schema
+      - name: Apply exact pending Member lifecycle managed migrations
+        id: apply_member_lifecycle_schema
         uses: cloudflare/wrangler-action@v4
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           wranglerVersion: '4'
           command: d1 migrations apply customer-crm-db --remote
-
-      - name: List pending migrations after apply
+      - name: List pending migrations after lifecycle apply
         id: pending_after
         uses: cloudflare/wrangler-action@v4
         with:
@@ -277,86 +215,31 @@ jobs:
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           wranglerVersion: '4'
           command: d1 migrations list customer-crm-db --remote
-
-      - name: Read Member schema after apply
+      - name: Read exact Member schema object receipts after apply
         id: schema_after
         uses: cloudflare/wrangler-action@v4
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           wranglerVersion: '4'
-          command: d1 execute customer-crm-db --remote --json --command "SELECT name,type FROM sqlite_master WHERE name IN ('customer_family_groups','customer_family_customer_links','member_memories','member_memory_media','member_memory_favorites','member_favorite_mutation_rate_limits','member_family_pass_entitlements','member_public_assets','member_creative_templates','member_shop_products','member_news_items') ORDER BY name; SELECT name FROM d1_migrations_managed WHERE name LIKE '20260924_member_%' ORDER BY name;"
-
-      - name: Verify exact applied Member schema state
+          command: d1 execute customer-crm-db --remote --json --command "SELECT name,type,tbl_name FROM sqlite_master WHERE name COLLATE NOCASE IN ('customer_family_groups','customer_family_customer_links','member_memories','member_memory_media','member_memory_favorites','member_favorite_mutation_rate_limits','member_family_pass_entitlements','member_public_assets','member_creative_templates','member_shop_products','member_news_items','member_identities','member_prospects','member_customer_invitations','member_profile_change_review_queue','member_registration_events','member_consent_evidence','idx_member_identity_customer','idx_member_identity_prospect','idx_member_customer_invitation_customer','idx_member_registration_events_member_time','idx_member_registration_events_prospect_time','idx_member_consent_evidence_member_time','idx_member_consent_evidence_prospect_time','trg_member_registration_events_no_update','trg_member_registration_events_no_delete','trg_member_consent_evidence_no_update','trg_member_consent_evidence_no_delete') ORDER BY name; SELECT name FROM d1_migrations_managed WHERE name IN ('20260924_member_creative_catalog_foundation.sql','20260924_member_family_identity_foundation.sql','20260924_member_family_pass_entitlement_foundation.sql','20260924_member_favorite_mutation_rate_limit_foundation.sql','20260924_member_memory_core_foundation.sql','20260924_member_memory_favorites_foundation.sql','20260924_member_news_catalog_foundation.sql','20260924_member_public_asset_registry_foundation.sql','20260924_member_shop_catalog_foundation.sql','20261007_member_identity_prospect_foundation.sql','20261009_member_registration_consent_event_foundation.sql') ORDER BY name;"
+      - name: Verify exact applied lifecycle schema state
         shell: bash
         env:
           PENDING_OUTPUT: ${{ steps.pending_after.outputs.command-output }}
           REMOTE_OUTPUT: ${{ steps.schema_after.outputs.command-output }}
         run: |
           set -euo pipefail
-          node <<'NODE'
-          const pending=process.env.PENDING_OUTPUT||'';
-          const remote=process.env.REMOTE_OUTPUT||'';
-          const known=[
-            '20260924_member_creative_catalog_foundation.sql',
-            '20260924_member_family_identity_foundation.sql',
-            '20260924_member_family_pass_entitlement_foundation.sql',
-            '20260924_member_favorite_mutation_rate_limit_foundation.sql',
-            '20260924_member_memory_core_foundation.sql',
-            '20260924_member_memory_favorites_foundation.sql',
-            '20260924_member_news_catalog_foundation.sql',
-            '20260924_member_public_asset_registry_foundation.sql',
-            '20260924_member_shop_catalog_foundation.sql'
-          ];
-          const expectedTables=[
-            'customer_family_groups',
-            'customer_family_customer_links',
-            'member_memories',
-            'member_memory_media',
-            'member_memory_favorites',
-            'member_favorite_mutation_rate_limits',
-            'member_family_pass_entitlements',
-            'member_public_assets',
-            'member_creative_templates',
-            'member_shop_products',
-            'member_news_items'
-          ];
-          const files=[];
-          for(const match of pending.matchAll(/[A-Za-z0-9_.-]+\.sql/g)){
-            if(!files.includes(match[0]))files.push(match[0]);
-          }
-          const memberPending=files.filter(x=>known.includes(x));
-          const unknown=files.filter(x=>!known.includes(x));
-          const tables=expectedTables.filter(x=>remote.includes(x));
-          const tracked=known.filter(x=>remote.includes(x));
-          if(memberPending.length||unknown.length||tables.length!==expectedTables.length||tracked.length!==known.length){
-            throw new Error('MEMBER_SCHEMA_POST_APPLY_VERIFICATION_FAILED:'+
-              'pendingMember='+memberPending.length+
-              ',unknownPending='+unknown.length+
-              ',tables='+tables.length+
-              ',tracked='+tracked.length);
-          }
-          console.log('MEMBER_SCHEMA_CLASSIFICATION=ALREADY_APPLIED_CONFIRMED');
-          console.log('MEMBER_SCHEMA_TABLE_COUNT=11');
-          console.log('MEMBER_SCHEMA_TRACKED_MIGRATION_COUNT=9');
-          console.log('MEMBER_PENDING_MIGRATION_COUNT=0');
-          console.log('MEMBER_SCHEMA_APPLY=PASS');
-          console.log('PRODUCTION_D1_WRITE_SCOPE=MEMBER_SCHEMA_ONLY');
+          node --input-type=module <<'NODE'
+          import { requireMemberLifecyclePostApplyState, MEMBER_LIFECYCLE_SCHEMA_OBJECTS } from './src/member-production-lifecycle-schema-gate.mjs';
+          const result=requireMemberLifecyclePostApplyState({pendingOutput:process.env.PENDING_OUTPUT||'',schemaOutput:process.env.REMOTE_OUTPUT||''});
+          console.log(`MEMBER_SCHEMA_POST_APPLY_CLASSIFICATION=${result.status}`);
+          console.log(`MEMBER_SCHEMA_TABLE_COUNT=${result.runtime.receipt.total_required_table_count}`);
+          console.log(`MEMBER_SCHEMA_TRACKED_MIGRATION_COUNT=${result.runtime.receipt.total_required_migration_count}`);
+          console.log(`MEMBER_LIFECYCLE_SCHEMA_OBJECT_COUNT=${MEMBER_LIFECYCLE_SCHEMA_OBJECTS.length}`);
+          console.log('MEMBER_LIFECYCLE_SCHEMA_APPLY=PASS');
           console.log('PRODUCTION_DEPLOY=0');
           console.log('MEMBER_ROUTE_ACTIVATION=0');
           console.log('CRM_WRITE=0');
           console.log('LINE_SEND=0');
           NODE
-
-      - name: Final schema-only declaration
-        run: |
-          echo 'MEMBER_SCHEMA_APPLY=PASS'
-          echo 'PRODUCTION_D1_WRITE_SCOPE=MEMBER_SCHEMA_ONLY'
-          echo 'PRODUCTION_DEPLOY=0'
-          echo 'MEMBER_ROUTE_ACTIVATION=0'
-          echo 'MEMBER_SESSION_ACTIVATION=0'
-          echo 'LINE_LOGIN_PRODUCTION_ACTIVATION=0'
-          echo 'CRM_WRITE=0'
-          echo 'LINE_SEND=0'
-          echo 'CUSTOMER_ID_GENERATION=0'
-          echo 'COMMERCE_ACTIVATION=0'
