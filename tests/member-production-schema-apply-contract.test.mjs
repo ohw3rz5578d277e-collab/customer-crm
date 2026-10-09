@@ -127,6 +127,59 @@ function splitSqlStatements(raw) {
   return statements;
 }
 
+function maskQuotedSql(raw) {
+  let out='';
+  let quote=null;
+  for(let i=0;i<raw.length;i+=1){
+    const ch=raw[i];
+    const next=raw[i+1];
+    if(quote){
+      out+=(ch==='\n' || ch==='\r') ? ch : ' ';
+      if(ch===quote.close){
+        if(quote.doubled && next===quote.close){
+          out+=' ';
+          i+=1;
+        }else{
+          quote=null;
+        }
+      }
+      continue;
+    }
+    const opened=openQuote(ch);
+    if(opened){
+      quote=opened;
+      out+=' ';
+      continue;
+    }
+    out+=ch;
+  }
+  if(quote) throw new Error('unterminated SQL quoted literal or identifier');
+  return out;
+}
+
+function extractTopLevelTriggerBlocks(sql) {
+  const masked=maskQuotedSql(sql);
+  const blocks=[];
+  const spans=[];
+  for(const match of masked.matchAll(/CREATE\s+TRIGGER\s+IF\s+NOT\s+EXISTS[\s\S]*?\bEND\s*;/gi)){
+    const start=match.index;
+    const end=start+match[0].length;
+    blocks.push(sql.slice(start,end));
+    spans.push([start,end]);
+  }
+  return {blocks,spans};
+}
+
+function replaceSpansWithWhitespace(raw, spans) {
+  const chars=[...raw];
+  for(const [start,end] of spans){
+    for(let i=start;i<end;i+=1){
+      if(chars[i] !== '\n' && chars[i] !== '\r') chars[i]=' ';
+    }
+  }
+  return chars.join('');
+}
+
 function assertExactObjectSet(actual, expected, kind, migration){
   const actualSet=new Set(actual);
   const expectedSet=new Set(expected);
@@ -140,7 +193,7 @@ function auditSchemaOnlyMigration(raw, migration) {
   const createdTables=[];
   const createdIndexes=[];
   const createdTriggers=[];
-  const triggerBlocks=[...sql.matchAll(/CREATE\s+TRIGGER\s+IF\s+NOT\s+EXISTS[\s\S]*?\bEND\s*;/gi)].map(match=>match[0]);
+  const {blocks:triggerBlocks,spans:triggerSpans}=extractTopLevelTriggerBlocks(sql);
   for(const block of triggerBlocks){
     const match=block.match(/^CREATE\s+TRIGGER\s+IF\s+NOT\s+EXISTS\s+([A-Za-z0-9_]+)\s+BEFORE\s+(UPDATE|DELETE)\s+ON\s+([A-Za-z0-9_]+)\s+BEGIN\s+SELECT\s+RAISE\(ABORT,\s*'[^']+'\)\s*;\s*END\s*;$/i);
     assert.ok(match,`${migration} contains an unexpected trigger body`);
@@ -151,7 +204,7 @@ function auditSchemaOnlyMigration(raw, migration) {
     assert.equal(operationRaw.toUpperCase(),contract.operation,`${migration} contains unauthorized trigger operation: ${triggerName}`);
     createdTriggers.push(triggerName);
   }
-  const topLevel=sql.replace(/CREATE\s+TRIGGER\s+IF\s+NOT\s+EXISTS[\s\S]*?\bEND\s*;/gi,' ');
+  const topLevel=replaceSpansWithWhitespace(sql,triggerSpans);
   assert.doesNotMatch(topLevel,/(^|;)\s*(?:INSERT|UPDATE|DELETE|REPLACE|TRUNCATE)\b/im,`${migration} contains top-level DML`);
   assert.doesNotMatch(topLevel,/(^|;)\s*(?:ALTER|DROP)\b/im,`${migration} contains destructive top-level DDL`);
   const statements=splitSqlStatements(topLevel);
@@ -259,6 +312,17 @@ assert.throws(
   ()=>auditSchemaOnlyMigration(consentWithoutRequiredTrigger,'20261009_member_registration_consent_event_foundation.sql'),
   /triggers exact object count mismatch|triggers exact object set mismatch|duplicate or missing canonical objects/,
   'omitting a required append-only lifecycle trigger must fail before apply'
+);
+const quotedFakeTrigger=consentMigrationRaw
+  .replace(/CREATE\s+TRIGGER\s+IF\s+NOT\s+EXISTS\s+trg_member_consent_evidence_no_delete[\s\S]*?\bEND\s*;\s*/i,'')
+  .replace(
+    'CREATE TABLE IF NOT EXISTS member_registration_events (',
+    'CREATE TABLE IF NOT EXISTS member_registration_events (\n  fake_trigger_text TEXT DEFAULT "CREATE TRIGGER IF NOT EXISTS trg_member_consent_evidence_no_delete BEFORE DELETE ON member_consent_evidence BEGIN SELECT RAISE(ABORT, \'fake\'); END;",'
+  );
+assert.throws(
+  ()=>auditSchemaOnlyMigration(quotedFakeTrigger,'20261009_member_registration_consent_event_foundation.sql'),
+  /triggers exact object count mismatch|triggers exact object set mismatch|duplicate or missing canonical objects/,
+  'trigger-shaped text inside a quoted SQL default must not count as a real trigger'
 );
 
 assert.ok(workflow.includes('workflow_dispatch:'),'workflow_dispatch missing');
