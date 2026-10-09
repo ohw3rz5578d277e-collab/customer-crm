@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
 import http from 'node:http';
 import { chromium } from 'playwright';
 import { stripLegacyAdminUserUi } from '../src/production-index-crm-line-ops.js';
@@ -39,6 +40,8 @@ await new Promise(r=>server.listen(0,'127.0.0.1',r));
 const origin='http://127.0.0.1:'+server.address().port;
 const browser=await chromium.launch({headless:true});
 const legacySelectors=['#crmTodayDashboard','#crmReservationStatus','#crmDeliveryDeadlinePanel','#crmLegacyOperations','#crmTodayFilterPanel','#lineOpsOpen','.crm-lineops-fab','#lineOpsPanel','#crmMobileBar','#crmPriorityFab','.crmUxQuickHint','.crm-mf-bottom','.crm-mf-fab','.crm-mf-scrolltop','.crm-bottom-nav','.crm-top-menu-btn','.crm-side-menu','#crmStableAuditBtn','.crm-stable-audit-btn','#crmSettingsMenuBtn','#crmLogoutMenuBtn','#crmUxFab','#crmUserFab','#crmUserBackdrop','#crmUserModal'];
+const screenshotDir='artifacts/crm-canonical-uix-responsive';
+await fs.mkdir(screenshotDir,{recursive:true});
 try{
   for(const viewport of [{width:390,height:844},{width:1440,height:900}]){
     const context=await browser.newContext({viewport,hasTouch:viewport.width<=767,isMobile:viewport.width<=430});
@@ -52,8 +55,9 @@ try{
     for(const sel of legacySelectors)assert.equal(await page.locator(sel).count(),0,viewport.width+': legacy UI remains '+sel);
     const duplicates=await page.evaluate(()=>{const seen=new Set(),dups=[];for(const el of document.querySelectorAll('[id]')){if(seen.has(el.id))dups.push(el.id);seen.add(el.id)}return [...new Set(dups)]});
     assert.deepEqual(duplicates,[],viewport.width+': duplicate DOM ids '+duplicates.join(','));
-    const visibleLegacyText=await page.locator('button:visible,a:visible').evaluateAll(els=>els.map(x=>(x.textContent||'').trim()).filter(t=>['LINE運用','ユーザー管理','状態確認','今日やること'].includes(t)));
+    const visibleLegacyText=await page.locator('button:visible,a:visible').evaluateAll(els=>els.map(x=>(x.textContent||'').trim()).filter(t=>['LINE運用','ユーザー管理','今日やること'].includes(t)));
     assert.deepEqual(visibleLegacyText,[],viewport.width+': legacy button text visible');
+    assert.equal(await page.locator('#crmShellStatusTop').isVisible(),true,viewport.width+': canonical status action missing');
 
     await page.locator('#crmShellStatusTop').click();
     await page.locator('#crmOwnerStatusSheet.open').waitFor();
@@ -100,6 +104,7 @@ try{
     const controls=await page.locator('button:visible').count();
     assert.ok(controls>=6,viewport.width+': canonical visible button inventory unexpectedly small '+controls);
     assert.equal(errors.length,0,viewport.width+': '+errors.join(' | '));
+    await page.screenshot({path:`${screenshotDir}/canonical-owner-${viewport.width}x${viewport.height}.png`,fullPage:true});
     await context.close();
   }
   assert.equal(requests.some(x=>!x.startsWith('GET ')&&!x.startsWith('HEAD ')),false,'unexpected HTTP write '+requests.join(' | '));
