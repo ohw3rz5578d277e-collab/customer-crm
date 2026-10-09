@@ -1,0 +1,154 @@
+name: Dispatch Member Production route candidate stage from release-gate issue
+
+run-name: >-
+  ${{ startsWith(github.event.comment.body, '/member-production-route-stage ') && 'Production mutation bridge: member-route-stage' || 'Production bridge: ignored' }}
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  issues: read
+  actions: write
+
+jobs:
+  dispatch:
+    name: Validate exact Member route stage command and dispatch
+    if: >-
+      github.event.issue.number == 26 &&
+      github.event.issue.pull_request == null &&
+      github.actor == 'ohw3rz5578d277e-collab' &&
+      github.event.comment.user.login == 'ohw3rz5578d277e-collab' &&
+      startsWith(github.event.comment.body, '/member-production-route-stage ')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Validate exact Owner command and current main
+        id: gate
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMMAND_BODY: ${{ github.event.comment.body }}
+          OWNER_COMMENT_ID: ${{ github.event.comment.id }}
+        run: |
+          set -euo pipefail
+          command_re='^/member-production-route-stage sha=([0-9a-f]{40}) deploy_run=([0-9]+) storage_preflight_run=([0-9]+) active_version=([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}) confirm=STAGE_MEMBER_ROUTE_CANDIDATE$'
+          [[ "$COMMAND_BODY" =~ $command_re ]] || { echo '::error::INVALID_MEMBER_ROUTE_STAGE_COMMAND'; exit 1; }
+          expected_sha="${BASH_REMATCH[1]}"
+          deploy_run_id="${BASH_REMATCH[2]}"
+          storage_preflight_run_id="${BASH_REMATCH[3]}"
+          active_version_id="${BASH_REMATCH[4]}"
+          [[ "$OWNER_COMMENT_ID" =~ ^[0-9]+$ ]] || { echo '::error::INVALID_OWNER_COMMENT_ID'; exit 1; }
+          current_sha="$(
+            curl --fail --silent --show-error \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H 'Accept: application/vnd.github+json' \
+              -H 'X-GitHub-Api-Version: 2022-11-28' \
+              "https://api.github.com/repos/$GITHUB_REPOSITORY/commits/main" \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin)["sha"])'
+          )"
+          test "$current_sha" = "$expected_sha" || { echo "::error::MAIN_DRIFT expected=$expected_sha current=$current_sha"; exit 1; }
+          echo "expected_sha=$expected_sha" >> "$GITHUB_OUTPUT"
+          echo "deploy_run_id=$deploy_run_id" >> "$GITHUB_OUTPUT"
+          echo "storage_preflight_run_id=$storage_preflight_run_id" >> "$GITHUB_OUTPUT"
+          echo "active_version_id=$active_version_id" >> "$GITHUB_OUTPUT"
+          echo "owner_comment_id=$OWNER_COMMENT_ID" >> "$GITHUB_OUTPUT"
+          echo 'MEMBER_ROUTE_STAGE_COMMAND=PASS'
+          echo "MEMBER_ROUTE_STAGE_AUTHORIZED_SHA=$expected_sha"
+          echo 'PRODUCTION_TRAFFIC_CHANGE=0'
+          echo 'PRODUCTION_DEPLOY=0'
+
+      - name: Reject instead of queueing behind another Production mutation
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          THIS_RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          workflows=(
+            dispatch-production-deploy-from-issue.yml
+            dispatch-member-schema-apply-from-issue.yml
+            dispatch-member-production-runtime-secret-stage-from-issue.yml
+            dispatch-member-production-version-promotion-from-issue.yml
+            dispatch-member-production-route-stage-from-issue.yml
+            deploy-cloudflare.yml
+            member-production-schema-apply.yml
+            member-production-runtime-secret-stage.yml
+            member-production-version-promotion.yml
+            member-production-route-stage.yml
+          )
+          statuses=(queued in_progress waiting pending requested)
+          for workflow in "${workflows[@]}"; do
+            for status in "${statuses[@]}"; do
+              code="$(curl --silent --show-error --output /tmp/member-route-stage-conflicts.json --write-out '%{http_code}' \
+                -H "Authorization: Bearer $GH_TOKEN" \
+                -H 'Accept: application/vnd.github+json' \
+                -H 'X-GitHub-Api-Version: 2022-11-28' \
+                "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/workflows/$workflow/runs?status=$status&per_page=100")"
+              if [[ "$code" == 404 ]]; then
+                continue
+              fi
+              test "$code" = 200 || { cat /tmp/member-route-stage-conflicts.json >&2 || true; exit 1; }
+              conflicts="$(WORKFLOW="$workflow" THIS_RUN_ID="$THIS_RUN_ID" python3 - <<'PY'
+          import json, os
+          with open('/tmp/member-route-stage-conflicts.json', encoding='utf-8') as f:
+              runs=json.load(f).get('workflow_runs',[])
+          me=int(os.environ['THIS_RUN_ID'])
+          print(sum(1 for r in runs if int(r.get('id',0))!=me))
+          PY
+              )"
+              test "$conflicts" = 0 || { echo "::error::PRODUCTION_MUTATION_BUSY_RETRY_REQUIRED workflow=$workflow status=$status count=$conflicts"; exit 1; }
+            done
+          done
+          rm -f /tmp/member-route-stage-conflicts.json
+          echo 'PRODUCTION_MUTATION_DISPATCH_GATE=FREE'
+          echo 'PRODUCTION_MUTATION_QUEUE_POLICY=REJECT_AND_RETRY'
+
+      - name: Dispatch stage-only workflow
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_SHA: ${{ steps.gate.outputs.expected_sha }}
+          DEPLOY_RUN_ID: ${{ steps.gate.outputs.deploy_run_id }}
+          STORAGE_PREFLIGHT_RUN_ID: ${{ steps.gate.outputs.storage_preflight_run_id }}
+          ACTIVE_VERSION_ID: ${{ steps.gate.outputs.active_version_id }}
+          OWNER_COMMENT_ID: ${{ steps.gate.outputs.owner_comment_id }}
+          BRIDGE_RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          payload="$(python3 - <<'PY'
+          import json, os
+          print(json.dumps({
+            'ref':'main',
+            'inputs':{
+              'expected_sha':os.environ['EXPECTED_SHA'],
+              'deploy_run_id':os.environ['DEPLOY_RUN_ID'],
+              'storage_preflight_run_id':os.environ['STORAGE_PREFLIGHT_RUN_ID'],
+              'expected_active_version_id':os.environ['ACTIVE_VERSION_ID'],
+              'owner_comment_id':os.environ['OWNER_COMMENT_ID'],
+              'bridge_run_id':os.environ['BRIDGE_RUN_ID'],
+              'confirmation':'STAGE_MEMBER_ROUTE_CANDIDATE'
+            }
+          }))
+          PY
+          )"
+          code="$(curl --silent --show-error \
+            --output /tmp/member-route-stage-dispatch.txt \
+            --write-out '%{http_code}' \
+            --request POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/workflows/member-production-route-stage.yml/dispatches" \
+            -d "$payload")"
+          test "$code" = 204 || {
+            cat /tmp/member-route-stage-dispatch.txt >&2 || true
+            echo "::error::MEMBER_ROUTE_STAGE_DISPATCH_FAILED_HTTP_$code"
+            exit 1
+          }
+          echo "MEMBER_ROUTE_STAGE_DISPATCHED_SHA=$EXPECTED_SHA"
+          echo "MEMBER_ROUTE_STAGE_BRIDGE_RUN_ID=$BRIDGE_RUN_ID"
+          echo 'PRODUCTION_TRAFFIC_CHANGE=0'
+          echo 'PRODUCTION_DEPLOY=0'
+          echo 'PRODUCTION_D1_WRITE=0'
