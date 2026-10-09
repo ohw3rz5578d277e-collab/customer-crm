@@ -4,6 +4,7 @@ const direct=fs.readFileSync('src/crm-customer360-direct-navigation.mjs','utf8')
 const owner=fs.readFileSync('src/crm-owner-view-state-v2.mjs','utf8');
 const shell=fs.readFileSync('src/crm-owner-app-shell.mjs','utf8');
 const entry=fs.readFileSync('src/production-index-crm-customer360-entry.js','utf8');
+const lineOps=fs.readFileSync('src/production-index-crm-line-ops.js','utf8');
 
 function assert(ok,msg){if(!ok)throw new Error(msg)}
 assert(direct.includes('window.__crmCustomer360UI={showList,showHome,focusSearch,refreshList}'),'stable Customer360 UI API missing');
@@ -45,13 +46,17 @@ assert(!shell.includes('data-crm-shell-nav="today"'),'Today navigation must not 
 assert(shell.includes('crmOwnerNavMarketing'),'mobile Analysis navigation missing');
 assert(!fs.existsSync('src/crm-mobile-owner-interaction-recovery.mjs'),'retired legacy mobile recovery source must not remain');
 assert(!fs.existsSync('src/crm-owner-view-state.mjs'),'retired Owner view-state v1 source must not remain');
-assert(!fs.existsSync('src/production-index-crm-line-ops.js'),'orphan legacy LINE ops wrapper must not remain');
+assert(lineOps.includes('/api/line-ops/dashboard')&&lineOps.includes('/api/line-ops/logs'),'historical LINE ops API compatibility missing');
+assert(!lineOps.includes('injectLineOpsButton'),'LINE ops wrapper must not inject legacy browser UI');
+assert(!lineOps.includes('crm-line-ops-style')&&!lineOps.includes('crm-line-ops-script'),'legacy LINE ops UI assets must be removed');
+assert(!lineOps.includes('lineOpsOpen')&&!lineOps.includes('crm-lineops-fab'),'legacy LINE ops buttons must be removed from source');
 console.log('CUSTOMER_LIST_DIRECT_NAV_CONTRACT=PASS');
 console.log('CANONICAL_OWNER_VIEW_STATE_CONTRACT=PASS');
 console.log('OWNER_NAV_BIND_ONCE_CONTRACT=PASS');
 console.log('OWNER_APP_SHELL_CANONICAL_UIX=PASS');
 console.log('LEGACY_MOBILE_RECOVERY_PRODUCTION_COMPOSITION=0');
 console.log('LEGACY_OWNER_UI_SOURCE_FILES=0');
+console.log('LINE_OPS_API_COMPATIBILITY_UI_INJECTION=0');
 console.log('HIDDEN_BUTTON_PRIMARY_ROUTING=REMOVED_FROM_PRIMARY');
 console.log('LINE_TO_CUSTOMER_ONE_TAP_CONTRACT=PASS');
 console.log('IDENTITY_SOURCE_CHANGE=0');
