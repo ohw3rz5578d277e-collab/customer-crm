@@ -19,8 +19,86 @@ const lifecycleAuxObjects=[
   'trg_member_consent_evidence_no_update','trg_member_consent_evidence_no_delete'
 ];
 
+function stripSqlComments(raw) {
+  let out='';
+  let quote=null;
+  for(let i=0;i<raw.length;i+=1){
+    const ch=raw[i];
+    const next=raw[i+1];
+    if(quote){
+      out+=ch;
+      if(ch===quote){
+        if(next===quote){
+          out+=next;
+          i+=1;
+        }else{
+          quote=null;
+        }
+      }
+      continue;
+    }
+    if(ch==="'" || ch==='"' || ch==='`'){
+      quote=ch;
+      out+=ch;
+      continue;
+    }
+    if(ch==='-' && next==='-'){
+      i+=2;
+      while(i<raw.length && raw[i] !== '\n' && raw[i] !== '\r') i+=1;
+      out+=' ';
+      if(i<raw.length) out+=raw[i];
+      continue;
+    }
+    if(ch==='/' && next==='*'){
+      i+=2;
+      while(i<raw.length && !(raw[i]==='*' && raw[i+1]==='/')) i+=1;
+      if(i>=raw.length) throw new Error('unterminated SQL block comment');
+      i+=1;
+      out+=' ';
+      continue;
+    }
+    out+=ch;
+  }
+  if(quote) throw new Error('unterminated SQL quoted literal');
+  return out;
+}
+
+function splitSqlStatements(raw) {
+  const statements=[];
+  let current='';
+  let quote=null;
+  for(let i=0;i<raw.length;i+=1){
+    const ch=raw[i];
+    const next=raw[i+1];
+    current+=ch;
+    if(quote){
+      if(ch===quote){
+        if(next===quote){
+          current+=next;
+          i+=1;
+        }else{
+          quote=null;
+        }
+      }
+      continue;
+    }
+    if(ch==="'" || ch==='"' || ch==='`'){
+      quote=ch;
+      continue;
+    }
+    if(ch===';'){
+      const statement=current.slice(0,-1).trim();
+      if(statement) statements.push(statement);
+      current='';
+    }
+  }
+  if(quote) throw new Error('unterminated SQL quoted literal');
+  if(current.trim()) statements.push(current.trim());
+  return statements;
+}
+
 function auditSchemaOnlyMigration(raw, migration) {
-  const sql=raw.replace(/--.*$/gm,' ').replace(/\/\*[\s\S]*?\*\//g,' ');
+  const sql=stripSqlComments(raw);
   const triggerBlocks=[...sql.matchAll(/CREATE\s+TRIGGER\s+IF\s+NOT\s+EXISTS[\s\S]*?\bEND\s*;/gi)].map(match=>match[0]);
   for(const block of triggerBlocks){
     assert.match(block,/^CREATE\s+TRIGGER\s+IF\s+NOT\s+EXISTS\s+[A-Za-z0-9_]+\s+BEFORE\s+(?:UPDATE|DELETE)\s+ON\s+[A-Za-z0-9_]+\s+BEGIN\s+SELECT\s+RAISE\(ABORT,\s*'[^']+'\)\s*;\s*END\s*;$/i,`${migration} contains an unexpected trigger body`);
@@ -28,12 +106,23 @@ function auditSchemaOnlyMigration(raw, migration) {
   const topLevel=sql.replace(/CREATE\s+TRIGGER\s+IF\s+NOT\s+EXISTS[\s\S]*?\bEND\s*;/gi,' ');
   assert.doesNotMatch(topLevel,/(^|;)\s*(?:INSERT|UPDATE|DELETE|REPLACE|TRUNCATE)\b/im,`${migration} contains top-level DML`);
   assert.doesNotMatch(topLevel,/(^|;)\s*(?:ALTER|DROP)\b/im,`${migration} contains destructive top-level DDL`);
-  const statements=topLevel.split(';').map(value=>value.trim()).filter(Boolean);
+  const statements=splitSqlStatements(topLevel);
   assert.ok(statements.length>0,`${migration} is empty`);
   for(const statement of statements){
     assert.match(statement,/^CREATE\s+(?:UNIQUE\s+)?(?:TABLE|INDEX)\s+IF\s+NOT\s+EXISTS\b/i,`${migration} contains non-schema top-level statement`);
   }
 }
+
+assert.throws(
+  ()=>auditSchemaOnlyMigration("CREATE TABLE IF NOT EXISTS harmless (note TEXT DEFAULT '--'); DELETE FROM member_registration_events;",'quote-aware-regression.sql'),
+  /top-level DML|non-schema top-level statement/,
+  'SQL comment markers inside quoted literals must not hide following top-level DML'
+);
+assert.throws(
+  ()=>auditSchemaOnlyMigration("CREATE TABLE IF NOT EXISTS harmless (note TEXT DEFAULT '/* not a comment */'); DROP TABLE member_identities;",'quote-aware-block-comment-regression.sql'),
+  /destructive top-level DDL|non-schema top-level statement/,
+  'SQL block-comment markers inside quoted literals must not hide following destructive DDL'
+);
 
 assert.ok(workflow.includes('workflow_dispatch:'),'workflow_dispatch missing');
 for(const input of ['expected_sha:','preflight_run_id:','owner_comment_id:','confirmation:']) assert.ok(workflow.includes(input),`workflow input missing: ${input}`);
