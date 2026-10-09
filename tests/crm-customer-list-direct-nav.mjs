@@ -4,7 +4,6 @@ const direct=fs.readFileSync('src/crm-customer360-direct-navigation.mjs','utf8')
 const owner=fs.readFileSync('src/crm-owner-view-state-v2.mjs','utf8');
 const shell=fs.readFileSync('src/crm-owner-app-shell.mjs','utf8');
 const entry=fs.readFileSync('src/production-index-crm-customer360-entry.js','utf8');
-const legacy=fs.readFileSync('src/crm-mobile-owner-interaction-recovery.mjs','utf8');
 
 function assert(ok,msg){if(!ok)throw new Error(msg)}
 assert(direct.includes('window.__crmCustomer360UI={showList,showHome,focusSearch,refreshList}'),'stable Customer360 UI API missing');
@@ -31,7 +30,8 @@ assert(owner.includes("line.onclick=()=>api.showLine()"),'LINE primary handler i
 assert(owner.includes('navBound=true;metrics.nav_bind_count=1'),'Owner nav must bind once idempotently');
 assert(owner.includes('nav_duplicate_bind_count'),'duplicate nav binding metric missing');
 assert(!owner.includes(".observe(document.documentElement,{childList:true,subtree:true})"),'unbounded documentElement observer must remain removed');
-assert(!entry.includes("from './crm-mobile-owner-interaction-recovery.mjs'"),'legacy mobile recovery must be quarantined from Production composition');
+assert(!entry.includes("from './crm-mobile-owner-interaction-recovery.mjs'"),'legacy mobile recovery must stay out of Production composition');
+assert(!entry.includes('injectMobileOwnerInteractionRecovery('),'legacy mobile recovery must stay out of Production HTML');
 assert(entry.includes("from './crm-owner-line-chat.mjs'"),'canonical LINE chat module missing from Production entry');
 assert(entry.indexOf('injectOwnerLineChat(withDirectNavigation)')>entry.indexOf('injectCustomer360DirectNavigation(withCardSummary)'),'LINE chat must compose after direct navigation');
 assert(entry.indexOf('injectOwnerViewState(withLineChat)')>entry.indexOf('injectOwnerLineChat(withDirectNavigation)'),'Owner view controller must compose after LINE chat');
@@ -43,14 +43,16 @@ assert(shell.includes('分析・アプローチ')&&shell.includes('予約管理�
 assert(shell.includes('@media(max-width:767px)')&&shell.includes('@media(min-width:768px) and (max-width:1099px)'),'responsive device breakpoints missing');
 assert(!shell.includes('data-crm-shell-nav="today"'),'Today navigation must not be visible in canonical shell');
 assert(shell.includes('crmOwnerNavMarketing'),'mobile Analysis navigation missing');
-assert(legacy.includes('clickCustomer360List'),'legacy compatibility path no longer detectable; audit intentionally retained');
+assert(!fs.existsSync('src/crm-mobile-owner-interaction-recovery.mjs'),'retired legacy mobile recovery source must not remain');
+assert(!fs.existsSync('src/crm-owner-view-state.mjs'),'retired Owner view-state v1 source must not remain');
+assert(!fs.existsSync('src/production-index-crm-line-ops.js'),'orphan legacy LINE ops wrapper must not remain');
 console.log('CUSTOMER_LIST_DIRECT_NAV_CONTRACT=PASS');
 console.log('CANONICAL_OWNER_VIEW_STATE_CONTRACT=PASS');
 console.log('OWNER_NAV_BIND_ONCE_CONTRACT=PASS');
 console.log('OWNER_APP_SHELL_CANONICAL_UIX=PASS');
 console.log('LEGACY_MOBILE_RECOVERY_PRODUCTION_COMPOSITION=0');
+console.log('LEGACY_OWNER_UI_SOURCE_FILES=0');
 console.log('HIDDEN_BUTTON_PRIMARY_ROUTING=REMOVED_FROM_PRIMARY');
-console.log('LEGACY_COMPATIBILITY_ROUTE=PRESENT_BUT_NOT_STATE_OWNER');
 console.log('LINE_TO_CUSTOMER_ONE_TAP_CONTRACT=PASS');
 console.log('IDENTITY_SOURCE_CHANGE=0');
 console.log('MIGRATION_CHANGE=0');
