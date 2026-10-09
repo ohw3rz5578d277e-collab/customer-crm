@@ -1,15 +1,22 @@
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import { chromium } from 'playwright';
+import { stripLegacyAdminUserUi } from '../src/production-index-crm-line-ops.js';
 import { composeCustomer360AdminHtml } from '../src/production-index-crm-customer360-entry.js';
 
-const legacyBase=`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><style>html,body{margin:0}.app{max-width:1200px;margin:0 auto;padding:16px}</style></head><body>
+const legacyBase=`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><style>html,body{margin:0}.app{max-width:1200px;margin:0 auto;padding:16px}</style><style id="crm-admin-users-style">#crmUserFab{position:fixed}</style></head><body>
 <div id="crmMobileBar">legacy mobile nav</div><div class="crm-mf-bottom">legacy nav</div><div class="crm-bottom-nav">legacy nav</div><button id="crmPriorityFab">重要</button><button class="crm-mf-fab">FAB</button><button class="crm-top-menu-btn">☰</button><div class="crmUxQuickHint">legacy hint</div><button id="crmStableAuditBtn">状態確認</button>
 <div class="crm-lineops-fab"><button id="lineOpsOpen">LINE運用</button></div><section id="lineOpsPanel"><button id="lineOpsClose">閉じる</button><h2>旧LINE</h2></section>
-<div id="crmUserFab"><button id="crmOpenUsers">ユーザー管理</button></div><div id="crmUserBackdrop"></div><div id="crmUserModal">旧管理ユーザー</div>
+<div class="crm-user-fab" id="crmUserFab"><b>Googleログイン</b><div class="sub">owner@example.test<br>role: admin</div><button class="primary" id="crmOpenUsers">ユーザー管理</button></div><div class="crm-user-backdrop" id="crmUserBackdrop"></div><div class="crm-user-modal" id="crmUserModal" aria-hidden="true"><div class="crm-user-head"><div><h2>管理ユーザー</h2></div><button id="crmCloseUsers">閉じる</button></div><div class="crm-user-body"><div id="crmUserList">旧管理ユーザー</div></div></div><script id="crm-admin-users-script">window.__legacyAdminUsersUi=1;</script>
 <main class="app"><h1>顧客管理</h1><section id="crmTodayDashboard"><h2>今日やること</h2></section><section id="crmReservationStatus">旧予約状態</section><section id="crmDeliveryDeadlinePanel">旧納品期限</section><section id="crmLegacyOperations">旧運用</section><section id="crmTodayFilterPanel">旧フィルター</section></main>
 </body></html>`;
-const html=composeCustomer360AdminHtml(legacyBase);
+const lowerHtml=stripLegacyAdminUserUi(legacyBase);
+assert.equal(lowerHtml.includes('crmUserFab'),false,'legacy admin user FAB must be stripped before canonical composition');
+assert.equal(lowerHtml.includes('crmUserBackdrop'),false,'legacy admin user backdrop must be stripped before canonical composition');
+assert.equal(lowerHtml.includes('crmUserModal'),false,'legacy admin user modal must be stripped before canonical composition');
+assert.equal(lowerHtml.includes('crm-admin-users-style'),false,'legacy admin user style must be stripped before canonical composition');
+assert.equal(lowerHtml.includes('crm-admin-users-script'),false,'legacy admin user script must be stripped before canonical composition');
+const html=composeCustomer360AdminHtml(lowerHtml);
 const customer={customer_id:'26000001',name:'山田 花子',line_display_name:'hanako',line_linked:true,realized_ltv:50000,shoot_count:2,family_summary:'子1人',last_shoot_date:'2026-08-20',area_summary:'大阪府豊中市',recommendation:{next_offer:'七五三'},next_opportunity:{label:'七五三',days:20}};
 const facets={prefectures:['大阪府'],cities:['豊中市'],genres:['七五三'],sources:['Instagram'],campaigns:['秋'],school_stages:[]};
 const requests=[];
