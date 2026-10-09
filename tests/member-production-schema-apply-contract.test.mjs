@@ -225,6 +225,7 @@ function auditSchemaOnlyMigration(raw, migration) {
       assert.equal(targetTable,contract.target,`${migration} creates unauthorized index target: ${indexName}`);
       assert.equal(Boolean(uniqueRaw),contract.unique,`${migration} creates index with wrong uniqueness: ${indexName}`);
       assert.equal(columnsRaw.replace(/\s+/g,''),contract.columns,`${migration} creates index with wrong columns: ${indexName}`);
+      assert.match(predicateRaw||'',/^[\x00-\x7F]*$/,`${migration} creates index with non-ASCII predicate: ${indexName}`);
       assert.equal((predicateRaw||'').trim().replace(/\s+/g,' ').toUpperCase(),contract.predicate.toUpperCase(),`${migration} creates index with wrong predicate: ${indexName}`);
       createdIndexes.push(indexName);
       continue;
@@ -310,6 +311,7 @@ assert.throws(
 );
 
 for(const sql of [
+  'CREATE UNIQUE INDEX IF NOT EXISTS idx_member_identity_customer ON member_identities(canonical_customer_id) WHERE canonıcal_customer_id IS NOT NULL;',
   'CREATE UNIQUE INDEX IF NOT EXISTS idx_member_identity_customer ON member_identities(prospect_id) WHERE canonical_customer_id IS NOT NULL;',
   'CREATE UNIQUE INDEX IF NOT EXISTS idx_member_identity_customer ON member_identities(canonical_customer_id) WHERE canonical_customer_id IS NULL;',
   'CREATE UNIQUE INDEX IF NOT EXISTS idx_member_identity_customer ON member_identities(canonical_customer_id);',
@@ -317,7 +319,7 @@ for(const sql of [
   'CREATE INDEX IF NOT EXISTS idx_member_customer_invitation_customer ON member_customer_invitations(canonical_customer_id,created_at) WHERE created_at IS NOT NULL;',
   'CREATE UNIQUE INDEX IF NOT EXISTS idx_member_identity_customer ON member_identities(lower(canonical_customer_id)) WHERE canonical_customer_id IS NOT NULL;'
 ]){
-  assert.throws(()=>auditSchemaOnlyMigration(sql,'index-definition-regression.sql'),/wrong columns|wrong predicate|non-schema|unauthorized/,'index column, expression, order and partial-predicate drift must fail before apply');
+  assert.throws(()=>auditSchemaOnlyMigration(sql,'index-definition-regression.sql'),/wrong columns|wrong predicate|non-ASCII predicate|non-schema|unauthorized/,'index column, expression, order and partial-predicate drift must fail before apply');
 }
 
 const identityMigrationRaw=fs.readFileSync('migrations_managed/20261007_member_identity_prospect_foundation.sql','utf8');
