@@ -7,8 +7,18 @@ import {
   classifyMemberProductionRuntimeSchema
 } from '../src/member-production-runtime-schema-readiness.mjs';
 
-function schemaOutput(names) {
-  return JSON.stringify([{ results: names.map(name => ({ name })) }]);
+const requiredTables = new Set([
+  ...MEMBER_RUNTIME_LEGACY_TABLES,
+  ...MEMBER_RUNTIME_LIFECYCLE_TABLES
+]);
+
+function schemaOutput(names, typeOverrides = {}) {
+  return JSON.stringify([{ results: names.map(name => {
+    if (Object.prototype.hasOwnProperty.call(typeOverrides, name)) {
+      return { name, type: typeOverrides[name] };
+    }
+    return requiredTables.has(name) ? { name, type: 'table' } : { name };
+  }) }]);
 }
 
 function pendingOutput(names) {
@@ -96,6 +106,31 @@ const fullyAppliedNames = [
 }
 
 {
+  const first = MEMBER_RUNTIME_LIFECYCLE_MIGRATIONS[0];
+  const wrongTypeTable = first.tables[0];
+  const result = classifyMemberProductionRuntimeSchema({
+    pendingOutput: pendingOutput([]),
+    schemaOutput: schemaOutput(fullyAppliedNames, { [wrongTypeTable]: 'view' })
+  });
+  assert.equal(result.ready, false);
+  assert.equal(result.status, 'BLOCKED_SCHEMA_RECEIPT_INCONSISTENT');
+  assert.equal(result.receipt.lifecycle_table_count, 5);
+  assert.ok(result.blockers.includes(`lifecycle_tables_missing:${first.name}`));
+}
+
+{
+  const wrongTypeTable = MEMBER_RUNTIME_LEGACY_TABLES[0];
+  const result = classifyMemberProductionRuntimeSchema({
+    pendingOutput: pendingOutput([]),
+    schemaOutput: schemaOutput(fullyAppliedNames, { [wrongTypeTable]: 'trigger' })
+  });
+  assert.equal(result.ready, false);
+  assert.equal(result.status, 'BLOCKED_SCHEMA_RECEIPT_INCONSISTENT');
+  assert.equal(result.receipt.legacy_table_count, 10);
+  assert.ok(result.blockers.includes('legacy_member_tables_missing'));
+}
+
+{
   const result = classifyMemberProductionRuntimeSchema({
     pendingOutput: pendingOutput([]),
     schemaOutput: 'not-json'
@@ -109,4 +144,5 @@ console.log('MEMBER_PRODUCTION_RUNTIME_SCHEMA_READINESS=PASS');
 console.log('KNOWN_LIFECYCLE_PENDING_CLASSIFICATION=PASS');
 console.log('UNKNOWN_PENDING_FAIL_CLOSED=PASS');
 console.log('LIFECYCLE_RECEIPT_FAIL_CLOSED=PASS');
+console.log('REQUIRED_TABLE_TYPE_FAIL_CLOSED=PASS');
 console.log('PRODUCTION_OPERATION=0');
