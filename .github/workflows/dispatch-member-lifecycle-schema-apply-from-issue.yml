@@ -1,0 +1,173 @@
+name: Dispatch Member lifecycle schema apply from release-gate issue
+
+run-name: >-
+  ${{ startsWith(github.event.comment.body, '/member-lifecycle-schema-apply ') && 'Production mutation bridge: lifecycle-schema-apply' || 'Production bridge: ignored' }}
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  issues: read
+  actions: write
+
+jobs:
+  dispatch:
+    name: Validate Member lifecycle schema apply command and dispatch
+    if: >-
+      github.event.issue.number == 26 &&
+      github.event.issue.pull_request == null &&
+      github.actor == 'ohw3rz5578d277e-collab' &&
+      github.event.comment.user.login == 'ohw3rz5578d277e-collab' &&
+      startsWith(github.event.comment.body, '/member-lifecycle-schema-apply ')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Validate exact Owner command and current main
+        id: gate
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMMAND_BODY: ${{ github.event.comment.body }}
+          OWNER_COMMENT_ID: ${{ github.event.comment.id }}
+        run: |
+          set -euo pipefail
+          command_re='^/member-lifecycle-schema-apply sha=([0-9a-f]{40}) readiness_run=([0-9]+) confirm=APPLY_MEMBER_LIFECYCLE_SCHEMA$'
+          [[ "$COMMAND_BODY" =~ $command_re ]] || { echo '::error::INVALID_MEMBER_LIFECYCLE_SCHEMA_APPLY_COMMAND'; exit 1; }
+          expected_sha="${BASH_REMATCH[1]}"
+          readiness_run_id="${BASH_REMATCH[2]}"
+          current_sha="$(
+            curl --fail --silent --show-error \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H 'Accept: application/vnd.github+json' \
+              -H 'X-GitHub-Api-Version: 2022-11-28' \
+              "https://api.github.com/repos/${GITHUB_REPOSITORY}/commits/main" \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin)["sha"])'
+          )"
+          test "$current_sha" = "$expected_sha" || { echo "::error::MAIN_DRIFT expected=$expected_sha current=$current_sha"; exit 1; }
+          echo "expected_sha=$expected_sha" >> "$GITHUB_OUTPUT"
+          echo "readiness_run_id=$readiness_run_id" >> "$GITHUB_OUTPUT"
+          echo "owner_comment_id=$OWNER_COMMENT_ID" >> "$GITHUB_OUTPUT"
+          echo "MEMBER_LIFECYCLE_SCHEMA_APPLY_AUTHORIZED_SHA=$expected_sha"
+          echo "MEMBER_LIFECYCLE_SCHEMA_APPLY_READINESS_RUN_ID=$readiness_run_id"
+          echo "MEMBER_LIFECYCLE_SCHEMA_APPLY_OWNER_COMMENT_ID=$OWNER_COMMENT_ID"
+          echo 'PRODUCTION_DEPLOY=0'
+          echo 'MEMBER_ROUTE_ACTIVATION=0'
+
+      - name: Reject instead of overlapping another Production mutation
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          THIS_RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          sleep 2
+          workflows=(
+            dispatch-production-deploy-from-issue.yml
+            dispatch-member-schema-apply-from-issue.yml
+            dispatch-member-lifecycle-schema-apply-from-issue.yml
+            dispatch-member-production-runtime-secret-stage-from-issue.yml
+            dispatch-member-production-version-promotion-from-issue.yml
+            deploy-cloudflare.yml
+            member-production-schema-apply.yml
+            member-lifecycle-schema-apply.yml
+            member-production-runtime-secret-stage.yml
+            member-production-version-promotion.yml
+          )
+          statuses=(queued in_progress waiting pending requested)
+          for workflow in "${workflows[@]}"; do
+            for status in "${statuses[@]}"; do
+              response="$(
+                curl --fail --silent --show-error \
+                  -H "Authorization: Bearer $GH_TOKEN" \
+                  -H 'Accept: application/vnd.github+json' \
+                  -H 'X-GitHub-Api-Version: 2022-11-28' \
+                  "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/workflows/$workflow/runs?status=$status&per_page=100"
+              )"
+              conflicts="$(
+                WORKFLOW="$workflow" THIS_RUN_ID="$THIS_RUN_ID" node -e '
+                  const data=JSON.parse(require("fs").readFileSync(0,"utf8"));
+                  const workflow=process.env.WORKFLOW;
+                  const me=Number(process.env.THIS_RUN_ID);
+                  const mutationDispatch=new Set([
+                    "dispatch-production-deploy-from-issue.yml",
+                    "dispatch-member-schema-apply-from-issue.yml",
+                    "dispatch-member-lifecycle-schema-apply-from-issue.yml",
+                    "dispatch-member-production-runtime-secret-stage-from-issue.yml",
+                    "dispatch-member-production-version-promotion-from-issue.yml"
+                  ]);
+                  const mutationWorkers=new Set([
+                    "member-production-schema-apply.yml",
+                    "member-lifecycle-schema-apply.yml",
+                    "member-production-runtime-secret-stage.yml",
+                    "member-production-version-promotion.yml"
+                  ]);
+                  const count=(data.workflow_runs||[]).filter(r=>{
+                    if(Number(r.id)===me)return false;
+                    if(workflow==="deploy-cloudflare.yml"){
+                      return r.event==="workflow_dispatch" && !String(r.display_title||"").startsWith("CRM Production preflight ");
+                    }
+                    if(mutationWorkers.has(workflow))return r.event==="workflow_dispatch";
+                    if(mutationDispatch.has(workflow)){
+                      const title=String(r.display_title||"");
+                      return r.event==="issue_comment" && title.startsWith("Production mutation bridge:");
+                    }
+                    return false;
+                  }).length;
+                  process.stdout.write(String(count));
+                ' <<<"$response"
+              )"
+              test "$conflicts" = '0' || {
+                echo "::error::PRODUCTION_MUTATION_BUSY_RETRY_REQUIRED workflow=$workflow status=$status count=$conflicts"
+                exit 1
+              }
+            done
+          done
+          echo 'PRODUCTION_MUTATION_DISPATCH_GATE=FREE'
+          echo 'PRODUCTION_MUTATION_QUEUE_POLICY=REJECT_AND_RETRY'
+
+      - name: Dispatch exact lifecycle schema apply
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_SHA: ${{ steps.gate.outputs.expected_sha }}
+          READINESS_RUN_ID: ${{ steps.gate.outputs.readiness_run_id }}
+          OWNER_COMMENT_ID: ${{ steps.gate.outputs.owner_comment_id }}
+        run: |
+          set -euo pipefail
+          payload="$(node - <<'NODE'
+          const payload={
+            ref:'main',
+            inputs:{
+              expected_sha:process.env.EXPECTED_SHA,
+              readiness_run_id:process.env.READINESS_RUN_ID,
+              owner_comment_id:process.env.OWNER_COMMENT_ID,
+              confirmation:'APPLY_MEMBER_LIFECYCLE_SCHEMA'
+            }
+          };
+          process.stdout.write(JSON.stringify(payload));
+          NODE
+          )"
+          code="$(
+            curl --silent --show-error \
+              --output /tmp/member-lifecycle-schema-apply-dispatch.txt \
+              --write-out '%{http_code}' \
+              --request POST \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H 'Accept: application/vnd.github+json' \
+              -H 'X-GitHub-Api-Version: 2022-11-28' \
+              "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/member-lifecycle-schema-apply.yml/dispatches" \
+              -d "$payload"
+          )"
+          test "$code" = '204' || {
+            cat /tmp/member-lifecycle-schema-apply-dispatch.txt >&2 || true
+            echo "::error::MEMBER_LIFECYCLE_SCHEMA_APPLY_DISPATCH_FAILED_HTTP_$code"
+            exit 1
+          }
+          rm -f /tmp/member-lifecycle-schema-apply-dispatch.txt
+          echo "MEMBER_LIFECYCLE_SCHEMA_APPLY_DISPATCHED_SHA=$EXPECTED_SHA"
+          echo "MEMBER_LIFECYCLE_SCHEMA_APPLY_DISPATCHED_READINESS_RUN=$READINESS_RUN_ID"
+          echo 'PRODUCTION_DEPLOY=0'
+          echo 'MEMBER_ROUTE_ACTIVATION=0'
