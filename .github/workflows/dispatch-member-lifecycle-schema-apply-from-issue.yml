@@ -127,6 +127,7 @@ jobs:
           done
           echo 'PRODUCTION_MUTATION_DISPATCH_GATE=FREE'
           echo 'PRODUCTION_MUTATION_QUEUE_POLICY=REJECT_AND_RETRY'
+          echo 'PRODUCTION_MUTATION_FILTER=ACTUAL_MUTATIONS_ONLY'
 
       - name: Dispatch exact lifecycle schema apply
         shell: bash
