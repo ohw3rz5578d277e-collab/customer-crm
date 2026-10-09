@@ -11,22 +11,22 @@ const lifecycleMigrations=[
 const lifecycleTables=[
   'member_identities','member_prospects','member_customer_invitations','member_profile_change_review_queue','member_registration_events','member_consent_evidence'
 ];
-const lifecycleIndexTargets=new Map([
-  ['idx_member_identity_customer','member_identities'],
-  ['idx_member_identity_prospect','member_identities'],
-  ['idx_member_customer_invitation_customer','member_customer_invitations'],
-  ['idx_member_registration_events_member_time','member_registration_events'],
-  ['idx_member_registration_events_prospect_time','member_registration_events'],
-  ['idx_member_consent_evidence_member_time','member_consent_evidence'],
-  ['idx_member_consent_evidence_prospect_time','member_consent_evidence']
+const lifecycleIndexContracts=new Map([
+  ['idx_member_identity_customer',{target:'member_identities',unique:true}],
+  ['idx_member_identity_prospect',{target:'member_identities',unique:true}],
+  ['idx_member_customer_invitation_customer',{target:'member_customer_invitations',unique:false}],
+  ['idx_member_registration_events_member_time',{target:'member_registration_events',unique:false}],
+  ['idx_member_registration_events_prospect_time',{target:'member_registration_events',unique:false}],
+  ['idx_member_consent_evidence_member_time',{target:'member_consent_evidence',unique:false}],
+  ['idx_member_consent_evidence_prospect_time',{target:'member_consent_evidence',unique:false}]
 ]);
-const lifecycleTriggerTargets=new Map([
-  ['trg_member_registration_events_no_update','member_registration_events'],
-  ['trg_member_registration_events_no_delete','member_registration_events'],
-  ['trg_member_consent_evidence_no_update','member_consent_evidence'],
-  ['trg_member_consent_evidence_no_delete','member_consent_evidence']
+const lifecycleTriggerContracts=new Map([
+  ['trg_member_registration_events_no_update',{target:'member_registration_events',operation:'UPDATE'}],
+  ['trg_member_registration_events_no_delete',{target:'member_registration_events',operation:'DELETE'}],
+  ['trg_member_consent_evidence_no_update',{target:'member_consent_evidence',operation:'UPDATE'}],
+  ['trg_member_consent_evidence_no_delete',{target:'member_consent_evidence',operation:'DELETE'}]
 ]);
-const lifecycleAuxObjects=[...lifecycleIndexTargets.keys(),...lifecycleTriggerTargets.keys()];
+const lifecycleAuxObjects=[...lifecycleIndexContracts.keys(),...lifecycleTriggerContracts.keys()];
 const lifecycleTableSet=new Set(lifecycleTables);
 const expectedLifecycleObjectsByMigration=new Map([
   ['20261007_member_identity_prospect_foundation.sql',{
@@ -142,10 +142,13 @@ function auditSchemaOnlyMigration(raw, migration) {
   const createdTriggers=[];
   const triggerBlocks=[...sql.matchAll(/CREATE\s+TRIGGER\s+IF\s+NOT\s+EXISTS[\s\S]*?\bEND\s*;/gi)].map(match=>match[0]);
   for(const block of triggerBlocks){
-    const match=block.match(/^CREATE\s+TRIGGER\s+IF\s+NOT\s+EXISTS\s+([A-Za-z0-9_]+)\s+BEFORE\s+(?:UPDATE|DELETE)\s+ON\s+([A-Za-z0-9_]+)\s+BEGIN\s+SELECT\s+RAISE\(ABORT,\s*'[^']+'\)\s*;\s*END\s*;$/i);
+    const match=block.match(/^CREATE\s+TRIGGER\s+IF\s+NOT\s+EXISTS\s+([A-Za-z0-9_]+)\s+BEFORE\s+(UPDATE|DELETE)\s+ON\s+([A-Za-z0-9_]+)\s+BEGIN\s+SELECT\s+RAISE\(ABORT,\s*'[^']+'\)\s*;\s*END\s*;$/i);
     assert.ok(match,`${migration} contains an unexpected trigger body`);
-    const [,triggerName,targetTable]=match;
-    assert.equal(lifecycleTriggerTargets.get(triggerName),targetTable,`${migration} contains unauthorized trigger name or target: ${triggerName}`);
+    const [,triggerName,operationRaw,targetTable]=match;
+    const contract=lifecycleTriggerContracts.get(triggerName);
+    assert.ok(contract,`${migration} contains unauthorized trigger name: ${triggerName}`);
+    assert.equal(targetTable,contract.target,`${migration} contains unauthorized trigger target: ${triggerName}`);
+    assert.equal(operationRaw.toUpperCase(),contract.operation,`${migration} contains unauthorized trigger operation: ${triggerName}`);
     createdTriggers.push(triggerName);
   }
   const topLevel=sql.replace(/CREATE\s+TRIGGER\s+IF\s+NOT\s+EXISTS[\s\S]*?\bEND\s*;/gi,' ');
@@ -161,10 +164,14 @@ function auditSchemaOnlyMigration(raw, migration) {
       createdTables.push(table[1]);
       continue;
     }
-    const index=statement.match(/^CREATE\s+(?:UNIQUE\s+)?INDEX\s+IF\s+NOT\s+EXISTS\s+([A-Za-z0-9_]+)\s+ON\s+([A-Za-z0-9_]+)\s*\(/i);
+    const index=statement.match(/^CREATE\s+(UNIQUE\s+)?INDEX\s+IF\s+NOT\s+EXISTS\s+([A-Za-z0-9_]+)\s+ON\s+([A-Za-z0-9_]+)\s*\(/i);
     if(index){
-      assert.equal(lifecycleIndexTargets.get(index[1]),index[2],`${migration} creates unauthorized index name or target: ${index[1]}`);
-      createdIndexes.push(index[1]);
+      const [,uniqueRaw,indexName,targetTable]=index;
+      const contract=lifecycleIndexContracts.get(indexName);
+      assert.ok(contract,`${migration} creates unauthorized index name: ${indexName}`);
+      assert.equal(targetTable,contract.target,`${migration} creates unauthorized index target: ${indexName}`);
+      assert.equal(Boolean(uniqueRaw),contract.unique,`${migration} creates index with wrong uniqueness: ${indexName}`);
+      createdIndexes.push(indexName);
       continue;
     }
     assert.fail(`${migration} contains non-schema or unauthorized top-level statement`);
@@ -215,13 +222,28 @@ assert.throws(
 );
 assert.throws(
   ()=>auditSchemaOnlyMigration('CREATE INDEX IF NOT EXISTS idx_member_identity_customer ON customers(id);','wrong-index-target-regression.sql'),
-  /unauthorized index name or target/,
+  /unauthorized index target|wrong uniqueness/,
   'lifecycle indexes may target only their exact lifecycle tables'
 );
 assert.throws(
   ()=>auditSchemaOnlyMigration("CREATE TRIGGER IF NOT EXISTS trg_member_registration_events_no_update BEFORE UPDATE ON customers BEGIN SELECT RAISE(ABORT, 'x'); END;",'wrong-trigger-target-regression.sql'),
-  /unauthorized trigger name or target/,
+  /unauthorized trigger target/,
   'lifecycle triggers may target only their exact lifecycle tables'
+);
+assert.throws(
+  ()=>auditSchemaOnlyMigration("CREATE TRIGGER IF NOT EXISTS trg_member_registration_events_no_update BEFORE DELETE ON member_registration_events BEGIN SELECT RAISE(ABORT, 'x'); END;",'wrong-trigger-operation-regression.sql'),
+  /unauthorized trigger operation/,
+  'a no_update trigger name must remain bound to BEFORE UPDATE'
+);
+assert.throws(
+  ()=>auditSchemaOnlyMigration('CREATE INDEX IF NOT EXISTS idx_member_identity_prospect ON member_identities(prospect_id);','identity-index-uniqueness-regression.sql'),
+  /wrong uniqueness/,
+  'identity prospect index must remain UNIQUE'
+);
+assert.throws(
+  ()=>auditSchemaOnlyMigration('CREATE UNIQUE INDEX IF NOT EXISTS idx_member_customer_invitation_customer ON member_customer_invitations(canonical_customer_id);','nonunique-index-regression.sql'),
+  /wrong uniqueness/,
+  'non-unique lifecycle indexes must not silently become unique'
 );
 
 const identityMigrationRaw=fs.readFileSync('migrations_managed/20261007_member_identity_prospect_foundation.sql','utf8');
