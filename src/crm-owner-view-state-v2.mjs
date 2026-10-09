@@ -2,6 +2,7 @@ export function injectOwnerViewState(html){
   if(!html||html.includes('crm-owner-view-state-v2-script'))return html;
   const style=String.raw`<style id="crm-owner-view-state-v2-style">
 #crmOwnerLineChat{display:none}
+#crmOwnerStatusSheet:not(.open),#crmOwnerCanonicalSettings:not(.open){display:none!important;visibility:hidden!important;pointer-events:none!important}
 body[data-crm-owner-view="customers"] #crmMktNav,body[data-crm-owner-view="search"] #crmMktNav,body[data-crm-owner-view="marketing"] #crmMktNav,body[data-crm-owner-view="today"] #crmMktNav{display:flex!important}
 body[data-crm-owner-view="customers"] #crmMktList,body[data-crm-owner-view="search"] #crmMktList,body[data-crm-owner-view="today"] #crmMktList{display:block!important}
 body[data-crm-owner-view="customers"] #crmMktHome,body[data-crm-owner-view="search"] #crmMktHome,body[data-crm-owner-view="today"] #crmMktHome{display:none!important}
