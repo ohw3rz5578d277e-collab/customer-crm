@@ -6,12 +6,14 @@ on:
       - '.github/workflows/member-production-runtime-readiness.yml'
       - '.github/workflows/dispatch-member-production-runtime-readiness-from-issue.yml'
       - 'tests/member-production-runtime-readiness-contract.test.mjs'
+      - 'tests/member-production-runtime-schema-readiness.test.mjs'
       - 'docs/member-app/member-production-runtime-readiness.md'
       - 'docs/member-app/member-runtime-release-gates.md'
       - 'member_tests/member-runtime-step9-final-gate.test.mjs'
       - 'docs/member-app/member-runtime-step9-final-gate-20261009.md'
       - 'src/member-production-backend-sequence-readiness.mjs'
       - 'src/member-production-activation-readiness-assembly.mjs'
+      - 'src/member-production-runtime-schema-readiness.mjs'
       - 'member_tests/member-production-backend-sequence-readiness.test.mjs'
       - 'member_tests/member-production-activation-readiness-assembly.test.mjs'
       - 'docs/member-app/member-production-backend-sequence-readiness-20261009.md'
@@ -62,6 +64,9 @@ jobs:
 
       - name: Verify Member runtime readiness contract
         run: node tests/member-production-runtime-readiness-contract.test.mjs
+
+      - name: Verify Member runtime schema classifier
+        run: node tests/member-production-runtime-schema-readiness.test.mjs
 
   readiness:
     name: Exact-SHA read-only Member Production runtime readiness
@@ -332,7 +337,7 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           wranglerVersion: '4'
-          command: d1 execute customer-crm-db --remote --json --command "SELECT name,type FROM sqlite_master WHERE name IN ('customer_family_groups','customer_family_customer_links','member_memories','member_memory_media','member_memory_favorites','member_favorite_mutation_rate_limits','member_family_pass_entitlements','member_public_assets','member_creative_templates','member_shop_products','member_news_items') ORDER BY name; SELECT name FROM d1_migrations_managed WHERE name LIKE '20260924_member_%' ORDER BY name;"
+          command: d1 execute customer-crm-db --remote --json --command "SELECT name,type FROM sqlite_master WHERE name IN ('customer_family_groups','customer_family_customer_links','member_memories','member_memory_media','member_memory_favorites','member_favorite_mutation_rate_limits','member_family_pass_entitlements','member_public_assets','member_creative_templates','member_shop_products','member_news_items','member_identities','member_prospects','member_customer_invitations','member_profile_change_review_queue','member_registration_events','member_consent_evidence') ORDER BY name; SELECT name FROM d1_migrations_managed WHERE name IN ('20260924_member_creative_catalog_foundation.sql','20260924_member_family_identity_foundation.sql','20260924_member_family_pass_entitlement_foundation.sql','20260924_member_favorite_mutation_rate_limit_foundation.sql','20260924_member_memory_core_foundation.sql','20260924_member_memory_favorites_foundation.sql','20260924_member_news_catalog_foundation.sql','20260924_member_public_asset_registry_foundation.sql','20260924_member_shop_catalog_foundation.sql','20261007_member_identity_prospect_foundation.sql','20261009_member_registration_consent_event_foundation.sql') ORDER BY name;"
 
       - name: Classify read-only Member runtime readiness
         shell: bash
@@ -341,52 +346,37 @@ jobs:
           SCHEMA_OUTPUT: ${{ steps.schema.outputs.command-output }}
         run: |
           set -euo pipefail
-          node <<'NODE'
-          const pending=process.env.PENDING_OUTPUT||'';
-          const schema=process.env.SCHEMA_OUTPUT||'';
-          const migrations=[
-            '20260924_member_creative_catalog_foundation.sql',
-            '20260924_member_family_identity_foundation.sql',
-            '20260924_member_family_pass_entitlement_foundation.sql',
-            '20260924_member_favorite_mutation_rate_limit_foundation.sql',
-            '20260924_member_memory_core_foundation.sql',
-            '20260924_member_memory_favorites_foundation.sql',
-            '20260924_member_news_catalog_foundation.sql',
-            '20260924_member_public_asset_registry_foundation.sql',
-            '20260924_member_shop_catalog_foundation.sql'
-          ];
-          const tables=[
-            'customer_family_groups',
-            'customer_family_customer_links',
-            'member_memories',
-            'member_memory_media',
-            'member_memory_favorites',
-            'member_favorite_mutation_rate_limits',
-            'member_family_pass_entitlements',
-            'member_public_assets',
-            'member_creative_templates',
-            'member_shop_products',
-            'member_news_items'
-          ];
-          const pendingFiles=[...pending.matchAll(/[A-Za-z0-9_.-]+\.sql/g)].map(m=>m[0]);
-          const uniquePending=[...new Set(pendingFiles)];
-          const memberPending=uniquePending.filter(x=>migrations.includes(x));
-          const unknownPending=uniquePending.filter(x=>!migrations.includes(x));
-          const presentTables=tables.filter(x=>schema.includes(x));
-          const tracked=migrations.filter(x=>schema.includes(x));
-          if(memberPending.length||unknownPending.length||presentTables.length!==11||tracked.length!==9){
-            throw new Error(
-              'MEMBER_SCHEMA_RUNTIME_RECEIPT_INCONSISTENT:'+
-              'memberPending='+memberPending.length+
-              ',unknownPending='+unknownPending.length+
-              ',tables='+presentTables.length+
-              ',tracked='+tracked.length
-            );
+          node --input-type=module <<'NODE'
+          import { classifyMemberProductionRuntimeSchema } from './src/member-production-runtime-schema-readiness.mjs';
+
+          const result=classifyMemberProductionRuntimeSchema({
+            pendingOutput:process.env.PENDING_OUTPUT||'',
+            schemaOutput:process.env.SCHEMA_OUTPUT||''
+          });
+
+          console.log('MEMBER_SCHEMA_RUNTIME_STATUS='+result.status);
+          console.log('MEMBER_LEGACY_PENDING_MIGRATION_COUNT='+result.pending.legacy.length);
+          console.log('MEMBER_LIFECYCLE_REQUIRED_MIGRATION_COUNT=2');
+          console.log('MEMBER_LIFECYCLE_PENDING_MIGRATION_COUNT='+result.pending.lifecycle.length);
+          console.log('MEMBER_LIFECYCLE_PENDING_MIGRATIONS='+(result.pending.lifecycle.join(',')||'NONE'));
+          console.log('MEMBER_UNKNOWN_PENDING_MIGRATION_COUNT='+result.pending.unknown.length);
+          console.log('MEMBER_UNKNOWN_PENDING_MIGRATIONS='+(result.pending.unknown.join(',')||'NONE'));
+          console.log('MEMBER_SCHEMA_LEGACY_TABLE_COUNT='+result.receipt.legacy_table_count);
+          console.log('MEMBER_SCHEMA_LEGACY_TRACKED_MIGRATION_COUNT='+result.receipt.legacy_tracked_migration_count);
+          console.log('MEMBER_SCHEMA_LIFECYCLE_TABLE_COUNT='+result.receipt.lifecycle_table_count);
+          console.log('MEMBER_SCHEMA_LIFECYCLE_TRACKED_MIGRATION_COUNT='+result.receipt.lifecycle_tracked_migration_count);
+          console.log('MEMBER_SCHEMA_TOTAL_REQUIRED_TABLE_COUNT='+result.receipt.total_required_table_count);
+          console.log('MEMBER_SCHEMA_TOTAL_REQUIRED_MIGRATION_COUNT='+result.receipt.total_required_migration_count);
+          console.log('MEMBER_SCHEMA_RUNTIME_BLOCKERS='+(result.blockers.join(',')||'NONE'));
+
+          if(!result.ready){
+            throw new Error('MEMBER_SCHEMA_RUNTIME_READINESS_BLOCKED:'+result.status+':'+result.blockers.join(','));
           }
+
           console.log('MEMBER_SCHEMA_RUNTIME_RECEIPT=ALREADY_APPLIED_CONFIRMED');
           console.log('MEMBER_PENDING_MIGRATION_COUNT=0');
-          console.log('MEMBER_SCHEMA_TABLE_COUNT=11');
-          console.log('MEMBER_SCHEMA_TRACKED_MIGRATION_COUNT=9');
+          console.log('MEMBER_SCHEMA_TABLE_COUNT=17');
+          console.log('MEMBER_SCHEMA_TRACKED_MIGRATION_COUNT=11');
           console.log('MEMBER_RUNTIME_READINESS_MODE=OBSERVE_ONLY');
           console.log('MEMBER_PRODUCTION_OWNER_APPROVED_ACTIVATION=0');
           console.log('MEMBER_PRODUCTION_ROUTE_MODE_ENABLEMENT=0');
