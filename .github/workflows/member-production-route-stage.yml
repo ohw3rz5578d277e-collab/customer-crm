@@ -8,6 +8,10 @@ on:
     paths:
       - '.github/workflows/member-production-route-stage.yml'
       - '.github/workflows/dispatch-member-production-route-stage-from-issue.yml'
+      - '.github/workflows/dispatch-production-deploy-from-issue.yml'
+      - '.github/workflows/dispatch-member-schema-apply-from-issue.yml'
+      - '.github/workflows/dispatch-member-production-runtime-secret-stage-from-issue.yml'
+      - '.github/workflows/dispatch-member-production-version-promotion-from-issue.yml'
       - 'tests/member-production-route-stage-contract.test.mjs'
   workflow_dispatch:
     inputs:
@@ -74,6 +78,10 @@ jobs:
           set -euo pipefail
           ruby -e "require 'yaml'; YAML.load_file(ARGV[0])" .github/workflows/member-production-route-stage.yml
           ruby -e "require 'yaml'; YAML.load_file(ARGV[0])" .github/workflows/dispatch-member-production-route-stage-from-issue.yml
+          ruby -e "require 'yaml'; YAML.load_file(ARGV[0])" .github/workflows/dispatch-production-deploy-from-issue.yml
+          ruby -e "require 'yaml'; YAML.load_file(ARGV[0])" .github/workflows/dispatch-member-schema-apply-from-issue.yml
+          ruby -e "require 'yaml'; YAML.load_file(ARGV[0])" .github/workflows/dispatch-member-production-runtime-secret-stage-from-issue.yml
+          ruby -e "require 'yaml'; YAML.load_file(ARGV[0])" .github/workflows/dispatch-member-production-version-promotion-from-issue.yml
 
       - name: Set up Node
         uses: actions/setup-node@v5
@@ -242,6 +250,7 @@ jobs:
             RUN_ID="$run_id" EXPECTED_PATH="$expected_path" LABEL="$label" python3 - <<'PY'
           import json, os
           with open('/tmp/'+os.environ['LABEL']+'.json', encoding='utf-8') as f: r=json.load(f)
+          label=os.environ['LABEL']
           checks={
               'id': r.get('id')==int(os.environ['RUN_ID']),
               'status': r.get('status')=='completed',
@@ -250,9 +259,13 @@ jobs:
               'event': r.get('event')=='workflow_dispatch',
               'path': r.get('path')==os.environ['EXPECTED_PATH'],
           }
+          if label=='deploy':
+              checks['display_title']=r.get('display_title')==f"CRM Production deploy {os.environ['EXPECTED_SHA']}"
+          if label=='storage_preflight':
+              checks['display_title']=r.get('display_title')=='Member Production storage binding preflight'
           bad=[k for k,v in checks.items() if not v]
-          if bad: raise SystemExit('INVALID_'+os.environ['LABEL'].upper()+'_RECEIPT:'+','.join(bad))
-          print(os.environ['LABEL'].upper()+'_RECEIPT=PASS')
+          if bad: raise SystemExit('INVALID_'+label.upper()+'_RECEIPT:'+','.join(bad))
+          print(label.upper()+'_RECEIPT=PASS')
           PY
             rm -f "/tmp/$label.json"
           }
@@ -392,6 +405,12 @@ jobs:
           EXPECTED_SHA: ${{ steps.auth.outputs.expected_sha }}
         run: |
           set -euo pipefail
+          current_main="$(git ls-remote origin refs/heads/main | awk '{print $1}')"
+          test "$current_main" = "$EXPECTED_SHA" || {
+            echo "::error::MAIN_DRIFT_BEFORE_ROUTE_STAGE_UPLOAD current=$current_main expected=$EXPECTED_SHA"
+            exit 1
+          }
+          echo 'CURRENT_MAIN_PRE_UPLOAD_GATE=PASS'
           npx wrangler versions upload \
             --config .member-production-route-stage.wrangler.jsonc \
             --name customer-crm-api \
