@@ -1,6 +1,9 @@
 // ======================================================
-// CUSTOMER CRM / LINE OPS TRACKING WRAPPER
+// CUSTOMER CRM / LINE OPS API COMPATIBILITY WRAPPER
 // build: customer-crm-api-line-ops-20260614-01
+// Canonical Owner App Shell owns all visible LINE UI.
+// This wrapper preserves historical API compatibility only and MUST NOT inject browser UI.
+// It also removes retired visual-only admin-user UI emitted by the older secure wrapper.
 // ======================================================
 
 import app from "./production-index-crm-list-workbench-safety.js";
@@ -20,6 +23,21 @@ async function addColumn(db, table, def){ try { await db.prepare(`ALTER TABLE ${
 async function all(env, sql, binds=[]){ try { const s=env.DB.prepare(sql); const r=binds.length?await s.bind(...binds).all():await s.all(); return r.results||[]; } catch(_) { return []; } }
 async function first(env, sql, binds=[]){ try { const s=env.DB.prepare(sql); return binds.length?await s.bind(...binds).first():await s.first(); } catch(_) { return null; } }
 async function run(env, sql, binds=[]){ try { const s=env.DB.prepare(sql); return binds.length?await s.bind(...binds).run():await s.run(); } catch(e){ return { error:String(e && e.message || e) }; } }
+
+export function stripLegacyAdminUserUi(html){
+  let source=String(html||"");
+  source=source.replace(/<style\b[^>]*\bid=["']crm-admin-users-style["'][^>]*>[\s\S]*?<\/style>/gi,"");
+  source=source.replace(/<div\b[^>]*\bid=["']crmUserFab["'][^>]*>[\s\S]*?<script\b[^>]*\bid=["']crm-admin-users-script["'][^>]*>[\s\S]*?<\/script>/gi,"");
+  return source;
+}
+
+async function scrubLegacyHtmlResponse(response){
+  const contentType=response?.headers?.get("content-type")||"";
+  if(!contentType.toLowerCase().includes("text/html")) return response;
+  const headers=new Headers(response.headers);
+  headers.delete("content-length");
+  return new Response(stripLegacyAdminUserUi(await response.text()),{status:response.status,statusText:response.statusText,headers});
+}
 
 async function ensureSchema(env){
   if(!env.DB) throw new Error("D1 DB binding(DB) is missing");
@@ -100,12 +118,6 @@ async function logs(env, url){
   return all(env, `SELECT * FROM crm_line_ops_logs ${id ? "WHERE line_log_id=?" : ""} ORDER BY datetime(created_at) DESC LIMIT 100`, id ? [id] : []);
 }
 
-function injectLineOpsButton(html){
-  const style = `<style id="crm-line-ops-style">.crm-lineops-fab{position:fixed;right:18px;bottom:205px;z-index:2147482100}.crm-lineops-fab button{border:0;border-radius:999px;background:#028760;color:#fff;font-weight:800;padding:12px 16px;box-shadow:0 12px 32px rgba(0,0,0,.18);cursor:pointer}.crm-lineops-panel{position:fixed;right:16px;bottom:16px;width:min(960px,calc(100vw - 32px));max-height:86vh;overflow:auto;background:#fff;border:1px solid #e5e7eb;border-radius:20px;box-shadow:0 20px 50px rgba(0,0,0,.2);z-index:2147482200;display:none;padding:16px}.crm-lineops-panel.open{display:block}.crm-lineops-grid{display:grid;grid-template-columns:repeat(6,1fr);gap:8px}.crm-lineops-card{background:#f9fafb;border:1px solid #e5e7eb;border-radius:14px;padding:10px}.crm-lineops-card b{font-size:22px}.crm-lineops-row{border:1px solid #e5e7eb;border-radius:14px;padding:10px;margin:8px 0}.crm-lineops-actions button{margin:3px;border:1px solid #e5e7eb;border-radius:10px;background:#fff;padding:8px 9px;font-weight:700}@media(max-width:760px){.crm-lineops-fab{bottom:140px;right:10px}.crm-lineops-panel{inset:8px;width:auto}.crm-lineops-grid{grid-template-columns:repeat(2,1fr)}}</style>`;
-  const script = `<script id="crm-line-ops-script">(()=>{if(window.__crmLineOps)return;window.__crmLineOps=1;const e=s=>String(s??'').replace(/[&<>]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[m]));async function api(p,o={}){const r=await fetch(p,{credentials:'same-origin',headers:{'content-type':'application/json'},...o});const j=await r.json();if(!r.ok)throw Error(j.message||'APIエラー');return j}function mount(){if(document.getElementById('lineOpsPanel'))return;document.body.insertAdjacentHTML('beforeend','<div class="crm-lineops-fab"><button id="lineOpsOpen">LINE運用</button></div><div class="crm-lineops-panel" id="lineOpsPanel"><button style="float:right" id="lineOpsClose">閉じる</button><h2>LINE送信・反応管理</h2><div id="lineOpsBody">読み込み中...</div></div>');document.getElementById('lineOpsOpen').onclick=()=>{document.getElementById('lineOpsPanel').classList.add('open');load()};document.getElementById('lineOpsClose').onclick=()=>document.getElementById('lineOpsPanel').classList.remove('open')}async function load(){const d=await api('/api/line-ops/dashboard');const s=d.stats||{};document.getElementById('lineOpsBody').innerHTML='<div class="crm-lineops-grid">'+[['未送信',s.pending],['送信済み',s.sent],['返信あり',s.replied],['返信なし',s.no_reply],['予約化',s.reserved],['合計',s.total]].map(x=>'<div class="crm-lineops-card"><b>'+e(x[1]||0)+'</b><br>'+e(x[0])+'</div>').join('')+'</div><p><button id="lineOpsReload">更新</button> <button id="lineOpsLogs">ログ</button></p><div>'+d.latest.map(r=>'<div class="crm-lineops-row"><b>'+e(r.customer_name||r.customer_id)+'</b> #'+e(r.id)+'<br><small>'+e(r.action_label||'')+' / '+e(r.status||'copied')+' / '+e(r.reply_status||'unknown')+(r.led_to_reservation?' / 予約化':'')+'</small><p>'+e(r.message_preview||'')+'</p><div class="crm-lineops-actions"><button data-sent="'+r.id+'">送信済み</button><button data-rep="'+r.id+'">返信あり</button><button data-no="'+r.id+'">返信なし</button><button data-rsv="'+r.id+'">予約化</button></div></div>').join('')+'</div>';bind()}function bind(){document.getElementById('lineOpsReload').onclick=load;document.getElementById('lineOpsLogs').onclick=async()=>{const l=await api('/api/line-ops/logs');document.getElementById('lineOpsBody').innerHTML='<pre>'+e(JSON.stringify(l,null,2))+'</pre>'};document.querySelectorAll('[data-sent]').forEach(b=>b.onclick=()=>post('/api/line-ops/'+b.dataset.sent+'/mark-sent',{}));document.querySelectorAll('[data-rep]').forEach(b=>b.onclick=()=>post('/api/line-ops/'+b.dataset.rep+'/response',{reply_status:'replied'}));document.querySelectorAll('[data-no]').forEach(b=>b.onclick=()=>post('/api/line-ops/'+b.dataset.no+'/response',{reply_status:'no_reply'}));document.querySelectorAll('[data-rsv]').forEach(b=>b.onclick=()=>{const id=prompt('予約ID');if(id)post('/api/line-ops/'+b.dataset.rsv+'/link-reservation',{reservation_id:id})})}async function post(p,b){await api(p,{method:'POST',body:JSON.stringify(b)});load()}document.readyState==='loading'?document.addEventListener('DOMContentLoaded',mount):mount()})();</script>`;
-  return html.includes("</body>") ? html.replace("</body>", style + script + "</body>") : html + style + script;
-}
-
 export default {
   async fetch(request, env, ctx){
     const url = new URL(request.url);
@@ -143,10 +155,7 @@ export default {
         const u = await requireUser(request, env); if(!u.ok) return u.response;
         return json(await logs(env, url));
       }
-      const res = await app.fetch(request, env, ctx);
-      const ct = res.headers.get("content-type") || "";
-      if(request.method === "GET" && ct.includes("text/html")) return new Response(injectLineOpsButton(await res.text()), { status:res.status, headers:res.headers });
-      return res;
+      return scrubLegacyHtmlResponse(await app.fetch(request, env, ctx));
     }catch(e){
       return json({ ok:false, build:BUILD, message:String(e && e.message || e) }, 500);
     }
