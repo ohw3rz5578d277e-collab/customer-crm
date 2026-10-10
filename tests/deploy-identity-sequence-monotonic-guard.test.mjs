@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
-import { assertCustomerIdentitySequenceMonotonic } from '../scripts/assert-customer-identity-sequence-monotonic.mjs';
+import {
+  assertCustomerIdentitySequenceMonotonic,
+  assertDeployCurrentMainStable
+} from '../scripts/assert-customer-identity-sequence-monotonic.mjs';
 
 function pass(name, payload) {
   const out = assertCustomerIdentitySequenceMonotonic(JSON.stringify(payload));
@@ -48,5 +51,53 @@ pass('CASE 12 nested wrangler result shape PASS', {
 fail('CASE 13 multiple conflicting canonical rows FAIL', {
   results: [row(500, 499), row(499, 500)]
 }, /multiple_canonical_rows/);
+
+const sha='9096da7f66a37b1f79ada9b287d220c5cfbcef12';
+const other='1daa40e4f4eefd2a31628ffd780a1fe9d184ae8a';
+{
+  const out=assertDeployCurrentMainStable({
+    releaseMode:'preflight',
+    expectedSha:'not-required',
+    checkoutSha:'not-required',
+    remoteMainOutput:'not-required'
+  });
+  assert.equal(out.checked,false,'preflight must not invoke late deploy main guard');
+}
+{
+  const out=assertDeployCurrentMainStable({
+    releaseMode:'deploy',
+    expectedSha:sha,
+    checkoutSha:sha,
+    remoteMainOutput:`${sha}\trefs/heads/main\n`
+  });
+  assert.equal(out.checked,true);
+  assert.equal(out.expected_sha,sha);
+  assert.equal(out.checkout_sha,sha);
+  assert.equal(out.current_main_sha,sha);
+}
+assert.throws(() => assertDeployCurrentMainStable({
+  releaseMode:'deploy',
+  expectedSha:sha,
+  checkoutSha:sha,
+  remoteMainOutput:`${other}\trefs/heads/main\n`
+}), /BLOCKED_FINAL_CURRENT_MAIN_SHA_MISMATCH/,'deploy must fail closed when main drifts after the initial gate');
+assert.throws(() => assertDeployCurrentMainStable({
+  releaseMode:'deploy',
+  expectedSha:sha,
+  checkoutSha:other,
+  remoteMainOutput:`${sha}\trefs\/heads\/main\n`
+}), /BLOCKED_FINAL_CHECKOUT_SHA_MISMATCH/,'deploy must fail closed if checkout no longer matches authorization');
+assert.throws(() => assertDeployCurrentMainStable({
+  releaseMode:'deploy',
+  expectedSha:'BAD',
+  checkoutSha:sha,
+  remoteMainOutput:`${sha}\trefs/heads/main\n`
+}), /deploy_current_main_expected_sha_invalid/,'deploy expected SHA must remain exact lowercase 40-hex');
+assert.throws(() => assertDeployCurrentMainStable({
+  releaseMode:'deploy',
+  expectedSha:sha,
+  checkoutSha:sha,
+  remoteMainOutput:''
+}), /deploy_current_main_remote_main_sha_invalid/,'missing remote main evidence must fail closed');
 
 console.log('deploy identity sequence monotonic guard tests PASS');
