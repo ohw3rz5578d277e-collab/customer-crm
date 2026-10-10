@@ -1,8 +1,10 @@
 import { execFileSync } from 'node:child_process';
+import { appendFileSync } from 'node:fs';
 
 const MAX_SEQUENCE = 999999;
 const SEQUENCE_KEY = 'canonical_customer_id';
 const SHA_RE = /^[0-9a-f]{40}$/;
+const CLASSIFY_CONTEXT_KEYS = ['PENDING_OUTPUT','TABLE_OUTPUT','TRACKING_OUTPUT','COLUMN_OUTPUT','INDEX_OUTPUT'];
 
 function isPlainObject(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -114,9 +116,25 @@ export function assertDeployCurrentMainStable({ releaseMode, expectedSha, checko
   };
 }
 
+export function shouldRunFinalDeployMainGuard(env = {}) {
+  const mode = String(env.RELEASE_MODE || '').trim();
+  if (mode !== 'deploy') return { run: false, reason: 'not_deploy_mode' };
+  if (String(env.FINAL_CURRENT_MAIN_GUARD_DONE || '').trim() === '1') return { run: false, reason: 'already_checked_predeploy' };
+  if (CLASSIFY_CONTEXT_KEYS.some((key) => Object.prototype.hasOwnProperty.call(env, key))) {
+    return { run: false, reason: 'classification_invocation' };
+  }
+  return { run: true, reason: 'predeploy_sequence_invocation' };
+}
+
+function markFinalDeployMainGuardDone() {
+  process.env.FINAL_CURRENT_MAIN_GUARD_DONE = '1';
+  const githubEnv = String(process.env.GITHUB_ENV || '').trim();
+  if (githubEnv) appendFileSync(githubEnv, 'FINAL_CURRENT_MAIN_GUARD_DONE=1\n', 'utf8');
+}
+
 function verifyDeployCurrentMainFromGit() {
-  const mode = String(process.env.RELEASE_MODE || '').trim();
-  if (mode !== 'deploy') return { checked: false, mode };
+  const decision = shouldRunFinalDeployMainGuard(process.env);
+  if (!decision.run) return { checked: false, mode: String(process.env.RELEASE_MODE || '').trim(), skip_reason: decision.reason };
 
   let checkoutSha;
   let remoteMainOutput;
@@ -128,12 +146,14 @@ function verifyDeployCurrentMainFromGit() {
     throw new Error(`deploy_current_main_git_query_failed: ${detail}`);
   }
 
-  return assertDeployCurrentMainStable({
-    releaseMode: mode,
+  const result = assertDeployCurrentMainStable({
+    releaseMode: process.env.RELEASE_MODE,
     expectedSha: process.env.EXPECTED_SHA,
     checkoutSha,
     remoteMainOutput
   });
+  markFinalDeployMainGuardDone();
+  return result;
 }
 
 async function readStdin() {
@@ -152,6 +172,8 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       console.log(`FINAL_DEPLOY_CURRENT_MAIN_SHA=${deployMain.current_main_sha}`);
       console.log(`FINAL_DEPLOY_EXPECTED_SHA=${deployMain.expected_sha}`);
       console.log('FINAL_CURRENT_MAIN_GUARD=PASS');
+    } else if (String(process.env.RELEASE_MODE || '').trim() === 'deploy') {
+      console.log(`FINAL_CURRENT_MAIN_GUARD_SKIPPED=${deployMain.skip_reason}`);
     }
     console.log(`Customer identity sequence monotonic guard passed: last_value=${result.last_value}, existing_numeric_suffix_max=${result.existing_numeric_suffix_max}, ahead_by=${result.ahead_by}`);
   } catch (error) {
