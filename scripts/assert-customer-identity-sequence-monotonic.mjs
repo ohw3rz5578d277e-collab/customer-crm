@@ -1,5 +1,10 @@
+import { execFileSync } from 'node:child_process';
+import { appendFileSync } from 'node:fs';
+
 const MAX_SEQUENCE = 999999;
 const SEQUENCE_KEY = 'canonical_customer_id';
+const SHA_RE = /^[0-9a-f]{40}$/;
+const CLASSIFY_CONTEXT_KEYS = ['PENDING_OUTPUT','TABLE_OUTPUT','TRACKING_OUTPUT','COLUMN_OUTPUT','INDEX_OUTPUT'];
 
 function isPlainObject(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -29,6 +34,18 @@ function walk(value, visit) {
   if (!isPlainObject(value)) return;
   visit(value);
   for (const item of Object.values(value)) walk(item, visit);
+}
+
+function normalizeSha(value, label) {
+  const sha = String(value == null ? '' : value).trim().toLowerCase();
+  if (!SHA_RE.test(sha)) throw new Error(`deploy_current_main_${label}_sha_invalid`);
+  return sha;
+}
+
+function remoteMainShaFromLsRemote(raw) {
+  const line = String(raw == null ? '' : raw).trim().split(/\r?\n/).find(Boolean) || '';
+  const sha = line.split(/\s+/)[0] || '';
+  return normalizeSha(sha, 'remote_main');
 }
 
 export function findCanonicalSequenceRows(parsed) {
@@ -75,6 +92,70 @@ export function assertCustomerIdentitySequenceMonotonic(rawOutput) {
   };
 }
 
+export function assertDeployCurrentMainStable({ releaseMode, expectedSha, checkoutSha, remoteMainOutput } = {}) {
+  const mode = String(releaseMode == null ? '' : releaseMode).trim();
+  if (mode !== 'deploy') return { checked: false, mode };
+
+  const expected = normalizeSha(expectedSha, 'expected');
+  const checkout = normalizeSha(checkoutSha, 'checkout');
+  const remoteMain = remoteMainShaFromLsRemote(remoteMainOutput);
+
+  if (checkout !== expected) {
+    throw new Error(`BLOCKED_FINAL_CHECKOUT_SHA_MISMATCH:current=${checkout}:expected=${expected}`);
+  }
+  if (remoteMain !== expected) {
+    throw new Error(`BLOCKED_FINAL_CURRENT_MAIN_SHA_MISMATCH:current=${remoteMain}:expected=${expected}`);
+  }
+
+  return {
+    checked: true,
+    mode,
+    expected_sha: expected,
+    checkout_sha: checkout,
+    current_main_sha: remoteMain
+  };
+}
+
+export function shouldRunFinalDeployMainGuard(env = {}) {
+  const mode = String(env.RELEASE_MODE || '').trim();
+  if (mode !== 'deploy') return { run: false, reason: 'not_deploy_mode' };
+  if (String(env.FINAL_CURRENT_MAIN_GUARD_DONE || '').trim() === '1') return { run: false, reason: 'already_checked_predeploy' };
+  if (CLASSIFY_CONTEXT_KEYS.some((key) => Object.prototype.hasOwnProperty.call(env, key))) {
+    return { run: false, reason: 'classification_invocation' };
+  }
+  return { run: true, reason: 'predeploy_sequence_invocation' };
+}
+
+function markFinalDeployMainGuardDone() {
+  process.env.FINAL_CURRENT_MAIN_GUARD_DONE = '1';
+  const githubEnv = String(process.env.GITHUB_ENV || '').trim();
+  if (githubEnv) appendFileSync(githubEnv, 'FINAL_CURRENT_MAIN_GUARD_DONE=1\n', 'utf8');
+}
+
+function verifyDeployCurrentMainFromGit() {
+  const decision = shouldRunFinalDeployMainGuard(process.env);
+  if (!decision.run) return { checked: false, mode: String(process.env.RELEASE_MODE || '').trim(), skip_reason: decision.reason };
+
+  let checkoutSha;
+  let remoteMainOutput;
+  try {
+    checkoutSha = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+    remoteMainOutput = execFileSync('git', ['ls-remote', 'origin', 'refs/heads/main'], { encoding: 'utf8' });
+  } catch (error) {
+    const detail = error && error.message ? error.message : String(error);
+    throw new Error(`deploy_current_main_git_query_failed: ${detail}`);
+  }
+
+  const result = assertDeployCurrentMainStable({
+    releaseMode: process.env.RELEASE_MODE,
+    expectedSha: process.env.EXPECTED_SHA,
+    checkoutSha,
+    remoteMainOutput
+  });
+  markFinalDeployMainGuardDone();
+  return result;
+}
+
 async function readStdin() {
   const chunks = [];
   for await (const chunk of process.stdin) chunks.push(chunk);
@@ -85,6 +166,15 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   try {
     const input = await readStdin();
     const result = assertCustomerIdentitySequenceMonotonic(input);
+    const deployMain = verifyDeployCurrentMainFromGit();
+    if (deployMain.checked) {
+      console.log(`FINAL_DEPLOY_CHECKOUT_SHA=${deployMain.checkout_sha}`);
+      console.log(`FINAL_DEPLOY_CURRENT_MAIN_SHA=${deployMain.current_main_sha}`);
+      console.log(`FINAL_DEPLOY_EXPECTED_SHA=${deployMain.expected_sha}`);
+      console.log('FINAL_CURRENT_MAIN_GUARD=PASS');
+    } else if (String(process.env.RELEASE_MODE || '').trim() === 'deploy') {
+      console.log(`FINAL_CURRENT_MAIN_GUARD_SKIPPED=${deployMain.skip_reason}`);
+    }
     console.log(`Customer identity sequence monotonic guard passed: last_value=${result.last_value}, existing_numeric_suffix_max=${result.existing_numeric_suffix_max}, ahead_by=${result.ahead_by}`);
   } catch (error) {
     console.error(error && error.message ? error.message : String(error));
