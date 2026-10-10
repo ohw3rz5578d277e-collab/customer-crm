@@ -66,6 +66,7 @@ jobs:
           THIS_RUN_ID: ${{ github.run_id }}
         run: |
           set -euo pipefail
+          sleep 2
           workflows=(
             dispatch-production-deploy-from-issue.yml
             dispatch-member-schema-apply-from-issue.yml
@@ -90,12 +91,37 @@ jobs:
                 continue
               fi
               test "$code" = 200 || { cat /tmp/member-route-stage-conflicts.json >&2 || true; exit 1; }
-              conflicts="$(WORKFLOW="$workflow" THIS_RUN_ID="$THIS_RUN_ID" python3 - <<'PY'
+              conflicts="$(
+                WORKFLOW="$workflow" THIS_RUN_ID="$THIS_RUN_ID" python3 - <<'PY'
           import json, os
           with open('/tmp/member-route-stage-conflicts.json', encoding='utf-8') as f:
               runs=json.load(f).get('workflow_runs',[])
+          workflow=os.environ['WORKFLOW']
           me=int(os.environ['THIS_RUN_ID'])
-          print(sum(1 for r in runs if int(r.get('id',0))!=me))
+
+          direct_mutation_workflows={
+              'member-production-schema-apply.yml',
+              'member-production-runtime-secret-stage.yml',
+              'member-production-version-promotion.yml',
+              'member-production-route-stage.yml',
+          }
+
+          def is_actual_mutation(run):
+              if int(run.get('id',0))==me:
+                  return False
+              event=run.get('event')
+              title=str(run.get('display_title',''))
+              if workflow=='deploy-cloudflare.yml':
+                  return event=='workflow_dispatch' and not title.startswith('CRM Production preflight ')
+              if workflow in direct_mutation_workflows:
+                  return event=='workflow_dispatch'
+              if workflow.startswith('dispatch-'):
+                  if title.startswith('Production read-only bridge:') or title=='Production bridge: ignored':
+                      return False
+                  return title.startswith('Production mutation bridge:') or event=='issue_comment'
+              return False
+
+          print(sum(1 for run in runs if is_actual_mutation(run)))
           PY
               )"
               test "$conflicts" = 0 || { echo "::error::PRODUCTION_MUTATION_BUSY_RETRY_REQUIRED workflow=$workflow status=$status count=$conflicts"; exit 1; }
@@ -104,6 +130,7 @@ jobs:
           rm -f /tmp/member-route-stage-conflicts.json
           echo 'PRODUCTION_MUTATION_DISPATCH_GATE=FREE'
           echo 'PRODUCTION_MUTATION_QUEUE_POLICY=REJECT_AND_RETRY'
+          echo 'PRODUCTION_MUTATION_FILTER=ACTUAL_MUTATIONS_ONLY'
 
       - name: Dispatch stage-only workflow
         shell: bash
