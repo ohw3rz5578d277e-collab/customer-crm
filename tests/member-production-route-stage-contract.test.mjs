@@ -168,12 +168,18 @@ pass('issue bridge dispatches stage-only workflow',
 
 for(const file of peerConflictFiles){
   const peer=fs.readFileSync(file,'utf8');
+  const directRouteStageDispatchClassifier=
+    peer.includes('r.get("event")=="workflow_dispatch"')
+    || (
+      peer.includes("event=run.get('event')")
+      && peer.includes("return event=='workflow_dispatch'")
+    );
   pass(`${file} registers route-stage bridge as a peer mutation`,
     peer.includes('dispatch-member-production-route-stage-from-issue.yml')
   );
   pass(`${file} registers direct route-stage workflow as a peer mutation`,
     peer.includes('member-production-route-stage.yml')
-    && peer.includes('r.get("event")=="workflow_dispatch"')
+    && directRouteStageDispatchClassifier
   );
 }
 
