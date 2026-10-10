@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import {
   assertCustomerIdentitySequenceMonotonic,
-  assertDeployCurrentMainStable
+  assertDeployCurrentMainStable,
+  shouldRunFinalDeployMainGuard
 } from '../scripts/assert-customer-identity-sequence-monotonic.mjs';
 
 function pass(name, payload) {
@@ -85,7 +86,7 @@ assert.throws(() => assertDeployCurrentMainStable({
   releaseMode:'deploy',
   expectedSha:sha,
   checkoutSha:other,
-  remoteMainOutput:`${sha}\trefs\/heads\/main\n`
+  remoteMainOutput:`${sha}\trefs/heads/main\n`
 }), /BLOCKED_FINAL_CHECKOUT_SHA_MISMATCH/,'deploy must fail closed if checkout no longer matches authorization');
 assert.throws(() => assertDeployCurrentMainStable({
   releaseMode:'deploy',
@@ -99,5 +100,26 @@ assert.throws(() => assertDeployCurrentMainStable({
   checkoutSha:sha,
   remoteMainOutput:''
 }), /deploy_current_main_remote_main_sha_invalid/,'missing remote main evidence must fail closed');
+
+assert.deepEqual(
+  shouldRunFinalDeployMainGuard({RELEASE_MODE:'preflight'}),
+  {run:false,reason:'not_deploy_mode'},
+  'preflight invocation must never run the final deploy drift check'
+);
+assert.deepEqual(
+  shouldRunFinalDeployMainGuard({RELEASE_MODE:'deploy',PENDING_OUTPUT:''}),
+  {run:false,reason:'classification_invocation'},
+  'classification invocation must not consume the final predeploy drift check'
+);
+assert.deepEqual(
+  shouldRunFinalDeployMainGuard({RELEASE_MODE:'deploy'}),
+  {run:true,reason:'predeploy_sequence_invocation'},
+  'first deploy-mode sequence-only invocation must run the final drift check'
+);
+assert.deepEqual(
+  shouldRunFinalDeployMainGuard({RELEASE_MODE:'deploy',FINAL_CURRENT_MAIN_GUARD_DONE:'1'}),
+  {run:false,reason:'already_checked_predeploy'},
+  'post-deploy sequence verification must not re-run the current-main drift check'
+);
 
 console.log('deploy identity sequence monotonic guard tests PASS');
