@@ -123,9 +123,19 @@ pass('issue bridge accepts only the exact stage command shape',
 pass('issue bridge rechecks current main before dispatch',
   bridge.includes('MAIN_DRIFT expected=$expected_sha current=$current_sha')
 );
-pass('issue bridge rejects concurrent Production mutations',
+pass('issue bridge rejects concurrent actual Production mutations only',
   bridge.includes('PRODUCTION_MUTATION_BUSY_RETRY_REQUIRED')
   && bridge.includes('PRODUCTION_MUTATION_QUEUE_POLICY=REJECT_AND_RETRY')
+  && bridge.includes('PRODUCTION_MUTATION_FILTER=ACTUAL_MUTATIONS_ONLY')
+  && bridge.includes("event=='workflow_dispatch'")
+  && bridge.includes("title.startswith('Production read-only bridge:')")
+  && bridge.includes("title=='Production bridge: ignored'")
+  && bridge.includes("title.startswith('Production mutation bridge:')")
+  && bridge.includes("'member-production-route-stage.yml'")
+);
+pass('issue bridge excludes PR contracts from direct mutation workflows',
+  bridge.includes('if workflow in direct_mutation_workflows:')
+  && bridge.includes("return event=='workflow_dispatch'")
 );
 pass('issue bridge dispatches stage-only workflow',
   bridge.includes('/actions/workflows/member-production-route-stage.yml/dispatches')
@@ -134,6 +144,7 @@ pass('issue bridge dispatches stage-only workflow',
 );
 
 console.log('MEMBER_PRODUCTION_ROUTE_STAGE_CONTRACT=PASS');
+console.log('MEMBER_PRODUCTION_MUTATION_FILTER=ACTUAL_MUTATIONS_ONLY_PASS');
 console.log('CANONICAL_MEMBER_ROUTE_DEFAULT_OFF=PASS');
 console.log('STAGED_MEMBER_ROUTE_ONLY=YES');
 console.log('STAGED_LINE_LOGIN_EXTERNAL_EXCHANGE=NO');
