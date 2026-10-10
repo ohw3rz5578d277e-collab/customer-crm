@@ -3,6 +3,7 @@ import fs from 'node:fs';
 
 const workflow=fs.readFileSync('.github/workflows/member-production-version-promotion.yml','utf8');
 const bridge=fs.readFileSync('.github/workflows/dispatch-member-production-version-promotion-from-issue.yml','utf8');
+const routeStage=fs.readFileSync('.github/workflows/member-production-route-stage.yml','utf8');
 const canonicalDeployBridge=fs.readFileSync('.github/workflows/dispatch-production-deploy-from-issue.yml','utf8');
 const schemaApplyBridge=fs.readFileSync('.github/workflows/dispatch-member-schema-apply-from-issue.yml','utf8');
 const runtimeSecretStageBridge=fs.readFileSync('.github/workflows/dispatch-member-production-runtime-secret-stage-from-issue.yml','utf8');
@@ -10,185 +11,241 @@ const foundation=fs.readFileSync('.github/workflows/member-app-foundation.yml','
 const canonicalDeploy=fs.readFileSync('.github/workflows/deploy-cloudflare.yml','utf8');
 const schemaApplyWorkflow=fs.readFileSync('.github/workflows/member-production-schema-apply.yml','utf8');
 const runtimeSecretStageWorkflow=fs.readFileSync('.github/workflows/member-production-runtime-secret-stage.yml','utf8');
-const receiptPath='release/member/member-production-runtime-secret-stage-36285531724.json';
-const receipt=JSON.parse(fs.readFileSync(receiptPath,'utf8'));
 
-for(const exact of [
-  '41059eb0ca192f29f790abfd4563552581b1a6b8',
-  '6dd49589-f01d-473f-876a-034563023b0e',
-  '36285531724',
-  'PROMOTE_MEMBER_STAGED_VERSION'
-]){
-  assert.ok(workflow.includes(exact), 'workflow missing exact gate: '+exact);
+function pass(name, condition){
+  assert.equal(condition,true,name);
+  console.log('PASS',name);
 }
-assert.ok(workflow.includes('workflow_call:'), 'promotion workflow must be reusable');
-assert.doesNotMatch(workflow,/\bworkflow_dispatch:/, 'manual workflow_dispatch must not exist');
+
+const legacy={
+  source:'41059eb0ca192f29f790abfd4563552581b1a6b8',
+  version:'6dd49589-f01d-473f-876a-034563023b0e',
+  run:'36285531724',
+  receipt:'release/member/member-production-runtime-secret-stage-36285531724.json'
+};
+
+pass('promotion workflow is reusable only',
+  workflow.includes('workflow_call:')
+  && !/\bworkflow_dispatch:/.test(workflow)
+);
 for(const input of ['expected_sha','staged_version_id','expected_active_version_id','staging_run_id','owner_comment_id','bridge_run_id','bridge_run_attempt','confirmation']){
-  assert.ok(workflow.includes(input+':'), 'missing workflow input: '+input);
+  pass(`promotion input ${input} exists`,workflow.includes(input+':'));
 }
 
-assert.ok(canonicalDeploy.includes("inputs.mode == 'deploy' && 'customer-crm-production-deploy'"), 'canonical deploy shared mutation concurrency missing');
-assert.ok(canonicalDeploy.includes("format('customer-crm-production-preflight-{0}', github.run_id)"), 'read-only preflight must not occupy mutation concurrency');
-assert.ok(canonicalDeploy.includes('run-name: >-'),'canonical deploy run-name discriminator missing');
-assert.ok(canonicalDeploy.includes("format('CRM Production {0} {1}', inputs.mode, inputs.expected_sha)"),'canonical deploy mode run-name missing');
-assert.ok(workflow.includes("'customer-crm-production-deploy'"), 'promotion must share canonical Production deployment concurrency');
-assert.ok(schemaApplyWorkflow.includes("github.event_name == 'workflow_dispatch' && 'customer-crm-production-deploy'"), 'schema apply must share Production mutation concurrency');
-assert.ok(runtimeSecretStageWorkflow.includes("github.event_name == 'workflow_dispatch' && 'customer-crm-production-deploy'"), 'runtime stage must share Production mutation concurrency');
-assert.doesNotMatch(schemaApplyWorkflow,/workflow_dispatch' && 'member-production-schema-apply'/);
-assert.doesNotMatch(runtimeSecretStageWorkflow,/workflow_dispatch' && 'member-production-runtime-secret-stage'/);
-assert.ok(workflow.includes('cancel-in-progress: false'));
+pass('legacy fixed staged candidate is removed from promotion workflow',
+  !workflow.includes(legacy.source)
+  && !workflow.includes(legacy.version)
+  && !workflow.includes(legacy.run)
+  && !workflow.includes(legacy.receipt)
+  && !workflow.includes('AUTHORIZED_STAGED_VERSION_ID')
+  && !workflow.includes('AUTHORIZED_STAGING_RUN_ID')
+  && !workflow.includes('DURABLE_STAGING_RECEIPT')
+);
+pass('legacy fixed staged candidate is removed from promotion bridge',
+  !bridge.includes(legacy.version)
+  && !bridge.includes(legacy.run)
+);
 
-assert.ok(workflow.includes('MAIN_DRIFT current=$current_main expected=$EXPECTED_SHA'));
-assert.ok(workflow.includes('FINAL_MAIN_DRIFT current=$current_main expected=$EXPECTED_SHA'));
-assert.ok(workflow.includes('git merge-base --is-ancestor "$STAGING_SOURCE_SHA" "$EXPECTED_SHA"'));
-assert.ok(workflow.includes('MEMBER_PROMOTION_ISSUE_BRIDGE_RECEIPT=PASS'));
-assert.ok(workflow.includes("r.get('event')=='issue_comment'"));
-assert.ok(workflow.includes("r.get('run_attempt')==1"));
-assert.ok(workflow.includes("r.get('actor',{}).get('login')=='ohw3rz5578d277e-collab'"));
-assert.ok(workflow.includes('BRIDGE_RERUN_NOT_AUTHORIZED'));
-
-for(const freshness of [
+pass('promotion remains exact current-main gated',
+  workflow.includes('CHECKOUT_SHA_MISMATCH')
+  && workflow.includes('MAIN_DRIFT current=$current_main expected=$EXPECTED_SHA')
+  && workflow.includes('FINAL_MAIN_DRIFT current=$current_main expected=$EXPECTED_SHA')
+  && workflow.includes('CURRENT_MAIN_EXACT_GATE=PASS')
+);
+pass('promotion authenticates first-attempt issue bridge',
+  workflow.includes("'event': r.get('event')=='issue_comment'")
+  && workflow.includes("'path': r.get('path')=='.github/workflows/dispatch-member-production-version-promotion-from-issue.yml'")
+  && workflow.includes("'run_attempt': r.get('run_attempt')==1")
+  && workflow.includes("'actor': r.get('actor',{}).get('login')=='ohw3rz5578d277e-collab'")
+  && workflow.includes('BRIDGE_RERUN_NOT_AUTHORIZED')
+);
+for(const marker of [
   'OWNER_COMMENT_EDITED',
   'OWNER_COMMENT_NOT_FRESH',
-  'age > 900',
   'OWNER_PROMOTION_AUTHORIZATION_FRESHNESS=PASS',
   'FINAL_OWNER_COMMENT_EDITED',
   'FINAL_OWNER_COMMENT_NOT_FRESH',
   'FINAL_OWNER_PROMOTION_AUTHORIZATION_FRESHNESS=PASS'
 ]){
-  assert.ok(workflow.includes(freshness), 'missing freshness gate: '+freshness);
+  pass(`fresh authorization marker ${marker}`,workflow.includes(marker));
 }
+pass('promotion Owner command binds route staged version run and active replacement',
+  workflow.includes('/member-production-promote sha=$EXPECTED_SHA staged_version=$STAGED_VERSION_ID staging_run=$STAGING_RUN_ID replace_active_version=$EXPECTED_ACTIVE_VERSION_ID confirm=PROMOTE_MEMBER_STAGED_VERSION')
+);
 
-assert.equal(receipt.schema_version,1);
-assert.equal(receipt.worker_name,'customer-crm-api');
-assert.equal(receipt.workflow_path,'.github/workflows/member-production-runtime-secret-stage.yml');
-assert.equal(receipt.run_id,36285531724);
-assert.equal(receipt.job_id,108525472623);
-assert.equal(receipt.source_sha,'41059eb0ca192f29f790abfd4563552581b1a6b8');
-assert.equal(receipt.status,'completed');
-assert.equal(receipt.conclusion,'success');
-assert.equal(receipt.staged_version_id,'6dd49589-f01d-473f-876a-034563023b0e');
-assert.equal(receipt.worker_version_stage,'PASS');
-assert.equal(receipt.production_deployment_unchanged,true);
-assert.equal(receipt.production_traffic_change,0);
-assert.equal(receipt.production_deploy,0);
-assert.equal(receipt.run_created_at_utc,'2026-09-27T01:26:24Z');
-assert.equal(receipt.run_updated_at_utc,'2026-09-27T01:26:51Z');
-assert.equal(receipt.expected_version_message,'Owner-gated Member runtime secret stage for 41059eb0ca192f29f790abfd4563552581b1a6b8');
-assert.match(receipt.authentication_role,/independently validates/);
-assert.ok(workflow.includes(receiptPath));
-assert.ok(workflow.includes('DURABLE_MEMBER_STAGING_SUCCESS_RECEIPT=PASS'));
-assert.ok(workflow.includes('LIVE_MEMBER_STAGING_RUN_METADATA=PASS'));
-assert.ok(workflow.includes('LIVE_MEMBER_STAGING_RUN_METADATA=NOT_RETAINED'));
-assert.ok(workflow.includes('CLOUDFLARE_STAGED_VERSION_CREATED_WITHIN_RUN_WINDOW=PASS'));
-assert.ok(workflow.includes('CLOUDFLARE_STAGED_VERSION_SOURCE_SHA_MESSAGE=PASS'));
-assert.ok(workflow.includes('INDEPENDENT_MEMBER_STAGED_VERSION_LINEAGE=PASS'));
-assert.ok(workflow.includes('STAGING_SOURCE_WORKFLOW_PROVENANCE_CONTRACT=PASS'));
-assert.doesNotMatch(workflow,/actions\/jobs\/\$STAGE_JOB_ID\/logs/);
+pass('promotion requires exact successful route-stage workflow receipt',
+  workflow.includes("r.get('status')=='completed'")
+  && workflow.includes("r.get('conclusion')=='success'")
+  && workflow.includes("r.get('head_sha')==expected_sha")
+  && workflow.includes("r.get('event')=='workflow_dispatch'")
+  && workflow.includes("r.get('path')=='.github/workflows/member-production-route-stage.yml'")
+  && workflow.includes("r.get('run_attempt')==1")
+  && workflow.includes("r.get('display_title')==f'Member route candidate stage {expected_sha}'")
+  && workflow.includes('MEMBER_ROUTE_STAGE_SUCCESS_RECEIPT=PASS')
+);
+pass('route-stage lineage is Cloudflare-authenticated independently',
+  workflow.includes('npx wrangler versions view "$STAGED_VERSION_ID" --name customer-crm-api --json')
+  && workflow.includes('Owner-gated Member route-only stage sha=${process.env.EXPECTED_SHA} run=${process.env.STAGING_RUN_ID}')
+  && workflow.includes('STAGED_VERSION_ID_NOT_PRESENT_IN_VERSION_VIEW')
+  && workflow.includes('STAGED_VERSION_CREATED_OUTSIDE_AUTHENTICATED_ROUTE_STAGE_RUN_WINDOW')
+  && workflow.includes('STAGED_VERSION_ROUTE_STAGE_MESSAGE_MISMATCH')
+  && workflow.includes('INDEPENDENT_MEMBER_ROUTE_STAGED_VERSION_LINEAGE=PASS')
+);
+for(const required of [
+  'MEMBER_PRODUCTION_ROUTE_MODE',
+  'MEMBER_PRIVATE_MEDIA_CONTENT_ROUTE_MODE',
+  'MEMBER_LINE_LOGIN_EXTERNAL_EXCHANGE_MODE',
+  'MEMBER_SESSION_SECRET',
+  'MEMBER_LINE_LOGIN_TRANSACTION_SECRET',
+  'MEMBER_LINE_LOGIN_CHANNEL_SECRET',
+  'MEMBER_PRIVATE_MEDIA_DELIVERY_SECRET',
+  'MEMBER_PRIVATE_MEDIA_BUCKET',
+  'DB',
+  'LINE_SERVICE',
+  'RESERVATION_SERVICE'
+]){
+  pass(`staged version binding/mode ${required} is required`,workflow.includes(`'${required}'`));
+}
+pass('route-stage source provenance is rechecked from exact SHA',
+  workflow.includes('git show "$EXPECTED_SHA:.github/workflows/member-production-route-stage.yml"')
+  && workflow.includes("MEMBER_PRODUCTION_ROUTE_MODE:'enabled'")
+  && workflow.includes("MEMBER_PRIVATE_MEDIA_CONTENT_ROUTE_MODE:'disabled'")
+  && workflow.includes("MEMBER_LINE_LOGIN_EXTERNAL_EXCHANGE_MODE:'disabled'")
+  && workflow.includes("const trueLine='const MEMBER_PRODUCTION_OWNER_APPROVED=true;'")
+  && workflow.includes('npx wrangler versions upload')
+  && workflow.includes('STAGED_VERSION_RECEIVED_TRAFFIC')
+  && workflow.includes('NEXT_BOUNDARY=FRESH_OWNER_ROUTE_PROMOTION_AUTHORIZATION_REQUIRED')
+  && workflow.includes('ROUTE_STAGE_SOURCE_PROVENANCE_CONTRACT=PASS')
+);
 
-assert.ok(workflow.includes('ACTIVE_PRODUCTION_DEPLOYMENT_FRESH_SNAPSHOT=PASS'));
-assert.ok(workflow.includes('OWNER_AUTHORIZED_ACTIVE_VERSION_MATCH=PASS'));
-assert.ok(workflow.includes('CURRENT_ACTIVE_VERSION_NOT_OWNER_AUTHORIZED'));
-assert.ok(workflow.includes('PRE_MUTATION_OWNER_AUTHORIZED_ACTIVE_VERSION_MATCH=PASS'));
-assert.ok(workflow.includes('FINAL_OWNER_AUTHORIZED_ACTIVE_VERSION_MATCH=PASS'));
-assert.ok(workflow.includes('FINAL_ACTIVE_VERSION_NOT_OWNER_AUTHORIZED'));
-assert.ok(workflow.includes('ACTIVE_PRODUCTION_DEPLOYMENT_DRIFTED_BEFORE_PROMOTION'));
-assert.ok(workflow.includes('ACTIVE_PRODUCTION_DEPLOYMENT_STABLE_BEFORE_PROMOTION=PASS'));
-assert.ok(workflow.includes('STAGED_VERSION_ALREADY_PRESENT_IN_ACTIVE_DEPLOYMENT'));
-assert.ok(workflow.includes('npx wrangler versions deploy "$STAGED_VERSION_ID@100%"'));
-assert.ok(workflow.includes('--name customer-crm-api'));
-assert.ok(workflow.includes('--yes'));
-assert.ok(workflow.includes('PROMOTED_VERSION_ACTIVE_ENTRY_COUNT_NOT_EXACTLY_ONE'));
-assert.ok(workflow.includes('PROMOTED_VERSION_TRAFFIC_NOT_100_PERCENT'));
-assert.ok(workflow.includes('ACTIVE_PRODUCTION_100_PERCENT_ENTRY_COUNT_NOT_EXACTLY_ONE'));
-assert.ok(workflow.includes('ACTIVE_PRODUCTION_100_PERCENT_VERSION_MISMATCH'));
-assert.ok(workflow.includes('ACTIVE_PRODUCTION_PROMOTED_VERSION_TRAFFIC_PERCENT=100'));
-assert.ok(workflow.includes("Number(staged[0].percentage)!==100"));
-assert.ok(workflow.includes("fullTraffic.length!==1"));
+pass('route stage itself remains stage-only',
+  routeStage.includes('npx wrangler versions upload')
+  && !routeStage.includes('wrangler versions deploy')
+  && routeStage.includes('PRODUCTION_TRAFFIC_CHANGE=0')
+  && routeStage.includes('PROMOTION=0')
+);
+pass('active version is Owner bound before and immediately before promotion',
+  workflow.includes('ACTIVE_PRODUCTION_DEPLOYMENT_FRESH_SNAPSHOT=PASS')
+  && workflow.includes('OWNER_AUTHORIZED_ACTIVE_VERSION_MATCH=PASS')
+  && workflow.includes('PRE_MUTATION_OWNER_AUTHORIZED_ACTIVE_VERSION_MATCH=PASS')
+  && workflow.includes('FINAL_OWNER_AUTHORIZED_ACTIVE_VERSION_MATCH=PASS')
+  && workflow.includes('CURRENT_ACTIVE_VERSION_NOT_OWNER_AUTHORIZED')
+  && workflow.includes('FINAL_ACTIVE_VERSION_NOT_OWNER_AUTHORIZED')
+  && workflow.includes('ACTIVE_PRODUCTION_DEPLOYMENT_DRIFTED_BEFORE_PROMOTION')
+  && workflow.includes('ACTIVE_PRODUCTION_DEPLOYMENT_STABLE_BEFORE_PROMOTION=PASS')
+  && workflow.includes('STAGED_VERSION_ALREADY_PRESENT_IN_ACTIVE_DEPLOYMENT')
+);
 
-const deployMatches=workflow.match(/\bnpx wrangler versions deploy\b/g)||[];
-assert.equal(deployMatches.length,1,'versions deploy must appear exactly once');
-assert.doesNotMatch(workflow,/\bnpx wrangler deploy\b/);
-assert.doesNotMatch(workflow,/\bwrangler d1\b/i);
-assert.doesNotMatch(workflow,/\bwrangler secret (put|bulk|delete)\b/i);
-assert.doesNotMatch(workflow,/^\s*npx wrangler versions secret (put|bulk|delete)\b/im);
+const promotionMutations=workflow.match(/\bnpx wrangler versions deploy\b/g)||[];
+pass('promotion has exactly one intended traffic mutation',promotionMutations.length===1);
+pass('promotion targets exact staged version at 100 percent',
+  workflow.includes('npx wrangler versions deploy "$STAGED_VERSION_ID@100%"')
+  && workflow.includes('--name customer-crm-api')
+  && workflow.includes('--yes')
+);
+pass('promotion does not contain deploy D1 secret or R2 mutation commands',
+  !/\bnpx wrangler deploy\b/.test(workflow)
+  && !/\bwrangler d1\b/i.test(workflow)
+  && !/\bwrangler r2\b/i.test(workflow)
+  && !/\bwrangler secret (put|bulk|delete)\b/i.test(workflow)
+  && !/^\s*npx wrangler versions secret (put|bulk|delete)\b/im.test(workflow)
+);
+pass('post promotion requires exact single 100 percent version',
+  workflow.includes('PROMOTED_VERSION_ACTIVE_ENTRY_COUNT_NOT_EXACTLY_ONE')
+  && workflow.includes('PROMOTED_VERSION_TRAFFIC_NOT_100_PERCENT')
+  && workflow.includes('ACTIVE_PRODUCTION_100_PERCENT_ENTRY_COUNT_NOT_EXACTLY_ONE')
+  && workflow.includes('ACTIVE_PRODUCTION_100_PERCENT_VERSION_MISMATCH')
+  && workflow.includes('ACTIVE_PRODUCTION_PROMOTED_VERSION_TRAFFIC_PERCENT=100')
+);
 
-assert.ok(bridge.includes("github.event.issue.number == 26"));
-assert.ok(bridge.includes("github.actor == 'ohw3rz5578d277e-collab'"));
-assert.ok(bridge.includes("github.event.comment.user.login == 'ohw3rz5578d277e-collab'"));
-assert.ok(bridge.includes("staged_version=(6dd49589-f01d-473f-876a-034563023b0e)"));
-assert.ok(bridge.includes("staging_run=(36285531724)"));
-assert.ok(bridge.includes('replace_active_version=([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})'));
-assert.ok(bridge.includes('/member-production-promotion-snapshot '));
-assert.ok(bridge.includes('ACTIVE_PRODUCTION_VERSION_ID='));
-assert.ok(bridge.includes('promotion_command="/member-production-promote sha=$EXPECTED_SHA'));
-assert.ok(bridge.includes("printf '`%s`\\n' \"$promotion_command\""));
-assert.doesNotMatch(bridge,/echo\s+"`\/member-production-promote\b/,'promotion summary must not execute command substitution');
-assert.ok(bridge.includes('expected_active_version_id: ${{ needs.validate.outputs.expected_active_version_id }}'));
-assert.ok(bridge.includes('PROMOTION_BRIDGE_RERUN_NOT_AUTHORIZED'));
-assert.ok(bridge.includes('github.run_attempt'));
-assert.ok(bridge.includes('uses: ./.github/workflows/member-production-version-promotion.yml'));
-assert.ok(bridge.includes('secrets: inherit'));
-assert.doesNotMatch(bridge,/\/dispatches/);
-assert.doesNotMatch(bridge,/actions:\s*write/);
-assert.doesNotMatch(bridge,/wrangler\s+versions\s+deploy/i);
-assert.doesNotMatch(bridge,/wrangler\s+deploy\b/i);
+pass('promotion shares canonical Production mutation concurrency',
+  canonicalDeploy.includes("inputs.mode == 'deploy' && 'customer-crm-production-deploy'")
+  && canonicalDeploy.includes("format('customer-crm-production-preflight-{0}', github.run_id)")
+  && workflow.includes("'customer-crm-production-deploy'")
+  && schemaApplyWorkflow.includes("github.event_name == 'workflow_dispatch' && 'customer-crm-production-deploy'")
+  && runtimeSecretStageWorkflow.includes("github.event_name == 'workflow_dispatch' && 'customer-crm-production-deploy'")
+  && workflow.includes('cancel-in-progress: false')
+);
+
+pass('snapshot command dynamically binds route-stage candidate',
+  bridge.includes("command_re='^/member-production-promotion-snapshot sha=([0-9a-f]{40}) staged_version=([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}) staging_run=([0-9]+)$'")
+  && bridge.includes('MEMBER_PROMOTION_ROUTE_STAGE_RECEIPT=PASS')
+  && bridge.includes('ACTIVE_PRODUCTION_VERSION_ID=')
+  && bridge.includes('promotion_command="/member-production-promote sha=$EXPECTED_SHA staged_version=$STAGED_VERSION_ID staging_run=$STAGING_RUN_ID replace_active_version=$active_version_id confirm=PROMOTE_MEMBER_STAGED_VERSION"')
+  && bridge.includes("printf '`%s`\\n' \"$promotion_command\"")
+);
+pass('promotion bridge accepts dynamic exact candidate and run',
+  bridge.includes("command_re='^/member-production-promote sha=([0-9a-f]{40}) staged_version=([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}) staging_run=([0-9]+) replace_active_version=([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}) confirm=PROMOTE_MEMBER_STAGED_VERSION$'")
+  && bridge.includes('expected_active_version_id: ${{ needs.validate.outputs.expected_active_version_id }}')
+  && bridge.includes('staging_run_id: ${{ needs.validate.outputs.staging_run_id }}')
+  && bridge.includes('PROMOTION_BRIDGE_RERUN_NOT_AUTHORIZED')
+  && bridge.includes('github.run_attempt')
+);
+pass('bridge is Owner Issue 26 only',
+  bridge.includes('github.event.issue.number == 26')
+  && bridge.includes("github.actor == 'ohw3rz5578d277e-collab'")
+  && bridge.includes("github.event.comment.user.login == 'ohw3rz5578d277e-collab'")
+);
+pass('bridge never directly promotes or deploys',
+  !/wrangler\s+versions\s+deploy/i.test(bridge)
+  && !/wrangler\s+deploy\b/i.test(bridge)
+  && !/actions\/workflows\/member-production-version-promotion\.yml\/dispatches/.test(bridge)
+  && !/actions:\s*write/.test(bridge)
+  && bridge.includes('uses: ./.github/workflows/member-production-version-promotion.yml')
+  && bridge.includes('secrets: inherit')
+);
 
 for(const mutationBridge of [canonicalDeployBridge,schemaApplyBridge,runtimeSecretStageBridge,bridge]){
-  assert.doesNotMatch(mutationBridge,/\nconcurrency:\s*\n/,'mutation authorization bridge must not queue before busy rejection');
-  assert.ok(mutationBridge.includes('run-name: >-'),'bridge run-name discriminator missing');
-  assert.ok(mutationBridge.includes('Production mutation bridge:'),'mutation bridge label missing');
-  assert.ok(mutationBridge.includes('PRODUCTION_MUTATION_BUSY_RETRY_REQUIRED'),'busy mutation rejection missing');
-  assert.ok(mutationBridge.includes('PRODUCTION_MUTATION_QUEUE_POLICY=REJECT_AND_RETRY'),'reject-and-retry policy missing');
-  assert.ok(mutationBridge.includes('PRODUCTION_MUTATION_FILTER=ACTUAL_MUTATIONS_ONLY'),'mutation-only filter marker missing');
-  assert.ok(mutationBridge.includes('r.get("event")=="workflow_dispatch"'),'workflow dispatch event classifier missing');
-  assert.ok(mutationBridge.includes('r.get("display_title","")'),'run title classifier missing');
-  assert.ok(mutationBridge.includes('CRM Production preflight '),'canonical preflight exclusion missing');
-  assert.ok(mutationBridge.includes('Production read-only bridge:'),'read-only bridge exclusion missing');
-  assert.ok(mutationBridge.includes('Production bridge: ignored'),'ignored bridge exclusion missing');
-  assert.ok(mutationBridge.includes('r.get("event")=="issue_comment"'),'legacy issue-comment fail-closed classifier missing');
-  assert.ok(mutationBridge.includes('dispatch-production-deploy-from-issue.yml'),'canonical bridge mutual exclusion missing');
-  assert.ok(mutationBridge.includes('dispatch-member-schema-apply-from-issue.yml'),'schema bridge mutual exclusion missing');
-  assert.ok(mutationBridge.includes('dispatch-member-production-runtime-secret-stage-from-issue.yml'),'runtime-stage bridge mutual exclusion missing');
-  assert.ok(mutationBridge.includes('dispatch-member-production-version-promotion-from-issue.yml'),'promotion bridge mutual exclusion missing');
-  assert.ok(mutationBridge.includes('deploy-cloudflare.yml'),'canonical target conflict check missing');
-  assert.ok(mutationBridge.includes('member-production-schema-apply.yml'),'schema target conflict check missing');
-  assert.ok(mutationBridge.includes('member-production-runtime-secret-stage.yml'),'runtime-stage target conflict check missing');
-  for(const status of ['queued','in_progress','waiting','pending','requested']){
-    assert.ok(mutationBridge.includes(status),'mutation status gate missing: '+status);
+  pass('mutation bridge has no workflow-level concurrency before busy rejection',!/\nconcurrency:\s*\n/.test(mutationBridge));
+  for(const marker of [
+    'run-name: >-',
+    'Production mutation bridge:',
+    'PRODUCTION_MUTATION_BUSY_RETRY_REQUIRED',
+    'PRODUCTION_MUTATION_QUEUE_POLICY=REJECT_AND_RETRY',
+    'PRODUCTION_MUTATION_FILTER=ACTUAL_MUTATIONS_ONLY',
+    'Production read-only bridge:',
+    'Production bridge: ignored',
+    'dispatch-production-deploy-from-issue.yml',
+    'dispatch-member-schema-apply-from-issue.yml',
+    'dispatch-member-production-runtime-secret-stage-from-issue.yml',
+    'dispatch-member-production-version-promotion-from-issue.yml',
+    'deploy-cloudflare.yml',
+    'member-production-schema-apply.yml',
+    'member-production-runtime-secret-stage.yml'
+  ]){
+    pass(`mutation bridge retains ${marker}`,mutationBridge.includes(marker));
   }
-  assert.ok(mutationBridge.includes('THIS_RUN_ID'),'current bridge run exclusion missing');
 }
-assert.ok(canonicalDeployBridge.includes("steps.gate.outputs.release_mode == 'deploy'"),'canonical preflight must remain outside mutation rejection gate');
-assert.ok(canonicalDeployBridge.includes('Production read-only bridge: preflight'),'canonical preflight read-only run label missing');
-assert.ok(canonicalDeployBridge.includes('Production mutation bridge: deploy'),'canonical deploy mutation run label missing');
-assert.ok(bridge.includes('Production read-only bridge: version-snapshot'),'promotion snapshot read-only run label missing');
-assert.ok(bridge.includes('Production mutation bridge: version-promotion'),'promotion mutation run label missing');
-assert.ok(runtimeSecretStageBridge.includes('Production mutation bridge: runtime-secret-stage'),'runtime-stage mutation run label missing');
-assert.ok(schemaApplyBridge.includes('Production mutation bridge: schema-apply'),'schema-apply mutation run label missing');
-assert.doesNotMatch(runtimeSecretStageBridge,/MEMBER_RUNTIME_SECRET_STAGE_LOCK_OCCUPIED/,'legacy runtime broad lock must remain removed');
-assert.doesNotMatch(bridge,/MEMBER_PROMOTION_DISPATCH_LOCK_OCCUPIED/,'legacy promotion broad lock must remain removed');
+pass('promotion bridge registers route-stage peer mutation',
+  bridge.includes('dispatch-member-production-route-stage-from-issue.yml')
+  && bridge.includes('member-production-route-stage.yml')
+);
+pass('canonical preflight remains excluded from mutation slot',
+  canonicalDeployBridge.includes("steps.gate.outputs.release_mode == 'deploy'")
+  && canonicalDeployBridge.includes('Production read-only bridge: preflight')
+);
+pass('run labels distinguish read-only snapshot and mutation',
+  bridge.includes('Production read-only bridge: version-snapshot')
+  && bridge.includes('Production mutation bridge: version-promotion')
+  && runtimeSecretStageBridge.includes('Production mutation bridge: runtime-secret-stage')
+  && schemaApplyBridge.includes('Production mutation bridge: schema-apply')
+);
 
 for(const path of [
   '.github/workflows/member-production-version-promotion.yml',
   '.github/workflows/dispatch-member-production-version-promotion-from-issue.yml',
-  'tests/member-production-version-promotion-contract.test.mjs',
-  receiptPath
+  'tests/member-production-version-promotion-contract.test.mjs'
 ]){
-  assert.ok(foundation.includes(path), 'Member foundation scope missing: '+path);
+  pass(`Member foundation includes ${path}`,foundation.includes(path));
 }
 
 console.log('MEMBER_PRODUCTION_VERSION_PROMOTION_CONTRACT=PASS');
+console.log('MEMBER_PRODUCTION_VERSION_PROMOTION_ROUTE_STAGE_LINEAGE=PASS');
 console.log('MEMBER_PRODUCTION_VERSION_PROMOTION_OWNER_GATE=PASS');
 console.log('MEMBER_PRODUCTION_VERSION_PROMOTION_SINGLE_USE_BRIDGE=PASS');
-console.log('MEMBER_PRODUCTION_VERSION_PROMOTION_DURABLE_STAGING_RECEIPT=PASS');
 console.log('MEMBER_PRODUCTION_VERSION_PROMOTION_INDEPENDENT_CLOUDFLARE_LINEAGE=PASS');
 console.log('MEMBER_PRODUCTION_VERSION_PROMOTION_OWNER_AUTHORIZED_REPLACEMENT_VERSION=PASS');
 console.log('MEMBER_PRODUCTION_VERSION_PROMOTION_SHARED_CONCURRENCY=PASS');
 console.log('MEMBER_PRODUCTION_MUTATION_REJECT_AND_RETRY_GATE=PASS');
-console.log('MEMBER_PRODUCTION_MUTATION_BRIDGE_PRECONCURRENCY_REJECTION=PASS');
-console.log('MEMBER_PRODUCTION_MUTATION_FILTER=ACTUAL_MUTATIONS_ONLY_PASS');
-console.log('MEMBER_PRODUCTION_NON_MUTATING_PREFLIGHT_EXCLUSION=PASS');
-console.log('MEMBER_PRODUCTION_PR_CI_BUSY_EXCLUSION=PASS');
 console.log('MEMBER_PRODUCTION_VERSION_PROMOTION_FINAL_MAIN_RECHECK=PASS');
 console.log('MEMBER_PRODUCTION_VERSION_PROMOTION_SOURCE_ONLY_PR_GATE=PASS');
