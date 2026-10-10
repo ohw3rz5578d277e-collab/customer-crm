@@ -5,6 +5,12 @@ const workflow=fs.readFileSync('.github/workflows/member-production-route-stage.
 const bridge=fs.readFileSync('.github/workflows/dispatch-member-production-route-stage-from-issue.yml','utf8');
 const entry=fs.readFileSync('src/production-index-crm-customer360-entry.js','utf8');
 const cfg=JSON.parse(fs.readFileSync('wrangler.jsonc','utf8'));
+const peerConflictFiles=[
+  '.github/workflows/dispatch-production-deploy-from-issue.yml',
+  '.github/workflows/dispatch-member-schema-apply-from-issue.yml',
+  '.github/workflows/dispatch-member-production-runtime-secret-stage-from-issue.yml',
+  '.github/workflows/dispatch-member-production-version-promotion-from-issue.yml'
+];
 
 function pass(name,condition){
   assert.equal(condition,true,name);
@@ -36,6 +42,9 @@ pass('workflow has PR contract and Owner-gated dispatch only',
   && workflow.includes('workflow_dispatch:')
   && workflow.includes("test \"$CONFIRMATION_RAW\" = 'STAGE_MEMBER_ROUTE_CANDIDATE'")
 );
+pass('workflow PR scope watches every peer mutation scan',
+  peerConflictFiles.every(file=>workflow.includes(`- '${file}'`))
+);
 pass('workflow requires exact main and exact current active version',
   workflow.includes('CURRENT_MAIN_EXACT_GATE=PASS')
   && workflow.includes('CURRENT_ACTIVE_VERSION_NOT_OWNER_AUTHORIZED')
@@ -54,8 +63,13 @@ pass('workflow requires fresh unedited exact Owner command',
 pass('workflow requires exact successful deploy receipt',
   workflow.includes("verify_run \"$DEPLOY_RUN_ID\" '.github/workflows/deploy-cloudflare.yml' 'deploy'")
 );
+pass('deploy receipt requires real deploy run title and cannot accept preflight lineage',
+  workflow.includes("checks['display_title']=r.get('display_title')==f\"CRM Production deploy {os.environ['EXPECTED_SHA']}\"")
+  && !workflow.includes("checks['display_title']=r.get('display_title')==f\"CRM Production preflight {os.environ['EXPECTED_SHA']}\"")
+);
 pass('workflow requires exact successful storage preflight receipt',
   workflow.includes("verify_run \"$STORAGE_PREFLIGHT_RUN_ID\" '.github/workflows/member-production-storage-preflight.yml' 'storage_preflight'")
+  && workflow.includes("checks['display_title']=r.get('display_title')=='Member Production storage binding preflight'")
 );
 pass('candidate patch changes Owner constant exactly and only ephemerally',
   workflow.includes("const falseLine='const MEMBER_PRODUCTION_OWNER_APPROVED=false;';")
@@ -81,6 +95,15 @@ pass('candidate cannot change resource bindings',
 pass('candidate is bundled locally before any version mutation',
   workflow.indexOf('MEMBER_ROUTE_CANDIDATE_DRY_RUN=PASS')
   < workflow.indexOf('npx wrangler versions upload')
+);
+const preUploadMainGate=workflow.indexOf('CURRENT_MAIN_PRE_UPLOAD_GATE=PASS');
+const uploadMutation=workflow.indexOf('npx wrangler versions upload');
+pass('current main is rechecked immediately before version upload mutation',
+  preUploadMainGate>=0
+  && uploadMutation>=0
+  && preUploadMainGate<uploadMutation
+  && workflow.includes('MAIN_DRIFT_BEFORE_ROUTE_STAGE_UPLOAD')
+  && workflow.slice(preUploadMainGate,uploadMutation).trim().length<200
 );
 pass('stage creates a version but never promotes traffic',
   workflow.includes('npx wrangler versions upload')
@@ -143,7 +166,21 @@ pass('issue bridge dispatches stage-only workflow',
   && bridge.includes("'confirmation':'STAGE_MEMBER_ROUTE_CANDIDATE'")
 );
 
+for(const file of peerConflictFiles){
+  const peer=fs.readFileSync(file,'utf8');
+  pass(`${file} registers route-stage bridge as a peer mutation`,
+    peer.includes('dispatch-member-production-route-stage-from-issue.yml')
+  );
+  pass(`${file} registers direct route-stage workflow as a peer mutation`,
+    peer.includes('member-production-route-stage.yml')
+    && peer.includes('r.get("event")=="workflow_dispatch"')
+  );
+}
+
 console.log('MEMBER_PRODUCTION_ROUTE_STAGE_CONTRACT=PASS');
+console.log('MEMBER_PRODUCTION_DEPLOY_LINEAGE=EXACT_DEPLOY_ONLY_PASS');
+console.log('MEMBER_PRODUCTION_PRE_UPLOAD_MAIN_GATE=PASS');
+console.log('MEMBER_PRODUCTION_PEER_MUTATION_SCANS=PASS');
 console.log('MEMBER_PRODUCTION_MUTATION_FILTER=ACTUAL_MUTATIONS_ONLY_PASS');
 console.log('CANONICAL_MEMBER_ROUTE_DEFAULT_OFF=PASS');
 console.log('STAGED_MEMBER_ROUTE_ONLY=YES');
