@@ -1,0 +1,174 @@
+name: Dispatch Member Production runtime version promotion from release-gate issue
+
+run-name: >-
+  ${{ startsWith(github.event.comment.body, '/member-runtime-version-promote ') && 'Production mutation bridge: member-runtime-version-promotion' || 'Production bridge: ignored' }}
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  issues: read
+  actions: write
+
+concurrency:
+  group: member-production-runtime-version-promotion-dispatch
+  cancel-in-progress: false
+
+jobs:
+  dispatch:
+    name: Validate exact fresh Owner runtime promotion command and dispatch
+    if: >-
+      github.event.issue.number == 26 &&
+      github.event.issue.pull_request == null &&
+      github.actor == 'ohw3rz5578d277e-collab' &&
+      github.event.comment.user.login == 'ohw3rz5578d277e-collab' &&
+      startsWith(github.event.comment.body, '/member-runtime-version-promote ')
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    outputs:
+      expected_sha: ${{ steps.gate.outputs.expected_sha }}
+      staged_version_id: ${{ steps.gate.outputs.staged_version_id }}
+      stage_run_id: ${{ steps.gate.outputs.stage_run_id }}
+      expected_active_version_id: ${{ steps.gate.outputs.expected_active_version_id }}
+      owner_comment_id: ${{ steps.gate.outputs.owner_comment_id }}
+    steps:
+      - name: Validate exact Owner command current main secret-stage receipt and first attempt
+        id: gate
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMMAND_BODY: ${{ github.event.comment.body }}
+          OWNER_COMMENT_ID: ${{ github.event.comment.id }}
+          BRIDGE_RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          test "$BRIDGE_RUN_ATTEMPT" = '1' || { echo '::error::RUNTIME_PROMOTION_BRIDGE_RERUN_NOT_AUTHORIZED'; exit 1; }
+          command_re='^/member-runtime-version-promote sha=([0-9a-f]{40}) version=([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}) stage_run=([0-9]+) replace_active_version=([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}) confirm=PROMOTE_MEMBER_RUNTIME_VERSION$'
+          [[ "$COMMAND_BODY" =~ $command_re ]] || { echo '::error::INVALID_MEMBER_RUNTIME_VERSION_PROMOTION_COMMAND'; exit 1; }
+          expected_sha="${BASH_REMATCH[1]}"
+          staged_version_id="${BASH_REMATCH[2]}"
+          stage_run_id="${BASH_REMATCH[3]}"
+          expected_active_version_id="${BASH_REMATCH[4]}"
+
+          current_sha="$(curl --fail --silent --show-error \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/commits/main" \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin)["sha"])')"
+          test "$current_sha" = "$expected_sha" || { echo "::error::MAIN_DRIFT expected=$expected_sha current=$current_sha"; exit 1; }
+
+          curl --fail --silent --show-error \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/runs/$stage_run_id" \
+            > /tmp/member-runtime-version-promotion-stage-run.json
+          EXPECTED_SHA="$expected_sha" STAGE_RUN_ID="$stage_run_id" python3 - <<'PY'
+          import json, os
+          with open('/tmp/member-runtime-version-promotion-stage-run.json', encoding='utf-8') as f:
+              r=json.load(f)
+          checks={
+              'id': r.get('id')==int(os.environ['STAGE_RUN_ID']),
+              'status': r.get('status')=='completed',
+              'conclusion': r.get('conclusion')=='success',
+              'head_sha': r.get('head_sha')==os.environ['EXPECTED_SHA'],
+              'event': r.get('event')=='workflow_dispatch',
+              'path': r.get('path')=='.github/workflows/member-production-runtime-secret-stage.yml',
+              'run_attempt': r.get('run_attempt')==1,
+          }
+          bad=[k for k,v in checks.items() if not v]
+          if bad:
+              raise SystemExit('INVALID_RUNTIME_SECRET_STAGE_RECEIPT:'+','.join(bad))
+          print('MEMBER_RUNTIME_SECRET_STAGE_RECEIPT=PASS')
+          PY
+          rm -f /tmp/member-runtime-version-promotion-stage-run.json
+
+          echo "expected_sha=$expected_sha" >> "$GITHUB_OUTPUT"
+          echo "staged_version_id=$staged_version_id" >> "$GITHUB_OUTPUT"
+          echo "stage_run_id=$stage_run_id" >> "$GITHUB_OUTPUT"
+          echo "expected_active_version_id=$expected_active_version_id" >> "$GITHUB_OUTPUT"
+          echo "owner_comment_id=$OWNER_COMMENT_ID" >> "$GITHUB_OUTPUT"
+          echo 'RUNTIME_PROMOTION_BRIDGE_FIRST_ATTEMPT=PASS'
+          echo 'PRODUCTION_TRAFFIC_CHANGE=0'
+
+      - name: Reject instead of queueing behind another Production mutation
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          THIS_RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          workflows=(
+            dispatch-production-deploy-from-issue.yml
+            dispatch-member-schema-apply-from-issue.yml
+            dispatch-member-production-runtime-secret-stage-from-issue.yml
+            dispatch-member-production-runtime-version-promotion-from-issue.yml
+            dispatch-member-production-version-promotion-from-issue.yml
+            dispatch-member-production-route-stage-from-issue.yml
+            deploy-cloudflare.yml
+            member-production-schema-apply.yml
+            member-production-runtime-secret-stage.yml
+            member-production-runtime-version-promotion.yml
+            member-production-version-promotion.yml
+            member-production-route-stage.yml
+          )
+          statuses=(queued in_progress waiting pending requested)
+          for workflow in "${workflows[@]}"; do
+            for status in "${statuses[@]}"; do
+              count="$(curl --fail --silent --show-error \
+                -H "Authorization: Bearer $GH_TOKEN" \
+                -H 'Accept: application/vnd.github+json' \
+                -H 'X-GitHub-Api-Version: 2022-11-28' \
+                "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/workflows/$workflow/runs?status=$status&per_page=100" \
+                | WORKFLOW="$workflow" THIS_RUN_ID="$THIS_RUN_ID" python3 -c 'import json,os,sys; me=int(os.environ["THIS_RUN_ID"]); runs=json.load(sys.stdin).get("workflow_runs",[]); print(sum(1 for r in runs if int(r.get("id",0))!=me))')"
+              test "$count" = '0' || { echo "::error::PRODUCTION_MUTATION_BUSY_RETRY_REQUIRED workflow=$workflow status=$status count=$count"; exit 1; }
+            done
+          done
+          echo 'PRODUCTION_MUTATION_DISPATCH_GATE=FREE'
+          echo 'PRODUCTION_MUTATION_QUEUE_POLICY=REJECT_AND_RETRY'
+
+      - name: Dispatch exact-version canonical promotion workflow
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_SHA: ${{ steps.gate.outputs.expected_sha }}
+          STAGED_VERSION_ID: ${{ steps.gate.outputs.staged_version_id }}
+          STAGE_RUN_ID: ${{ steps.gate.outputs.stage_run_id }}
+          EXPECTED_ACTIVE_VERSION_ID: ${{ steps.gate.outputs.expected_active_version_id }}
+          OWNER_COMMENT_ID: ${{ steps.gate.outputs.owner_comment_id }}
+          BRIDGE_RUN_ID: ${{ github.run_id }}
+          BRIDGE_RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          payload="$(python3 - <<'PY'
+          import json, os
+          print(json.dumps({'ref':'main','inputs':{
+            'expected_sha':os.environ['EXPECTED_SHA'],
+            'staged_version_id':os.environ['STAGED_VERSION_ID'],
+            'stage_run_id':os.environ['STAGE_RUN_ID'],
+            'expected_active_version_id':os.environ['EXPECTED_ACTIVE_VERSION_ID'],
+            'owner_comment_id':os.environ['OWNER_COMMENT_ID'],
+            'bridge_run_id':os.environ['BRIDGE_RUN_ID'],
+            'bridge_run_attempt':os.environ['BRIDGE_RUN_ATTEMPT'],
+            'confirmation':'PROMOTE_MEMBER_RUNTIME_VERSION'
+          }}))
+          PY
+          )"
+          code="$(curl --silent --show-error \
+            --output /tmp/member-runtime-version-promotion-dispatch.txt \
+            --write-out '%{http_code}' --request POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/workflows/member-production-runtime-version-promotion.yml/dispatches" \
+            -d "$payload")"
+          test "$code" = '204' || { cat /tmp/member-runtime-version-promotion-dispatch.txt >&2 || true; echo "::error::MEMBER_RUNTIME_VERSION_PROMOTION_DISPATCH_FAILED_HTTP_$code"; exit 1; }
+          rm -f /tmp/member-runtime-version-promotion-dispatch.txt
+          echo 'MEMBER_RUNTIME_VERSION_PROMOTION_DISPATCH=PASS'
+          echo 'PRODUCTION_TRAFFIC_CHANGE=0'
+          echo 'PRODUCTION_D1_WRITE=0'
+          echo 'CRM_WRITE=0'
+          echo 'LINE_SEND=0'
