@@ -1,16 +1,56 @@
 import fs from 'node:fs';
+import { createHash } from 'node:crypto';
 import { classifyLineHistoryUnresolved } from '../src/crm-line-history-unresolved-classifier.mjs';
 
+const CANONICAL_PRODUCTION_IDENTITY_SNAPSHOT='customer-crm-production-identity-snapshot-v1';
+const REQUIRED_CUSTOMER_IDENTITY_FIELDS=['customer_id','line_user_id','name','deleted_at'];
+
+function hasArg(name){return process.argv.includes(name)}
 function arg(name){const i=process.argv.indexOf(name);return i>=0?String(process.argv[i+1]||''):''}
-function readJson(path,required=true){
+function exactSha(v){return typeof v==='string'&&/^[0-9a-f]{40}$/.test(v)}
+function exactSha256(v){return typeof v==='string'&&/^[0-9a-f]{64}$/.test(v)}
+function sha256(bytes){return createHash('sha256').update(bytes).digest('hex')}
+function owns(obj,key){return Object.prototype.hasOwnProperty.call(obj,key)}
+function customerId(v){return v==null?'':String(v).trim()}
+function readJson(path,required=true,{allowCanonicalCustomers=false,bindingRequested=false,expectedSourceSha='',expectedSnapshotSha256=''}={}){
   if(!path){
     if(required)throw new Error('missing input path');
     return [];
   }
-  const raw=JSON.parse(fs.readFileSync(path,'utf8'));
+  const bytes=fs.readFileSync(path);
+  const raw=JSON.parse(bytes.toString('utf8'));
+  const isCanonicalCustomers=allowCanonicalCustomers&&raw&&typeof raw==='object'&&!Array.isArray(raw)&&raw.snapshot_format===CANONICAL_PRODUCTION_IDENTITY_SNAPSHOT;
+  if(allowCanonicalCustomers&&bindingRequested&&!isCanonicalCustomers){
+    throw new Error('canonical production identity snapshot required when binding is supplied: '+path);
+  }
   if(Array.isArray(raw)){
     if(raw.length===1&&raw[0]&&Array.isArray(raw[0].results))return raw[0].results;
     return raw;
+  }
+  if(isCanonicalCustomers){
+    const expectedSource=expectedSourceSha;
+    const expectedDigest=expectedSnapshotSha256;
+    if(!exactSha(expectedSource))throw new Error('canonical production identity snapshot expected source sha required: '+path);
+    if(!exactSha256(expectedDigest))throw new Error('canonical production identity snapshot expected sha256 required: '+path);
+    const actualSource=raw.source_main_sha;
+    if(!exactSha(actualSource))throw new Error('canonical production identity snapshot source sha invalid: '+path);
+    if(actualSource!==expectedSource)throw new Error('canonical production identity snapshot source sha mismatch: '+path);
+    if(sha256(bytes)!==expectedDigest)throw new Error('canonical production identity snapshot sha256 mismatch: '+path);
+    if(raw.complete!==true)throw new Error('canonical production identity snapshot is incomplete: '+path);
+    if(raw.query_scope!=='all_customer_identities')throw new Error('canonical production identity snapshot query scope invalid: '+path);
+    if(!Array.isArray(raw.customers))throw new Error('canonical production identity snapshot customers required: '+path);
+    if(!Number.isInteger(raw.customer_count)||raw.customer_count!==raw.customers.length)throw new Error('canonical production identity snapshot customer count mismatch: '+path);
+    if(raw.customers.length<1)throw new Error('canonical production identity snapshot customers empty: '+path);
+    const seenCustomerIds=new Set();
+    for(const row of raw.customers){
+      if(!row||typeof row!=='object'||Array.isArray(row))throw new Error('canonical production identity snapshot customer row invalid: '+path);
+      if(REQUIRED_CUSTOMER_IDENTITY_FIELDS.some(field=>!owns(row,field)))throw new Error('canonical production identity snapshot customer identity fields required: '+path);
+      const id=customerId(row.customer_id);
+      if(!id)throw new Error('canonical production identity snapshot customer id required: '+path);
+      if(seenCustomerIds.has(id))throw new Error('canonical production identity snapshot duplicate customer id: '+path);
+      seenCustomerIds.add(id);
+    }
+    return raw.customers;
   }
   if(raw&&Array.isArray(raw.results))return raw.results;
   if(raw&&raw.result&&Array.isArray(raw.result.results))return raw.result.results;
@@ -22,16 +62,24 @@ const masterPath=arg('--customer-master');
 const reviewsPath=arg('--reviews');
 const reservationPath=arg('--reservation-identities');
 const exactReservationEvidencePath=arg('--exact-reservation-evidence');
+const expectedCustomerSourceSha=arg('--expected-customer-source-sha');
+const expectedCustomerSnapshotSha256=arg('--expected-customer-snapshot-sha256');
+const customerBindingRequested=hasArg('--expected-customer-source-sha')||hasArg('--expected-customer-snapshot-sha256');
 const outPath=arg('--out')||'line-history-unresolved-triage.json';
 
 if(!candidatesPath||!customersPath){
-  console.error('Usage: node scripts/classify-line-history-unresolved.mjs --candidates candidate-snapshot.json --customers production-customers.json [--customer-master master.json] [--reviews reviews.json] [--reservation-identities reservation-identities.json] [--exact-reservation-evidence exact-reservation-evidence.json] [--out result.json]');
+  console.error('Usage: node scripts/classify-line-history-unresolved.mjs --candidates candidate-snapshot.json --customers production-customers.json [--expected-customer-source-sha <40-hex>] [--expected-customer-snapshot-sha256 <64-hex>] [--customer-master master.json] [--reviews reviews.json] [--reservation-identities reservation-identities.json] [--exact-reservation-evidence exact-reservation-evidence.json] [--out result.json]');
   process.exit(2);
 }
 
 const result=classifyLineHistoryUnresolved({
   candidates:readJson(candidatesPath),
-  customers:readJson(customersPath),
+  customers:readJson(customersPath,true,{
+    allowCanonicalCustomers:true,
+    bindingRequested:customerBindingRequested,
+    expectedSourceSha:expectedCustomerSourceSha,
+    expectedSnapshotSha256:expectedCustomerSnapshotSha256
+  }),
   customerMaster:readJson(masterPath,false),
   reviews:readJson(reviewsPath,false),
   reservationIdentities:readJson(reservationPath,false),
