@@ -14,7 +14,7 @@ permissions:
 
 jobs:
   snapshot:
-    name: Read-only Member promotion active-version snapshot
+    name: Read-only Member route-stage promotion snapshot
     if: >-
       github.event.issue.number == 26 &&
       github.event.issue.pull_request == null &&
@@ -22,9 +22,9 @@ jobs:
       github.event.comment.user.login == 'ohw3rz5578d277e-collab' &&
       startsWith(github.event.comment.body, '/member-production-promotion-snapshot ')
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 10
     steps:
-      - name: Validate read-only snapshot command and exact current main
+      - name: Validate exact read-only snapshot command current main and route-stage receipt
         id: snapshot_gate
         shell: bash
         env:
@@ -32,9 +32,11 @@ jobs:
           COMMAND_BODY: ${{ github.event.comment.body }}
         run: |
           set -euo pipefail
-          command_re='^/member-production-promotion-snapshot sha=([0-9a-f]{40})$'
+          command_re='^/member-production-promotion-snapshot sha=([0-9a-f]{40}) staged_version=([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}) staging_run=([0-9]+)$'
           [[ "$COMMAND_BODY" =~ $command_re ]] || { echo '::error::INVALID_MEMBER_PROMOTION_SNAPSHOT_COMMAND'; exit 1; }
           expected_sha="${BASH_REMATCH[1]}"
+          staged_version_id="${BASH_REMATCH[2]}"
+          staging_run_id="${BASH_REMATCH[3]}"
 
           current_sha="$(
             curl --fail --silent --show-error \
@@ -45,7 +47,38 @@ jobs:
             | python3 -c 'import json,sys; print(json.load(sys.stdin)["sha"])'
           )"
           test "$current_sha" = "$expected_sha" || { echo "::error::MAIN_DRIFT expected=$expected_sha current=$current_sha"; exit 1; }
+
+          curl --fail --silent --show-error \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/runs/$staging_run_id" \
+            > /tmp/member-promotion-snapshot-route-stage.json
+
+          EXPECTED_SHA="$expected_sha" STAGING_RUN_ID="$staging_run_id" python3 - <<'PY'
+          import json, os
+          with open('/tmp/member-promotion-snapshot-route-stage.json', encoding='utf-8') as f:
+              r=json.load(f)
+          checks={
+              'id': r.get('id')==int(os.environ['STAGING_RUN_ID']),
+              'status': r.get('status')=='completed',
+              'conclusion': r.get('conclusion')=='success',
+              'head_sha': r.get('head_sha')==os.environ['EXPECTED_SHA'],
+              'event': r.get('event')=='workflow_dispatch',
+              'path': r.get('path')=='.github/workflows/member-production-route-stage.yml',
+              'run_attempt': r.get('run_attempt')==1,
+              'display_title': r.get('display_title')==f"Member route candidate stage {os.environ['EXPECTED_SHA']}",
+          }
+          bad=[k for k,v in checks.items() if not v]
+          if bad:
+              raise SystemExit('INVALID_ROUTE_STAGE_RECEIPT:'+','.join(bad))
+          print('MEMBER_PROMOTION_ROUTE_STAGE_RECEIPT=PASS')
+          PY
+          rm -f /tmp/member-promotion-snapshot-route-stage.json
+
           echo "expected_sha=$expected_sha" >> "$GITHUB_OUTPUT"
+          echo "staged_version_id=$staged_version_id" >> "$GITHUB_OUTPUT"
+          echo "staging_run_id=$staging_run_id" >> "$GITHUB_OUTPUT"
 
       - name: Read exact current active 100 percent Worker version
         shell: bash
@@ -53,6 +86,8 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           EXPECTED_SHA: ${{ steps.snapshot_gate.outputs.expected_sha }}
+          STAGED_VERSION_ID: ${{ steps.snapshot_gate.outputs.staged_version_id }}
+          STAGING_RUN_ID: ${{ steps.snapshot_gate.outputs.staging_run_id }}
         run: |
           set -euo pipefail
           npm install --no-save wrangler@4.131.2
@@ -74,12 +109,19 @@ jobs:
             exit 1
           }
 
+          test "$active_version_id" != "$STAGED_VERSION_ID" || {
+            echo '::error::STAGED_VERSION_ALREADY_ACTIVE'
+            exit 1
+          }
+
           echo "ACTIVE_PRODUCTION_VERSION_ID=$active_version_id"
-          promotion_command="/member-production-promote sha=$EXPECTED_SHA staged_version=6dd49589-f01d-473f-876a-034563023b0e staging_run=36285531724 replace_active_version=$active_version_id confirm=PROMOTE_MEMBER_STAGED_VERSION"
+          promotion_command="/member-production-promote sha=$EXPECTED_SHA staged_version=$STAGED_VERSION_ID staging_run=$STAGING_RUN_ID replace_active_version=$active_version_id confirm=PROMOTE_MEMBER_STAGED_VERSION"
           {
-            echo '## Member Production promotion read-only snapshot'
+            echo '## Member route-stage promotion read-only snapshot'
             echo
             echo "- CURRENT_MAIN_SHA=$EXPECTED_SHA"
+            echo "- STAGED_VERSION_ID=$STAGED_VERSION_ID"
+            echo "- ROUTE_STAGE_RUN_ID=$STAGING_RUN_ID"
             echo "- ACTIVE_PRODUCTION_VERSION_ID=$active_version_id"
             echo '- PRODUCTION_TRAFFIC_CHANGE=0'
             echo '- PRODUCTION_DEPLOY=0'
@@ -89,10 +131,13 @@ jobs:
             printf '`%s`\n' "$promotion_command"
           } >> "$GITHUB_STEP_SUMMARY"
 
+          rm -f /tmp/member-promotion-snapshot.json
           echo 'MEMBER_PROMOTION_SNAPSHOT=PASS'
           echo 'PRODUCTION_TRAFFIC_CHANGE=0'
           echo 'PRODUCTION_DEPLOY=0'
           echo 'PRODUCTION_D1_WRITE=0'
+          echo 'R2_OBJECT_READ=0'
+          echo 'R2_OBJECT_WRITE=0'
 
   validate:
     name: Validate exact fresh Owner promotion command
@@ -113,7 +158,7 @@ jobs:
       bridge_run_id: ${{ steps.gate.outputs.bridge_run_id }}
       bridge_run_attempt: ${{ steps.gate.outputs.bridge_run_attempt }}
     steps:
-      - name: Validate exact Owner command current main and first attempt
+      - name: Validate exact Owner command current main route-stage receipt and first attempt
         id: gate
         shell: bash
         env:
@@ -126,7 +171,7 @@ jobs:
           set -euo pipefail
           test "$BRIDGE_RUN_ATTEMPT" = '1' || { echo '::error::PROMOTION_BRIDGE_RERUN_NOT_AUTHORIZED'; exit 1; }
 
-          command_re='^/member-production-promote sha=([0-9a-f]{40}) staged_version=(6dd49589-f01d-473f-876a-034563023b0e) staging_run=(36285531724) replace_active_version=([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}) confirm=PROMOTE_MEMBER_STAGED_VERSION$'
+          command_re='^/member-production-promote sha=([0-9a-f]{40}) staged_version=([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}) staging_run=([0-9]+) replace_active_version=([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}) confirm=PROMOTE_MEMBER_STAGED_VERSION$'
           [[ "$COMMAND_BODY" =~ $command_re ]] || { echo '::error::INVALID_MEMBER_PRODUCTION_PROMOTION_COMMAND'; exit 1; }
 
           expected_sha="${BASH_REMATCH[1]}"
@@ -144,6 +189,34 @@ jobs:
           )"
           test "$current_sha" = "$expected_sha" || { echo "::error::MAIN_DRIFT expected=$expected_sha current=$current_sha"; exit 1; }
 
+          curl --fail --silent --show-error \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/runs/$staging_run_id" \
+            > /tmp/member-promotion-route-stage.json
+
+          EXPECTED_SHA="$expected_sha" STAGING_RUN_ID="$staging_run_id" python3 - <<'PY'
+          import json, os
+          with open('/tmp/member-promotion-route-stage.json', encoding='utf-8') as f:
+              r=json.load(f)
+          checks={
+              'id': r.get('id')==int(os.environ['STAGING_RUN_ID']),
+              'status': r.get('status')=='completed',
+              'conclusion': r.get('conclusion')=='success',
+              'head_sha': r.get('head_sha')==os.environ['EXPECTED_SHA'],
+              'event': r.get('event')=='workflow_dispatch',
+              'path': r.get('path')=='.github/workflows/member-production-route-stage.yml',
+              'run_attempt': r.get('run_attempt')==1,
+              'display_title': r.get('display_title')==f"Member route candidate stage {os.environ['EXPECTED_SHA']}",
+          }
+          bad=[k for k,v in checks.items() if not v]
+          if bad:
+              raise SystemExit('INVALID_ROUTE_STAGE_RECEIPT:'+','.join(bad))
+          print('MEMBER_PROMOTION_ROUTE_STAGE_RECEIPT=PASS')
+          PY
+          rm -f /tmp/member-promotion-route-stage.json
+
           echo "expected_sha=$expected_sha" >> "$GITHUB_OUTPUT"
           echo "staged_version_id=$staged_version_id" >> "$GITHUB_OUTPUT"
           echo "expected_active_version_id=$expected_active_version_id" >> "$GITHUB_OUTPUT"
@@ -154,7 +227,7 @@ jobs:
 
           echo "MEMBER_PROMOTION_FRESH_OWNER_SHA=$expected_sha"
           echo "MEMBER_PROMOTION_EXACT_STAGED_VERSION=$staged_version_id"
-          echo "MEMBER_PROMOTION_EXACT_STAGING_RUN=$staging_run_id"
+          echo "MEMBER_PROMOTION_EXACT_ROUTE_STAGE_RUN=$staging_run_id"
           echo "MEMBER_PROMOTION_OWNER_AUTHORIZED_REPLACED_ACTIVE_VERSION=$expected_active_version_id"
           echo "MEMBER_PROMOTION_BRIDGE_RUN_ID=$BRIDGE_RUN_ID"
           echo 'MEMBER_PROMOTION_BRIDGE_RUN_ATTEMPT=1'
@@ -176,31 +249,65 @@ jobs:
             deploy-cloudflare.yml
             member-production-schema-apply.yml
             member-production-runtime-secret-stage.yml
+            member-production-version-promotion.yml
             member-production-route-stage.yml
           )
           statuses=(queued in_progress waiting pending requested)
           for workflow in "${workflows[@]}"; do
             for status in "${statuses[@]}"; do
+              code="$(curl --silent --show-error --output /tmp/member-promotion-conflicts.json --write-out '%{http_code}' \
+                -H "Authorization: Bearer $GH_TOKEN" \
+                -H 'Accept: application/vnd.github+json' \
+                -H 'X-GitHub-Api-Version: 2022-11-28' \
+                "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/workflows/$workflow/runs?status=$status&per_page=100")"
+              if [[ "$code" == 404 ]]; then
+                continue
+              fi
+              test "$code" = 200 || { cat /tmp/member-promotion-conflicts.json >&2 || true; exit 1; }
+
               conflicts="$(
-                curl --fail --silent --show-error \
-                  -H "Authorization: Bearer $GH_TOKEN" \
-                  -H 'Accept: application/vnd.github+json' \
-                  -H 'X-GitHub-Api-Version: 2022-11-28' \
-                  "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/workflows/$workflow/runs?status=$status&per_page=100" \
-                | WORKFLOW="$workflow" THIS_RUN_ID="$THIS_RUN_ID" python3 -c 'import json,os,sys; w=os.environ["WORKFLOW"]; me=int(os.environ["THIS_RUN_ID"]); runs=json.load(sys.stdin).get("workflow_runs",[]); print(sum(1 for r in runs if int(r.get("id",0))!=me and ((w=="deploy-cloudflare.yml" and r.get("event")=="workflow_dispatch" and not str(r.get("display_title","")).startswith("CRM Production preflight ")) or (w in {"member-production-schema-apply.yml","member-production-runtime-secret-stage.yml","member-production-route-stage.yml"} and r.get("event")=="workflow_dispatch") or (w.startswith("dispatch-") and (str(r.get("display_title","")).startswith("Production mutation bridge:") or (not str(r.get("display_title","")).startswith("Production read-only bridge:") and str(r.get("display_title",""))!="Production bridge: ignored" and r.get("event")=="issue_comment"))))))'
+                WORKFLOW="$workflow" THIS_RUN_ID="$THIS_RUN_ID" python3 - <<'PY'
+          import json, os
+          with open('/tmp/member-promotion-conflicts.json', encoding='utf-8') as f:
+              runs=json.load(f).get('workflow_runs',[])
+          workflow=os.environ['WORKFLOW']
+          me=int(os.environ['THIS_RUN_ID'])
+          direct_mutation_workflows={
+              'member-production-schema-apply.yml',
+              'member-production-runtime-secret-stage.yml',
+              'member-production-version-promotion.yml',
+              'member-production-route-stage.yml',
+          }
+          def is_actual_mutation(run):
+              if int(run.get('id',0))==me:
+                  return False
+              event=run.get('event')
+              title=str(run.get('display_title',''))
+              if workflow=='deploy-cloudflare.yml':
+                  return event=='workflow_dispatch' and not title.startswith('CRM Production preflight ')
+              if workflow in direct_mutation_workflows:
+                  return event=='workflow_dispatch'
+              if workflow.startswith('dispatch-'):
+                  if title.startswith('Production read-only bridge:') or title=='Production bridge: ignored':
+                      return False
+                  return title.startswith('Production mutation bridge:') or event=='issue_comment'
+              return False
+          print(sum(1 for run in runs if is_actual_mutation(run)))
+          PY
               )"
-              test "$conflicts" = '0' || {
+              test "$conflicts" = 0 || {
                 echo "::error::PRODUCTION_MUTATION_BUSY_RETRY_REQUIRED workflow=$workflow status=$status count=$conflicts"
                 exit 1
               }
             done
           done
+          rm -f /tmp/member-promotion-conflicts.json
           echo 'PRODUCTION_MUTATION_DISPATCH_GATE=FREE'
           echo 'PRODUCTION_MUTATION_QUEUE_POLICY=REJECT_AND_RETRY'
           echo 'PRODUCTION_MUTATION_FILTER=ACTUAL_MUTATIONS_ONLY'
 
   promote:
-    name: Call exact Owner-gated promotion workflow
+    name: Call exact Owner-gated route-stage promotion workflow
     needs: validate
     uses: ./.github/workflows/member-production-version-promotion.yml
     with:

@@ -1,114 +1,187 @@
-# Member Production staged-version promotion gate
+# Member Production route-stage version promotion gate
 
 ## Purpose
 
-This source-only change adds the permanent Owner-gated path for promoting the already staged immutable Worker version:
+This gate promotes exactly one immutable Worker version created by the canonical Member Production route candidate stage.
 
-- staging source SHA: `41059eb0ca192f29f790abfd4563552581b1a6b8`
-- staging run: `36285531724` — SUCCESS
-- staging job: `108525472623` — SUCCESS
-- staged Worker version: `6dd49589-f01d-473f-876a-034563023b0e`
-- durable receipt: `release/member/member-production-runtime-secret-stage-36285531724.json`
-- release-gate issue: `#26`
+The promotion path is no longer bound to the historical 2026-09-27 runtime-secret staged version. Instead, every candidate must be identified by a fresh exact pair:
 
-Merging this source does **not** authorize or perform Production promotion.
+- `staged_version=<exact immutable Worker version UUID>`
+- `staging_run=<exact successful member-production-route-stage.yml run ID>`
 
-## Fresh Owner authorization required after merge
+The route-stage run, staged version, current `main`, and currently active Production version are all independently revalidated before any traffic mutation.
 
-Production promotion uses two Owner actions on issue #26.
+Merging this source does **not** authorize or perform a Production promotion.
 
-First, obtain a fresh **read-only** active-version snapshot:
+## Required sequence
 
-```text
-/member-production-promotion-snapshot sha=<FRESH_CURRENT_MAIN_40_SHA>
-```
+A future route promotion has three separately gated stages.
 
-That command performs no traffic mutation and reports the exact 100%-traffic `ACTIVE_PRODUCTION_VERSION_ID`.
+1. A successful exact-current-main `member-production-route-stage.yml` run creates an immutable route-only candidate at **0% Production traffic**.
+2. A fresh read-only promotion snapshot binds that exact candidate/run to the exact currently active 100%-traffic Production version.
+3. A separate fresh Owner promotion authorization may promote that exact candidate to 100%.
 
-Then create a new promotion authorization that explicitly names the active version being replaced:
+The route-stage itself explicitly leaves:
 
-```text
-/member-production-promote sha=<FRESH_CURRENT_MAIN_40_SHA> staged_version=6dd49589-f01d-473f-876a-034563023b0e staging_run=36285531724 replace_active_version=<FRESH_ACTIVE_PRODUCTION_VERSION_ID> confirm=PROMOTE_MEMBER_STAGED_VERSION
-```
+- LINE Login external exchange disabled;
+- private-media content route disabled;
+- Favorites writes disabled;
+- MEMORY writes disabled;
+- FAMILY PASS / BLACK entitlement writes disabled.
 
-There is no manual `workflow_dispatch` trigger on the promotion workflow. The issue-comment bridge validates the command on its first run attempt and calls the promotion workflow as a reusable workflow. Re-running the bridge is rejected.
+Only the Member route boundary candidate is staged.
 
-The Owner comment must remain unedited and no more than 15 minutes old both when the promotion starts and immediately before the traffic mutation.
+## Read-only promotion snapshot
 
-## Fail-closed gates
-
-Before any traffic mutation the workflow must prove all of the following:
-
-1. checkout SHA equals the freshly Owner-authorized current `main`;
-2. staging source SHA is an ancestor of that current `main`;
-3. invocation is the exact first-attempt Issue #26 bridge run, triggered by the Owner account;
-4. Owner authorization comment is exact, belongs to issue #26, is unedited, and is no more than 15 minutes old;
-5. the checked-in receipt is only supporting evidence; while GitHub still retains run `36285531724`, its live run metadata must independently match SUCCESS, exact source SHA, exact workflow and the exact recorded time window;
-6. Cloudflare's immutable staged-version metadata must independently prove the exact version ID, creation inside the staging run window, the exact source-SHA staging message, and the required Member secret bindings;
-7. the staging-source workflow at `41059eb0...` must contain the exact version-secret staging provenance contract;
-8. the active 100%-traffic Production version must exactly equal the `replace_active_version` named by the fresh Owner authorization;
-9. the exact staged version must not already be active;
-10. the promotion workflow, canonical Production deployment, Member Production schema apply, and Member Production runtime secret stage share the exact `customer-crm-production-deploy` concurrency group for real Production executions, so those mutation windows cannot overlap;
-11. non-serialized Member Production operations are absent;
-12. a second active deployment snapshot immediately before mutation must be unchanged and must still equal the Owner-authorized active version;
-13. immediately before mutation, current `main`, Owner-comment freshness, the active 100%-traffic version, and non-serialized operation state are checked again.
-
-Any mismatch stops the run before promotion.
-
-## Durable staging receipt
-
-The promotion path does not depend on retained GitHub Actions job logs. The version-controlled receipt is **supporting evidence, not a trust anchor by itself**. While GitHub retains the staging run, live run metadata is revalidated. Independently of log retention, the immutable Cloudflare version must report a creation timestamp inside the exact staging run window and the source-SHA staging message produced by the staging workflow, and its required bindings must still be present.
-
-## Only mutation in the promotion workflow
-
-After all gates pass, the only intended traffic mutation is:
+After a successful route-stage run, issue #26 may be used for a fresh read-only snapshot:
 
 ```text
-npx wrangler versions deploy 6dd49589-f01d-473f-876a-034563023b0e@100% --name customer-crm-api --yes
+/member-production-promotion-snapshot sha=<FRESH_CURRENT_MAIN_40_SHA> staged_version=<ROUTE_STAGED_VERSION_UUID> staging_run=<SUCCESSFUL_ROUTE_STAGE_RUN_ID>
 ```
 
-The workflow does not use `wrangler deploy`, D1 mutation commands, secret mutation commands, CRM write APIs, LINE send APIs, Customer ID generation, commerce activation, or paid services.
+The bridge first verifies that `staging_run` is:
 
-After the promotion command, the workflow parses the fresh active deployment and requires exactly one entry for the staged Worker version at `percentage === 100`. It also requires that this staged version is the only 100%-traffic version before declaring promotion success.
+- completed;
+- successful;
+- `workflow_dispatch`;
+- first attempt;
+- from `.github/workflows/member-production-route-stage.yml`;
+- for the exact supplied current-main SHA;
+- titled `Member route candidate stage <SHA>`.
 
-## Current authorization boundary
+It then reads the current 100%-traffic `customer-crm-api` Worker version and emits a promotion command template.
 
-The current Owner authorization covers source changes, PR creation, CI, review, and source-only fixes to review findings.
+The snapshot performs:
 
-It does **not** authorize:
-- Production promotion or traffic change;
-- `wrangler versions deploy` execution;
-- `wrangler deploy` / Production Worker deploy;
-- Member route activation;
-- `MEMBER_PRODUCTION_OWNER_APPROVED` activation;
-- `MEMBER_PRODUCTION_ROUTE_MODE` enablement;
-- Member session Production activation;
-- LINE Login Production activation;
-- Production D1 writes;
+- Production traffic change: `0`;
+- Production deploy: `0`;
+- Production D1 write: `0`;
+- R2 object read/write: `0`.
+
+## Fresh Owner promotion authorization
+
+The promotion command is dynamic and must bind all four identities exactly:
+
+```text
+/member-production-promote sha=<FRESH_CURRENT_MAIN_40_SHA> staged_version=<ROUTE_STAGED_VERSION_UUID> staging_run=<SUCCESSFUL_ROUTE_STAGE_RUN_ID> replace_active_version=<FRESH_ACTIVE_PRODUCTION_VERSION_UUID> confirm=PROMOTE_MEMBER_STAGED_VERSION
+```
+
+There is no manual `workflow_dispatch` trigger on the promotion workflow. The Issue #26 bridge is first-attempt only and calls the reusable promotion workflow after validating the exact command.
+
+The Owner comment must be unedited and no more than 15 minutes old at the initial gate and again immediately before traffic mutation.
+
+## Route-stage lineage authentication
+
+Before promotion, the workflow authenticates the candidate through independent evidence.
+
+### GitHub run receipt
+
+The exact `staging_run` must still identify a successful first-attempt route-stage workflow for the exact current-main SHA.
+
+### Cloudflare immutable version
+
+`wrangler versions view <staged_version>` must prove:
+
+- the exact staged version ID exists;
+- its creation timestamp falls inside the authenticated route-stage run window, with only a small clock/API tolerance;
+- its version message equals:
+
+```text
+Owner-gated Member route-only stage sha=<SHA> run=<STAGING_RUN_ID>
+```
+
+The staged version must expose the expected binding/mode names, including:
+
+- `MEMBER_PRODUCTION_ROUTE_MODE`
+- `MEMBER_PRIVATE_MEDIA_CONTENT_ROUTE_MODE`
+- `MEMBER_LINE_LOGIN_EXTERNAL_EXCHANGE_MODE`
+- `MEMBER_SESSION_SECRET`
+- `MEMBER_LINE_LOGIN_TRANSACTION_SECRET`
+- `MEMBER_LINE_LOGIN_CHANNEL_SECRET`
+- `MEMBER_PRIVATE_MEDIA_DELIVERY_SECRET`
+- `MEMBER_PRIVATE_MEDIA_BUCKET`
+- `DB`
+- `LINE_SERVICE`
+- `RESERVATION_SERVICE`
+
+No secret value is read or printed.
+
+### Exact route-stage source provenance
+
+The promotion workflow re-reads `.github/workflows/member-production-route-stage.yml` from the exact Owner-authorized SHA and requires the deterministic stage contract:
+
+- ephemeral Owner approval patch only;
+- Member route mode staged `enabled`;
+- private-media content route staged `disabled`;
+- LINE external exchange staged `disabled`;
+- candidate created by `wrangler versions upload`;
+- staged candidate verified to receive no Production traffic;
+- route-stage stops at `FRESH_OWNER_ROUTE_PROMOTION_AUTHORIZATION_REQUIRED`.
+
+## Active Production replacement protection
+
+The exact active 100%-traffic Worker version named in `replace_active_version` must match:
+
+1. the first fresh Production snapshot;
+2. the immediate pre-mutation snapshot;
+3. the final gate immediately before promotion.
+
+Any canonical deploy or other change that alters the active version makes the authorization stale and the workflow fails closed. A newer Production deployment can never be replaced implicitly.
+
+## Only intended traffic mutation
+
+After every gate passes, the promotion workflow contains exactly one intended traffic mutation:
+
+```text
+npx wrangler versions deploy "$STAGED_VERSION_ID@100%" --name customer-crm-api --yes
+```
+
+The workflow does not use:
+
+- `wrangler deploy`;
+- D1 mutation commands;
+- R2 mutation/object commands;
+- secret mutation commands;
 - CRM writes;
 - LINE sends;
+- Customer / Prospect mutation;
 - Customer ID generation;
-- commerce activation;
-- paid spend.
+- Commerce activation;
+- BLACK automatic entitlement writes.
 
-
-## Sequential rollback protection
-
-The shared concurrency lock prevents overlapping Production traffic mutations. In addition, the Owner must explicitly authorize replacing one exact currently-active Worker version. If any canonical Production deploy changes the 100%-traffic version after the snapshot or before the promotion acquires or uses the lock, the promotion fails closed with an active-version mismatch. A newer completed Production deployment is therefore never replaced implicitly.
-
+Post-promotion verification requires exactly one 100%-traffic Production version, and it must be the exact staged version authorized by the Owner.
 
 ## Shared Production mutation lock
 
-For real Production executions, these workflows share the same GitHub Actions concurrency group `customer-crm-production-deploy`:
+Real Production mutations share `customer-crm-production-deploy` concurrency with:
 
-- canonical Cloudflare Production deploy;
-- Member staged-version Production promotion;
+- canonical CRM Production deploy;
+- Member staged-version promotion;
 - Member Production schema apply;
-- Member Production runtime secret stage.
+- Member runtime secret stage;
+- Member route candidate stage.
 
-Their pull-request contract jobs keep PR-specific concurrency groups. Production mutation authorization bridges do not intentionally queue work: before dispatch they check the four mutation bridges and mutation target workflows for `queued`, `in_progress`, `waiting`, `pending`, or `requested` runs. If any other mutation is active, the new command fails closed with `PRODUCTION_MUTATION_BUSY_RETRY_REQUIRED`; the Owner must retry with fresh authorization after the mutation window is clear. The mutation authorization bridges deliberately have no workflow-level concurrency group, so the busy rejection logic executes before GitHub Actions can place same-bridge commands into a lossy pending slot. The shared `customer-crm-production-deploy` concurrency group remains a last-line race guard on the actual mutation workflows, not a durable queue.
+Authorization bridges use reject-and-retry checks rather than serving as a queue. A conflicting active or queued Production mutation causes fail-closed behavior and requires a fresh Owner authorization later.
 
+Read-only canonical preflights and explicit read-only snapshot bridges remain outside the mutation slot.
 
-## Read-only canonical preflight isolation
+## Authorization boundary
 
-The canonical `deploy-cloudflare.yml` workflow uses `customer-crm-production-deploy` only when `workflow_dispatch` runs with `mode=deploy`. Read-only `mode=preflight` runs use a unique `customer-crm-production-preflight-<run_id>` group, so a preflight cannot consume or replace the single pending slot used by an authorized Production mutation. Pull-request CI remains on its PR-specific group.
+This source-only gate does **not** itself authorize:
+
+- route-stage version upload;
+- Production version promotion / traffic change;
+- CRM Production deploy/redeploy;
+- Member session activation;
+- LINE Login activation;
+- private-media content route activation;
+- R2 create/delete/upload/write/binding change;
+- Production D1 write or migration apply;
+- Customer / Prospect / Customer ID mutation;
+- secret creation/change/value display;
+- security policy change;
+- Commerce activation;
+- BLACK automatic award;
+- paid spend.
+
+Every future Production stage requires its own fresh exact Owner authorization.
