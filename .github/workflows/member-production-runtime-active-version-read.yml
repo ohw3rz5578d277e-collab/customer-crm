@@ -1,0 +1,302 @@
+name: Member Production runtime active version read
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/member-production-runtime-active-version-read.yml'
+      - '.github/workflows/dispatch-member-production-runtime-active-version-read-from-issue.yml'
+      - 'tests/member-production-runtime-active-version-read-contract.test.mjs'
+  workflow_dispatch:
+    inputs:
+      expected_sha:
+        required: true
+        type: string
+      staged_version_id:
+        required: true
+        type: string
+      stage_run_id:
+        required: true
+        type: string
+      owner_comment_id:
+        required: true
+        type: string
+      bridge_run_id:
+        required: true
+        type: string
+      bridge_run_attempt:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+  issues: read
+
+concurrency:
+  group: ${{ github.event_name == 'workflow_dispatch' && 'customer-crm-production-deploy' || format('member-runtime-active-version-read-pr-{0}', github.event.pull_request.number) }}
+  cancel-in-progress: false
+  queue: max
+
+jobs:
+  contract:
+    name: Member runtime active version read contract
+    if: ${{ github.event_name == 'pull_request' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact PR head
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Assert exact PR head
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
+      - name: Set up Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+      - name: Verify read-only active version contract
+        run: node tests/member-production-runtime-active-version-read-contract.test.mjs
+
+  read:
+    name: Exact-SHA Member Production active version read only
+    if: ${{ github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      EXPECTED_SHA_RAW: ${{ inputs.expected_sha }}
+      STAGED_VERSION_ID_RAW: ${{ inputs.staged_version_id }}
+      STAGE_RUN_ID_RAW: ${{ inputs.stage_run_id }}
+      OWNER_COMMENT_ID_RAW: ${{ inputs.owner_comment_id }}
+      BRIDGE_RUN_ID_RAW: ${{ inputs.bridge_run_id }}
+      BRIDGE_RUN_ATTEMPT_RAW: ${{ inputs.bridge_run_attempt }}
+    steps:
+      - name: Normalize and validate authorization inputs
+        id: auth
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected_sha="$(printf '%s' "$EXPECTED_SHA_RAW" | tr '[:upper:]' '[:lower:]')"
+          staged_version_id="$(printf '%s' "$STAGED_VERSION_ID_RAW" | tr '[:upper:]' '[:lower:]')"
+          [[ "$expected_sha" =~ ^[0-9a-f]{40}$ ]] || { echo '::error::INVALID_EXPECTED_SHA'; exit 1; }
+          [[ "$staged_version_id" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] || { echo '::error::INVALID_STAGED_VERSION_ID'; exit 1; }
+          [[ "$STAGE_RUN_ID_RAW" =~ ^[0-9]+$ ]] || { echo '::error::INVALID_STAGE_RUN_ID'; exit 1; }
+          [[ "$OWNER_COMMENT_ID_RAW" =~ ^[0-9]+$ ]] || { echo '::error::INVALID_OWNER_COMMENT_ID'; exit 1; }
+          [[ "$BRIDGE_RUN_ID_RAW" =~ ^[0-9]+$ ]] || { echo '::error::INVALID_BRIDGE_RUN_ID'; exit 1; }
+          test "$BRIDGE_RUN_ATTEMPT_RAW" = '1' || { echo '::error::ACTIVE_VERSION_READ_BRIDGE_RERUN_NOT_AUTHORIZED'; exit 1; }
+          echo "expected_sha=$expected_sha" >> "$GITHUB_OUTPUT"
+          echo "staged_version_id=$staged_version_id" >> "$GITHUB_OUTPUT"
+          echo "stage_run_id=$STAGE_RUN_ID_RAW" >> "$GITHUB_OUTPUT"
+          echo "owner_comment_id=$OWNER_COMMENT_ID_RAW" >> "$GITHUB_OUTPUT"
+          echo "bridge_run_id=$BRIDGE_RUN_ID_RAW" >> "$GITHUB_OUTPUT"
+          echo 'MEMBER_RUNTIME_ACTIVE_VERSION_READ_INPUTS=PASS'
+
+      - name: Checkout exact authorized SHA
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ steps.auth.outputs.expected_sha }}
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Exact SHA and current-main gate
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ steps.auth.outputs.expected_sha }}
+        run: |
+          set -euo pipefail
+          actual_sha="$(git rev-parse HEAD)"
+          current_main="$(git ls-remote origin refs/heads/main | awk '{print $1}')"
+          test "$actual_sha" = "$EXPECTED_SHA" || { echo "::error::CHECKOUT_SHA_MISMATCH actual=$actual_sha expected=$EXPECTED_SHA"; exit 1; }
+          test "$current_main" = "$EXPECTED_SHA" || { echo "::error::MAIN_DRIFT current=$current_main expected=$EXPECTED_SHA"; exit 1; }
+          echo 'CURRENT_MAIN_EXACT_GATE=PASS'
+
+      - name: Verify fresh Owner authorization comment and bridge receipt
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_SHA: ${{ steps.auth.outputs.expected_sha }}
+          STAGED_VERSION_ID: ${{ steps.auth.outputs.staged_version_id }}
+          STAGE_RUN_ID: ${{ steps.auth.outputs.stage_run_id }}
+          OWNER_COMMENT_ID: ${{ steps.auth.outputs.owner_comment_id }}
+          BRIDGE_RUN_ID: ${{ steps.auth.outputs.bridge_run_id }}
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error \
+            -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/issues/comments/$OWNER_COMMENT_ID" > /tmp/member-runtime-active-version-owner-comment.json
+          EXPECTED_BODY="/member-runtime-active-version-read sha=$EXPECTED_SHA version=$STAGED_VERSION_ID stage_run=$STAGE_RUN_ID confirm=READ_MEMBER_RUNTIME_ACTIVE_VERSION" python3 - <<'PY'
+          import json, os
+          from datetime import datetime, timezone
+          c=json.load(open('/tmp/member-runtime-active-version-owner-comment.json', encoding='utf-8'))
+          if c.get('user',{}).get('login')!='ohw3rz5578d277e-collab': raise SystemExit('OWNER_COMMENT_ACTOR_MISMATCH')
+          if c.get('body')!=os.environ['EXPECTED_BODY']: raise SystemExit('OWNER_COMMENT_BODY_MISMATCH')
+          if not str(c.get('issue_url','')).endswith('/issues/26'): raise SystemExit('OWNER_COMMENT_ISSUE_MISMATCH')
+          if c.get('created_at')!=c.get('updated_at'): raise SystemExit('OWNER_COMMENT_EDITED')
+          created_raw=str(c.get('created_at') or '')
+          try:
+              created=datetime.fromisoformat(created_raw.replace('Z','+00:00'))
+          except Exception as exc:
+              raise SystemExit('OWNER_COMMENT_CREATED_AT_INVALID') from exc
+          age=(datetime.now(timezone.utc)-created).total_seconds()
+          if age < -30: raise SystemExit('OWNER_COMMENT_FROM_FUTURE')
+          if age > 900: raise SystemExit('OWNER_COMMENT_AUTHORIZATION_STALE')
+          print('OWNER_ACTIVE_VERSION_READ_AUTHORIZATION_COMMENT=PASS')
+          print('OWNER_ACTIVE_VERSION_READ_AUTHORIZATION_FRESH=PASS')
+          PY
+          curl --fail --silent --show-error \
+            -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/runs/$BRIDGE_RUN_ID" > /tmp/member-runtime-active-version-bridge.json
+          EXPECTED_SHA="$EXPECTED_SHA" BRIDGE_RUN_ID="$BRIDGE_RUN_ID" python3 - <<'PY'
+          import json, os
+          r=json.load(open('/tmp/member-runtime-active-version-bridge.json', encoding='utf-8'))
+          checks={
+            'id':r.get('id')==int(os.environ['BRIDGE_RUN_ID']),
+            'head_sha':r.get('head_sha')==os.environ['EXPECTED_SHA'],
+            'event':r.get('event')=='issue_comment',
+            'path':r.get('path')=='.github/workflows/dispatch-member-production-runtime-active-version-read-from-issue.yml',
+            'run_attempt':r.get('run_attempt')==1,
+            'actor':r.get('actor',{}).get('login')=='ohw3rz5578d277e-collab'
+          }
+          bad=[k for k,v in checks.items() if not v]
+          if bad: raise SystemExit('INVALID_ACTIVE_VERSION_READ_BRIDGE_RECEIPT:'+','.join(bad))
+          print('MEMBER_RUNTIME_ACTIVE_VERSION_READ_BRIDGE_RECEIPT=PASS')
+          PY
+          rm -f /tmp/member-runtime-active-version-owner-comment.json /tmp/member-runtime-active-version-bridge.json
+
+      - name: Verify successful exact-SHA runtime secret-stage receipt and staged version
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_SHA: ${{ steps.auth.outputs.expected_sha }}
+          STAGED_VERSION_ID: ${{ steps.auth.outputs.staged_version_id }}
+          STAGE_RUN_ID: ${{ steps.auth.outputs.stage_run_id }}
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error \
+            -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/runs/$STAGE_RUN_ID" > /tmp/member-runtime-active-version-stage-run.json
+          EXPECTED_SHA="$EXPECTED_SHA" STAGE_RUN_ID="$STAGE_RUN_ID" python3 - <<'PY'
+          import json, os
+          r=json.load(open('/tmp/member-runtime-active-version-stage-run.json', encoding='utf-8'))
+          checks={
+            'id':r.get('id')==int(os.environ['STAGE_RUN_ID']),
+            'status':r.get('status')=='completed',
+            'conclusion':r.get('conclusion')=='success',
+            'head_sha':r.get('head_sha')==os.environ['EXPECTED_SHA'],
+            'event':r.get('event')=='workflow_dispatch',
+            'path':r.get('path')=='.github/workflows/member-production-runtime-secret-stage.yml',
+            'run_attempt':r.get('run_attempt')==1,
+          }
+          bad=[k for k,v in checks.items() if not v]
+          if bad: raise SystemExit('INVALID_RUNTIME_SECRET_STAGE_RECEIPT:'+','.join(bad))
+          print('MEMBER_RUNTIME_SECRET_STAGE_RECEIPT=PASS')
+          PY
+          curl --fail --silent --show-error \
+            -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/runs/$STAGE_RUN_ID/jobs?per_page=100" > /tmp/member-runtime-active-version-stage-jobs.json
+          stage_job_id="$(python3 - <<'PY'
+          import json
+          d=json.load(open('/tmp/member-runtime-active-version-stage-jobs.json', encoding='utf-8'))
+          m=[j for j in d.get('jobs',[]) if j.get('name')=='Exact-SHA Member Production runtime secret stage' and j.get('conclusion')=='success']
+          print(m[0]['id'] if len(m)==1 else '')
+          PY
+          )"
+          [[ "$stage_job_id" =~ ^[0-9]+$ ]] || { echo '::error::INVALID_RUNTIME_SECRET_STAGE_JOB_RECEIPT'; exit 1; }
+          curl --fail --silent --show-error --location \
+            -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/jobs/$stage_job_id/logs" > /tmp/member-runtime-active-version-stage.log
+          grep -F "MEMBER_RUNTIME_SECRET_STAGED_VERSION_ID=$STAGED_VERSION_ID" /tmp/member-runtime-active-version-stage.log >/dev/null || { echo '::error::STAGE_RUN_VERSION_ID_MISMATCH'; exit 1; }
+          grep -F 'MEMBER_RUNTIME_SECRET_STAGE=PASS' /tmp/member-runtime-active-version-stage.log >/dev/null || { echo '::error::STAGE_RUN_PASS_RECEIPT_MISSING'; exit 1; }
+          grep -F 'PRODUCTION_DEPLOYMENT_UNCHANGED=PASS' /tmp/member-runtime-active-version-stage.log >/dev/null || { echo '::error::STAGE_RUN_TRAFFIC_INVARIANT_RECEIPT_MISSING'; exit 1; }
+          grep -F 'PRODUCTION_TRAFFIC_CHANGE=0' /tmp/member-runtime-active-version-stage.log >/dev/null || { echo '::error::STAGE_RUN_ZERO_TRAFFIC_RECEIPT_MISSING'; exit 1; }
+          echo 'STAGE_RUN_STAGED_VERSION_ID=PASS'
+          rm -f /tmp/member-runtime-active-version-stage-run.json /tmp/member-runtime-active-version-stage-jobs.json /tmp/member-runtime-active-version-stage.log
+
+      - name: Set up Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+
+      - name: Install Wrangler tooling
+        run: npm install --no-save wrangler@4.131.2
+
+      - name: Confirm Cloudflare authentication
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          npx wrangler whoami >/tmp/member-runtime-active-version-whoami.txt
+          test -s /tmp/member-runtime-active-version-whoami.txt
+          rm -f /tmp/member-runtime-active-version-whoami.txt
+          echo 'CLOUDFLARE_AUTH=PASS'
+
+      - name: Read exact active Production version and staged version metadata
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          EXPECTED_SHA: ${{ steps.auth.outputs.expected_sha }}
+          STAGED_VERSION_ID: ${{ steps.auth.outputs.staged_version_id }}
+        run: |
+          set -euo pipefail
+          npx wrangler deployments status --name customer-crm-api --json > /tmp/member-runtime-active-version-deployment.json
+          npx wrangler versions view "$STAGED_VERSION_ID" --name customer-crm-api --json > /tmp/member-runtime-active-version-staged.json
+          node <<'NODE'
+          const fs=require('fs');
+          const raw=JSON.parse(fs.readFileSync('/tmp/member-runtime-active-version-deployment.json','utf8'));
+          const d=Array.isArray(raw)?raw[0]:raw;
+          const versions=Array.isArray(d?.versions)?d.versions:[];
+          if(versions.length!==1)throw new Error('PRODUCTION_BASELINE_NOT_SINGLE_VERSION:'+versions.length);
+          const only=versions[0];
+          const active=String(only?.version_id||only?.id||'').toLowerCase();
+          if(!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(active))throw new Error('ACTIVE_VERSION_ID_INVALID');
+          if(Number(only?.percentage)!==100)throw new Error('PRODUCTION_BASELINE_NOT_100_PERCENT');
+          if(active===process.env.STAGED_VERSION_ID)throw new Error('STAGED_VERSION_ALREADY_ACTIVE');
+          const staged=JSON.parse(fs.readFileSync('/tmp/member-runtime-active-version-staged.json','utf8'));
+          const text=JSON.stringify(staged);
+          const expectedMessage='Owner-gated Member runtime secret stage for '+process.env.EXPECTED_SHA;
+          if(!text.includes(expectedMessage))throw new Error('STAGED_VERSION_MESSAGE_SHA_MISMATCH');
+          for(const name of ['MEMBER_SESSION_SECRET','MEMBER_LINE_LOGIN_TRANSACTION_SECRET','MEMBER_LINE_LOGIN_CHANNEL_SECRET','MEMBER_PRIVATE_MEDIA_DELIVERY_SECRET']) if(!text.includes(name))throw new Error('STAGED_SECRET_BINDING_MISSING:'+name);
+          console.log('MEMBER_RUNTIME_ACTIVE_VERSION_ID='+active);
+          console.log('PRODUCTION_BASELINE_SINGLE_VERSION=PASS');
+          console.log('PRODUCTION_BASELINE_100_PERCENT=PASS');
+          console.log('STAGED_VERSION_TRAFFIC=0');
+          console.log('STAGED_SECRET_BINDINGS=4');
+          console.log('SECRET_VALUES_PRINTED=NO');
+          NODE
+          rm -f /tmp/member-runtime-active-version-deployment.json /tmp/member-runtime-active-version-staged.json
+
+      - name: Final current-main read-only gate
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ steps.auth.outputs.expected_sha }}
+        run: |
+          set -euo pipefail
+          current_main="$(git ls-remote origin refs/heads/main | awk '{print $1}')"
+          test "$current_main" = "$EXPECTED_SHA" || { echo "::error::FINAL_MAIN_DRIFT current=$current_main expected=$EXPECTED_SHA"; exit 1; }
+          echo 'FINAL_CURRENT_MAIN_EXACT_GATE=PASS'
+
+      - name: Final read-only declaration
+        shell: bash
+        run: |
+          echo 'MEMBER_RUNTIME_ACTIVE_VERSION_READ=PASS'
+          echo 'PRODUCTION_TRAFFIC_CHANGE=0'
+          echo 'PRODUCTION_DEPLOY=0'
+          echo 'WRANGLER_DEPLOY=0'
+          echo 'PRODUCTION_D1_READ=0'
+          echo 'PRODUCTION_D1_WRITE=0'
+          echo 'R2_READ=0'
+          echo 'R2_WRITE=0'
+          echo 'SECRET_CHANGE=0'
+          echo 'MEMBER_ROUTE_ACTIVATION=0'
+          echo 'MEMBER_SESSION_PRODUCTION_ACTIVATION=0'
+          echo 'LINE_LOGIN_PRODUCTION_ACTIVATION=0'
+          echo 'CRM_WRITE=0'
+          echo 'CUSTOMER_ID_GENERATION=0'
+          echo 'LINE_SEND=0'
+          echo 'COMMERCE_ACTIVATION=0'
