@@ -33,7 +33,7 @@ permissions:
   issues: read
 
 concurrency:
-  group: ${{ github.event_name == 'workflow_dispatch' && 'crm-production-deploy' || format('member-runtime-active-version-read-pr-{0}', github.event.pull_request.number) }}
+  group: ${{ github.event_name == 'workflow_dispatch' && 'customer-crm-production-deploy' || format('member-runtime-active-version-read-pr-{0}', github.event.pull_request.number) }}
   cancel-in-progress: false
 
 jobs:
@@ -128,12 +128,22 @@ jobs:
             "https://api.github.com/repos/$GITHUB_REPOSITORY/issues/comments/$OWNER_COMMENT_ID" > /tmp/member-runtime-active-version-owner-comment.json
           EXPECTED_BODY="/member-runtime-active-version-read sha=$EXPECTED_SHA version=$STAGED_VERSION_ID stage_run=$STAGE_RUN_ID confirm=READ_MEMBER_RUNTIME_ACTIVE_VERSION" python3 - <<'PY'
           import json, os
+          from datetime import datetime, timezone
           c=json.load(open('/tmp/member-runtime-active-version-owner-comment.json', encoding='utf-8'))
           if c.get('user',{}).get('login')!='ohw3rz5578d277e-collab': raise SystemExit('OWNER_COMMENT_ACTOR_MISMATCH')
           if c.get('body')!=os.environ['EXPECTED_BODY']: raise SystemExit('OWNER_COMMENT_BODY_MISMATCH')
           if not str(c.get('issue_url','')).endswith('/issues/26'): raise SystemExit('OWNER_COMMENT_ISSUE_MISMATCH')
           if c.get('created_at')!=c.get('updated_at'): raise SystemExit('OWNER_COMMENT_EDITED')
+          created_raw=str(c.get('created_at') or '')
+          try:
+              created=datetime.fromisoformat(created_raw.replace('Z','+00:00'))
+          except Exception as exc:
+              raise SystemExit('OWNER_COMMENT_CREATED_AT_INVALID') from exc
+          age=(datetime.now(timezone.utc)-created).total_seconds()
+          if age < -30: raise SystemExit('OWNER_COMMENT_FROM_FUTURE')
+          if age > 900: raise SystemExit('OWNER_COMMENT_AUTHORIZATION_STALE')
           print('OWNER_ACTIVE_VERSION_READ_AUTHORIZATION_COMMENT=PASS')
+          print('OWNER_ACTIVE_VERSION_READ_AUTHORIZATION_FRESH=PASS')
           PY
           curl --fail --silent --show-error \
             -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' -H 'X-GitHub-Api-Version: 2022-11-28' \
