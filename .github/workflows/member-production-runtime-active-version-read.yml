@@ -35,6 +35,7 @@ permissions:
 concurrency:
   group: ${{ github.event_name == 'workflow_dispatch' && 'customer-crm-production-deploy' || format('member-runtime-active-version-read-pr-{0}', github.event.pull_request.number) }}
   cancel-in-progress: false
+  queue: max
 
 jobs:
   contract:
