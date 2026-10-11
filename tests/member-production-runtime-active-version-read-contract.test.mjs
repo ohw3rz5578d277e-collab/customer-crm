@@ -8,6 +8,8 @@ assert.ok(workflow.includes('name: Member Production runtime active version read
 assert.ok(workflow.includes('Exact-SHA Member Production active version read only'));
 assert.ok(workflow.includes("github.event_name == 'workflow_dispatch' && 'customer-crm-production-deploy'"));
 assert.ok(!workflow.includes("github.event_name == 'workflow_dispatch' && 'crm-production-deploy'"));
+assert.ok(workflow.includes('cancel-in-progress: false'));
+assert.ok(workflow.includes('queue: max'));
 assert.ok(workflow.includes("test \"$BRIDGE_RUN_ATTEMPT_RAW\" = '1'"));
 assert.ok(workflow.includes('CURRENT_MAIN_EXACT_GATE=PASS'));
 assert.ok(workflow.includes('OWNER_ACTIVE_VERSION_READ_AUTHORIZATION_COMMENT=PASS'));
@@ -54,4 +56,5 @@ console.log('MEMBER_PRODUCTION_RUNTIME_ACTIVE_VERSION_READ_CONTRACT=PASS');
 console.log('MEMBER_PRODUCTION_RUNTIME_ACTIVE_VERSION_READ_OWNER_GATE=PASS');
 console.log('MEMBER_PRODUCTION_RUNTIME_ACTIVE_VERSION_READ_FRESHNESS=PASS');
 console.log('MEMBER_PRODUCTION_RUNTIME_ACTIVE_VERSION_READ_CANONICAL_LOCK=PASS');
+console.log('MEMBER_PRODUCTION_RUNTIME_ACTIVE_VERSION_READ_QUEUE_MAX=PASS');
 console.log('MEMBER_PRODUCTION_RUNTIME_ACTIVE_VERSION_READ_ONLY=PASS');
