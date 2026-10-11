@@ -6,9 +6,15 @@ const bridge = fs.readFileSync('.github/workflows/dispatch-member-production-run
 
 assert.ok(workflow.includes('name: Member Production runtime active version read'));
 assert.ok(workflow.includes('Exact-SHA Member Production active version read only'));
+assert.ok(workflow.includes("github.event_name == 'workflow_dispatch' && 'customer-crm-production-deploy'"));
+assert.ok(!workflow.includes("github.event_name == 'workflow_dispatch' && 'crm-production-deploy'"));
 assert.ok(workflow.includes("test \"$BRIDGE_RUN_ATTEMPT_RAW\" = '1'"));
 assert.ok(workflow.includes('CURRENT_MAIN_EXACT_GATE=PASS'));
 assert.ok(workflow.includes('OWNER_ACTIVE_VERSION_READ_AUTHORIZATION_COMMENT=PASS'));
+assert.ok(workflow.includes('OWNER_ACTIVE_VERSION_READ_AUTHORIZATION_FRESH=PASS'));
+assert.ok(workflow.includes('OWNER_COMMENT_AUTHORIZATION_STALE'));
+assert.ok(workflow.includes('age > 900'));
+assert.ok(workflow.includes('OWNER_COMMENT_FROM_FUTURE'));
 assert.ok(workflow.includes('MEMBER_RUNTIME_ACTIVE_VERSION_READ_BRIDGE_RECEIPT=PASS'));
 assert.ok(workflow.includes("'run_attempt':r.get('run_attempt')==1"));
 assert.ok(workflow.includes("r.get('path')=='.github/workflows/member-production-runtime-secret-stage.yml'"));
@@ -46,4 +52,6 @@ assert.doesNotMatch(bridge, /wrangler\s+/i);
 
 console.log('MEMBER_PRODUCTION_RUNTIME_ACTIVE_VERSION_READ_CONTRACT=PASS');
 console.log('MEMBER_PRODUCTION_RUNTIME_ACTIVE_VERSION_READ_OWNER_GATE=PASS');
+console.log('MEMBER_PRODUCTION_RUNTIME_ACTIVE_VERSION_READ_FRESHNESS=PASS');
+console.log('MEMBER_PRODUCTION_RUNTIME_ACTIVE_VERSION_READ_CANONICAL_LOCK=PASS');
 console.log('MEMBER_PRODUCTION_RUNTIME_ACTIVE_VERSION_READ_ONLY=PASS');
