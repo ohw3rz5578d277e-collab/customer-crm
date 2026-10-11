@@ -11,9 +11,8 @@ permissions:
   contents: read
   issues: read
 
-authorization:
-  # This bridge intentionally cannot dispatch the stage workflow yet.
-  # The executable dispatch wiring is a separate Owner approval boundary.
+# This bridge intentionally cannot dispatch the stage workflow yet.
+# Executable dispatch wiring is a separate Owner approval boundary.
 
 jobs:
   validate:
