@@ -1,0 +1,76 @@
+name: Member Production LINE Login stage plan
+
+run-name: >-
+  Member LINE Login stage plan PR #${{ github.event.pull_request.number }}
+
+on:
+  pull_request:
+    paths:
+      - 'src/member-production-line-login-stage-plan.mjs'
+      - 'member_tests/member-production-line-login-stage-plan.test.mjs'
+      - '.github/workflows/member-production-line-login-stage-plan.yml'
+      - 'docs/member-app/member-production-line-login-stage-plan.md'
+      - 'src/production-index-crm-customer360-entry.js'
+      - 'src/member-production-request-composition.mjs'
+      - 'src/member-line-login-exchange-executor.mjs'
+      - 'src/member-line-login-http-contract.mjs'
+      - 'wrangler.jsonc'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: member-line-login-stage-plan-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  contract:
+    name: LINE Login stage plan contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact PR head
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+
+      - name: Assert exact PR head
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
+
+      - name: Verify workflow YAML
+        shell: bash
+        run: |
+          set -euo pipefail
+          ruby -e "require 'yaml'; YAML.load_file(ARGV[0])" .github/workflows/member-production-line-login-stage-plan.yml
+
+      - name: Set up Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+
+      - name: Verify LINE Login stage planner
+        run: node member_tests/member-production-line-login-stage-plan.test.mjs
+
+      - name: Verify dependent Member auth contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          node member_tests/member-session-foundation.test.mjs
+          node member_tests/member-line-login-exchange-executor.test.mjs
+          node member_tests/member-line-login-http-contract.test.mjs
+          node member_tests/member-app-http-composition.test.mjs
+          node member_tests/member-production-request-composition.test.mjs
+          echo 'MEMBER_LINE_LOGIN_STAGE_PLAN_SOURCE_ONLY=PASS'
+          echo 'PRODUCTION_MUTATION=0'
+          echo 'PRODUCTION_TRAFFIC_CHANGE=0'
+          echo 'PRODUCTION_DEPLOY=0'
+          echo 'PRODUCTION_D1_READ=0'
+          echo 'PRODUCTION_D1_WRITE=0'
+          echo 'R2_OBJECT_READ=0'
+          echo 'R2_OBJECT_WRITE=0'
+          echo 'LINE_SEND=0'
+          echo 'CUSTOMER_PROSPECT_MUTATION=0'
