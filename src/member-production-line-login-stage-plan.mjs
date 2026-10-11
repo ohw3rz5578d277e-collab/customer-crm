@@ -1,4 +1,5 @@
-const BUILD='member-production-line-login-stage-plan-20261012-01';
+const BUILD='member-production-line-login-stage-plan-20261012-02';
+const CANONICAL_ENTRYPOINT='src/production-index-crm-customer360-entry.js';
 
 const REQUIRED_DISABLED_MODES=Object.freeze([
   'MEMBER_PRIVATE_MEDIA_CONTENT_ROUTE_MODE',
@@ -24,6 +25,10 @@ function clone(value){return JSON.parse(JSON.stringify(value));}
 export function buildMemberLineLoginStageCandidate(entrySource,wranglerConfig){
   const source=text(entrySource);
   const cfg=clone(wranglerConfig||{});
+
+  if(text(cfg.main)!==CANONICAL_ENTRYPOINT){
+    throw new Error('CANONICAL_ENTRYPOINT_MISMATCH');
+  }
 
   const ownerFalse='const MEMBER_PRODUCTION_OWNER_APPROVED=false;';
   const ownerTrue='const MEMBER_PRODUCTION_OWNER_APPROVED=true;';
@@ -51,6 +56,7 @@ export function buildMemberLineLoginStageCandidate(entrySource,wranglerConfig){
     .replace('line_login_approved:false','line_login_approved:true');
 
   const candidateConfig=clone(cfg);
+  candidateConfig.main=CANONICAL_ENTRYPOINT;
   candidateConfig.vars={
     ...(candidateConfig.vars||{}),
     MEMBER_PRODUCTION_ROUTE_MODE:'enabled',
@@ -98,6 +104,7 @@ export function validateMemberLineLoginStageCandidate(candidate){
   const vars=cfg.vars||{};
 
   const checks={
+    main:text(cfg.main)===CANONICAL_ENTRYPOINT,
     owner:(entry.match(/const MEMBER_PRODUCTION_OWNER_APPROVED=true;/g)||[]).length===1 && !entry.includes('const MEMBER_PRODUCTION_OWNER_APPROVED=false;'),
     line_approval:(entry.match(/line_login_approved:true/g)||[]).length===1 && !entry.includes('line_login_approved:false'),
     route:enabled(vars.MEMBER_PRODUCTION_ROUTE_MODE),
@@ -136,4 +143,4 @@ export function memberProductionLineLoginStagePlanHealth(){
   };
 }
 
-export const __test={BUILD,REQUIRED_DISABLED_MODES,REQUIRED_BINDINGS,enabled};
+export const __test={BUILD,CANONICAL_ENTRYPOINT,REQUIRED_DISABLED_MODES,REQUIRED_BINDINGS,enabled};
