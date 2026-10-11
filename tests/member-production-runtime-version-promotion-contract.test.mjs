@@ -5,6 +5,8 @@ const workflow=fs.readFileSync('.github/workflows/member-production-runtime-vers
 const bridge=fs.readFileSync('.github/workflows/dispatch-member-production-runtime-version-promotion-from-issue.yml','utf8');
 
 assert.match(workflow,/workflow_dispatch:\s*\n\s*inputs:\s*\n\s*expected_sha:/);
+assert.ok(workflow.includes("github.event_name == 'workflow_dispatch' && 'customer-crm-production-deploy'"));
+assert.ok(!workflow.includes("github.event_name == 'workflow_dispatch' && 'crm-production-deploy'"));
 for(const input of [
   'staged_version_id',
   'stage_run_id',
@@ -146,6 +148,7 @@ assert.doesNotMatch(bridge,/deploy-cloudflare\.yml\/dispatches/);
 assert.doesNotMatch(bridge,/member-production-runtime-secret-stage\.yml\/dispatches/);
 
 console.log('MEMBER_PRODUCTION_RUNTIME_VERSION_PROMOTION_CONTRACT=PASS');
+console.log('MEMBER_PRODUCTION_RUNTIME_VERSION_PROMOTION_CANONICAL_LOCK=PASS');
 console.log('MEMBER_PRODUCTION_RUNTIME_VERSION_PROMOTION_OWNER_GATE=PASS');
 console.log('MEMBER_PRODUCTION_RUNTIME_VERSION_PROMOTION_ACTIVE_VERSION_BINDING=PASS');
 console.log('MEMBER_PRODUCTION_RUNTIME_VERSION_PROMOTION_FIRST_ATTEMPT_ONLY=PASS');
