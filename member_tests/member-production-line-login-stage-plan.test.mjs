@@ -18,6 +18,7 @@ const validation=validateMemberLineLoginStageCandidate(candidate);
 
 pass('planner returns a valid candidate',validation.ok===true);
 pass('canonical source is not mutated in memory',entry.includes('const MEMBER_PRODUCTION_OWNER_APPROVED=false;'));
+pass('candidate preserves canonical Worker entrypoint',candidate.wrangler_config.main==='src/production-index-crm-customer360-entry.js');
 pass('candidate enables Owner approval exactly once',(candidate.entry_source.match(/const MEMBER_PRODUCTION_OWNER_APPROVED=true;/g)||[]).length===1);
 pass('candidate enables LINE login approval exactly once',(candidate.entry_source.match(/line_login_approved:true/g)||[]).length===1);
 pass('candidate enables Member route',candidate.wrangler_config.vars.MEMBER_PRODUCTION_ROUTE_MODE==='enabled');
@@ -46,12 +47,16 @@ pass('health stops at fresh Owner-gated immutable candidate stage',health.next_b
 
 throws('planner rejects canonical Owner already enabled',()=>buildMemberLineLoginStageCandidate(entry.replace('const MEMBER_PRODUCTION_OWNER_APPROVED=false;','const MEMBER_PRODUCTION_OWNER_APPROVED=true;'),cfg),/OWNER_DEFAULT_FALSE_NOT_EXACTLY_ONE|OWNER_ALREADY_ENABLED/);
 throws('planner rejects canonical LINE approval already enabled',()=>buildMemberLineLoginStageCandidate(entry.replace('line_login_approved:false','line_login_approved:true'),cfg),/LINE_LOGIN_APPROVAL_FALSE_NOT_EXACTLY_ONE|LINE_LOGIN_APPROVAL_ALREADY_ENABLED/);
+const wrongMain=structuredClone(cfg);wrongMain.main='src/unpatched-entry.js';
+throws('planner rejects canonical Worker entrypoint drift',()=>buildMemberLineLoginStageCandidate(entry,wrongMain),/CANONICAL_ENTRYPOINT_MISMATCH/);
 const routeEnabled=structuredClone(cfg);routeEnabled.vars={...(routeEnabled.vars||{}),MEMBER_PRODUCTION_ROUTE_MODE:'enabled'};
 throws('planner rejects canonical route mode already enabled',()=>buildMemberLineLoginStageCandidate(entry,routeEnabled),/CANONICAL_MODE_ALREADY_ENABLED:MEMBER_PRODUCTION_ROUTE_MODE/);
 const exchangeEnabled=structuredClone(cfg);exchangeEnabled.vars={...(exchangeEnabled.vars||{}),MEMBER_LINE_LOGIN_EXTERNAL_EXCHANGE_MODE:'enabled'};
 throws('planner rejects canonical LINE exchange already enabled',()=>buildMemberLineLoginStageCandidate(entry,exchangeEnabled),/CANONICAL_MODE_ALREADY_ENABLED:MEMBER_LINE_LOGIN_EXTERNAL_EXCHANGE_MODE/);
 const extraR2=structuredClone(cfg);extraR2.r2_buckets=[...(extraR2.r2_buckets||[]),{binding:'EXTRA',bucket_name:'extra'}];
 throws('planner rejects resource binding drift',()=>buildMemberLineLoginStageCandidate(entry,extraR2),/CANONICAL_PRIVATE_MEDIA_BINDING_MISMATCH/);
+const invalidCandidate=structuredClone(candidate);invalidCandidate.wrangler_config.main='src/unpatched-entry.js';
+throws('validator rejects candidate Worker entrypoint drift',()=>validateMemberLineLoginStageCandidate(invalidCandidate),/LINE_LOGIN_STAGE_CANDIDATE_INVALID:main/);
 
 console.log(`MEMBER_PRODUCTION_LINE_LOGIN_STAGE_PLAN=${passCount}/${passCount} PASS`);
 console.log('PRODUCTION_MUTATION=0');
