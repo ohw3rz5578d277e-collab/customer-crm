@@ -12,6 +12,19 @@ const schemaApply=fs.readFileSync('.github/workflows/member-production-schema-ap
 const runtimeSecret=fs.readFileSync('.github/workflows/member-production-runtime-secret-stage.yml','utf8');
 const versionPromotion=fs.readFileSync('.github/workflows/member-production-version-promotion.yml','utf8');
 const routeStage=fs.readFileSync('.github/workflows/member-production-route-stage.yml','utf8');
+const peerMutationBridgePaths=[
+  '.github/workflows/dispatch-production-deploy-from-issue.yml',
+  '.github/workflows/dispatch-member-schema-apply-from-issue.yml',
+  '.github/workflows/dispatch-member-production-runtime-secret-stage-from-issue.yml',
+  '.github/workflows/dispatch-member-production-runtime-version-promotion-from-issue.yml',
+  '.github/workflows/dispatch-member-production-version-promotion-from-issue.yml',
+  '.github/workflows/dispatch-member-production-route-stage-from-issue.yml',
+  '.github/workflows/dispatch-member-production-line-login-stage-from-issue.yml',
+];
+const peerMutationBridges=peerMutationBridgePaths.map(path=>({
+  path,
+  source:fs.readFileSync(path,'utf8'),
+}));
 
 function pass(name,condition){assert.equal(condition,true,name);console.log('PASS',name);}
 
@@ -75,7 +88,7 @@ pass('stage authenticates exact workflow_run caller provenance',
   && workflow.includes("'path': r.get('path')=='.github/workflows/dispatch-member-production-line-login-stage-after-bridge.yml'")
   && workflow.includes("'head_sha': r.get('head_sha')==os.environ['EXPECTED_SHA']")
   && workflow.includes("'run_attempt': r.get('run_attempt')==1")
-  && workflow.includes('Validated mutation dispatcher preflight: member-line-login-stage bridge=')
+  && workflow.includes('Production mutation bridge: member-line-login-stage-post-bridge bridge=')
   && workflow.includes('MEMBER_LINE_LOGIN_STAGE_REUSABLE_CALLER_PROVENANCE=PASS')
 );
 pass('stage requires successful post-bridge validation job before mutation',
@@ -208,6 +221,16 @@ pass('issue bridge creates one-day validated receipt artifact but cannot call st
   && !bridge.includes('uses: ./.github/workflows/member-production-line-login-stage.yml')
   && !bridge.includes('/actions/workflows/member-production-line-login-stage.yml/dispatches')
   && !bridge.includes('actions: write')
+);
+
+pass('post-bridge run-name uses canonical Production mutation classifier prefix',
+  postBridge.includes("format('Production mutation bridge: member-line-login-stage-post-bridge bridge={0}'")
+  && postBridge.includes("|| 'Production bridge: ignored'")
+);
+pass('all canonical peer mutation bridges register post-bridge LINE Login mutation',
+  peerMutationBridges.every(({source})=>
+    source.includes('dispatch-member-production-line-login-stage-after-bridge.yml')
+  )
 );
 
 pass('post-bridge validator is triggered only after exact bridge completion',

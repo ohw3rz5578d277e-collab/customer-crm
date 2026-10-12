@@ -15,6 +15,12 @@ on:
       - 'wrangler.jsonc'
       - '.github/workflows/member-production-route-stage.yml'
       - '.github/workflows/member-production-version-promotion.yml'
+      - '.github/workflows/dispatch-production-deploy-from-issue.yml'
+      - '.github/workflows/dispatch-member-schema-apply-from-issue.yml'
+      - '.github/workflows/dispatch-member-production-runtime-secret-stage-from-issue.yml'
+      - '.github/workflows/dispatch-member-production-runtime-version-promotion-from-issue.yml'
+      - '.github/workflows/dispatch-member-production-version-promotion-from-issue.yml'
+      - '.github/workflows/dispatch-member-production-route-stage-from-issue.yml'
   workflow_call:
     inputs:
       expected_sha:
@@ -239,7 +245,7 @@ jobs:
               'path': r.get('path')=='.github/workflows/dispatch-member-production-line-login-stage-after-bridge.yml',
               'head_sha': r.get('head_sha')==os.environ['EXPECTED_SHA'],
               'run_attempt': r.get('run_attempt')==1,
-              'display_title': r.get('display_title')==f"Validated mutation dispatcher preflight: member-line-login-stage bridge={os.environ['BRIDGE_RUN_ID']}",
+              'display_title': r.get('display_title')==f"Production mutation bridge: member-line-login-stage-post-bridge bridge={os.environ['BRIDGE_RUN_ID']}",
           }
           bad=[k for k,v in checks.items() if not v]
           if bad: raise SystemExit('INVALID_LINE_LOGIN_REUSABLE_CALLER:'+','.join(bad))

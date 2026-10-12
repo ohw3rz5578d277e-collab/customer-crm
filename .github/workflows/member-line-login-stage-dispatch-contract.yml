@@ -7,6 +7,12 @@ on:
     paths:
       - '.github/workflows/dispatch-member-production-line-login-stage-from-issue.yml'
       - '.github/workflows/dispatch-member-production-line-login-stage-after-bridge.yml'
+      - '.github/workflows/dispatch-production-deploy-from-issue.yml'
+      - '.github/workflows/dispatch-member-schema-apply-from-issue.yml'
+      - '.github/workflows/dispatch-member-production-runtime-secret-stage-from-issue.yml'
+      - '.github/workflows/dispatch-member-production-runtime-version-promotion-from-issue.yml'
+      - '.github/workflows/dispatch-member-production-version-promotion-from-issue.yml'
+      - '.github/workflows/dispatch-member-production-route-stage-from-issue.yml'
       - '.github/workflows/member-production-line-login-stage.yml'
       - '.github/workflows/member-line-login-stage-dispatch-contract.yml'
       - 'tests/member-production-line-login-stage-contract.test.mjs'

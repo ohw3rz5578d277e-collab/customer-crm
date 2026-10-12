@@ -1,7 +1,7 @@
 name: Validate Member LINE Login stage after release-gate bridge
 
 run-name: >-
-  ${{ github.event.workflow_run.conclusion == 'success' && format('Validated mutation dispatcher preflight: member-line-login-stage bridge={0}', github.event.workflow_run.id) || 'Validated mutation dispatcher: ignored' }}
+  ${{ github.event.workflow_run.conclusion == 'success' && format('Production mutation bridge: member-line-login-stage-post-bridge bridge={0}', github.event.workflow_run.id) || 'Production bridge: ignored' }}
 
 on:
   workflow_run:
