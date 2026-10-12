@@ -1,0 +1,65 @@
+name: Member LINE Login dispatch bridge contract
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/dispatch-member-production-line-login-stage-from-issue.yml'
+      - '.github/workflows/dispatch-member-production-line-login-stage-after-bridge.yml'
+      - '.github/workflows/member-line-login-stage-dispatch-contract.yml'
+      - 'tests/member-production-line-login-stage-contract.test.mjs'
+      - 'docs/member-app/member-production-line-login-stage.md'
+      - '.github/workflows/member-app-foundation.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: LINE Login dispatch bridge source-only contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact PR head
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+
+      - name: Assert exact PR head
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
+
+      - name: Verify bridge workflow YAML
+        shell: bash
+        run: |
+          set -euo pipefail
+          ruby -e "require 'yaml'; YAML.load_file(ARGV[0])" .github/workflows/dispatch-member-production-line-login-stage-from-issue.yml
+          ruby -e "require 'yaml'; YAML.load_file(ARGV[0])" .github/workflows/dispatch-member-production-line-login-stage-after-bridge.yml
+          ruby -e "require 'yaml'; YAML.load_file(ARGV[0])" .github/workflows/member-line-login-stage-dispatch-contract.yml
+
+      - name: Set up Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+
+      - name: Verify LINE Login stage and dispatch contracts
+        run: node tests/member-production-line-login-stage-contract.test.mjs
+
+      - name: Source-only receipt
+        shell: bash
+        run: |
+          echo 'MEMBER_LINE_LOGIN_DISPATCH_BRIDGE_CONTRACT=PASS'
+          echo 'PRODUCTION_MUTATION=0'
+          echo 'WORKFLOW_DISPATCH=0'
+          echo 'PRODUCTION_TRAFFIC_CHANGE=0'
+          echo 'PRODUCTION_DEPLOY=0'
+          echo 'PRODUCTION_D1_READ=0'
+          echo 'PRODUCTION_D1_WRITE=0'
+          echo 'R2_OBJECT_READ=0'
+          echo 'R2_OBJECT_WRITE=0'
+          echo 'LINE_SEND=0'
+          echo 'CUSTOMER_PROSPECT_MUTATION=0'
