@@ -114,6 +114,31 @@ test('LINE exchange not enabled fails closed',()=>{
   assert.throws(()=>buildMemberLineLoginPromotionReadiness(x),/STAGED_LINE_LOGIN_EXCHANGE_NOT_ENABLED/);
 });
 
+test('strict zero rejects boolean false',()=>{
+  const x=clone(base); x.stage_receipt.production_traffic_change=false;
+  assert.throws(()=>buildMemberLineLoginPromotionReadiness(x),/LINE_LOGIN_STAGE_RECEIPT_INVALID:traffic/);
+});
+
+test('strict zero rejects empty string',()=>{
+  const x=clone(base); x.stage_receipt.production_traffic_change='';
+  assert.throws(()=>buildMemberLineLoginPromotionReadiness(x),/LINE_LOGIN_STAGE_RECEIPT_INVALID:traffic/);
+});
+
+test('strict zero rejects null',()=>{
+  const x=clone(base); x.stage_receipt.production_traffic_change=null;
+  assert.throws(()=>buildMemberLineLoginPromotionReadiness(x),/LINE_LOGIN_STAGE_RECEIPT_INVALID:traffic/);
+});
+
+test('strict zero accepts numeric zero',()=>{
+  const x=clone(base); x.stage_receipt.production_traffic_change=0;
+  assert.equal(buildMemberLineLoginPromotionReadiness(x).readiness,'PASS');
+});
+
+test('strict zero accepts string zero',()=>{
+  const x=clone(base); x.stage_receipt.production_traffic_change='0';
+  assert.equal(buildMemberLineLoginPromotionReadiness(x).readiness,'PASS');
+});
+
 test('health remains source-only and mutation-free',()=>{
   const h=memberLineLoginPromotionReadinessHealth();
   assert.equal(h.source_only,true);
