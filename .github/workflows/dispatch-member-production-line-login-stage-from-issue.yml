@@ -104,12 +104,14 @@ jobs:
             dispatch-production-deploy-from-issue.yml
             dispatch-member-schema-apply-from-issue.yml
             dispatch-member-production-runtime-secret-stage-from-issue.yml
+            dispatch-member-production-runtime-version-promotion-from-issue.yml
             dispatch-member-production-version-promotion-from-issue.yml
             dispatch-member-production-route-stage-from-issue.yml
             dispatch-member-production-line-login-stage-from-issue.yml
             deploy-cloudflare.yml
             member-production-schema-apply.yml
             member-production-runtime-secret-stage.yml
+            member-production-runtime-version-promotion.yml
             member-production-version-promotion.yml
             member-production-route-stage.yml
             member-production-line-login-stage.yml
@@ -135,6 +137,7 @@ jobs:
           direct_mutation_workflows={
               'member-production-schema-apply.yml',
               'member-production-runtime-secret-stage.yml',
+              'member-production-runtime-version-promotion.yml',
               'member-production-version-promotion.yml',
               'member-production-route-stage.yml',
               'member-production-line-login-stage.yml',
