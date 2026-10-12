@@ -27,24 +27,35 @@ The compare from candidate source SHA `fdfa65fa...` to initial current main `990
 
 The Production entrypoint, `wrangler.jsonc`, and executable Production workflows were not changed by that compare.
 
+The exact audited Git blob SHAs for those readiness files are also pinned:
+
+- `src/member-production-line-login-promotion-readiness.mjs` -> `8be93701a8fb5e3a2e9fd72776a7a2ce698aa140`
+- `member_tests/member-production-line-login-promotion-readiness.test.mjs` -> `a26ba0302d9e315e642c747dc8498df6cda4790e`
+- `docs/member-app/member-production-line-login-promotion-readiness.md` -> `ec1ed3fdc1fac59f70447eadfc9df7db6a972287`
+
+Filename allowlisting alone is insufficient. A packet is not ready unless read-only drift evidence states that blob evidence was checked, provides exactly those three readiness paths, and each path has the exact pinned blob SHA above. This prevents an edited allowlisted readiness source/test/doc from inheriting the previously audited readiness identity merely because its filename is unchanged.
+
 A merged blocked-handoff change would itself add three additional non-runtime files:
 
 1. `src/member-production-line-login-promotion-blocked-handoff.mjs`
 2. `member_tests/member-production-line-login-promotion-blocked-handoff.test.mjs`
 3. `docs/member-app/member-production-line-login-promotion-blocked-handoff.md`
 
-The validator therefore requires the three readiness files and permits either none or all three of the blocked-handoff files. Any other changed file, any partial blocked-handoff set, any duplicate changed-file evidence, or any missing readiness file fails closed. This keeps the packet valid before and after its own merge without allowing unrelated source drift.
+The validator therefore requires the three readiness files and permits either none or all three of the blocked-handoff files. Any other changed file, any partial blocked-handoff set, any duplicate changed-file evidence, any missing readiness file, or any readiness blob mismatch fails closed. This keeps the packet valid before and after its own merge without allowing unrelated source drift.
 
 ## Blocked-handoff packet
 
 `src/member-production-line-login-promotion-blocked-handoff.mjs` is a pure source-only validator. It performs no network calls and no Production mutation.
 
+It carries its own immutable candidate constants instead of treating imported readiness constants as authority. The existing promotion-readiness validator remains an additional validation layer, and its returned identity must agree with those local immutable constants.
+
 It requires all of the following before returning `packet_ready=true`:
 
-- the exact immutable candidate identity pinned by the existing promotion-readiness planner;
-- promotion-readiness evidence remains `PASS`;
+- the exact immutable candidate identity recorded by this packet;
+- promotion-readiness evidence remains `PASS` and returns the same candidate identity;
 - current main is syntactically valid and separately tracked from the candidate source SHA;
 - the candidate-source-to-current-main changed-file evidence contains all three required readiness files;
+- the three readiness paths have the exact pinned Git blob SHAs above;
 - changed files are restricted to the immutable non-runtime allowlist above;
 - the blocked-handoff file set is either absent or complete;
 - Production entrypoint drift is explicitly false;
