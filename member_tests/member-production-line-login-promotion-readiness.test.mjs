@@ -17,6 +17,7 @@ const base={
     candidate_sha256:'af11b47ca14b90985fd2a1f6aa5523626b77dbb4f72a7092c1e7fb5da1fb5cd8',
     unchanged_active_version_id:'6d34db85-9a52-45e9-8f7d-094f9fc7957a',
     staging_run_id:'38233408939',
+    owner_approved:true,
     member_route_enabled:true,
     line_login_approved:true,
     line_login_external_exchange_enabled:true,
@@ -43,6 +44,7 @@ const base={
   staged_version:{
     version_id:'be711f54-8716-4178-9949-d5ced183d9dc',
     candidate_sha256:'af11b47ca14b90985fd2a1f6aa5523626b77dbb4f72a7092c1e7fb5da1fb5cd8',
+    owner_approved:true,
     member_route_enabled:true,
     line_login_approved:true,
     line_login_external_exchange_enabled:true,
@@ -64,6 +66,7 @@ test('valid exact candidate is promotion-ready',()=>{
   assert.equal(result.staged_version_id,base.staged_version_id);
   assert.equal(result.expected_active_version_id,base.expected_active_version_id);
   assert.equal(result.candidate_binding,'IMMUTABLE_SOURCE_CONSTANTS');
+  assert.equal(result.owner_approval_required,true);
   assert.equal(result.production_traffic_change,false);
   assert.equal(result.next_boundary,'FRESH_OWNER_GATED_LINE_LOGIN_PROMOTION_REQUIRED');
 });
@@ -114,6 +117,16 @@ test('internally consistent forged candidate identifiers fail closed',()=>{
 test('stage receipt run lineage mismatch fails closed',()=>{
   const x=clone(base); x.stage_receipt.staging_run_id='99999999999';
   assert.throws(()=>buildMemberLineLoginPromotionReadiness(x),/LINE_LOGIN_STAGE_RECEIPT_INVALID:staging_run/);
+});
+
+test('stage receipt Owner approval disabled fails closed',()=>{
+  const x=clone(base); x.stage_receipt.owner_approved=false;
+  assert.throws(()=>buildMemberLineLoginPromotionReadiness(x),/LINE_LOGIN_STAGE_RECEIPT_INVALID:owner_approval/);
+});
+
+test('staged Owner approval disabled fails closed',()=>{
+  const x=clone(base); x.staged_version.owner_approved=false;
+  assert.throws(()=>buildMemberLineLoginPromotionReadiness(x),/STAGED_OWNER_APPROVAL_NOT_ENABLED/);
 });
 
 test('stage receipt candidate digest mismatch fails closed',()=>{
@@ -193,6 +206,7 @@ test('health remains source-only and mutation-free',()=>{
   const h=memberLineLoginPromotionReadinessHealth();
   assert.equal(h.source_only,true);
   assert.equal(h.candidate_binding,'IMMUTABLE_SOURCE_CONSTANTS');
+  assert.equal(h.owner_approval_required,true);
   assert.equal(h.production_mutation,false);
   assert.equal(h.production_traffic_change,false);
   assert.equal(h.production_deploy,false);
