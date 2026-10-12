@@ -37,7 +37,7 @@ on:
         required: true
         type: string
       bridge_run_id:
-        description: First-attempt issue-comment bridge run ID
+        description: First-attempt successful Issue 26 bridge run ID
         required: true
         type: string
       confirmation:
@@ -161,7 +161,7 @@ jobs:
           test "$current_main" = "$EXPECTED_SHA" || { echo "::error::MAIN_DRIFT current=$current_main expected=$EXPECTED_SHA"; exit 1; }
           echo 'CURRENT_MAIN_EXACT_GATE=PASS'
 
-      - name: Verify first-attempt Issue 26 bridge receipt
+      - name: Verify successful first-attempt Issue 26 bridge receipt
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -181,6 +181,8 @@ jobs:
               r=json.load(f)
           checks={
               'id': r.get('id')==int(os.environ['BRIDGE_RUN_ID']),
+              'status': r.get('status')=='completed',
+              'conclusion': r.get('conclusion')=='success',
               'event': r.get('event')=='issue_comment',
               'path': r.get('path')=='.github/workflows/dispatch-member-production-line-login-stage-from-issue.yml',
               'head_sha': r.get('head_sha')==os.environ['EXPECTED_SHA'],
@@ -190,6 +192,7 @@ jobs:
           bad=[k for k,v in checks.items() if not v]
           if bad: raise SystemExit('INVALID_LINE_LOGIN_STAGE_BRIDGE_RECEIPT:'+','.join(bad))
           print('MEMBER_LINE_LOGIN_STAGE_BRIDGE_RECEIPT=PASS')
+          print('MEMBER_LINE_LOGIN_STAGE_BRIDGE_SUCCESS=PASS')
           PY
           rm -f /tmp/member-line-login-stage-bridge.json
 
@@ -215,8 +218,7 @@ jobs:
           python3 - <<'PY'
           import json, os
           from datetime import datetime, timezone
-          with open('/tmp/member-line-login-stage-owner-comment.json', encoding='utf-8') as f:
-              c=json.load(f)
+          c=json.load(open('/tmp/member-line-login-stage-owner-comment.json', encoding='utf-8'))
           if c.get('user',{}).get('login')!='ohw3rz5578d277e-collab': raise SystemExit('OWNER_COMMENT_ACTOR_MISMATCH')
           if c.get('body')!=os.environ['EXPECTED_BODY']: raise SystemExit('OWNER_COMMENT_BODY_MISMATCH')
           if not str(c.get('issue_url','')).endswith('/issues/26'): raise SystemExit('OWNER_COMMENT_ISSUE_MISMATCH')
@@ -239,16 +241,14 @@ jobs:
           EXPECTED_ACTIVE_VERSION_ID: ${{ steps.auth.outputs.expected_active_version_id }}
         run: |
           set -euo pipefail
-          fetch_run () {
-            run_id="$1"; target="$2"
+          for spec in "$ROUTE_STAGE_RUN_ID:/tmp/member-line-login-route-stage-run.json" "$ROUTE_PROMOTION_RUN_ID:/tmp/member-line-login-route-promotion-run.json"; do
+            run_id="${spec%%:*}"; target="${spec#*:}"
             curl --fail --silent --show-error \
               -H "Authorization: Bearer $GH_TOKEN" \
               -H 'Accept: application/vnd.github+json' \
               -H 'X-GitHub-Api-Version: 2022-11-28' \
               "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/runs/$run_id" > "$target"
-          }
-          fetch_run "$ROUTE_STAGE_RUN_ID" /tmp/member-line-login-route-stage-run.json
-          fetch_run "$ROUTE_PROMOTION_RUN_ID" /tmp/member-line-login-route-promotion-run.json
+          done
           python3 - <<'PY'
           import json, os
           stage=json.load(open('/tmp/member-line-login-route-stage-run.json', encoding='utf-8'))
@@ -275,8 +275,7 @@ jobs:
           print('ROUTE_STAGE_AND_PROMOTION_RUN_METADATA=PASS')
           PY
 
-          curl --fail --silent --show-error \
-            -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' -H 'X-GitHub-Api-Version: 2022-11-28' \
+          curl --fail --silent --show-error -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' -H 'X-GitHub-Api-Version: 2022-11-28' \
             "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/runs/$ROUTE_STAGE_RUN_ID/jobs?per_page=100" > /tmp/member-line-login-route-stage-jobs.json
           route_stage_job_id="$(python3 - <<'PY'
           import json
@@ -286,16 +285,14 @@ jobs:
           PY
           )"
           [[ "$route_stage_job_id" =~ ^[0-9]+$ ]] || { echo '::error::ROUTE_STAGE_JOB_RECEIPT_INVALID'; exit 1; }
-          curl --fail --silent --show-error --location \
-            -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' -H 'X-GitHub-Api-Version: 2022-11-28' \
+          curl --fail --silent --show-error --location -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' -H 'X-GitHub-Api-Version: 2022-11-28' \
             "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/jobs/$route_stage_job_id/logs" > /tmp/member-line-login-route-stage.log
           grep -F 'MEMBER_PRODUCTION_ROUTE_STAGE=PASS' /tmp/member-line-login-route-stage.log >/dev/null
           grep -F "STAGED_VERSION_ID=$EXPECTED_ACTIVE_VERSION_ID" /tmp/member-line-login-route-stage.log >/dev/null
           grep -F 'LINE_LOGIN_EXTERNAL_EXCHANGE_STAGED=disabled' /tmp/member-line-login-route-stage.log >/dev/null
           grep -F 'PRODUCTION_TRAFFIC_CHANGE=0' /tmp/member-line-login-route-stage.log >/dev/null
 
-          curl --fail --silent --show-error \
-            -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' -H 'X-GitHub-Api-Version: 2022-11-28' \
+          curl --fail --silent --show-error -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' -H 'X-GitHub-Api-Version: 2022-11-28' \
             "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/runs/$ROUTE_PROMOTION_RUN_ID/jobs?per_page=100" > /tmp/member-line-login-route-promotion-jobs.json
           route_promotion_job_id="$(python3 - <<'PY'
           import json
@@ -305,8 +302,7 @@ jobs:
           PY
           )"
           [[ "$route_promotion_job_id" =~ ^[0-9]+$ ]] || { echo '::error::ROUTE_PROMOTION_JOB_RECEIPT_INVALID'; exit 1; }
-          curl --fail --silent --show-error --location \
-            -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' -H 'X-GitHub-Api-Version: 2022-11-28' \
+          curl --fail --silent --show-error --location -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' -H 'X-GitHub-Api-Version: 2022-11-28' \
             "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/jobs/$route_promotion_job_id/logs" > /tmp/member-line-login-route-promotion.log
           grep -F 'MEMBER_ROUTE_STAGED_VERSION_PROMOTION=PASS' /tmp/member-line-login-route-promotion.log >/dev/null
           grep -F "MEMBER_STAGED_VERSION_ID=$EXPECTED_ACTIVE_VERSION_ID" /tmp/member-line-login-route-promotion.log >/dev/null
@@ -408,7 +404,9 @@ jobs:
           console.log('LINE_LOGIN_APPROVAL_STAGED=true');
           console.log('LINE_LOGIN_EXTERNAL_EXCHANGE_STAGED=enabled');
           console.log('PRIVATE_MEDIA_CONTENT_ROUTE_STAGED=disabled');
-          console.log('MEMBER_WRITE_MODES_STAGED=disabled');
+          console.log('FAVORITES_WRITE_STAGED=disabled');
+          console.log('MEMORY_WRITE_STAGED=disabled');
+          console.log('FAMILY_PASS_ENTITLEMENT_WRITE_STAGED=disabled');
           console.log('MEMBER_LINE_LOGIN_CANDIDATE_SHA256='+digest);
           NODE
 
