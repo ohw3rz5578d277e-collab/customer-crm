@@ -1,4 +1,4 @@
-const BUILD='member-production-line-login-promotion-readiness-20261012-04';
+const BUILD='member-production-line-login-promotion-readiness-20261012-05';
 
 const UUID_RE=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const SHA_RE=/^[0-9a-f]{40}$/i;
@@ -51,6 +51,7 @@ export function buildMemberLineLoginPromotionReadiness(input={}){
     candidate_digest:exactString(receipt.candidate_sha256).toLowerCase()===AUTHORIZED_CANDIDATE.candidate_sha256,
     unchanged_active:exactString(receipt.unchanged_active_version_id).toLowerCase()===AUTHORIZED_CANDIDATE.expected_active_version_id,
     staging_run:exactString(receipt.staging_run_id)===AUTHORIZED_CANDIDATE.staging_run_id,
+    owner_approval:bool(receipt.owner_approved),
     route:bool(receipt.member_route_enabled),
     line_approval:bool(receipt.line_login_approved),
     line_exchange:bool(receipt.line_login_external_exchange_enabled),
@@ -85,6 +86,7 @@ export function buildMemberLineLoginPromotionReadiness(input={}){
   const staged=input.staged_version||{};
   if(exactString(staged.version_id).toLowerCase()!==AUTHORIZED_CANDIDATE.staged_version_id)throw new Error('STAGED_VERSION_VIEW_ID_MISMATCH');
   if(exactString(staged.candidate_sha256).toLowerCase()!==AUTHORIZED_CANDIDATE.candidate_sha256)throw new Error('STAGED_VERSION_DIGEST_MISMATCH');
+  if(staged.owner_approved!==true)throw new Error('STAGED_OWNER_APPROVAL_NOT_ENABLED');
   if(staged.member_route_enabled!==true)throw new Error('STAGED_MEMBER_ROUTE_NOT_ENABLED');
   if(staged.line_login_approved!==true)throw new Error('STAGED_LINE_LOGIN_APPROVAL_NOT_ENABLED');
   if(staged.line_login_external_exchange_enabled!==true)throw new Error('STAGED_LINE_LOGIN_EXCHANGE_NOT_ENABLED');
@@ -103,6 +105,7 @@ export function buildMemberLineLoginPromotionReadiness(input={}){
     staging_run_id:AUTHORIZED_CANDIDATE.staging_run_id,
     expected_active_version_id:AUTHORIZED_CANDIDATE.expected_active_version_id,
     candidate_binding:'IMMUTABLE_SOURCE_CONSTANTS',
+    owner_approval_required:true,
     production_traffic_current_percent:0,
     production_mutation:false,
     production_traffic_change:false,
@@ -131,6 +134,7 @@ export function memberLineLoginPromotionReadinessHealth(){
     build:BUILD,
     source_only:true,
     candidate_binding:'IMMUTABLE_SOURCE_CONSTANTS',
+    owner_approval_required:true,
     production_mutation:false,
     production_traffic_change:false,
     production_deploy:false,
