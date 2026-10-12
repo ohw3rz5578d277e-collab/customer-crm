@@ -11,7 +11,7 @@ The successful LINE Login candidate stage produced the following exact evidence:
 - unchanged active Worker version: `6d34db85-9a52-45e9-8f7d-094f9fc7957a`
 - staged candidate Production traffic: `0%`
 
-The candidate has Member route, LINE Login approval, and LINE Login external exchange enabled. Private-media content routing, Favorites writes, MEMORY writes, and FAMILY PASS entitlement writes remain disabled.
+The candidate has staged Owner approval, Member route, LINE Login approval, and LINE Login external exchange enabled. Private-media content routing, Favorites writes, MEMORY writes, and FAMILY PASS entitlement writes remain disabled.
 
 ## Source-only readiness planner
 
@@ -27,13 +27,14 @@ It requires exact agreement among:
 4. pinned LINE Login stage run ID;
 5. pinned expected active 100%-traffic Worker version;
 6. successful stage receipt markers matching those pinned identifiers, including exact stage run lineage;
-7. a single-version Production baseline;
-8. candidate traffic remaining at zero;
-9. candidate LINE Login modes being enabled;
-10. all unrelated write/activation modes remaining disabled;
-11. resource bindings remaining unchanged.
+7. `owner_approved=true` in both the stage receipt and staged-version evidence;
+8. a single-version Production baseline;
+9. candidate traffic remaining at zero;
+10. candidate Member route and LINE Login modes being enabled;
+11. all unrelated write/activation modes remaining disabled;
+12. resource bindings remaining unchanged.
 
-A syntactically valid, internally consistent but different candidate identity fails closed. A receipt whose `staging_run_id` does not equal `38233408939` also fails closed. Any other mismatch also fails closed.
+A syntactically valid, internally consistent but different candidate identity fails closed. A receipt whose `staging_run_id` does not equal `38233408939` fails closed. Missing or false staged Owner approval in either evidence view also fails closed. Any other mismatch also fails closed.
 
 ## Explicit exclusions
 
@@ -59,4 +60,4 @@ A source-only executable promotion workflow was intentionally not installed by t
 
 The immutable candidate source SHA is the SHA that produced the staged candidate; a future executable promotion boundary must separately verify the then-current `main` SHA before any traffic mutation.
 
-The repository must continue to fail closed if current main, active Worker version, candidate version, candidate digest, stage lineage, resource bindings, or safety modes drift.
+The repository must continue to fail closed if current main, active Worker version, candidate version, candidate digest, stage lineage, staged Owner approval, resource bindings, or safety modes drift.
