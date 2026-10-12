@@ -16,6 +16,7 @@ const base={
     staged_version_id:'be711f54-8716-4178-9949-d5ced183d9dc',
     candidate_sha256:'af11b47ca14b90985fd2a1f6aa5523626b77dbb4f72a7092c1e7fb5da1fb5cd8',
     unchanged_active_version_id:'6d34db85-9a52-45e9-8f7d-094f9fc7957a',
+    staging_run_id:'38233408939',
     member_route_enabled:true,
     line_login_approved:true,
     line_login_external_exchange_enabled:true,
@@ -103,10 +104,16 @@ test('internally consistent forged candidate identifiers fail closed',()=>{
   x.stage_receipt.staged_version_id=x.staged_version_id;
   x.stage_receipt.candidate_sha256=x.candidate_sha256;
   x.stage_receipt.unchanged_active_version_id=x.expected_active_version_id;
+  x.stage_receipt.staging_run_id=x.staging_run_id;
   x.active_deployment.versions=[{version_id:x.expected_active_version_id,percentage:100}];
   x.staged_version.version_id=x.staged_version_id;
   x.staged_version.candidate_sha256=x.candidate_sha256;
   assert.throws(()=>buildMemberLineLoginPromotionReadiness(x),/UNAUTHORIZED_EXPECTED_SHA/);
+});
+
+test('stage receipt run lineage mismatch fails closed',()=>{
+  const x=clone(base); x.stage_receipt.staging_run_id='99999999999';
+  assert.throws(()=>buildMemberLineLoginPromotionReadiness(x),/LINE_LOGIN_STAGE_RECEIPT_INVALID:staging_run/);
 });
 
 test('stage receipt candidate digest mismatch fails closed',()=>{
