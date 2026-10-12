@@ -30,6 +30,7 @@ A future authorized stage must provide:
 - exact currently active route-only Worker version UUID at 100% traffic;
 - fresh unedited Owner authorization comment from release-gate Issue #26;
 - first-attempt Issue #26 bridge run ID;
+- exact post-bridge reusable caller run ID;
 - confirmation token `STAGE_MEMBER_LINE_LOGIN_CANDIDATE`.
 
 The stage verifies that the route-stage receipt created the exact currently active Worker version while LINE Login external exchange was disabled, and that the route-promotion receipt promoted that same version to 100% traffic.
@@ -38,15 +39,18 @@ The stage verifies that the route-stage receipt created the exact currently acti
 
 After all gates pass, the workflow:
 
-1. re-checks exact current `main`;
-2. verifies the active Production deployment is exactly the Owner-authorized route-only version at 100%;
-3. builds the LINE Login candidate using the audited planner;
-4. verifies resource bindings are unchanged;
-5. performs a local Wrangler dry-run bundle;
-6. re-checks the fresh unedited Owner authorization and current `main` immediately before the only mutation;
-7. uploads exactly one immutable Worker version with `wrangler versions upload`;
-8. verifies the active Production deployment is unchanged and the staged version receives 0% traffic;
-9. removes all ephemeral candidate files.
+1. requires `caller_run_id` to equal the current GitHub run ID;
+2. verifies the caller is the exact first-attempt `workflow_run` for `.github/workflows/dispatch-member-production-line-login-stage-after-bridge.yml` on the authorized SHA;
+3. verifies the canonical post-bridge validation job already completed successfully in that same run;
+4. re-checks exact current `main`;
+5. verifies the active Production deployment is exactly the Owner-authorized route-only version at 100%;
+6. builds the LINE Login candidate using the audited planner;
+7. verifies resource bindings are unchanged;
+8. performs a local Wrangler dry-run bundle;
+9. re-checks the fresh unedited Owner authorization and current `main` immediately before the only mutation;
+10. uploads exactly one immutable Worker version with `wrangler versions upload`;
+11. verifies the active Production deployment is unchanged and the staged version receives 0% traffic;
+12. removes all ephemeral candidate files.
 
 The stage does not use `wrangler deploy` or `wrangler versions deploy`.
 
@@ -68,13 +72,13 @@ The stage does not authorize or perform:
 - BLACK automatic award;
 - paid spend.
 
-## Issue #26 command and two-stage bridge design
+## Issue #26 command and reusable bridge design
 
 The reserved Owner command is:
 
 `/member-production-line-login-stage sha=<exact-main-sha> route_stage_run=<run-id> route_promotion_run=<run-id> active_version=<uuid> confirm=STAGE_MEMBER_LINE_LOGIN_CANDIDATE`
 
-The bridge architecture deliberately separates Owner-command validation from stage dispatch so the stage can require a **completed + successful first-attempt bridge run** as provenance.
+The architecture separates Owner-command validation from the Production stage and uses the repository's canonical reusable-workflow pattern instead of a REST workflow dispatch.
 
 ### Stage A — Issue #26 bridge
 
@@ -87,15 +91,15 @@ The bridge architecture deliberately separates Owner-command validation from sta
 5. rejects when another canonical Production mutation is queued or running;
 6. writes a bounded receipt containing only IDs, exact SHA, active-version UUID, confirmation and a SHA-256 digest of the exact command;
 7. uploads that receipt as a one-day artifact;
-8. performs no Production mutation and does not directly dispatch the stage.
+8. performs no Production mutation and does not call the stage directly.
 
-The bridge itself has no `actions: write` permission.
+The bridge has no `actions: write` permission.
 
-### Stage B — completed-bridge validator
+### Stage B — completed-bridge validator and reusable caller
 
 `.github/workflows/dispatch-member-production-line-login-stage-after-bridge.yml` is triggered only by `workflow_run` completion of Stage A.
 
-It requires:
+Its `validate` job requires:
 
 - exact source workflow path;
 - `status=completed`;
@@ -111,27 +115,40 @@ It requires:
 - the Owner comment still unedited and within the 900-second freshness window;
 - no conflicting canonical Production mutation before the next boundary.
 
-This two-stage shape preserves the stage workflow's existing provenance requirement instead of weakening it to accept an in-progress bridge.
+Only after `validate` succeeds, the workflow calls:
 
-## Current executable-dispatch status
+`uses: ./.github/workflows/member-production-line-login-stage.yml`
 
-The post-bridge validator currently **fails closed before the actual `member-production-line-login-stage.yml` workflow dispatch** with:
+with the exact validated receipt-bound inputs and `secrets: inherit`.
 
-`MEMBER_LINE_LOGIN_STAGE_POST_BRIDGE_EXECUTABLE_DISPATCH_NOT_INSTALLED`
+No `actions: write` permission and no GitHub REST `/dispatches` POST are used.
 
-This is intentional in the current source-only work-in-progress because the repository-writing tool rejected creation of the executable dispatch step. The source does not weaken any existing stage provenance check to work around that rejection.
+### Stage C — reusable LINE Login candidate stage
 
-Therefore, even if this work-in-progress branch were mistakenly merged, the Issue #26 command could not reach `wrangler versions upload`: the post-bridge workflow ends with `LINE_LOGIN_STAGE_WORKFLOW_DISPATCH=0` and a failing conclusion.
+`.github/workflows/member-production-line-login-stage.yml` keeps the pull-request contract entrypoint but uses `workflow_call` as its only Production execution entrypoint. It has no manual `workflow_dispatch` trigger.
 
-The remaining source step is to install the audited post-bridge stage dispatch while preserving all completed-bridge, freshness, current-main and mutation-busy gates. That source change still requires review before merge.
+Before any Worker upload, the called stage verifies:
+
+- `caller_run_id == GITHUB_RUN_ID`;
+- the current run is `event=workflow_run`;
+- the run path is exactly `.github/workflows/dispatch-member-production-line-login-stage-after-bridge.yml`;
+- the run `head_sha` equals the authorized exact `main`;
+- `run_attempt=1`;
+- the run display title is bound to the exact source bridge run;
+- exactly one canonical `Revalidate successful bridge receipt before stage dispatch` job has already completed successfully;
+- the Issue #26 bridge remains a completed successful first-attempt Owner run;
+- the Owner comment is still fresh and unedited;
+- the route-stage and route-promotion lineage remains exact.
+
+This removes the direct/manual stage dispatch surface while preserving the completed-bridge, freshness, lineage and Production mutation exclusion gates.
 
 ## Shared Production mutation exclusion
 
-The actual LINE Login candidate stage uses the canonical `customer-crm-production-deploy` concurrency group, shared with canonical deploy and the existing Member Production mutations. The Issue #26 bridge and post-bridge validator also perform explicit reject-and-retry checks against the currently registered peer mutation workflows before issuing or consuming a dispatch receipt.
+The actual LINE Login candidate stage uses the canonical `customer-crm-production-deploy` concurrency group, shared with canonical deploy and the existing Member Production mutations. The Issue #26 bridge and post-bridge validator also perform explicit reject-and-retry checks against registered peer mutation workflows before issuing or consuming the dispatch receipt.
 
 This provides two layers:
 
-1. fail-closed busy checks before the dispatch boundary;
+1. fail-closed busy checks before the reusable stage boundary;
 2. canonical execution-layer mutual exclusion if two workflows are scheduled close together.
 
 ## Promotion remains separate
@@ -141,3 +158,7 @@ Even after a successful candidate stage, Production traffic remains on the prior
 `NEXT_BOUNDARY=FRESH_OWNER_LINE_LOGIN_PROMOTION_AUTHORIZATION_REQUIRED`
 
 A fresh, separately reviewed promotion implementation and separate Owner authorization are required before the staged LINE Login candidate can receive Production traffic.
+
+## Authorization boundary
+
+Merging source wiring does not itself authorize a Production stage. Actual execution still requires a fresh exact Owner command on Issue #26 after the executable source is merged and the current main SHA is freshly verified.
