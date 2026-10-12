@@ -1,4 +1,4 @@
-const BUILD='member-production-line-login-promotion-readiness-20261012-03';
+const BUILD='member-production-line-login-promotion-readiness-20261012-04';
 
 const UUID_RE=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const SHA_RE=/^[0-9a-f]{40}$/i;
@@ -50,6 +50,7 @@ export function buildMemberLineLoginPromotionReadiness(input={}){
     staged_version:exactString(receipt.staged_version_id).toLowerCase()===AUTHORIZED_CANDIDATE.staged_version_id,
     candidate_digest:exactString(receipt.candidate_sha256).toLowerCase()===AUTHORIZED_CANDIDATE.candidate_sha256,
     unchanged_active:exactString(receipt.unchanged_active_version_id).toLowerCase()===AUTHORIZED_CANDIDATE.expected_active_version_id,
+    staging_run:exactString(receipt.staging_run_id)===AUTHORIZED_CANDIDATE.staging_run_id,
     route:bool(receipt.member_route_enabled),
     line_approval:bool(receipt.line_login_approved),
     line_exchange:bool(receipt.line_login_external_exchange_enabled),
