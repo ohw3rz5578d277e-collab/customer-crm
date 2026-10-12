@@ -10,6 +10,11 @@ const readinessDiffs=[
   'docs/member-app/member-production-line-login-promotion-readiness.md',
   'member_tests/member-production-line-login-promotion-readiness.test.mjs'
 ];
+const readinessBlobs={
+  'src/member-production-line-login-promotion-readiness.mjs':'8be93701a8fb5e3a2e9fd72776a7a2ce698aa140',
+  'docs/member-app/member-production-line-login-promotion-readiness.md':'ec1ed3fdc1fac59f70447eadfc9df7db6a972287',
+  'member_tests/member-production-line-login-promotion-readiness.test.mjs':'a26ba0302d9e315e642c747dc8498df6cda4790e'
+};
 const handoffDiffs=[
   'src/member-production-line-login-promotion-blocked-handoff.mjs',
   'docs/member-app/member-production-line-login-promotion-blocked-handoff.md',
@@ -74,7 +79,9 @@ const candidate={
     production_entry_changed:false,
     wrangler_changed:false,
     runtime_workflow_changed:false,
-    changed_files:[...readinessDiffs]
+    changed_files:[...readinessDiffs],
+    readiness_blob_evidence_checked:true,
+    readiness_file_blobs:{...readinessBlobs}
   },
   repository_safety_evidence:{
     executable_workflow_write_blocked:true,
@@ -103,8 +110,9 @@ function hasBlocker(result,prefix){return result.blockers.some(v=>v===prefix||v.
   assert.equal(result.candidate_sha256,candidate.candidate_sha256);
   assert.equal(result.staging_run_id,candidate.staging_run_id);
   assert.equal(result.expected_active_version_id,candidate.expected_active_version_id);
+  assert.deepEqual(result.required_readiness_blobs,readinessBlobs);
   for(const value of Object.values(result.safety))assert.equal(value,0);
-  console.log('PASS pre-merge blocked handoff packet binds exact ready candidate while granting no authorization');
+  console.log('PASS pre-merge blocked handoff packet binds exact ready candidate and immutable readiness blobs while granting no authorization');
 }
 
 {
@@ -118,6 +126,43 @@ function hasBlocker(result,prefix){return result.blockers.some(v=>v===prefix||v.
   assert.equal(result.authorization_granted,false);
   assert.equal(result.executable_promotion_available,false);
   console.log('PASS post-merge handoff files remain valid non-runtime evidence without granting authorization');
+}
+
+{
+  const input=clone(candidate);
+  input.runtime_drift_evidence.readiness_file_blobs['src/member-production-line-login-promotion-readiness.mjs']='1'.repeat(40);
+  const result=packet(input);
+  assert.equal(result.packet_ready,false);
+  assert.equal(hasBlocker(result,'READINESS_BLOB_MISMATCH:src/member-production-line-login-promotion-readiness.mjs'),true);
+  console.log('PASS modified readiness source blob fails closed even when filename remains allowlisted');
+}
+
+{
+  const input=clone(candidate);
+  delete input.runtime_drift_evidence.readiness_file_blobs['docs/member-app/member-production-line-login-promotion-readiness.md'];
+  const result=packet(input);
+  assert.equal(result.packet_ready,false);
+  assert.equal(hasBlocker(result,'READINESS_BLOB_EVIDENCE_PATH_SET_MISMATCH'),true);
+  assert.equal(hasBlocker(result,'READINESS_BLOB_MISMATCH:docs/member-app/member-production-line-login-promotion-readiness.md'),true);
+  console.log('PASS missing readiness blob evidence fails closed');
+}
+
+{
+  const input=clone(candidate);
+  input.runtime_drift_evidence.readiness_file_blobs['unexpected.txt']='2'.repeat(40);
+  const result=packet(input);
+  assert.equal(result.packet_ready,false);
+  assert.equal(hasBlocker(result,'READINESS_BLOB_EVIDENCE_PATH_SET_MISMATCH'),true);
+  console.log('PASS extra readiness blob evidence fails closed');
+}
+
+{
+  const input=clone(candidate);
+  input.runtime_drift_evidence.readiness_blob_evidence_checked=false;
+  const result=packet(input);
+  assert.equal(result.packet_ready,false);
+  assert.equal(hasBlocker(result,'READINESS_BLOB_EVIDENCE_NOT_CHECKED'),true);
+  console.log('PASS unchecked readiness blob evidence fails closed');
 }
 
 {
@@ -224,19 +269,29 @@ function hasBlocker(result,prefix){return result.blockers.some(v=>v===prefix||v.
   const health=memberLineLoginPromotionBlockedHandoffHealth();
   assert.equal(health.member_line_login_promotion_blocked_handoff,true);
   assert.equal(health.source_only,true);
+  assert.equal(health.readiness_blob_binding,'IMMUTABLE_GIT_BLOBS');
   assert.equal(health.executable_promotion_available,false);
   assert.equal(health.authorization_granted,false);
   assert.equal(health.production_mutation,false);
   assert.equal(health.next_boundary,'REPOSITORY_SAFE_EXECUTABLE_PROMOTION_PATH_REQUIRED');
-  console.log('PASS health exposes source-only non-executable boundary');
+  console.log('PASS health exposes immutable readiness blob binding and source-only non-executable boundary');
 }
 
 assert.equal(__test.EXECUTABLE_WORKFLOW_PATH,'.github/workflows/member-production-line-login-promotion.yml');
 assert.deepEqual([...__test.REQUIRED_READINESS_DIFFS].sort(),[...readinessDiffs].sort());
+assert.deepEqual(__test.REQUIRED_READINESS_BLOBS,readinessBlobs);
 assert.deepEqual([...__test.OPTIONAL_HANDOFF_DIFFS].sort(),[...handoffDiffs].sort());
 assert.deepEqual([...__test.ALLOWED_NON_RUNTIME_DIFFS].sort(),[...readinessDiffs,...handoffDiffs].sort());
+assert.deepEqual(__test.AUTHORIZED_CANDIDATE,{
+  expected_sha:'fdfa65fa797c3ee89885ee99244e7a9ad691b124',
+  staged_version_id:'be711f54-8716-4178-9949-d5ced183d9dc',
+  candidate_sha256:'af11b47ca14b90985fd2a1f6aa5523626b77dbb4f72a7092c1e7fb5da1fb5cd8',
+  staging_run_id:'38233408939',
+  expected_active_version_id:'6d34db85-9a52-45e9-8f7d-094f9fc7957a'
+});
 
 console.log('MEMBER_PRODUCTION_LINE_LOGIN_PROMOTION_BLOCKED_HANDOFF=PASS');
+console.log('READINESS_BLOB_BINDING=IMMUTABLE_GIT_BLOBS');
 console.log('PRODUCTION_TRAFFIC_CHANGE=0');
 console.log('PRODUCTION_DEPLOY=0');
 console.log('WORKER_VERSION_UPLOAD=0');
