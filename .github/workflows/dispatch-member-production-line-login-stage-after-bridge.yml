@@ -20,7 +20,7 @@ concurrency:
 
 jobs:
   validate:
-    name: Revalidate successful bridge receipt and fail closed before stage dispatch
+    name: Revalidate successful bridge receipt before stage dispatch
     if: >-
       github.event.workflow_run.conclusion == 'success' &&
       github.event.workflow_run.event == 'issue_comment'
