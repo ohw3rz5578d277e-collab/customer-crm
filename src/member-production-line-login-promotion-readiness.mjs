@@ -1,4 +1,4 @@
-const BUILD='member-production-line-login-promotion-readiness-20261012-01';
+const BUILD='member-production-line-login-promotion-readiness-20261012-02';
 
 const UUID_RE=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const SHA_RE=/^[0-9a-f]{40}$/i;
@@ -13,7 +13,7 @@ const REQUIRED_DISABLED=Object.freeze([
 
 function exactString(value){return value==null?'':String(value).trim();}
 function bool(value){return value===true;}
-function zero(value){return Number(value)===0;}
+function zero(value){return value===0||value==='0';}
 
 export function buildMemberLineLoginPromotionReadiness(input={}){
   const expectedSha=exactString(input.expected_sha).toLowerCase();
