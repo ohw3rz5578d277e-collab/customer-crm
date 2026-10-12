@@ -5,6 +5,17 @@ import {
   __test
 } from '../src/member-production-line-login-promotion-blocked-handoff.mjs';
 
+const readinessDiffs=[
+  'src/member-production-line-login-promotion-readiness.mjs',
+  'docs/member-app/member-production-line-login-promotion-readiness.md',
+  'member_tests/member-production-line-login-promotion-readiness.test.mjs'
+];
+const handoffDiffs=[
+  'src/member-production-line-login-promotion-blocked-handoff.mjs',
+  'docs/member-app/member-production-line-login-promotion-blocked-handoff.md',
+  'member_tests/member-production-line-login-promotion-blocked-handoff.test.mjs'
+];
+
 const candidate={
   current_main_sha:'990e5e768615afb8dc51f2b5ed27ba4140382d9a',
   candidate_source_sha:'fdfa65fa797c3ee89885ee99244e7a9ad691b124',
@@ -17,7 +28,7 @@ const candidate={
     exact_sha:'fdfa65fa797c3ee89885ee99244e7a9ad691b124',
     staged_version_id:'be711f54-8716-4178-9949-d5ced183d9dc',
     candidate_sha256:'af11b47ca14b90985fd2a1f6aa5523626b77dbb4f72a7092c1e7fb5da1fb5cd8',
-    unchanged_active_version_id:'6d34db85-9a52-45e9-8f7d-0949fc7957a'.replace('0949','094f9'),
+    unchanged_active_version_id:'6d34db85-9a52-45e9-8f7d-094f9fc7957a',
     staging_run_id:'38233408939',
     owner_approved:true,
     member_route_enabled:true,
@@ -63,11 +74,7 @@ const candidate={
     production_entry_changed:false,
     wrangler_changed:false,
     runtime_workflow_changed:false,
-    changed_files:[
-      'src/member-production-line-login-promotion-readiness.mjs',
-      'docs/member-app/member-production-line-login-promotion-readiness.md',
-      'member_tests/member-production-line-login-promotion-readiness.test.mjs'
-    ]
+    changed_files:[...readinessDiffs]
   },
   repository_safety_evidence:{
     executable_workflow_write_blocked:true,
@@ -97,7 +104,20 @@ function hasBlocker(result,prefix){return result.blockers.some(v=>v===prefix||v.
   assert.equal(result.staging_run_id,candidate.staging_run_id);
   assert.equal(result.expected_active_version_id,candidate.expected_active_version_id);
   for(const value of Object.values(result.safety))assert.equal(value,0);
-  console.log('PASS blocked handoff packet binds exact ready candidate while granting no authorization');
+  console.log('PASS pre-merge blocked handoff packet binds exact ready candidate while granting no authorization');
+}
+
+{
+  const input=clone(candidate);
+  input.current_main_sha='aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+  input.runtime_drift_evidence.head_sha=input.current_main_sha;
+  input.runtime_drift_evidence.changed_files=[...readinessDiffs,...handoffDiffs];
+  const result=packet(input);
+  assert.equal(result.packet_ready,true);
+  assert.deepEqual(result.blockers,[]);
+  assert.equal(result.authorization_granted,false);
+  assert.equal(result.executable_promotion_available,false);
+  console.log('PASS post-merge handoff files remain valid non-runtime evidence without granting authorization');
 }
 
 {
@@ -123,8 +143,35 @@ function hasBlocker(result,prefix){return result.blockers.some(v=>v===prefix||v.
   input.runtime_drift_evidence.changed_files.push('src/production-index-crm-customer360-entry.js');
   const result=packet(input);
   assert.equal(result.packet_ready,false);
-  assert.equal(hasBlocker(result,'NON_RUNTIME_DIFF_SET_MISMATCH'),true);
-  console.log('PASS unexpected changed file fails closed');
+  assert.equal(hasBlocker(result,'NON_RUNTIME_DIFF_NOT_ALLOWED'),true);
+  console.log('PASS unexpected runtime changed file fails closed');
+}
+
+{
+  const input=clone(candidate);
+  input.runtime_drift_evidence.changed_files.push(handoffDiffs[0]);
+  const result=packet(input);
+  assert.equal(result.packet_ready,false);
+  assert.equal(hasBlocker(result,'HANDOFF_DIFF_SET_PARTIAL'),true);
+  console.log('PASS partial handoff diff set fails closed');
+}
+
+{
+  const input=clone(candidate);
+  input.runtime_drift_evidence.changed_files=input.runtime_drift_evidence.changed_files.filter(v=>v!==readinessDiffs[0]);
+  const result=packet(input);
+  assert.equal(result.packet_ready,false);
+  assert.equal(hasBlocker(result,'REQUIRED_READINESS_DIFF_MISSING'),true);
+  console.log('PASS missing readiness provenance fails closed');
+}
+
+{
+  const input=clone(candidate);
+  input.runtime_drift_evidence.changed_files.push(readinessDiffs[0]);
+  const result=packet(input);
+  assert.equal(result.packet_ready,false);
+  assert.equal(hasBlocker(result,'NON_RUNTIME_DIFF_DUPLICATE'),true);
+  console.log('PASS duplicate drift evidence fails closed');
 }
 
 {
@@ -185,11 +232,9 @@ function hasBlocker(result,prefix){return result.blockers.some(v=>v===prefix||v.
 }
 
 assert.equal(__test.EXECUTABLE_WORKFLOW_PATH,'.github/workflows/member-production-line-login-promotion.yml');
-assert.deepEqual([...__test.ALLOWED_NON_RUNTIME_DIFFS].sort(),[
-  'docs/member-app/member-production-line-login-promotion-readiness.md',
-  'member_tests/member-production-line-login-promotion-readiness.test.mjs',
-  'src/member-production-line-login-promotion-readiness.mjs'
-].sort());
+assert.deepEqual([...__test.REQUIRED_READINESS_DIFFS].sort(),[...readinessDiffs].sort());
+assert.deepEqual([...__test.OPTIONAL_HANDOFF_DIFFS].sort(),[...handoffDiffs].sort());
+assert.deepEqual([...__test.ALLOWED_NON_RUNTIME_DIFFS].sort(),[...readinessDiffs,...handoffDiffs].sort());
 
 console.log('MEMBER_PRODUCTION_LINE_LOGIN_PROMOTION_BLOCKED_HANDOFF=PASS');
 console.log('PRODUCTION_TRAFFIC_CHANGE=0');
