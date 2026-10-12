@@ -7,9 +7,11 @@ on:
     paths:
       - '.github/workflows/dispatch-member-production-line-login-stage-from-issue.yml'
       - '.github/workflows/dispatch-member-production-line-login-stage-after-bridge.yml'
+      - '.github/workflows/member-production-line-login-stage.yml'
       - '.github/workflows/member-line-login-stage-dispatch-contract.yml'
       - 'tests/member-production-line-login-stage-contract.test.mjs'
       - 'docs/member-app/member-production-line-login-stage.md'
+      - 'docs/member-app/member-production-line-login-stage-dispatch-blocker.md'
       - '.github/workflows/member-app-foundation.yml'
 
 permissions:
@@ -39,6 +41,7 @@ jobs:
           set -euo pipefail
           ruby -e "require 'yaml'; YAML.load_file(ARGV[0])" .github/workflows/dispatch-member-production-line-login-stage-from-issue.yml
           ruby -e "require 'yaml'; YAML.load_file(ARGV[0])" .github/workflows/dispatch-member-production-line-login-stage-after-bridge.yml
+          ruby -e "require 'yaml'; YAML.load_file(ARGV[0])" .github/workflows/member-production-line-login-stage.yml
           ruby -e "require 'yaml'; YAML.load_file(ARGV[0])" .github/workflows/member-line-login-stage-dispatch-contract.yml
 
       - name: Set up Node
@@ -53,8 +56,11 @@ jobs:
         shell: bash
         run: |
           echo 'MEMBER_LINE_LOGIN_DISPATCH_BRIDGE_CONTRACT=PASS'
+          echo 'REUSABLE_WORKFLOW_CALL_SOURCE=PASS'
+          echo 'MANUAL_WORKFLOW_DISPATCH=0'
+          echo 'ACTIONS_WRITE=0'
+          echo 'REST_WORKFLOW_DISPATCH=0'
           echo 'PRODUCTION_MUTATION=0'
-          echo 'WORKFLOW_DISPATCH=0'
           echo 'PRODUCTION_TRAFFIC_CHANGE=0'
           echo 'PRODUCTION_DEPLOY=0'
           echo 'PRODUCTION_D1_READ=0'
