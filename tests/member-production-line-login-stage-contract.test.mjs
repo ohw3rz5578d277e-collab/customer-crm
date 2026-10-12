@@ -155,6 +155,8 @@ pass('issue bridge validates exact command main and fresh unedited comment',
 pass('issue bridge rejects peer Production mutations before issuing receipt',
   bridge.includes('PRODUCTION_MUTATION_BUSY_RETRY_REQUIRED')
   && bridge.includes('PRODUCTION_MUTATION_QUEUE_POLICY=REJECT_AND_RETRY')
+  && bridge.includes('dispatch-member-production-runtime-version-promotion-from-issue.yml')
+  && bridge.includes('member-production-runtime-version-promotion.yml')
   && bridge.includes('member-production-line-login-stage.yml')
   && bridge.includes('member-production-route-stage.yml')
   && bridge.includes('member-production-version-promotion.yml')
@@ -198,6 +200,8 @@ pass('post-bridge validator downloads exact source-run receipt and rechecks main
 pass('post-bridge validator rechecks peer mutation busy state',
   postBridge.includes('PRODUCTION_MUTATION_BUSY_RETRY_REQUIRED')
   && postBridge.includes('PRODUCTION_MUTATION_POST_BRIDGE_GATE=FREE')
+  && postBridge.includes('dispatch-member-production-runtime-version-promotion-from-issue.yml')
+  && postBridge.includes('member-production-runtime-version-promotion.yml')
   && postBridge.includes('member-production-line-login-stage.yml')
   && postBridge.includes('member-production-route-stage.yml')
 );
