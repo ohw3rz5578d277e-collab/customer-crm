@@ -59,6 +59,15 @@ pass('stage requires fresh unedited exact Owner command',
   && workflow.includes('OWNER_COMMENT_NOT_FRESH')
   && workflow.includes('/member-production-line-login-stage sha=$EXPECTED_SHA route_stage_run=$ROUTE_STAGE_RUN_ID route_promotion_run=$ROUTE_PROMOTION_RUN_ID active_version=$EXPECTED_ACTIVE_VERSION_ID confirm=STAGE_MEMBER_LINE_LOGIN_CANDIDATE')
 );
+const preUploadFresh=workflow.indexOf('OWNER_LINE_LOGIN_STAGE_AUTHORIZATION_FRESH_PRE_UPLOAD=PASS');
+const uploadMutation=workflow.indexOf('npx wrangler versions upload');
+pass('Owner authorization freshness is revalidated immediately before upload mutation',
+  preUploadFresh>=0
+  && uploadMutation>preUploadFresh
+  && workflow.includes('PRE_UPLOAD_OWNER_COMMENT_NOT_FRESH')
+  && workflow.includes('PRE_UPLOAD_OWNER_COMMENT_EDITED')
+  && workflow.slice(preUploadFresh,uploadMutation).includes('CURRENT_MAIN_PRE_UPLOAD_GATE=PASS')
+);
 pass('stage requires successful route-only stage lineage',
   workflow.includes("'path':stage.get('path')=='.github/workflows/member-production-route-stage.yml'")
   && workflow.includes('MEMBER_PRODUCTION_ROUTE_STAGE=PASS')
@@ -96,7 +105,7 @@ pass('candidate cannot change resource bindings',
 );
 pass('candidate is dry-run bundled before version upload',
   workflow.indexOf('MEMBER_LINE_LOGIN_CANDIDATE_DRY_RUN=PASS')>=0
-  && workflow.indexOf('MEMBER_LINE_LOGIN_CANDIDATE_DRY_RUN=PASS')<workflow.indexOf('npx wrangler versions upload')
+  && workflow.indexOf('MEMBER_LINE_LOGIN_CANDIDATE_DRY_RUN=PASS')<uploadMutation
 );
 pass('stage creates exactly one immutable version and does not promote traffic',
   workflow.includes('STAGED_VERSION_DELTA_NOT_EXACTLY_ONE')
