@@ -15,7 +15,13 @@ on:
       - 'wrangler.jsonc'
       - '.github/workflows/member-production-route-stage.yml'
       - '.github/workflows/member-production-version-promotion.yml'
-  workflow_dispatch:
+      - '.github/workflows/dispatch-production-deploy-from-issue.yml'
+      - '.github/workflows/dispatch-member-schema-apply-from-issue.yml'
+      - '.github/workflows/dispatch-member-production-runtime-secret-stage-from-issue.yml'
+      - '.github/workflows/dispatch-member-production-runtime-version-promotion-from-issue.yml'
+      - '.github/workflows/dispatch-member-production-version-promotion-from-issue.yml'
+      - '.github/workflows/dispatch-member-production-route-stage-from-issue.yml'
+  workflow_call:
     inputs:
       expected_sha:
         description: Exact current main SHA freshly authorized by Owner
@@ -41,14 +47,19 @@ on:
         description: First-attempt successful Issue 26 bridge run ID
         required: true
         type: string
-      post_bridge_dispatch_run_id:
-        description: Successful post-bridge dispatcher run that initiated this stage
+      caller_run_id:
+        description: Exact post-bridge workflow_run caller run ID
         required: true
         type: string
       confirmation:
         description: Exact stage confirmation token
         required: true
         type: string
+    secrets:
+      CLOUDFLARE_API_TOKEN:
+        required: true
+      CLOUDFLARE_ACCOUNT_ID:
+        required: true
 
 permissions:
   contents: read
@@ -114,7 +125,7 @@ jobs:
 
   stage:
     name: Owner-gated exact-main Member LINE Login candidate stage
-    if: ${{ github.event_name == 'workflow_dispatch' }}
+    if: ${{ github.event_name != 'pull_request' }}
     runs-on: ubuntu-latest
     timeout-minutes: 25
     env:
@@ -124,7 +135,7 @@ jobs:
       EXPECTED_ACTIVE_VERSION_ID_RAW: ${{ inputs.expected_active_version_id }}
       OWNER_COMMENT_ID_RAW: ${{ inputs.owner_comment_id }}
       BRIDGE_RUN_ID_RAW: ${{ inputs.bridge_run_id }}
-      POST_BRIDGE_DISPATCH_RUN_ID_RAW: ${{ inputs.post_bridge_dispatch_run_id }}
+      CALLER_RUN_ID_RAW: ${{ inputs.caller_run_id }}
       CONFIRMATION_RAW: ${{ inputs.confirmation }}
     steps:
       - name: Normalize and validate exact authorization inputs
@@ -139,8 +150,8 @@ jobs:
           [[ "$ROUTE_PROMOTION_RUN_ID_RAW" =~ ^[0-9]+$ ]] || { echo '::error::INVALID_ROUTE_PROMOTION_RUN_ID'; exit 1; }
           [[ "$OWNER_COMMENT_ID_RAW" =~ ^[0-9]+$ ]] || { echo '::error::INVALID_OWNER_COMMENT_ID'; exit 1; }
           [[ "$BRIDGE_RUN_ID_RAW" =~ ^[0-9]+$ ]] || { echo '::error::INVALID_BRIDGE_RUN_ID'; exit 1; }
-          [[ "$POST_BRIDGE_DISPATCH_RUN_ID_RAW" =~ ^[0-9]+$ ]] || { echo '::error::INVALID_POST_BRIDGE_DISPATCH_RUN_ID'; exit 1; }
-          test "$POST_BRIDGE_DISPATCH_RUN_ID_RAW" != "$BRIDGE_RUN_ID_RAW" || { echo '::error::POST_BRIDGE_DISPATCH_RUN_MUST_DIFFER_FROM_BRIDGE'; exit 1; }
+          [[ "$CALLER_RUN_ID_RAW" =~ ^[0-9]+$ ]] || { echo '::error::INVALID_CALLER_RUN_ID'; exit 1; }
+          test "$CALLER_RUN_ID_RAW" = "$GITHUB_RUN_ID" || { echo "::error::CALLER_RUN_ID_MISMATCH caller=$CALLER_RUN_ID_RAW current=$GITHUB_RUN_ID"; exit 1; }
           [[ "$active_version" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] || { echo '::error::INVALID_ACTIVE_VERSION_ID'; exit 1; }
           test "$CONFIRMATION_RAW" = 'STAGE_MEMBER_LINE_LOGIN_CANDIDATE' || { echo '::error::INVALID_LINE_LOGIN_STAGE_CONFIRMATION'; exit 1; }
           echo "expected_sha=$expected_sha" >> "$GITHUB_OUTPUT"
@@ -149,8 +160,9 @@ jobs:
           echo "expected_active_version_id=$active_version" >> "$GITHUB_OUTPUT"
           echo "owner_comment_id=$OWNER_COMMENT_ID_RAW" >> "$GITHUB_OUTPUT"
           echo "bridge_run_id=$BRIDGE_RUN_ID_RAW" >> "$GITHUB_OUTPUT"
-          echo "post_bridge_dispatch_run_id=$POST_BRIDGE_DISPATCH_RUN_ID_RAW" >> "$GITHUB_OUTPUT"
+          echo "caller_run_id=$CALLER_RUN_ID_RAW" >> "$GITHUB_OUTPUT"
           echo 'MEMBER_LINE_LOGIN_STAGE_INPUTS=PASS'
+          echo 'MEMBER_LINE_LOGIN_STAGE_REUSABLE_CALLER_RUN_ID=PASS'
 
       - name: Checkout exact authorized current main
         uses: actions/checkout@v6
@@ -206,67 +218,54 @@ jobs:
           PY
           rm -f /tmp/member-line-login-stage-bridge.json
 
-      - name: Verify successful post-bridge dispatcher provenance
+      - name: Verify reusable caller provenance and successful post-bridge validation job
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           EXPECTED_SHA: ${{ steps.auth.outputs.expected_sha }}
           BRIDGE_RUN_ID: ${{ steps.auth.outputs.bridge_run_id }}
-          POST_BRIDGE_DISPATCH_RUN_ID: ${{ steps.auth.outputs.post_bridge_dispatch_run_id }}
-          OWNER_COMMENT_ID: ${{ steps.auth.outputs.owner_comment_id }}
+          CALLER_RUN_ID: ${{ steps.auth.outputs.caller_run_id }}
         run: |
           set -euo pipefail
+          test "$CALLER_RUN_ID" = "$GITHUB_RUN_ID" || { echo '::error::REUSABLE_CALLER_RUN_ID_CHANGED'; exit 1; }
           curl --fail --silent --show-error \
             -H "Authorization: Bearer $GH_TOKEN" \
             -H 'Accept: application/vnd.github+json' \
             -H 'X-GitHub-Api-Version: 2022-11-28' \
-            "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/runs/$POST_BRIDGE_DISPATCH_RUN_ID" \
-            > /tmp/member-line-login-post-bridge-dispatch-run.json
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/runs/$CALLER_RUN_ID" \
+            > /tmp/member-line-login-reusable-caller-run.json
+          export EXPECTED_SHA BRIDGE_RUN_ID CALLER_RUN_ID
           python3 - <<'PY'
           import json, os
-          r=json.load(open('/tmp/member-line-login-post-bridge-dispatch-run.json', encoding='utf-8'))
+          r=json.load(open('/tmp/member-line-login-reusable-caller-run.json', encoding='utf-8'))
           checks={
-              'id': r.get('id')==int(os.environ['POST_BRIDGE_DISPATCH_RUN_ID']),
-              'status': r.get('status')=='completed',
-              'conclusion': r.get('conclusion')=='success',
+              'id': r.get('id')==int(os.environ['CALLER_RUN_ID']),
+              'status': r.get('status')=='in_progress',
               'event': r.get('event')=='workflow_run',
               'path': r.get('path')=='.github/workflows/dispatch-member-production-line-login-stage-after-bridge.yml',
               'head_sha': r.get('head_sha')==os.environ['EXPECTED_SHA'],
               'run_attempt': r.get('run_attempt')==1,
+              'display_title': r.get('display_title')==f"Production mutation bridge: member-line-login-stage-post-bridge bridge={os.environ['BRIDGE_RUN_ID']}",
           }
           bad=[k for k,v in checks.items() if not v]
-          if bad: raise SystemExit('INVALID_LINE_LOGIN_POST_BRIDGE_DISPATCH_RUN:'+','.join(bad))
-          print('MEMBER_LINE_LOGIN_STAGE_POST_BRIDGE_RUN=PASS')
+          if bad: raise SystemExit('INVALID_LINE_LOGIN_REUSABLE_CALLER:'+','.join(bad))
+          print('MEMBER_LINE_LOGIN_STAGE_REUSABLE_CALLER_PROVENANCE=PASS')
           PY
 
           curl --fail --silent --show-error \
             -H "Authorization: Bearer $GH_TOKEN" \
             -H 'Accept: application/vnd.github+json' \
             -H 'X-GitHub-Api-Version: 2022-11-28' \
-            "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/runs/$POST_BRIDGE_DISPATCH_RUN_ID/jobs?per_page=100" \
-            > /tmp/member-line-login-post-bridge-dispatch-jobs.json
-          post_bridge_job_id="$(python3 - <<'PY'
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/runs/$CALLER_RUN_ID/jobs?per_page=100" \
+            > /tmp/member-line-login-reusable-caller-jobs.json
+          python3 - <<'PY'
           import json
-          d=json.load(open('/tmp/member-line-login-post-bridge-dispatch-jobs.json', encoding='utf-8'))
-          m=[j for j in d.get('jobs',[]) if j.get('name')=='Revalidate successful bridge receipt before stage dispatch' and j.get('conclusion')=='success']
-          print(m[0]['id'] if len(m)==1 else '')
+          d=json.load(open('/tmp/member-line-login-reusable-caller-jobs.json', encoding='utf-8'))
+          matches=[j for j in d.get('jobs',[]) if j.get('name')=='Revalidate successful bridge receipt before stage dispatch' and j.get('conclusion')=='success']
+          if len(matches)!=1: raise SystemExit('POST_BRIDGE_VALIDATION_JOB_NOT_EXACTLY_ONE_SUCCESS')
+          print('MEMBER_LINE_LOGIN_STAGE_POST_BRIDGE_VALIDATION_JOB=PASS')
           PY
-          )"
-          [[ "$post_bridge_job_id" =~ ^[0-9]+$ ]] || { echo '::error::POST_BRIDGE_DISPATCH_JOB_RECEIPT_INVALID'; exit 1; }
-          curl --fail --silent --show-error --location \
-            -H "Authorization: Bearer $GH_TOKEN" \
-            -H 'Accept: application/vnd.github+json' \
-            -H 'X-GitHub-Api-Version: 2022-11-28' \
-            "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/jobs/$post_bridge_job_id/logs" \
-            > /tmp/member-line-login-post-bridge-dispatch.log
-          grep -F 'MEMBER_LINE_LOGIN_STAGE_POST_BRIDGE_DISPATCH=PASS' /tmp/member-line-login-post-bridge-dispatch.log >/dev/null
-          grep -F "SOURCE_BRIDGE_RUN_ID=$BRIDGE_RUN_ID" /tmp/member-line-login-post-bridge-dispatch.log >/dev/null
-          grep -F "DISPATCH_REQUESTED_FOR_SHA=$EXPECTED_SHA" /tmp/member-line-login-post-bridge-dispatch.log >/dev/null
-          grep -F "OWNER_COMMENT_ID=$OWNER_COMMENT_ID" /tmp/member-line-login-post-bridge-dispatch.log >/dev/null
-          echo 'MEMBER_LINE_LOGIN_STAGE_POST_BRIDGE_PROVENANCE=PASS'
-          rm -f /tmp/member-line-login-post-bridge-dispatch-run.json \
-            /tmp/member-line-login-post-bridge-dispatch-jobs.json \
-            /tmp/member-line-login-post-bridge-dispatch.log
+          rm -f /tmp/member-line-login-reusable-caller-run.json /tmp/member-line-login-reusable-caller-jobs.json
 
       - name: Verify fresh unedited Owner authorization on issue 26
         shell: bash
@@ -603,7 +602,7 @@ jobs:
           EXPECTED_ACTIVE_VERSION_ID: ${{ steps.auth.outputs.expected_active_version_id }}
           ROUTE_STAGE_RUN_ID: ${{ steps.auth.outputs.route_stage_run_id }}
           ROUTE_PROMOTION_RUN_ID: ${{ steps.auth.outputs.route_promotion_run_id }}
-          POST_BRIDGE_DISPATCH_RUN_ID: ${{ steps.auth.outputs.post_bridge_dispatch_run_id }}
+          CALLER_RUN_ID: ${{ steps.auth.outputs.caller_run_id }}
         run: |
           set -euo pipefail
           echo '=================================================='
@@ -614,7 +613,7 @@ jobs:
           echo "UNCHANGED_ACTIVE_VERSION_ID=$EXPECTED_ACTIVE_VERSION_ID"
           echo "ROUTE_STAGE_LINEAGE_RUN_ID=$ROUTE_STAGE_RUN_ID"
           echo "ROUTE_PROMOTION_LINEAGE_RUN_ID=$ROUTE_PROMOTION_RUN_ID"
-          echo "POST_BRIDGE_DISPATCH_LINEAGE_RUN_ID=$POST_BRIDGE_DISPATCH_RUN_ID"
+          echo "POST_BRIDGE_CALLER_RUN_ID=$CALLER_RUN_ID"
           echo 'MEMBER_ROUTE_MODE_STAGED=enabled'
           echo 'MEMBER_OWNER_APPROVAL_STAGED=true'
           echo 'LINE_LOGIN_APPROVAL_STAGED=true'

@@ -246,6 +246,7 @@ jobs:
             dispatch-member-production-runtime-secret-stage-from-issue.yml
             dispatch-member-production-version-promotion-from-issue.yml
             dispatch-member-production-route-stage-from-issue.yml
+            dispatch-member-production-line-login-stage-after-bridge.yml
             deploy-cloudflare.yml
             member-production-schema-apply.yml
             member-production-runtime-secret-stage.yml
