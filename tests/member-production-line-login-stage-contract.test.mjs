@@ -42,10 +42,17 @@ pass('stage requires exact current main',
   && workflow.includes('MAIN_DRIFT current=$current_main expected=$EXPECTED_SHA')
   && workflow.includes('MAIN_DRIFT_BEFORE_LINE_LOGIN_STAGE_UPLOAD')
 );
-pass('stage authenticates first-attempt Issue 26 bridge provenance',
-  workflow.includes("'path': r.get('path')=='.github/workflows/dispatch-member-production-line-login-stage-from-issue.yml'")
+pass('stage authenticates successful first-attempt Issue 26 bridge provenance',
+  workflow.includes("'status': r.get('status')=='completed'")
+  && workflow.includes("'conclusion': r.get('conclusion')=='success'")
+  && workflow.includes("'path': r.get('path')=='.github/workflows/dispatch-member-production-line-login-stage-from-issue.yml'")
   && workflow.includes("'run_attempt': r.get('run_attempt')==1")
   && workflow.includes("'actor': r.get('actor',{}).get('login')=='ohw3rz5578d277e-collab'")
+  && workflow.includes('MEMBER_LINE_LOGIN_STAGE_BRIDGE_SUCCESS=PASS')
+);
+pass('failed validation-only bridge cannot satisfy stage provenance',
+  bridge.includes('exit 1')
+  && workflow.includes("'conclusion': r.get('conclusion')=='success'")
 );
 pass('stage requires fresh unedited exact Owner command',
   workflow.includes('OWNER_COMMENT_EDITED')
