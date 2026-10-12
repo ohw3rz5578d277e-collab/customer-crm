@@ -56,13 +56,33 @@ pass('stage authenticates successful first-attempt Issue 26 bridge provenance',
   && workflow.includes("'actor': r.get('actor',{}).get('login')=='ohw3rz5578d277e-collab'")
   && workflow.includes('MEMBER_LINE_LOGIN_STAGE_BRIDGE_SUCCESS=PASS')
 );
+pass('stage requires successful post-bridge dispatcher provenance in addition to bridge success',
+  workflow.includes('post_bridge_dispatch_run_id:')
+  && workflow.includes('POST_BRIDGE_DISPATCH_RUN_ID_RAW')
+  && workflow.includes('INVALID_POST_BRIDGE_DISPATCH_RUN_ID')
+  && workflow.includes('POST_BRIDGE_DISPATCH_RUN_MUST_DIFFER_FROM_BRIDGE')
+  && workflow.includes("'event': r.get('event')=='workflow_run'")
+  && workflow.includes("'path': r.get('path')=='.github/workflows/dispatch-member-production-line-login-stage-after-bridge.yml'")
+  && workflow.includes("'conclusion': r.get('conclusion')=='success'")
+  && workflow.includes("j.get('name')=='Revalidate successful bridge receipt before stage dispatch'")
+  && workflow.includes('MEMBER_LINE_LOGIN_STAGE_POST_BRIDGE_DISPATCH=PASS')
+  && workflow.includes('SOURCE_BRIDGE_RUN_ID=$BRIDGE_RUN_ID')
+  && workflow.includes('DISPATCH_REQUESTED_FOR_SHA=$EXPECTED_SHA')
+  && workflow.includes('OWNER_COMMENT_ID=$OWNER_COMMENT_ID')
+  && workflow.includes('MEMBER_LINE_LOGIN_STAGE_POST_BRIDGE_PROVENANCE=PASS')
+);
 pass('stage requires fresh unedited exact Owner command',
   workflow.includes('OWNER_COMMENT_EDITED')
   && workflow.includes('OWNER_COMMENT_NOT_FRESH')
   && workflow.includes('/member-production-line-login-stage sha=$EXPECTED_SHA route_stage_run=$ROUTE_STAGE_RUN_ID route_promotion_run=$ROUTE_PROMOTION_RUN_ID active_version=$EXPECTED_ACTIVE_VERSION_ID confirm=STAGE_MEMBER_LINE_LOGIN_CANDIDATE')
 );
 const preUploadFresh=workflow.indexOf('OWNER_LINE_LOGIN_STAGE_AUTHORIZATION_FRESH_PRE_UPLOAD=PASS');
+const postBridgeProvenance=workflow.indexOf('MEMBER_LINE_LOGIN_STAGE_POST_BRIDGE_PROVENANCE=PASS');
 const uploadMutation=workflow.indexOf('npx wrangler versions upload');
+pass('successful post-bridge provenance is required before version upload mutation',
+  postBridgeProvenance>=0
+  && uploadMutation>postBridgeProvenance
+);
 pass('Owner authorization freshness is revalidated immediately before upload mutation',
   preUploadFresh>=0
   && uploadMutation>preUploadFresh
@@ -211,6 +231,11 @@ pass('post-bridge validator remains fail-closed because executable stage dispatc
   && !postBridge.includes('/actions/workflows/member-production-line-login-stage.yml/dispatches')
   && !postBridge.includes('actions: write')
 );
+pass('current fail-closed post-bridge validator cannot mint stage dispatcher provenance',
+  !postBridge.includes('MEMBER_LINE_LOGIN_STAGE_POST_BRIDGE_DISPATCH=PASS')
+  && workflow.includes('MEMBER_LINE_LOGIN_STAGE_POST_BRIDGE_DISPATCH=PASS')
+  && workflow.includes("'conclusion': r.get('conclusion')=='success'")
+);
 
 pass('LINE Login stage shares canonical Production mutation execution lock with peer mutations',
   canonicalDeploy.includes("inputs.mode == 'deploy' && 'customer-crm-production-deploy'")
@@ -224,6 +249,7 @@ pass('LINE Login stage shares canonical Production mutation execution lock with 
 console.log('MEMBER_PRODUCTION_LINE_LOGIN_STAGE_CONTRACT=PASS');
 console.log('LINE_LOGIN_STAGE_ISSUE_BRIDGE_RECEIPT=PASS');
 console.log('LINE_LOGIN_STAGE_POST_BRIDGE_VALIDATION=PASS_FAIL_CLOSED_BEFORE_DISPATCH');
+console.log('LINE_LOGIN_STAGE_MANUAL_DISPATCH_WITH_BRIDGE_ONLY=BLOCKED');
 console.log('LINE_LOGIN_STAGE_EXECUTION_BRIDGE=BLOCKED_PENDING_EXECUTABLE_DISPATCH_SOURCE');
 console.log('STAGED_MEMBER_ROUTE=YES');
 console.log('STAGED_LINE_LOGIN_APPROVAL=YES');
