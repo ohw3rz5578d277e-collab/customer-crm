@@ -1,0 +1,566 @@
+name: Member Production LINE Login candidate stage
+
+run-name: >-
+  ${{ github.event_name == 'pull_request' && format('Member LINE Login stage contract PR #{0}', github.event.pull_request.number) || format('Member LINE Login candidate stage {0}', inputs.expected_sha) }}
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/member-production-line-login-stage.yml'
+      - '.github/workflows/dispatch-member-production-line-login-stage-from-issue.yml'
+      - 'tests/member-production-line-login-stage-contract.test.mjs'
+      - 'src/member-production-line-login-stage-plan.mjs'
+      - 'src/production-index-crm-customer360-entry.js'
+      - 'wrangler.jsonc'
+      - '.github/workflows/member-production-route-stage.yml'
+      - '.github/workflows/member-production-version-promotion.yml'
+  workflow_dispatch:
+    inputs:
+      expected_sha:
+        description: Exact current main SHA freshly authorized by Owner
+        required: true
+        type: string
+      route_stage_run_id:
+        description: Exact successful route-only candidate stage run
+        required: true
+        type: string
+      route_promotion_run_id:
+        description: Exact successful route-only Production promotion bridge run
+        required: true
+        type: string
+      expected_active_version_id:
+        description: Exact currently active 100-percent route-only Worker version
+        required: true
+        type: string
+      owner_comment_id:
+        description: Fresh Owner authorization comment on issue 26
+        required: true
+        type: string
+      bridge_run_id:
+        description: First-attempt successful Issue 26 bridge run ID
+        required: true
+        type: string
+      confirmation:
+        description: Exact stage confirmation token
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+  issues: read
+
+concurrency:
+  group: ${{ github.event_name == 'pull_request' && format('member-line-login-stage-pr-{0}', github.event.pull_request.number) || 'customer-crm-production-deploy' }}
+  cancel-in-progress: false
+
+jobs:
+  contract:
+    name: Member Production LINE Login stage contract
+    if: ${{ github.event_name == 'pull_request' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact PR head
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+
+      - name: Assert exact PR head
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
+
+      - name: Verify workflow YAML
+        shell: bash
+        run: |
+          set -euo pipefail
+          ruby -e "require 'yaml'; YAML.load_file(ARGV[0])" .github/workflows/member-production-line-login-stage.yml
+          ruby -e "require 'yaml'; YAML.load_file(ARGV[0])" .github/workflows/dispatch-member-production-line-login-stage-from-issue.yml
+
+      - name: Set up Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+
+      - name: Verify LINE Login stage contract
+        run: node tests/member-production-line-login-stage-contract.test.mjs
+
+      - name: Verify dependent Member auth contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          node member_tests/member-production-line-login-stage-plan.test.mjs
+          node member_tests/member-session-foundation.test.mjs
+          node member_tests/member-line-login-exchange-executor.test.mjs
+          node member_tests/member-line-login-http-contract.test.mjs
+          node member_tests/member-production-request-composition.test.mjs
+          echo 'MEMBER_LINE_LOGIN_STAGE_PR_SOURCE_ONLY=PASS'
+          echo 'PRODUCTION_MUTATION=0'
+          echo 'PRODUCTION_TRAFFIC_CHANGE=0'
+          echo 'PRODUCTION_DEPLOY=0'
+          echo 'PRODUCTION_D1_READ=0'
+          echo 'PRODUCTION_D1_WRITE=0'
+          echo 'R2_OBJECT_READ=0'
+          echo 'R2_OBJECT_WRITE=0'
+
+  stage:
+    name: Owner-gated exact-main Member LINE Login candidate stage
+    if: ${{ github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      EXPECTED_SHA_RAW: ${{ inputs.expected_sha }}
+      ROUTE_STAGE_RUN_ID_RAW: ${{ inputs.route_stage_run_id }}
+      ROUTE_PROMOTION_RUN_ID_RAW: ${{ inputs.route_promotion_run_id }}
+      EXPECTED_ACTIVE_VERSION_ID_RAW: ${{ inputs.expected_active_version_id }}
+      OWNER_COMMENT_ID_RAW: ${{ inputs.owner_comment_id }}
+      BRIDGE_RUN_ID_RAW: ${{ inputs.bridge_run_id }}
+      CONFIRMATION_RAW: ${{ inputs.confirmation }}
+    steps:
+      - name: Normalize and validate exact authorization inputs
+        id: auth
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected_sha="$(printf '%s' "$EXPECTED_SHA_RAW" | tr '[:upper:]' '[:lower:]')"
+          active_version="$(printf '%s' "$EXPECTED_ACTIVE_VERSION_ID_RAW" | tr '[:upper:]' '[:lower:]')"
+          [[ "$expected_sha" =~ ^[0-9a-f]{40}$ ]] || { echo '::error::INVALID_EXPECTED_SHA'; exit 1; }
+          [[ "$ROUTE_STAGE_RUN_ID_RAW" =~ ^[0-9]+$ ]] || { echo '::error::INVALID_ROUTE_STAGE_RUN_ID'; exit 1; }
+          [[ "$ROUTE_PROMOTION_RUN_ID_RAW" =~ ^[0-9]+$ ]] || { echo '::error::INVALID_ROUTE_PROMOTION_RUN_ID'; exit 1; }
+          [[ "$OWNER_COMMENT_ID_RAW" =~ ^[0-9]+$ ]] || { echo '::error::INVALID_OWNER_COMMENT_ID'; exit 1; }
+          [[ "$BRIDGE_RUN_ID_RAW" =~ ^[0-9]+$ ]] || { echo '::error::INVALID_BRIDGE_RUN_ID'; exit 1; }
+          [[ "$active_version" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] || { echo '::error::INVALID_ACTIVE_VERSION_ID'; exit 1; }
+          test "$CONFIRMATION_RAW" = 'STAGE_MEMBER_LINE_LOGIN_CANDIDATE' || { echo '::error::INVALID_LINE_LOGIN_STAGE_CONFIRMATION'; exit 1; }
+          echo "expected_sha=$expected_sha" >> "$GITHUB_OUTPUT"
+          echo "route_stage_run_id=$ROUTE_STAGE_RUN_ID_RAW" >> "$GITHUB_OUTPUT"
+          echo "route_promotion_run_id=$ROUTE_PROMOTION_RUN_ID_RAW" >> "$GITHUB_OUTPUT"
+          echo "expected_active_version_id=$active_version" >> "$GITHUB_OUTPUT"
+          echo "owner_comment_id=$OWNER_COMMENT_ID_RAW" >> "$GITHUB_OUTPUT"
+          echo "bridge_run_id=$BRIDGE_RUN_ID_RAW" >> "$GITHUB_OUTPUT"
+          echo 'MEMBER_LINE_LOGIN_STAGE_INPUTS=PASS'
+
+      - name: Checkout exact authorized current main
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ steps.auth.outputs.expected_sha }}
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Exact current-main gate
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ steps.auth.outputs.expected_sha }}
+        run: |
+          set -euo pipefail
+          actual_sha="$(git rev-parse HEAD)"
+          current_main="$(git ls-remote origin refs/heads/main | awk '{print $1}')"
+          test "$actual_sha" = "$EXPECTED_SHA" || { echo "::error::CHECKOUT_SHA_MISMATCH actual=$actual_sha expected=$EXPECTED_SHA"; exit 1; }
+          test "$current_main" = "$EXPECTED_SHA" || { echo "::error::MAIN_DRIFT current=$current_main expected=$EXPECTED_SHA"; exit 1; }
+          echo 'CURRENT_MAIN_EXACT_GATE=PASS'
+
+      - name: Verify successful first-attempt Issue 26 bridge receipt
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_SHA: ${{ steps.auth.outputs.expected_sha }}
+          BRIDGE_RUN_ID: ${{ steps.auth.outputs.bridge_run_id }}
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/runs/$BRIDGE_RUN_ID" \
+            > /tmp/member-line-login-stage-bridge.json
+          python3 - <<'PY'
+          import json, os
+          with open('/tmp/member-line-login-stage-bridge.json', encoding='utf-8') as f:
+              r=json.load(f)
+          checks={
+              'id': r.get('id')==int(os.environ['BRIDGE_RUN_ID']),
+              'status': r.get('status')=='completed',
+              'conclusion': r.get('conclusion')=='success',
+              'event': r.get('event')=='issue_comment',
+              'path': r.get('path')=='.github/workflows/dispatch-member-production-line-login-stage-from-issue.yml',
+              'head_sha': r.get('head_sha')==os.environ['EXPECTED_SHA'],
+              'run_attempt': r.get('run_attempt')==1,
+              'actor': r.get('actor',{}).get('login')=='ohw3rz5578d277e-collab',
+          }
+          bad=[k for k,v in checks.items() if not v]
+          if bad: raise SystemExit('INVALID_LINE_LOGIN_STAGE_BRIDGE_RECEIPT:'+','.join(bad))
+          print('MEMBER_LINE_LOGIN_STAGE_BRIDGE_RECEIPT=PASS')
+          print('MEMBER_LINE_LOGIN_STAGE_BRIDGE_SUCCESS=PASS')
+          PY
+          rm -f /tmp/member-line-login-stage-bridge.json
+
+      - name: Verify fresh unedited Owner authorization on issue 26
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_SHA: ${{ steps.auth.outputs.expected_sha }}
+          ROUTE_STAGE_RUN_ID: ${{ steps.auth.outputs.route_stage_run_id }}
+          ROUTE_PROMOTION_RUN_ID: ${{ steps.auth.outputs.route_promotion_run_id }}
+          EXPECTED_ACTIVE_VERSION_ID: ${{ steps.auth.outputs.expected_active_version_id }}
+          OWNER_COMMENT_ID: ${{ steps.auth.outputs.owner_comment_id }}
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/issues/comments/$OWNER_COMMENT_ID" \
+            > /tmp/member-line-login-stage-owner-comment.json
+          EXPECTED_BODY="/member-production-line-login-stage sha=$EXPECTED_SHA route_stage_run=$ROUTE_STAGE_RUN_ID route_promotion_run=$ROUTE_PROMOTION_RUN_ID active_version=$EXPECTED_ACTIVE_VERSION_ID confirm=STAGE_MEMBER_LINE_LOGIN_CANDIDATE"
+          export EXPECTED_BODY
+          python3 - <<'PY'
+          import json, os
+          from datetime import datetime, timezone
+          c=json.load(open('/tmp/member-line-login-stage-owner-comment.json', encoding='utf-8'))
+          if c.get('user',{}).get('login')!='ohw3rz5578d277e-collab': raise SystemExit('OWNER_COMMENT_ACTOR_MISMATCH')
+          if c.get('body')!=os.environ['EXPECTED_BODY']: raise SystemExit('OWNER_COMMENT_BODY_MISMATCH')
+          if not str(c.get('issue_url','')).endswith('/issues/26'): raise SystemExit('OWNER_COMMENT_ISSUE_MISMATCH')
+          if c.get('created_at')!=c.get('updated_at'): raise SystemExit('OWNER_COMMENT_EDITED')
+          created=datetime.fromisoformat(str(c.get('created_at','')).replace('Z','+00:00'))
+          age=(datetime.now(timezone.utc)-created).total_seconds()
+          if age < -30: raise SystemExit('OWNER_COMMENT_FROM_FUTURE')
+          if age > 900: raise SystemExit(f'OWNER_COMMENT_NOT_FRESH:age_seconds={age:.0f}')
+          print('OWNER_LINE_LOGIN_STAGE_AUTHORIZATION=PASS')
+          print('OWNER_LINE_LOGIN_STAGE_AUTHORIZATION_FRESHNESS=PASS')
+          PY
+          rm -f /tmp/member-line-login-stage-owner-comment.json
+
+      - name: Verify route-only stage and promotion lineage for active version
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ROUTE_STAGE_RUN_ID: ${{ steps.auth.outputs.route_stage_run_id }}
+          ROUTE_PROMOTION_RUN_ID: ${{ steps.auth.outputs.route_promotion_run_id }}
+          EXPECTED_ACTIVE_VERSION_ID: ${{ steps.auth.outputs.expected_active_version_id }}
+        run: |
+          set -euo pipefail
+          for spec in "$ROUTE_STAGE_RUN_ID:/tmp/member-line-login-route-stage-run.json" "$ROUTE_PROMOTION_RUN_ID:/tmp/member-line-login-route-promotion-run.json"; do
+            run_id="${spec%%:*}"; target="${spec#*:}"
+            curl --fail --silent --show-error \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H 'Accept: application/vnd.github+json' \
+              -H 'X-GitHub-Api-Version: 2022-11-28' \
+              "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/runs/$run_id" > "$target"
+          done
+          python3 - <<'PY'
+          import json, os
+          stage=json.load(open('/tmp/member-line-login-route-stage-run.json', encoding='utf-8'))
+          promotion=json.load(open('/tmp/member-line-login-route-promotion-run.json', encoding='utf-8'))
+          stage_checks={
+            'id':stage.get('id')==int(os.environ['ROUTE_STAGE_RUN_ID']),
+            'status':stage.get('status')=='completed',
+            'conclusion':stage.get('conclusion')=='success',
+            'event':stage.get('event')=='workflow_dispatch',
+            'path':stage.get('path')=='.github/workflows/member-production-route-stage.yml',
+            'run_attempt':stage.get('run_attempt')==1,
+          }
+          promotion_checks={
+            'id':promotion.get('id')==int(os.environ['ROUTE_PROMOTION_RUN_ID']),
+            'status':promotion.get('status')=='completed',
+            'conclusion':promotion.get('conclusion')=='success',
+            'event':promotion.get('event')=='issue_comment',
+            'path':promotion.get('path')=='.github/workflows/dispatch-member-production-version-promotion-from-issue.yml',
+            'run_attempt':promotion.get('run_attempt')==1,
+          }
+          bad=[f'stage:{k}' for k,v in stage_checks.items() if not v]+[f'promotion:{k}' for k,v in promotion_checks.items() if not v]
+          if bad: raise SystemExit('INVALID_ROUTE_LINEAGE_RECEIPT:'+','.join(bad))
+          if stage.get('head_sha')!=promotion.get('head_sha'): raise SystemExit('ROUTE_STAGE_PROMOTION_SHA_MISMATCH')
+          print('ROUTE_STAGE_AND_PROMOTION_RUN_METADATA=PASS')
+          PY
+
+          curl --fail --silent --show-error -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/runs/$ROUTE_STAGE_RUN_ID/jobs?per_page=100" > /tmp/member-line-login-route-stage-jobs.json
+          route_stage_job_id="$(python3 - <<'PY'
+          import json
+          d=json.load(open('/tmp/member-line-login-route-stage-jobs.json', encoding='utf-8'))
+          m=[j for j in d.get('jobs',[]) if j.get('name')=='Owner-gated exact-main Member route candidate stage' and j.get('conclusion')=='success']
+          print(m[0]['id'] if len(m)==1 else '')
+          PY
+          )"
+          [[ "$route_stage_job_id" =~ ^[0-9]+$ ]] || { echo '::error::ROUTE_STAGE_JOB_RECEIPT_INVALID'; exit 1; }
+          curl --fail --silent --show-error --location -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/jobs/$route_stage_job_id/logs" > /tmp/member-line-login-route-stage.log
+          grep -F 'MEMBER_PRODUCTION_ROUTE_STAGE=PASS' /tmp/member-line-login-route-stage.log >/dev/null
+          grep -F "STAGED_VERSION_ID=$EXPECTED_ACTIVE_VERSION_ID" /tmp/member-line-login-route-stage.log >/dev/null
+          grep -F 'LINE_LOGIN_EXTERNAL_EXCHANGE_STAGED=disabled' /tmp/member-line-login-route-stage.log >/dev/null
+          grep -F 'PRODUCTION_TRAFFIC_CHANGE=0' /tmp/member-line-login-route-stage.log >/dev/null
+
+          curl --fail --silent --show-error -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/runs/$ROUTE_PROMOTION_RUN_ID/jobs?per_page=100" > /tmp/member-line-login-route-promotion-jobs.json
+          route_promotion_job_id="$(python3 - <<'PY'
+          import json
+          d=json.load(open('/tmp/member-line-login-route-promotion-jobs.json', encoding='utf-8'))
+          m=[j for j in d.get('jobs',[]) if 'Owner-gated exact route-staged version Production promotion' in str(j.get('name','')) and j.get('conclusion')=='success']
+          print(m[0]['id'] if len(m)==1 else '')
+          PY
+          )"
+          [[ "$route_promotion_job_id" =~ ^[0-9]+$ ]] || { echo '::error::ROUTE_PROMOTION_JOB_RECEIPT_INVALID'; exit 1; }
+          curl --fail --silent --show-error --location -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/jobs/$route_promotion_job_id/logs" > /tmp/member-line-login-route-promotion.log
+          grep -F 'MEMBER_ROUTE_STAGED_VERSION_PROMOTION=PASS' /tmp/member-line-login-route-promotion.log >/dev/null
+          grep -F "MEMBER_STAGED_VERSION_ID=$EXPECTED_ACTIVE_VERSION_ID" /tmp/member-line-login-route-promotion.log >/dev/null
+          grep -F "MEMBER_ROUTE_STAGE_RUN_ID=$ROUTE_STAGE_RUN_ID" /tmp/member-line-login-route-promotion.log >/dev/null
+          grep -F 'PRODUCTION_TRAFFIC_TARGET_PERCENT=100' /tmp/member-line-login-route-promotion.log >/dev/null
+          echo 'ROUTE_ONLY_ACTIVE_VERSION_LINEAGE=PASS'
+          rm -f /tmp/member-line-login-route-stage-run.json /tmp/member-line-login-route-promotion-run.json \
+            /tmp/member-line-login-route-stage-jobs.json /tmp/member-line-login-route-promotion-jobs.json \
+            /tmp/member-line-login-route-stage.log /tmp/member-line-login-route-promotion.log
+
+      - name: Set up Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+
+      - name: Verify canonical source remains default-off and planner-valid
+        shell: bash
+        run: |
+          set -euo pipefail
+          node member_tests/member-production-line-login-stage-plan.test.mjs
+          node member_tests/member-production-entry-default-off-manifest.test.mjs
+          node member_tests/member-line-login-exchange-executor.test.mjs
+          echo 'CANONICAL_LINE_LOGIN_DEFAULT_OFF=PASS'
+
+      - name: Install pinned Wrangler tooling
+        run: npm install --no-save wrangler@4.131.2
+
+      - name: Confirm Cloudflare authentication
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          npx wrangler whoami >/tmp/member-line-login-stage-whoami.txt
+          test -s /tmp/member-line-login-stage-whoami.txt
+          rm -f /tmp/member-line-login-stage-whoami.txt
+          echo 'CLOUDFLARE_AUTH=PASS'
+
+      - name: Snapshot exact active Production deployment and versions
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          EXPECTED_ACTIVE_VERSION_ID: ${{ steps.auth.outputs.expected_active_version_id }}
+        run: |
+          set -euo pipefail
+          npx wrangler deployments status --name customer-crm-api --json > /tmp/member-line-login-deployment-before.json
+          npx wrangler versions list --name customer-crm-api --json > /tmp/member-line-login-versions-before.json
+          npx wrangler versions view "$EXPECTED_ACTIVE_VERSION_ID" --name customer-crm-api --json > /tmp/member-line-login-active-version.json
+          node <<'NODE'
+          const fs=require('fs');
+          const value=JSON.parse(fs.readFileSync('/tmp/member-line-login-deployment-before.json','utf8'));
+          const d=Array.isArray(value)?value[0]:value;
+          const versions=Array.isArray(d?.versions)?d.versions:[];
+          const active=versions.filter(v=>Number(v.percentage)===100);
+          if(versions.length!==1)throw new Error('PRODUCTION_BASELINE_NOT_SINGLE_VERSION:'+versions.length);
+          if(active.length!==1||typeof active[0].version_id!=='string')throw new Error('CURRENT_ACTIVE_PRODUCTION_VERSION_UNAVAILABLE');
+          if(active[0].version_id.toLowerCase()!==process.env.EXPECTED_ACTIVE_VERSION_ID.toLowerCase())throw new Error('CURRENT_ACTIVE_VERSION_NOT_OWNER_AUTHORIZED');
+          const raw=fs.readFileSync('/tmp/member-line-login-active-version.json','utf8');
+          for(const name of ['MEMBER_PRODUCTION_ROUTE_MODE','MEMBER_LINE_LOGIN_EXTERNAL_EXCHANGE_MODE','MEMBER_SESSION_SECRET','MEMBER_LINE_LOGIN_TRANSACTION_SECRET','MEMBER_LINE_LOGIN_CHANNEL_SECRET','MEMBER_PRIVATE_MEDIA_DELIVERY_SECRET','MEMBER_PRIVATE_MEDIA_BUCKET','DB','LINE_SERVICE','RESERVATION_SERVICE']){
+            if(!raw.includes(name))throw new Error('ACTIVE_ROUTE_VERSION_BINDING_OR_MODE_MISSING:'+name);
+          }
+          console.log('OWNER_AUTHORIZED_ACTIVE_ROUTE_VERSION_MATCH=PASS');
+          console.log('PRODUCTION_BASELINE_SINGLE_VERSION=PASS');
+          NODE
+
+      - name: Build deterministic LINE Login staged candidate
+        id: candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import crypto from 'node:crypto';
+          import {buildMemberLineLoginStageCandidate,validateMemberLineLoginStageCandidate} from './src/member-production-line-login-stage-plan.mjs';
+          const sourcePath='src/production-index-crm-customer360-entry.js';
+          const tempEntry='src/.member-production-line-login-stage-entry.js';
+          const tempConfig='.member-production-line-login-stage.wrangler.jsonc';
+          const source=fs.readFileSync(sourcePath,'utf8');
+          const cfg=JSON.parse(fs.readFileSync('wrangler.jsonc','utf8'));
+          const canonicalBindings=JSON.stringify({d1_databases:cfg.d1_databases,r2_buckets:cfg.r2_buckets,ratelimits:cfg.ratelimits,services:cfg.services});
+          const candidate=buildMemberLineLoginStageCandidate(source,cfg);
+          validateMemberLineLoginStageCandidate(candidate);
+          const restored=candidate.entry_source
+            .replace('const MEMBER_PRODUCTION_OWNER_APPROVED=true;','const MEMBER_PRODUCTION_OWNER_APPROVED=false;')
+            .replace('line_login_approved:true','line_login_approved:false');
+          if(restored!==source)throw new Error('ENTRY_CANDIDATE_NOT_EXACT_TWO_DETERMINISTIC_PATCHES');
+          const runtimeConfig=JSON.parse(JSON.stringify(candidate.wrangler_config));
+          runtimeConfig.main=tempEntry;
+          const candidateBindings=JSON.stringify({d1_databases:runtimeConfig.d1_databases,r2_buckets:runtimeConfig.r2_buckets,ratelimits:runtimeConfig.ratelimits,services:runtimeConfig.services});
+          if(canonicalBindings!==candidateBindings)throw new Error('RESOURCE_BINDINGS_CHANGED_IN_LINE_LOGIN_CANDIDATE');
+          fs.writeFileSync(tempEntry,candidate.entry_source,{mode:0o600});
+          fs.writeFileSync(tempConfig,JSON.stringify(runtimeConfig,null,2)+'\n',{mode:0o600});
+          const digest=crypto.createHash('sha256').update(candidate.entry_source).update('\n---\n').update(JSON.stringify(runtimeConfig)).digest('hex');
+          fs.appendFileSync(process.env.GITHUB_OUTPUT,'candidate_digest='+digest+'\n');
+          console.log('MEMBER_LINE_LOGIN_CANDIDATE_ENTRY_PATCH=OWNER_AND_LINE_APPROVAL_ONLY');
+          console.log('MEMBER_ROUTE_MODE_STAGED=enabled');
+          console.log('LINE_LOGIN_APPROVAL_STAGED=true');
+          console.log('LINE_LOGIN_EXTERNAL_EXCHANGE_STAGED=enabled');
+          console.log('PRIVATE_MEDIA_CONTENT_ROUTE_STAGED=disabled');
+          console.log('FAVORITES_WRITE_STAGED=disabled');
+          console.log('MEMORY_WRITE_STAGED=disabled');
+          console.log('FAMILY_PASS_ENTITLEMENT_WRITE_STAGED=disabled');
+          console.log('MEMBER_LINE_LOGIN_CANDIDATE_SHA256='+digest);
+          NODE
+
+      - name: Dry-run bundle candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/member-line-login-stage-dry-run
+          npx wrangler deploy --dry-run --config .member-production-line-login-stage.wrangler.jsonc --outdir /tmp/member-line-login-stage-dry-run
+          test -d /tmp/member-line-login-stage-dry-run
+          echo 'MEMBER_LINE_LOGIN_CANDIDATE_DRY_RUN=PASS'
+
+      - name: Upload immutable LINE Login version without traffic change
+        id: stage
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          EXPECTED_SHA: ${{ steps.auth.outputs.expected_sha }}
+          ROUTE_STAGE_RUN_ID: ${{ steps.auth.outputs.route_stage_run_id }}
+          ROUTE_PROMOTION_RUN_ID: ${{ steps.auth.outputs.route_promotion_run_id }}
+          EXPECTED_ACTIVE_VERSION_ID: ${{ steps.auth.outputs.expected_active_version_id }}
+          OWNER_COMMENT_ID: ${{ steps.auth.outputs.owner_comment_id }}
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/issues/comments/$OWNER_COMMENT_ID" \
+            > /tmp/member-line-login-stage-owner-comment-pre-upload.json
+          EXPECTED_BODY="/member-production-line-login-stage sha=$EXPECTED_SHA route_stage_run=$ROUTE_STAGE_RUN_ID route_promotion_run=$ROUTE_PROMOTION_RUN_ID active_version=$EXPECTED_ACTIVE_VERSION_ID confirm=STAGE_MEMBER_LINE_LOGIN_CANDIDATE"
+          export EXPECTED_BODY
+          python3 - <<'PY'
+          import json, os
+          from datetime import datetime, timezone
+          c=json.load(open('/tmp/member-line-login-stage-owner-comment-pre-upload.json', encoding='utf-8'))
+          if c.get('user',{}).get('login')!='ohw3rz5578d277e-collab': raise SystemExit('PRE_UPLOAD_OWNER_COMMENT_ACTOR_MISMATCH')
+          if c.get('body')!=os.environ['EXPECTED_BODY']: raise SystemExit('PRE_UPLOAD_OWNER_COMMENT_BODY_MISMATCH')
+          if not str(c.get('issue_url','')).endswith('/issues/26'): raise SystemExit('PRE_UPLOAD_OWNER_COMMENT_ISSUE_MISMATCH')
+          if c.get('created_at')!=c.get('updated_at'): raise SystemExit('PRE_UPLOAD_OWNER_COMMENT_EDITED')
+          created=datetime.fromisoformat(str(c.get('created_at','')).replace('Z','+00:00'))
+          age=(datetime.now(timezone.utc)-created).total_seconds()
+          if age < -30: raise SystemExit('PRE_UPLOAD_OWNER_COMMENT_FROM_FUTURE')
+          if age > 900: raise SystemExit(f'PRE_UPLOAD_OWNER_COMMENT_NOT_FRESH:age_seconds={age:.0f}')
+          print('OWNER_LINE_LOGIN_STAGE_AUTHORIZATION_FRESH_PRE_UPLOAD=PASS')
+          PY
+          rm -f /tmp/member-line-login-stage-owner-comment-pre-upload.json
+
+          current_main="$(git ls-remote origin refs/heads/main | awk '{print $1}')"
+          test "$current_main" = "$EXPECTED_SHA" || {
+            echo "::error::MAIN_DRIFT_BEFORE_LINE_LOGIN_STAGE_UPLOAD current=$current_main expected=$EXPECTED_SHA"
+            exit 1
+          }
+          echo 'CURRENT_MAIN_PRE_UPLOAD_GATE=PASS'
+          npx wrangler versions upload \
+            --config .member-production-line-login-stage.wrangler.jsonc \
+            --name customer-crm-api \
+            --keep-vars \
+            --tag "member-line-login-stage-${EXPECTED_SHA:0:12}" \
+            --message "Owner-gated Member LINE Login stage sha=$EXPECTED_SHA run=${GITHUB_RUN_ID}"
+          npx wrangler versions list --name customer-crm-api --json > /tmp/member-line-login-versions-after.json
+          node <<'NODE'
+          const fs=require('fs');
+          function rows(path){const x=JSON.parse(fs.readFileSync(path,'utf8'));return Array.isArray(x)?x:Array.isArray(x.versions)?x.versions:Array.isArray(x.result)?x.result:[];}
+          function id(row){return String(row?.id||row?.version_id||row?.versionId||'');}
+          const before=new Set(rows('/tmp/member-line-login-versions-before.json').map(id).filter(Boolean));
+          const after=rows('/tmp/member-line-login-versions-after.json').map(id).filter(Boolean);
+          const created=after.filter(x=>!before.has(x));
+          if(created.length!==1)throw new Error('STAGED_VERSION_DELTA_NOT_EXACTLY_ONE:'+created.length);
+          fs.appendFileSync(process.env.GITHUB_OUTPUT,'version_id='+created[0]+'\n');
+          console.log('MEMBER_LINE_LOGIN_STAGED_VERSION_ID='+created[0]);
+          console.log('WORKER_VERSION_STAGE=PASS');
+          NODE
+
+      - name: Verify immutable stage and unchanged Production traffic
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          STAGED_VERSION_ID: ${{ steps.stage.outputs.version_id }}
+          EXPECTED_SHA: ${{ steps.auth.outputs.expected_sha }}
+          EXPECTED_ACTIVE_VERSION_ID: ${{ steps.auth.outputs.expected_active_version_id }}
+        run: |
+          set -euo pipefail
+          npx wrangler versions view "$STAGED_VERSION_ID" --name customer-crm-api --json > /tmp/member-line-login-staged-version.json
+          npx wrangler deployments status --name customer-crm-api --json > /tmp/member-line-login-deployment-after.json
+          node <<'NODE'
+          const fs=require('fs');
+          function canonical(value){if(Array.isArray(value))return value.map(canonical);if(value&&typeof value==='object')return Object.fromEntries(Object.keys(value).sort().map(k=>[k,canonical(value[k])]));return value;}
+          const before=JSON.parse(fs.readFileSync('/tmp/member-line-login-deployment-before.json','utf8'));
+          const after=JSON.parse(fs.readFileSync('/tmp/member-line-login-deployment-after.json','utf8'));
+          if(JSON.stringify(canonical(before))!==JSON.stringify(canonical(after)))throw new Error('PRODUCTION_DEPLOYMENT_CHANGED_DURING_LINE_LOGIN_STAGE');
+          const raw=fs.readFileSync('/tmp/member-line-login-staged-version.json','utf8');
+          for(const name of ['MEMBER_PRODUCTION_ROUTE_MODE','MEMBER_LINE_LOGIN_EXTERNAL_EXCHANGE_MODE','MEMBER_PRIVATE_MEDIA_CONTENT_ROUTE_MODE','MEMBER_FAVORITES_MUTATION_ROUTE_MODE','MEMBER_FAVORITES_WRITE_MODE','MEMBER_MEMORY_WRITE_MODE','MEMBER_FAMILY_PASS_ENTITLEMENT_WRITE_MODE','MEMBER_PRIVATE_MEDIA_BUCKET','DB','LINE_SERVICE','RESERVATION_SERVICE','CRM_OWNER_LOGIN_RATE_LIMITER','MEMBER_SESSION_SECRET','MEMBER_LINE_LOGIN_TRANSACTION_SECRET','MEMBER_LINE_LOGIN_CHANNEL_SECRET','MEMBER_PRIVATE_MEDIA_DELIVERY_SECRET']){
+            if(!raw.includes(name))throw new Error('STAGED_BINDING_OR_MODE_MISSING:'+name);
+          }
+          if(!raw.includes(process.env.EXPECTED_SHA))throw new Error('STAGED_VERSION_METADATA_SHA_MISSING');
+          const d=Array.isArray(after)?after[0]:after;
+          const active=(d?.versions||[]).filter(v=>Number(v.percentage)===100);
+          if(active.length!==1||active[0].version_id.toLowerCase()!==process.env.EXPECTED_ACTIVE_VERSION_ID.toLowerCase())throw new Error('ACTIVE_VERSION_CHANGED_DURING_LINE_LOGIN_STAGE');
+          if((d?.versions||[]).some(v=>String(v.version_id).toLowerCase()===process.env.STAGED_VERSION_ID.toLowerCase()&&Number(v.percentage)>0))throw new Error('STAGED_VERSION_RECEIVED_TRAFFIC');
+          console.log('STAGED_VERSION_BINDINGS_AND_MODES=PASS');
+          console.log('PRODUCTION_DEPLOYMENT_UNCHANGED=PASS');
+          console.log('PRODUCTION_TRAFFIC_CHANGE=0');
+          NODE
+
+      - name: Remove ephemeral candidate files
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          rm -f src/.member-production-line-login-stage-entry.js .member-production-line-login-stage.wrangler.jsonc
+          echo 'EPHEMERAL_CANDIDATE_FILES_REMOVED=PASS'
+
+      - name: Final stage receipt
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ steps.auth.outputs.expected_sha }}
+          STAGED_VERSION_ID: ${{ steps.stage.outputs.version_id }}
+          CANDIDATE_DIGEST: ${{ steps.candidate.outputs.candidate_digest }}
+          EXPECTED_ACTIVE_VERSION_ID: ${{ steps.auth.outputs.expected_active_version_id }}
+          ROUTE_STAGE_RUN_ID: ${{ steps.auth.outputs.route_stage_run_id }}
+          ROUTE_PROMOTION_RUN_ID: ${{ steps.auth.outputs.route_promotion_run_id }}
+        run: |
+          set -euo pipefail
+          echo '=================================================='
+          echo 'MEMBER_PRODUCTION_LINE_LOGIN_STAGE=PASS'
+          echo "EXACT_SHA=$EXPECTED_SHA"
+          echo "STAGED_VERSION_ID=$STAGED_VERSION_ID"
+          echo "CANDIDATE_SHA256=$CANDIDATE_DIGEST"
+          echo "UNCHANGED_ACTIVE_VERSION_ID=$EXPECTED_ACTIVE_VERSION_ID"
+          echo "ROUTE_STAGE_LINEAGE_RUN_ID=$ROUTE_STAGE_RUN_ID"
+          echo "ROUTE_PROMOTION_LINEAGE_RUN_ID=$ROUTE_PROMOTION_RUN_ID"
+          echo 'MEMBER_ROUTE_MODE_STAGED=enabled'
+          echo 'MEMBER_OWNER_APPROVAL_STAGED=true'
+          echo 'LINE_LOGIN_APPROVAL_STAGED=true'
+          echo 'LINE_LOGIN_EXTERNAL_EXCHANGE_STAGED=enabled'
+          echo 'PRIVATE_MEDIA_CONTENT_ROUTE_STAGED=disabled'
+          echo 'FAVORITES_WRITE_STAGED=disabled'
+          echo 'MEMORY_WRITE_STAGED=disabled'
+          echo 'FAMILY_PASS_ENTITLEMENT_WRITE_STAGED=disabled'
+          echo 'PRODUCTION_TRAFFIC_CHANGE=0'
+          echo 'PRODUCTION_DEPLOY=0'
+          echo 'PRODUCTION_D1_READ=0'
+          echo 'PRODUCTION_D1_WRITE=0'
+          echo 'R2_OBJECT_READ=0'
+          echo 'R2_OBJECT_WRITE=0'
+          echo 'SECRET_CHANGE=0'
+          echo 'LINE_SEND=0'
+          echo 'CUSTOMER_PROSPECT_MUTATION=0'
+          echo 'CUSTOMER_ID_GENERATION=0'
+          echo 'COMMERCE_ACTIVATION=0'
+          echo 'BLACK_AUTOMATIC_AWARD=0'
+          echo 'PROMOTION=0'
+          echo 'NEXT_BOUNDARY=FRESH_OWNER_LINE_LOGIN_PROMOTION_AUTHORIZATION_REQUIRED'
+          echo '=================================================='

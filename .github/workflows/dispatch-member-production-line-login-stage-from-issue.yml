@@ -1,0 +1,52 @@
+name: Dispatch Member Production LINE Login candidate stage from release-gate issue
+
+run-name: >-
+  ${{ startsWith(github.event.comment.body, '/member-production-line-login-stage ') && 'Production mutation bridge: member-line-login-stage-pending' || 'Production bridge: ignored' }}
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  issues: read
+
+# This bridge intentionally cannot dispatch the stage workflow yet.
+# Executable dispatch wiring is a separate Owner approval boundary.
+
+jobs:
+  validate:
+    name: Validate exact Member LINE Login stage command and fail closed
+    if: >-
+      github.event.issue.number == 26 &&
+      github.event.issue.pull_request == null &&
+      github.actor == 'ohw3rz5578d277e-collab' &&
+      github.event.comment.user.login == 'ohw3rz5578d277e-collab' &&
+      startsWith(github.event.comment.body, '/member-production-line-login-stage ')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Validate exact Owner command and current main
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMMAND_BODY: ${{ github.event.comment.body }}
+        run: |
+          set -euo pipefail
+          command_re='^/member-production-line-login-stage sha=([0-9a-f]{40}) route_stage_run=([0-9]+) route_promotion_run=([0-9]+) active_version=([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}) confirm=STAGE_MEMBER_LINE_LOGIN_CANDIDATE$'
+          [[ "$COMMAND_BODY" =~ $command_re ]] || { echo '::error::INVALID_MEMBER_LINE_LOGIN_STAGE_COMMAND'; exit 1; }
+          expected_sha="${BASH_REMATCH[1]}"
+          current_sha="$(curl --fail --silent --show-error -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' -H 'X-GitHub-Api-Version: 2022-11-28' "https://api.github.com/repos/$GITHUB_REPOSITORY/commits/main" | python3 -c 'import json,sys; print(json.load(sys.stdin)["sha"])')"
+          test "$current_sha" = "$expected_sha" || { echo "::error::MAIN_DRIFT expected=$expected_sha current=$current_sha"; exit 1; }
+          echo 'MEMBER_LINE_LOGIN_STAGE_COMMAND=PASS'
+          echo 'PRODUCTION_TRAFFIC_CHANGE=0'
+          echo 'PRODUCTION_DEPLOY=0'
+          echo 'PRODUCTION_D1_WRITE=0'
+
+      - name: Fail closed until executable bridge receives separate Owner approval
+        shell: bash
+        run: |
+          echo '::error::MEMBER_LINE_LOGIN_STAGE_DISPATCH_WIRING_NOT_AUTHORIZED'
+          echo 'WORKFLOW_DISPATCH=0'
+          echo 'PRODUCTION_MUTATION=0'
+          exit 1
