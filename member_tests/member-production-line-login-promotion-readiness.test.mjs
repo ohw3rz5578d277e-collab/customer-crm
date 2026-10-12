@@ -62,8 +62,51 @@ test('valid exact candidate is promotion-ready',()=>{
   assert.equal(result.readiness,'PASS');
   assert.equal(result.staged_version_id,base.staged_version_id);
   assert.equal(result.expected_active_version_id,base.expected_active_version_id);
+  assert.equal(result.candidate_binding,'IMMUTABLE_SOURCE_CONSTANTS');
   assert.equal(result.production_traffic_change,false);
   assert.equal(result.next_boundary,'FRESH_OWNER_GATED_LINE_LOGIN_PROMOTION_REQUIRED');
+});
+
+test('unauthorized expected SHA fails closed',()=>{
+  const x=clone(base); x.expected_sha='1'.repeat(40);
+  assert.throws(()=>buildMemberLineLoginPromotionReadiness(x),/UNAUTHORIZED_EXPECTED_SHA/);
+});
+
+test('unauthorized staged version ID fails closed',()=>{
+  const x=clone(base); x.staged_version_id='11111111-1111-1111-1111-111111111111';
+  assert.throws(()=>buildMemberLineLoginPromotionReadiness(x),/UNAUTHORIZED_STAGED_VERSION_ID/);
+});
+
+test('unauthorized candidate digest fails closed',()=>{
+  const x=clone(base); x.candidate_sha256='2'.repeat(64);
+  assert.throws(()=>buildMemberLineLoginPromotionReadiness(x),/UNAUTHORIZED_CANDIDATE_SHA256/);
+});
+
+test('unauthorized staging run fails closed',()=>{
+  const x=clone(base); x.staging_run_id='99999999999';
+  assert.throws(()=>buildMemberLineLoginPromotionReadiness(x),/UNAUTHORIZED_STAGING_RUN_ID/);
+});
+
+test('unauthorized active version ID fails closed',()=>{
+  const x=clone(base); x.expected_active_version_id='22222222-2222-2222-2222-222222222222';
+  assert.throws(()=>buildMemberLineLoginPromotionReadiness(x),/UNAUTHORIZED_ACTIVE_VERSION_ID/);
+});
+
+test('internally consistent forged candidate identifiers fail closed',()=>{
+  const x=clone(base);
+  x.expected_sha='1'.repeat(40);
+  x.staged_version_id='11111111-1111-1111-1111-111111111111';
+  x.candidate_sha256='2'.repeat(64);
+  x.staging_run_id='99999999999';
+  x.expected_active_version_id='22222222-2222-2222-2222-222222222222';
+  x.stage_receipt.exact_sha=x.expected_sha;
+  x.stage_receipt.staged_version_id=x.staged_version_id;
+  x.stage_receipt.candidate_sha256=x.candidate_sha256;
+  x.stage_receipt.unchanged_active_version_id=x.expected_active_version_id;
+  x.active_deployment.versions=[{version_id:x.expected_active_version_id,percentage:100}];
+  x.staged_version.version_id=x.staged_version_id;
+  x.staged_version.candidate_sha256=x.candidate_sha256;
+  assert.throws(()=>buildMemberLineLoginPromotionReadiness(x),/UNAUTHORIZED_EXPECTED_SHA/);
 });
 
 test('stage receipt candidate digest mismatch fails closed',()=>{
@@ -142,6 +185,7 @@ test('strict zero accepts string zero',()=>{
 test('health remains source-only and mutation-free',()=>{
   const h=memberLineLoginPromotionReadinessHealth();
   assert.equal(h.source_only,true);
+  assert.equal(h.candidate_binding,'IMMUTABLE_SOURCE_CONSTANTS');
   assert.equal(h.production_mutation,false);
   assert.equal(h.production_traffic_change,false);
   assert.equal(h.production_deploy,false);
