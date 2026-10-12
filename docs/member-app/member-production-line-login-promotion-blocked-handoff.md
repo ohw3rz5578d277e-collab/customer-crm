@@ -13,19 +13,27 @@ The LINE Login candidate is ready for a separately Owner-gated Production promot
 - staged Worker version: `be711f54-8716-4178-9949-d5ced183d9dc`
 - candidate SHA-256: `af11b47ca14b90985fd2a1f6aa5523626b77dbb4f72a7092c1e7fb5da1fb5cd8`
 - expected active Worker version: `6d34db85-9a52-45e9-8f7d-094f9fc7957a`
-- current main at the blocked-handoff audit: `990e5e768615afb8dc51f2b5ed27ba4140382d9a`
+- current main at the initial blocked-handoff audit: `990e5e768615afb8dc51f2b5ed27ba4140382d9a`
 
 The staged candidate keeps Member route and LINE Login external exchange enabled while private-media content routing, Favorites writes, MEMORY writes, and FAMILY PASS entitlement writes remain disabled.
 
 ## Runtime drift audit
 
-The compare from candidate source SHA `fdfa65fa...` to current main `990e5e76...` contains only the three PR #264 readiness files:
+The compare from candidate source SHA `fdfa65fa...` to initial current main `990e5e76...` contains only the three PR #264 readiness files:
 
 1. `src/member-production-line-login-promotion-readiness.mjs`
 2. `member_tests/member-production-line-login-promotion-readiness.test.mjs`
 3. `docs/member-app/member-production-line-login-promotion-readiness.md`
 
 The Production entrypoint, `wrangler.jsonc`, and executable Production workflows were not changed by that compare.
+
+A merged blocked-handoff change would itself add three additional non-runtime files:
+
+1. `src/member-production-line-login-promotion-blocked-handoff.mjs`
+2. `member_tests/member-production-line-login-promotion-blocked-handoff.test.mjs`
+3. `docs/member-app/member-production-line-login-promotion-blocked-handoff.md`
+
+The validator therefore requires the three readiness files and permits either none or all three of the blocked-handoff files. Any other changed file, any partial blocked-handoff set, any duplicate changed-file evidence, or any missing readiness file fails closed. This keeps the packet valid before and after its own merge without allowing unrelated source drift.
 
 ## Blocked-handoff packet
 
@@ -36,7 +44,9 @@ It requires all of the following before returning `packet_ready=true`:
 - the exact immutable candidate identity pinned by the existing promotion-readiness planner;
 - promotion-readiness evidence remains `PASS`;
 - current main is syntactically valid and separately tracked from the candidate source SHA;
-- the candidate-source-to-current-main changed-file set is exactly the three readiness files above;
+- the candidate-source-to-current-main changed-file evidence contains all three required readiness files;
+- changed files are restricted to the immutable non-runtime allowlist above;
+- the blocked-handoff file set is either absent or complete;
 - Production entrypoint drift is explicitly false;
 - `wrangler.jsonc` drift is explicitly false;
 - runtime workflow drift is explicitly false;
