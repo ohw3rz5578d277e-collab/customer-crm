@@ -26,14 +26,14 @@ It requires exact agreement among:
 3. pinned candidate SHA-256 digest;
 4. pinned LINE Login stage run ID;
 5. pinned expected active 100%-traffic Worker version;
-6. successful stage receipt markers matching those pinned identifiers;
+6. successful stage receipt markers matching those pinned identifiers, including exact stage run lineage;
 7. a single-version Production baseline;
 8. candidate traffic remaining at zero;
 9. candidate LINE Login modes being enabled;
 10. all unrelated write/activation modes remaining disabled;
 11. resource bindings remaining unchanged.
 
-A syntactically valid, internally consistent but different candidate identity fails closed. Any other mismatch also fails closed.
+A syntactically valid, internally consistent but different candidate identity fails closed. A receipt whose `staging_run_id` does not equal `38233408939` also fails closed. Any other mismatch also fails closed.
 
 ## Explicit exclusions
 
