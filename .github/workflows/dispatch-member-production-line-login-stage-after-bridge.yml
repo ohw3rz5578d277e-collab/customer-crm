@@ -1,0 +1,250 @@
+name: Validate Member LINE Login stage after release-gate bridge
+
+run-name: >-
+  ${{ github.event.workflow_run.conclusion == 'success' && format('Validated mutation dispatcher preflight: member-line-login-stage bridge={0}', github.event.workflow_run.id) || 'Validated mutation dispatcher: ignored' }}
+
+on:
+  workflow_run:
+    workflows:
+      - Dispatch Member Production LINE Login candidate stage from release-gate issue
+    types: [completed]
+
+permissions:
+  contents: read
+  issues: read
+  actions: read
+
+concurrency:
+  group: member-line-login-stage-post-bridge-validation
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Revalidate successful bridge receipt and fail closed before stage dispatch
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'issue_comment'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Verify exact completed successful first-attempt bridge and current main
+        id: bridge
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRIDGE_RUN_ID: ${{ github.event.workflow_run.id }}
+        run: |
+          set -euo pipefail
+          [[ "$BRIDGE_RUN_ID" =~ ^[0-9]+$ ]] || { echo '::error::INVALID_BRIDGE_RUN_ID'; exit 1; }
+          curl --fail --silent --show-error \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/runs/$BRIDGE_RUN_ID" \
+            > /tmp/member-line-login-stage-bridge.json
+          current_sha="$(curl --fail --silent --show-error \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/commits/main" \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin)["sha"])')"
+          export BRIDGE_RUN_ID current_sha
+          expected_sha="$(python3 - <<'PY'
+          import json, os
+          r=json.load(open('/tmp/member-line-login-stage-bridge.json', encoding='utf-8'))
+          checks={
+            'id':r.get('id')==int(os.environ['BRIDGE_RUN_ID']),
+            'status':r.get('status')=='completed',
+            'conclusion':r.get('conclusion')=='success',
+            'event':r.get('event')=='issue_comment',
+            'path':r.get('path')=='.github/workflows/dispatch-member-production-line-login-stage-from-issue.yml',
+            'run_attempt':r.get('run_attempt')==1,
+            'actor':r.get('actor',{}).get('login')=='ohw3rz5578d277e-collab',
+            'display_title':r.get('display_title')=='Production mutation bridge: member-line-login-stage',
+          }
+          bad=[k for k,v in checks.items() if not v]
+          if bad: raise SystemExit('INVALID_COMPLETED_LINE_LOGIN_STAGE_BRIDGE:'+','.join(bad))
+          head=str(r.get('head_sha','')).lower()
+          if head != os.environ['current_sha'].lower(): raise SystemExit('MAIN_DRIFT_AFTER_BRIDGE')
+          print(head)
+          PY
+          )"
+          [[ "$expected_sha" =~ ^[0-9a-f]{40}$ ]] || { echo '::error::INVALID_BRIDGE_HEAD_SHA'; exit 1; }
+          echo "expected_sha=$expected_sha" >> "$GITHUB_OUTPUT"
+          echo "bridge_run_id=$BRIDGE_RUN_ID" >> "$GITHUB_OUTPUT"
+          echo 'MEMBER_LINE_LOGIN_STAGE_COMPLETED_BRIDGE=PASS'
+          echo 'MEMBER_LINE_LOGIN_STAGE_COMPLETED_BRIDGE_ATTEMPT=1'
+          rm -f /tmp/member-line-login-stage-bridge.json
+
+      - name: Download exact validated bridge receipt
+        uses: actions/download-artifact@v4
+        with:
+          name: member-line-login-stage-dispatch-receipt-${{ github.event.workflow_run.id }}
+          path: /tmp/member-line-login-stage-receipt
+          github-token: ${{ github.token }}
+          run-id: ${{ github.event.workflow_run.id }}
+          repository: ${{ github.repository }}
+
+      - name: Verify receipt exact Owner comment freshness and current main
+        id: receipt
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_SHA: ${{ steps.bridge.outputs.expected_sha }}
+          BRIDGE_RUN_ID: ${{ steps.bridge.outputs.bridge_run_id }}
+        run: |
+          set -euo pipefail
+          receipt='/tmp/member-line-login-stage-receipt/member-line-login-stage-dispatch-receipt.json'
+          test -f "$receipt" || { echo '::error::LINE_LOGIN_STAGE_RECEIPT_MISSING'; exit 1; }
+          export EXPECTED_SHA BRIDGE_RUN_ID GITHUB_REPOSITORY receipt
+          eval "$(python3 - <<'PY'
+          import json, os, re, shlex
+          r=json.load(open(os.environ['receipt'], encoding='utf-8'))
+          checks={
+            'schema':r.get('schema')=='member-line-login-stage-dispatch-receipt-v1',
+            'repository':r.get('repository')==os.environ['GITHUB_REPOSITORY'],
+            'bridge_workflow_path':r.get('bridge_workflow_path')=='.github/workflows/dispatch-member-production-line-login-stage-from-issue.yml',
+            'bridge_run_id':r.get('bridge_run_id')==int(os.environ['BRIDGE_RUN_ID']),
+            'bridge_run_attempt':r.get('bridge_run_attempt')==1,
+            'expected_sha':r.get('expected_sha')==os.environ['EXPECTED_SHA'],
+            'confirmation':r.get('confirmation')=='STAGE_MEMBER_LINE_LOGIN_CANDIDATE',
+          }
+          bad=[k for k,v in checks.items() if not v]
+          if bad: raise SystemExit('INVALID_LINE_LOGIN_STAGE_DISPATCH_RECEIPT:'+','.join(bad))
+          values={
+            'ROUTE_STAGE_RUN_ID':str(r.get('route_stage_run_id','')),
+            'ROUTE_PROMOTION_RUN_ID':str(r.get('route_promotion_run_id','')),
+            'ACTIVE_VERSION_ID':str(r.get('active_version_id','')).lower(),
+            'OWNER_COMMENT_ID':str(r.get('owner_comment_id','')),
+            'COMMAND_SHA256':str(r.get('command_sha256','')).lower(),
+          }
+          patterns={
+            'ROUTE_STAGE_RUN_ID':r'[0-9]+',
+            'ROUTE_PROMOTION_RUN_ID':r'[0-9]+',
+            'ACTIVE_VERSION_ID':r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}',
+            'OWNER_COMMENT_ID':r'[0-9]+',
+            'COMMAND_SHA256':r'[0-9a-f]{64}',
+          }
+          for k,v in values.items():
+            if not re.fullmatch(patterns[k],v): raise SystemExit('INVALID_'+k)
+            print(f'{k}={shlex.quote(v)}')
+          PY
+          )"
+
+          current_sha="$(curl --fail --silent --show-error \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/commits/main" \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin)["sha"])')"
+          test "$current_sha" = "$EXPECTED_SHA" || { echo "::error::MAIN_DRIFT_BEFORE_LINE_LOGIN_STAGE_DISPATCH expected=$EXPECTED_SHA current=$current_sha"; exit 1; }
+
+          curl --fail --silent --show-error \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/issues/comments/$OWNER_COMMENT_ID" \
+            > /tmp/member-line-login-stage-owner-comment.json
+          EXPECTED_BODY="/member-production-line-login-stage sha=$EXPECTED_SHA route_stage_run=$ROUTE_STAGE_RUN_ID route_promotion_run=$ROUTE_PROMOTION_RUN_ID active_version=$ACTIVE_VERSION_ID confirm=STAGE_MEMBER_LINE_LOGIN_CANDIDATE"
+          export EXPECTED_BODY COMMAND_SHA256 OWNER_COMMENT_ID
+          python3 - <<'PY'
+          import hashlib, json, os
+          from datetime import datetime, timezone
+          c=json.load(open('/tmp/member-line-login-stage-owner-comment.json', encoding='utf-8'))
+          body=str(c.get('body',''))
+          if c.get('id') != int(os.environ['OWNER_COMMENT_ID']): raise SystemExit('OWNER_COMMENT_ID_MISMATCH')
+          if c.get('user',{}).get('login') != 'ohw3rz5578d277e-collab': raise SystemExit('OWNER_COMMENT_ACTOR_MISMATCH')
+          if body != os.environ['EXPECTED_BODY']: raise SystemExit('OWNER_COMMENT_BODY_MISMATCH')
+          if hashlib.sha256(body.encode()).hexdigest() != os.environ['COMMAND_SHA256']: raise SystemExit('OWNER_COMMENT_DIGEST_MISMATCH')
+          if not str(c.get('issue_url','')).endswith('/issues/26'): raise SystemExit('OWNER_COMMENT_ISSUE_MISMATCH')
+          if c.get('created_at') != c.get('updated_at'): raise SystemExit('OWNER_COMMENT_EDITED')
+          created=datetime.fromisoformat(str(c.get('created_at','')).replace('Z','+00:00'))
+          age=(datetime.now(timezone.utc)-created).total_seconds()
+          if age < -30: raise SystemExit('OWNER_COMMENT_FROM_FUTURE')
+          if age > 900: raise SystemExit(f'OWNER_COMMENT_NOT_FRESH_BEFORE_DISPATCH:age_seconds={age:.0f}')
+          print('OWNER_LINE_LOGIN_STAGE_DISPATCH_AUTHORIZATION=PASS')
+          PY
+          rm -f /tmp/member-line-login-stage-owner-comment.json
+
+          echo "route_stage_run_id=$ROUTE_STAGE_RUN_ID" >> "$GITHUB_OUTPUT"
+          echo "route_promotion_run_id=$ROUTE_PROMOTION_RUN_ID" >> "$GITHUB_OUTPUT"
+          echo "active_version_id=$ACTIVE_VERSION_ID" >> "$GITHUB_OUTPUT"
+          echo "owner_comment_id=$OWNER_COMMENT_ID" >> "$GITHUB_OUTPUT"
+          echo 'MEMBER_LINE_LOGIN_STAGE_DISPATCH_RECEIPT_VERIFIED=PASS'
+
+      - name: Reject instead of queueing behind another Production mutation
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRIDGE_RUN_ID: ${{ steps.bridge.outputs.bridge_run_id }}
+        run: |
+          set -euo pipefail
+          sleep 2
+          workflows=(
+            dispatch-production-deploy-from-issue.yml
+            dispatch-member-schema-apply-from-issue.yml
+            dispatch-member-production-runtime-secret-stage-from-issue.yml
+            dispatch-member-production-version-promotion-from-issue.yml
+            dispatch-member-production-route-stage-from-issue.yml
+            dispatch-member-production-line-login-stage-from-issue.yml
+            deploy-cloudflare.yml
+            member-production-schema-apply.yml
+            member-production-runtime-secret-stage.yml
+            member-production-version-promotion.yml
+            member-production-route-stage.yml
+            member-production-line-login-stage.yml
+          )
+          statuses=(queued in_progress waiting pending requested)
+          for workflow in "${workflows[@]}"; do
+            for status in "${statuses[@]}"; do
+              code="$(curl --silent --show-error --output /tmp/member-line-login-post-bridge-conflicts.json --write-out '%{http_code}' \
+                -H "Authorization: Bearer $GH_TOKEN" \
+                -H 'Accept: application/vnd.github+json' \
+                -H 'X-GitHub-Api-Version: 2022-11-28' \
+                "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/workflows/$workflow/runs?status=$status&per_page=100")"
+              if [[ "$code" == 404 ]]; then continue; fi
+              test "$code" = 200 || { cat /tmp/member-line-login-post-bridge-conflicts.json >&2 || true; exit 1; }
+              conflicts="$(WORKFLOW="$workflow" BRIDGE_RUN_ID="$BRIDGE_RUN_ID" python3 - <<'PY'
+          import json, os
+          runs=json.load(open('/tmp/member-line-login-post-bridge-conflicts.json', encoding='utf-8')).get('workflow_runs',[])
+          workflow=os.environ['WORKFLOW']
+          source_bridge=int(os.environ['BRIDGE_RUN_ID'])
+          direct_mutation_workflows={
+              'member-production-schema-apply.yml',
+              'member-production-runtime-secret-stage.yml',
+              'member-production-version-promotion.yml',
+              'member-production-route-stage.yml',
+              'member-production-line-login-stage.yml',
+          }
+          def actual(run):
+              if int(run.get('id',0))==source_bridge: return False
+              event=run.get('event')
+              title=str(run.get('display_title',''))
+              if workflow=='deploy-cloudflare.yml': return event=='workflow_dispatch' and not title.startswith('CRM Production preflight ')
+              if workflow in direct_mutation_workflows: return event=='workflow_dispatch'
+              if workflow.startswith('dispatch-'):
+                  if title.startswith('Production read-only bridge:') or title=='Production bridge: ignored': return False
+                  return title.startswith('Production mutation bridge:') or event=='issue_comment'
+              return False
+          print(sum(1 for r in runs if actual(r)))
+          PY
+              )"
+              test "$conflicts" = 0 || { echo "::error::PRODUCTION_MUTATION_BUSY_RETRY_REQUIRED workflow=$workflow status=$status count=$conflicts"; exit 1; }
+            done
+          done
+          rm -f /tmp/member-line-login-post-bridge-conflicts.json
+          echo 'PRODUCTION_MUTATION_POST_BRIDGE_GATE=FREE'
+          echo 'PRODUCTION_MUTATION_QUEUE_POLICY=REJECT_AND_RETRY'
+
+      - name: Fail closed before executable stage dispatch
+        shell: bash
+        run: |
+          echo '::error::MEMBER_LINE_LOGIN_STAGE_POST_BRIDGE_EXECUTABLE_DISPATCH_NOT_INSTALLED'
+          echo 'LINE_LOGIN_STAGE_WORKFLOW_DISPATCH=0'
+          echo 'PRODUCTION_MUTATION=0'
+          echo 'PRODUCTION_TRAFFIC_CHANGE=0'
+          echo 'PRODUCTION_DEPLOY=0'
+          echo 'PRODUCTION_D1_WRITE=0'
+          echo 'R2_OBJECT_READ=0'
+          echo 'R2_OBJECT_WRITE=0'
+          exit 1
