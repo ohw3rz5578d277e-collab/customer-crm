@@ -15,6 +15,14 @@ const readinessBlobs={
   'docs/member-app/member-production-line-login-promotion-readiness.md':'ec1ed3fdc1fac59f70447eadfc9df7db6a972287',
   'member_tests/member-production-line-login-promotion-readiness.test.mjs':'a26ba0302d9e315e642c747dc8498df6cda4790e'
 };
+const inheritedDiffs=[
+  'src/crm-customer-list-daily-operations.mjs',
+  'tests/customer-list-daily-operations.mjs'
+];
+const inheritedBlobs={
+  'src/crm-customer-list-daily-operations.mjs':'39f8abcb8671f8dd2d2f33c6c63e60228a29c992',
+  'tests/customer-list-daily-operations.mjs':'e853fc46f8c2fd4ff84726eba99f82942ffe9b68'
+};
 const handoffDiffs=[
   'src/member-production-line-login-promotion-blocked-handoff.mjs',
   'docs/member-app/member-production-line-login-promotion-blocked-handoff.md',
@@ -22,7 +30,7 @@ const handoffDiffs=[
 ];
 
 const candidate={
-  current_main_sha:'990e5e768615afb8dc51f2b5ed27ba4140382d9a',
+  current_main_sha:'7e10f06f4cf3c7d6fe823682344237956afcf183',
   candidate_source_sha:'fdfa65fa797c3ee89885ee99244e7a9ad691b124',
   staged_version_id:'be711f54-8716-4178-9949-d5ced183d9dc',
   candidate_sha256:'af11b47ca14b90985fd2a1f6aa5523626b77dbb4f72a7092c1e7fb5da1fb5cd8',
@@ -75,13 +83,15 @@ const candidate={
   runtime_drift_evidence:{
     checked:true,
     base_sha:'fdfa65fa797c3ee89885ee99244e7a9ad691b124',
-    head_sha:'990e5e768615afb8dc51f2b5ed27ba4140382d9a',
+    head_sha:'7e10f06f4cf3c7d6fe823682344237956afcf183',
     production_entry_changed:false,
     wrangler_changed:false,
     runtime_workflow_changed:false,
-    changed_files:[...readinessDiffs],
+    changed_files:[...readinessDiffs,...inheritedDiffs],
     readiness_blob_evidence_checked:true,
-    readiness_file_blobs:{...readinessBlobs}
+    readiness_file_blobs:{...readinessBlobs},
+    inherited_blob_evidence_checked:true,
+    inherited_file_blobs:{...inheritedBlobs}
   },
   repository_safety_evidence:{
     executable_workflow_write_blocked:true,
@@ -111,21 +121,22 @@ function hasBlocker(result,prefix){return result.blockers.some(v=>v===prefix||v.
   assert.equal(result.staging_run_id,candidate.staging_run_id);
   assert.equal(result.expected_active_version_id,candidate.expected_active_version_id);
   assert.deepEqual(result.required_readiness_blobs,readinessBlobs);
+  assert.deepEqual(result.required_inherited_blobs,inheritedBlobs);
   for(const value of Object.values(result.safety))assert.equal(value,0);
-  console.log('PASS pre-merge blocked handoff packet binds exact ready candidate and immutable readiness blobs while granting no authorization');
+  console.log('PASS pre-merge blocked handoff packet binds exact ready candidate, readiness blobs, and audited inherited current-main drift');
 }
 
 {
   const input=clone(candidate);
   input.current_main_sha='aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
   input.runtime_drift_evidence.head_sha=input.current_main_sha;
-  input.runtime_drift_evidence.changed_files=[...readinessDiffs,...handoffDiffs];
+  input.runtime_drift_evidence.changed_files=[...readinessDiffs,...inheritedDiffs,...handoffDiffs];
   const result=packet(input);
   assert.equal(result.packet_ready,true);
   assert.deepEqual(result.blockers,[]);
   assert.equal(result.authorization_granted,false);
   assert.equal(result.executable_promotion_available,false);
-  console.log('PASS post-merge handoff files remain valid non-runtime evidence without granting authorization');
+  console.log('PASS post-merge handoff files remain valid only when audited inherited drift remains present and pinned');
 }
 
 {
@@ -163,6 +174,43 @@ function hasBlocker(result,prefix){return result.blockers.some(v=>v===prefix||v.
   assert.equal(result.packet_ready,false);
   assert.equal(hasBlocker(result,'READINESS_BLOB_EVIDENCE_NOT_CHECKED'),true);
   console.log('PASS unchecked readiness blob evidence fails closed');
+}
+
+{
+  const input=clone(candidate);
+  input.runtime_drift_evidence.inherited_file_blobs['src/crm-customer-list-daily-operations.mjs']='3'.repeat(40);
+  const result=packet(input);
+  assert.equal(result.packet_ready,false);
+  assert.equal(hasBlocker(result,'INHERITED_BLOB_MISMATCH:src/crm-customer-list-daily-operations.mjs'),true);
+  console.log('PASS modified inherited current-main source blob fails closed');
+}
+
+{
+  const input=clone(candidate);
+  delete input.runtime_drift_evidence.inherited_file_blobs['tests/customer-list-daily-operations.mjs'];
+  const result=packet(input);
+  assert.equal(result.packet_ready,false);
+  assert.equal(hasBlocker(result,'INHERITED_BLOB_EVIDENCE_PATH_SET_MISMATCH'),true);
+  assert.equal(hasBlocker(result,'INHERITED_BLOB_MISMATCH:tests/customer-list-daily-operations.mjs'),true);
+  console.log('PASS missing inherited blob evidence fails closed');
+}
+
+{
+  const input=clone(candidate);
+  input.runtime_drift_evidence.inherited_file_blobs['unexpected.txt']='4'.repeat(40);
+  const result=packet(input);
+  assert.equal(result.packet_ready,false);
+  assert.equal(hasBlocker(result,'INHERITED_BLOB_EVIDENCE_PATH_SET_MISMATCH'),true);
+  console.log('PASS extra inherited blob evidence fails closed');
+}
+
+{
+  const input=clone(candidate);
+  input.runtime_drift_evidence.inherited_blob_evidence_checked=false;
+  const result=packet(input);
+  assert.equal(result.packet_ready,false);
+  assert.equal(hasBlocker(result,'INHERITED_BLOB_EVIDENCE_NOT_CHECKED'),true);
+  console.log('PASS unchecked inherited blob evidence fails closed');
 }
 
 {
@@ -208,6 +256,15 @@ function hasBlocker(result,prefix){return result.blockers.some(v=>v===prefix||v.
   assert.equal(result.packet_ready,false);
   assert.equal(hasBlocker(result,'REQUIRED_READINESS_DIFF_MISSING'),true);
   console.log('PASS missing readiness provenance fails closed');
+}
+
+{
+  const input=clone(candidate);
+  input.runtime_drift_evidence.changed_files=input.runtime_drift_evidence.changed_files.filter(v=>v!==inheritedDiffs[0]);
+  const result=packet(input);
+  assert.equal(result.packet_ready,false);
+  assert.equal(hasBlocker(result,'REQUIRED_INHERITED_DIFF_MISSING'),true);
+  console.log('PASS missing inherited current-main drift fails closed');
 }
 
 {
@@ -270,18 +327,21 @@ function hasBlocker(result,prefix){return result.blockers.some(v=>v===prefix||v.
   assert.equal(health.member_line_login_promotion_blocked_handoff,true);
   assert.equal(health.source_only,true);
   assert.equal(health.readiness_blob_binding,'IMMUTABLE_GIT_BLOBS');
+  assert.equal(health.inherited_drift_blob_binding,'IMMUTABLE_GIT_BLOBS');
   assert.equal(health.executable_promotion_available,false);
   assert.equal(health.authorization_granted,false);
   assert.equal(health.production_mutation,false);
   assert.equal(health.next_boundary,'REPOSITORY_SAFE_EXECUTABLE_PROMOTION_PATH_REQUIRED');
-  console.log('PASS health exposes immutable readiness blob binding and source-only non-executable boundary');
+  console.log('PASS health exposes immutable readiness and inherited-drift blob binding with source-only non-executable boundary');
 }
 
 assert.equal(__test.EXECUTABLE_WORKFLOW_PATH,'.github/workflows/member-production-line-login-promotion.yml');
 assert.deepEqual([...__test.REQUIRED_READINESS_DIFFS].sort(),[...readinessDiffs].sort());
 assert.deepEqual(__test.REQUIRED_READINESS_BLOBS,readinessBlobs);
+assert.deepEqual([...__test.REQUIRED_INHERITED_DIFFS].sort(),[...inheritedDiffs].sort());
+assert.deepEqual(__test.REQUIRED_INHERITED_BLOBS,inheritedBlobs);
 assert.deepEqual([...__test.OPTIONAL_HANDOFF_DIFFS].sort(),[...handoffDiffs].sort());
-assert.deepEqual([...__test.ALLOWED_NON_RUNTIME_DIFFS].sort(),[...readinessDiffs,...handoffDiffs].sort());
+assert.deepEqual([...__test.ALLOWED_NON_RUNTIME_DIFFS].sort(),[...readinessDiffs,...inheritedDiffs,...handoffDiffs].sort());
 assert.deepEqual(__test.AUTHORIZED_CANDIDATE,{
   expected_sha:'fdfa65fa797c3ee89885ee99244e7a9ad691b124',
   staged_version_id:'be711f54-8716-4178-9949-d5ced183d9dc',
@@ -292,6 +352,7 @@ assert.deepEqual(__test.AUTHORIZED_CANDIDATE,{
 
 console.log('MEMBER_PRODUCTION_LINE_LOGIN_PROMOTION_BLOCKED_HANDOFF=PASS');
 console.log('READINESS_BLOB_BINDING=IMMUTABLE_GIT_BLOBS');
+console.log('INHERITED_DRIFT_BLOB_BINDING=IMMUTABLE_GIT_BLOBS');
 console.log('PRODUCTION_TRAFFIC_CHANGE=0');
 console.log('PRODUCTION_DEPLOY=0');
 console.log('WORKER_VERSION_UPLOAD=0');
