@@ -25,6 +25,14 @@ pass('search communicates name Customer ID LINE display name and phone',daily.in
 pass('desktop header is daily-operations ordered',daily.includes('<th>顧客</th><th>関係</th><th>撮影回数</th><th>累計売上</th><th>最終撮影</th><th>LINE</th><th>次の候補</th><th>詳細</th>'));
 pass('mobile customer rows use compact density',daily.includes('#crmMktList .crm-daily-row{padding:9px!important}')&&daily.includes('grid-template-columns:70px minmax(0,1fr)!important')&&daily.includes('font-size:13px!important'));
 pass('mobile customer name and metadata are compact without becoming tiny',daily.includes('.crm-mkt-name{font-size:15px!important')&&daily.includes('.crm-mkt-sub{margin-top:2px!important;font-size:10px!important}'));
+pass('mobile search header is compact',daily.includes('.crm-search-head{padding:10px!important')&&daily.includes('margin-bottom:8px!important'));
+pass('mobile search input preserves 44px minimum touch target',daily.includes('.crm-search-box input{min-height:44px!important'));
+pass('mobile search clear action preserves 44px target',daily.includes('.crm-search-clear{right:8px!important;min-height:44px!important;min-width:44px!important'));
+pass('mobile Customer360 detail sheet is tighter',daily.includes('.crm-detail{inset:6px!important;border-radius:16px!important;padding:10px!important}'));
+pass('mobile Customer360 close control remains 44px square minimum',daily.includes('.crm-detail-close{width:44px!important;height:44px!important;min-width:44px!important;min-height:44px!important}'));
+pass('mobile Customer360 profile typography is compact and readable',daily.includes('.crm-360-profile-main h2{font-size:22px!important;line-height:1.25!important}'));
+pass('mobile Customer360 cards use compact spacing',daily.includes('.crm-360-card,.crm-section{padding:10px!important;border-radius:14px!important}'));
+pass('mobile Customer360 action targets remain at least 44px',daily.includes('.crm-360-actions .crm-mkt-btn{min-height:44px!important'));
 pass('mobile action targets remain at least 44px',daily.includes('min-height:44px'));
 pass('daily operations no longer depends on duplicate Marketing HOME table',daily.includes('crm-daily-row')&&!daily.includes("top.map(marketingRow).join('')"));
 pass('adapter is idempotent',injectCustomerListDailyOperations(daily)===daily);
