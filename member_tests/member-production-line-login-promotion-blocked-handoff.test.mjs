@@ -155,6 +155,37 @@ function fails(input,blocker){const result=packet(input);assert.equal(result.pac
 
 {
   const input=clone(candidate);
+  input.runtime_drift_evidence.changed_files.push('');
+  const result=fails(input,'NON_RUNTIME_DIFF_INVALID_ENTRY');
+  assert.equal(hasBlocker(result,'AUDITED_DIFF_SET_MISMATCH'),true);
+  console.log('PASS blank changed-file evidence entry fails closed');
+}
+
+{
+  const input=clone(candidate);
+  input.runtime_drift_evidence.changed_files.push('   ');
+  const result=fails(input,'NON_RUNTIME_DIFF_INVALID_ENTRY');
+  assert.equal(hasBlocker(result,'AUDITED_DIFF_SET_MISMATCH'),true);
+  console.log('PASS whitespace-only changed-file evidence entry fails closed');
+}
+
+{
+  const input=clone(candidate);
+  input.runtime_drift_evidence.changed_files[0]=` ${input.runtime_drift_evidence.changed_files[0]} `;
+  fails(input,'NON_RUNTIME_DIFF_INVALID_ENTRY');
+  console.log('PASS whitespace-padded changed-file evidence entry fails closed even when normalization would match');
+}
+
+{
+  const input=clone(candidate);
+  input.runtime_drift_evidence.changed_files.push(42);
+  const result=fails(input,'NON_RUNTIME_DIFF_INVALID_ENTRY');
+  assert.equal(hasBlocker(result,'AUDITED_DIFF_SET_MISMATCH'),true);
+  console.log('PASS non-string changed-file evidence entry fails closed');
+}
+
+{
+  const input=clone(candidate);
   input.runtime_drift_evidence.changed_files=input.runtime_drift_evidence.changed_files.filter(v=>v!==readinessDiffs[0]);
   const result=fails(input,'AUDITED_DIFF_SET_MISMATCH');
   assert.equal(hasBlocker(result,'REQUIRED_READINESS_DIFF_MISSING'),true);
