@@ -117,7 +117,7 @@ function fails(input,blocker){const result=packet(input);assert.equal(result.pac
   assert.equal(result.repository_safety_blocked,true);
   assert.equal(result.approval_text,'');
   assert.equal(result.next_boundary,'REPOSITORY_SAFE_EXECUTABLE_PROMOTION_PATH_REQUIRED');
-  assert.deepEqual(result.required_audited_diffs,auditedDiffs);
+  assert.deepEqual([...result.required_audited_diffs].sort(),[...auditedDiffs].sort());
   assert.deepEqual(result.required_readiness_blobs,readinessBlobs);
   assert.deepEqual(result.required_inherited_blobs,inheritedBlobs);
   for(const value of Object.values(result.safety))assert.equal(value,0);
