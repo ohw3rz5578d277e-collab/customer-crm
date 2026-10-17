@@ -13,13 +13,13 @@ The LINE Login candidate is ready for a separately Owner-gated Production promot
 - staged Worker version: `be711f54-8716-4178-9949-d5ced183d9dc`
 - candidate SHA-256: `af11b47ca14b90985fd2a1f6aa5523626b77dbb4f72a7092c1e7fb5da1fb5cd8`
 - expected active Worker version: `6d34db85-9a52-45e9-8f7d-094f9fc7957a`
-- current audited main for this replacement handoff: `7e10f06f4cf3c7d6fe823682344237956afcf183`
+- current audited main for this replacement handoff: `fe9bbcf8c650941b9c0788f633cd4796bbe6cb41`
 
 The staged candidate keeps Member route and LINE Login external exchange enabled while private-media content routing, Favorites writes, MEMORY writes, and FAMILY PASS entitlement writes remain disabled.
 
 ## Runtime drift audit
 
-The compare from candidate source SHA `fdfa65fa797c3ee89885ee99244e7a9ad691b124` to current audited main `7e10f06f4cf3c7d6fe823682344237956afcf183` contains exactly five files.
+The compare from candidate source SHA `fdfa65fa797c3ee89885ee99244e7a9ad691b124` to current audited main `fe9bbcf8c650941b9c0788f633cd4796bbe6cb41` contains exactly five files.
 
 The three PR #264 readiness files are:
 
@@ -33,15 +33,17 @@ Their exact audited Git blob SHAs are pinned:
 - `member_tests/member-production-line-login-promotion-readiness.test.mjs` -> `a26ba0302d9e315e642c747dc8498df6cda4790e`
 - `docs/member-app/member-production-line-login-promotion-readiness.md` -> `ec1ed3fdc1fac59f70447eadfc9df7db6a972287`
 
-After PR #267 advanced `main`, the same candidate-to-current-main comparison also contains exactly two inherited current-main files:
+After PR #267 and PR #268 advanced `main`, the candidate-to-current-main comparison still contains exactly two inherited current-main files:
 
 1. `src/crm-customer-list-daily-operations.mjs`
 2. `tests/customer-list-daily-operations.mjs`
 
+PR #268 updated those same inherited paths, so the audited blob evidence is refreshed to current main rather than reusing the earlier PR #267 blobs.
+
 Those inherited files are not silently ignored. They are explicitly audited and pinned to exact Git blob SHAs:
 
-- `src/crm-customer-list-daily-operations.mjs` -> `39f8abcb8671f8dd2d2f33c6c63e60228a29c992`
-- `tests/customer-list-daily-operations.mjs` -> `e853fc46f8c2fd4ff84726eba99f82942ffe9b68`
+- `src/crm-customer-list-daily-operations.mjs` -> `06bd614f97bcb94992dcedbe47f48990f0a56b1f`
+- `tests/customer-list-daily-operations.mjs` -> `ca1ec71457b8ea5a5507d33ff85d1f686d4261a4`
 
 The Production entrypoint, `wrangler.jsonc`, and executable Production workflows are still required to remain unchanged by the candidate-to-current-main audit.
 
@@ -67,7 +69,7 @@ It requires all of the following before returning `packet_ready=true`:
 - promotion-readiness evidence remains `PASS` and returns the same candidate identity;
 - current main is syntactically valid and separately tracked from the candidate source SHA;
 - candidate-source-to-current-main changed-file evidence contains all three readiness files;
-- candidate-source-to-current-main changed-file evidence contains both audited inherited PR #267 files;
+- candidate-source-to-current-main changed-file evidence contains both audited inherited current-main files;
 - the three readiness paths have the exact pinned Git blob SHAs above;
 - the two inherited paths have the exact pinned Git blob SHAs above;
 - changed files are restricted to the immutable audited allowlist above plus the complete optional blocked-handoff set;
