@@ -2,6 +2,7 @@ import { buildMemberLineLoginPromotionReadiness } from './member-production-line
 
 const PACKET='member_line_login_promotion_blocked_handoff_v1';
 const EXECUTABLE_WORKFLOW_PATH='.github/workflows/member-production-line-login-promotion.yml';
+const AUDITED_CURRENT_MAIN_SHA='fe9bbcf8c650941b9c0788f633cd4796bbe6cb41';
 const REQUIRED_READINESS_DIFFS=Object.freeze([
   'docs/member-app/member-production-line-login-promotion-readiness.md',
   'member_tests/member-production-line-login-promotion-readiness.test.mjs',
@@ -20,15 +21,9 @@ const REQUIRED_INHERITED_BLOBS=Object.freeze({
   'src/crm-customer-list-daily-operations.mjs':'06bd614f97bcb94992dcedbe47f48990f0a56b1f',
   'tests/customer-list-daily-operations.mjs':'ca1ec71457b8ea5a5507d33ff85d1f686d4261a4'
 });
-const OPTIONAL_HANDOFF_DIFFS=Object.freeze([
-  'docs/member-app/member-production-line-login-promotion-blocked-handoff.md',
-  'member_tests/member-production-line-login-promotion-blocked-handoff.test.mjs',
-  'src/member-production-line-login-promotion-blocked-handoff.mjs'
-]);
-const ALLOWED_NON_RUNTIME_DIFFS=Object.freeze([
+const REQUIRED_AUDITED_DIFFS=Object.freeze([
   ...REQUIRED_READINESS_DIFFS,
-  ...REQUIRED_INHERITED_DIFFS,
-  ...OPTIONAL_HANDOFF_DIFFS
+  ...REQUIRED_INHERITED_DIFFS
 ]);
 const AUTHORIZED_CANDIDATE=Object.freeze({
   expected_sha:'fdfa65fa797c3ee89885ee99244e7a9ad691b124',
@@ -54,6 +49,7 @@ export function buildMemberLineLoginPromotionBlockedHandoff(input={}){
   const blockers=[];
 
   if(!SHA_RE.test(currentMainSha))blockers.push('CURRENT_MAIN_SHA_INVALID');
+  if(currentMainSha!==AUDITED_CURRENT_MAIN_SHA)blockers.push('CURRENT_MAIN_SHA_MISMATCH');
   if(candidateSourceSha!==AUTHORIZED_CANDIDATE.expected_sha)blockers.push('CANDIDATE_SOURCE_SHA_MISMATCH');
   if(stagedVersionId!==AUTHORIZED_CANDIDATE.staged_version_id)blockers.push('STAGED_VERSION_ID_MISMATCH');
   if(candidateSha256!==AUTHORIZED_CANDIDATE.candidate_sha256)blockers.push('CANDIDATE_SHA256_MISMATCH');
@@ -82,20 +78,18 @@ export function buildMemberLineLoginPromotionBlockedHandoff(input={}){
   const drift=input.runtime_drift_evidence||{};
   if(!bool(drift.checked))blockers.push('RUNTIME_DRIFT_NOT_CHECKED');
   if(text(drift.base_sha).toLowerCase()!==AUTHORIZED_CANDIDATE.expected_sha)blockers.push('RUNTIME_DRIFT_BASE_SHA_MISMATCH');
-  if(text(drift.head_sha).toLowerCase()!==currentMainSha)blockers.push('RUNTIME_DRIFT_HEAD_SHA_MISMATCH');
+  if(text(drift.head_sha).toLowerCase()!==AUDITED_CURRENT_MAIN_SHA)blockers.push('RUNTIME_DRIFT_HEAD_SHA_MISMATCH');
   if(drift.production_entry_changed!==false)blockers.push('PRODUCTION_ENTRY_DRIFT_NOT_EXCLUDED');
   if(drift.wrangler_changed!==false)blockers.push('WRANGLER_DRIFT_NOT_EXCLUDED');
   if(drift.runtime_workflow_changed!==false)blockers.push('RUNTIME_WORKFLOW_DRIFT_NOT_EXCLUDED');
 
   const changedFiles=sortedStrings(drift.changed_files);
   const changedSet=new Set(changedFiles);
-  const allowedSet=new Set(ALLOWED_NON_RUNTIME_DIFFS);
+  const requiredAuditedFiles=[...REQUIRED_AUDITED_DIFFS].sort();
   if(changedSet.size!==changedFiles.length)blockers.push('NON_RUNTIME_DIFF_DUPLICATE');
-  if(changedFiles.some(path=>!allowedSet.has(path)))blockers.push('NON_RUNTIME_DIFF_NOT_ALLOWED');
+  if(JSON.stringify(changedFiles)!==JSON.stringify(requiredAuditedFiles))blockers.push('AUDITED_DIFF_SET_MISMATCH');
   if(REQUIRED_READINESS_DIFFS.some(path=>!changedSet.has(path)))blockers.push('REQUIRED_READINESS_DIFF_MISSING');
   if(REQUIRED_INHERITED_DIFFS.some(path=>!changedSet.has(path)))blockers.push('REQUIRED_INHERITED_DIFF_MISSING');
-  const handoffCount=OPTIONAL_HANDOFF_DIFFS.filter(path=>changedSet.has(path)).length;
-  if(handoffCount!==0&&handoffCount!==OPTIONAL_HANDOFF_DIFFS.length)blockers.push('HANDOFF_DIFF_SET_PARTIAL');
 
   if(!bool(drift.readiness_blob_evidence_checked))blockers.push('READINESS_BLOB_EVIDENCE_NOT_CHECKED');
   const readinessBlobs=plainObject(drift.readiness_file_blobs);
@@ -129,6 +123,7 @@ export function buildMemberLineLoginPromotionBlockedHandoff(input={}){
     executable_promotion_available:false,
     repository_safety_blocked:true,
     blocked_path:EXECUTABLE_WORKFLOW_PATH,
+    audited_current_main_sha:AUDITED_CURRENT_MAIN_SHA,
     current_main_sha:currentMainSha,
     candidate_source_sha:AUTHORIZED_CANDIDATE.expected_sha,
     staged_version_id:AUTHORIZED_CANDIDATE.staged_version_id,
@@ -139,8 +134,7 @@ export function buildMemberLineLoginPromotionBlockedHandoff(input={}){
     required_readiness_blobs:{...REQUIRED_READINESS_BLOBS},
     required_inherited_diffs:[...REQUIRED_INHERITED_DIFFS],
     required_inherited_blobs:{...REQUIRED_INHERITED_BLOBS},
-    optional_handoff_diffs:[...OPTIONAL_HANDOFF_DIFFS],
-    allowed_non_runtime_diffs:[...ALLOWED_NON_RUNTIME_DIFFS],
+    required_audited_diffs:[...REQUIRED_AUDITED_DIFFS],
     blockers,
     approval_text:'',
     next_boundary:'REPOSITORY_SAFE_EXECUTABLE_PROMOTION_PATH_REQUIRED',
@@ -174,6 +168,7 @@ export function memberLineLoginPromotionBlockedHandoffHealth(){
     member_line_login_promotion_blocked_handoff:true,
     packet:PACKET,
     source_only:true,
+    audited_current_main_sha:AUDITED_CURRENT_MAIN_SHA,
     readiness_blob_binding:'IMMUTABLE_GIT_BLOBS',
     inherited_drift_blob_binding:'IMMUTABLE_GIT_BLOBS',
     executable_promotion_available:false,
@@ -186,12 +181,12 @@ export function memberLineLoginPromotionBlockedHandoffHealth(){
 export const __test={
   PACKET,
   EXECUTABLE_WORKFLOW_PATH,
+  AUDITED_CURRENT_MAIN_SHA,
   REQUIRED_READINESS_DIFFS,
   REQUIRED_READINESS_BLOBS,
   REQUIRED_INHERITED_DIFFS,
   REQUIRED_INHERITED_BLOBS,
-  OPTIONAL_HANDOFF_DIFFS,
-  ALLOWED_NON_RUNTIME_DIFFS,
+  REQUIRED_AUDITED_DIFFS,
   AUTHORIZED_CANDIDATE,
   SHA_RE
 };
