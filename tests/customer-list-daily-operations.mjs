@@ -23,6 +23,8 @@ pass('detail action remains exact valid Customer ID based',daily.includes('daily
 pass('missing ID detail is fail-safe instead of broken empty-ID request',daily.includes('顧客IDを先に生成してください'));
 pass('search communicates name Customer ID LINE display name and phone',daily.includes('placeholder="名前・顧客ID・LINE表示名・電話で検索"'));
 pass('desktop header is daily-operations ordered',daily.includes('<th>顧客</th><th>関係</th><th>撮影回数</th><th>累計売上</th><th>最終撮影</th><th>LINE</th><th>次の候補</th><th>詳細</th>'));
+pass('mobile customer rows use compact density',daily.includes('#crmMktList .crm-daily-row{padding:9px!important}')&&daily.includes('grid-template-columns:70px minmax(0,1fr)!important')&&daily.includes('font-size:13px!important'));
+pass('mobile customer name and metadata are compact without becoming tiny',daily.includes('.crm-mkt-name{font-size:15px!important')&&daily.includes('.crm-mkt-sub{margin-top:2px!important;font-size:10px!important}'));
 pass('mobile action targets remain at least 44px',daily.includes('min-height:44px'));
 pass('daily operations no longer depends on duplicate Marketing HOME table',daily.includes('crm-daily-row')&&!daily.includes("top.map(marketingRow).join('')"));
 pass('adapter is idempotent',injectCustomerListDailyOperations(daily)===daily);
