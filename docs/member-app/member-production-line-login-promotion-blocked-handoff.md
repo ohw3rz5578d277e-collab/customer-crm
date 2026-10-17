@@ -6,6 +6,8 @@ This document records the safe stopping point after the LINE Login promotion rea
 
 The LINE Login candidate is ready for a separately Owner-gated Production promotion boundary, but creation of the executable repository workflow `.github/workflows/member-production-line-login-promotion.yml` was blocked by repository-writing safety control. That block was not bypassed.
 
+This handoff is an immutable source-only audit snapshot. It is valid only for the exact audited Customer CRM main recorded below. If `main` advances for any reason, the packet must fail closed and the drift audit must be refreshed before it can become ready again.
+
 ## Exact candidate lineage
 
 - candidate source SHA: `fdfa65fa797c3ee89885ee99244e7a9ad691b124`
@@ -13,13 +15,13 @@ The LINE Login candidate is ready for a separately Owner-gated Production promot
 - staged Worker version: `be711f54-8716-4178-9949-d5ced183d9dc`
 - candidate SHA-256: `af11b47ca14b90985fd2a1f6aa5523626b77dbb4f72a7092c1e7fb5da1fb5cd8`
 - expected active Worker version: `6d34db85-9a52-45e9-8f7d-094f9fc7957a`
-- current audited main for this replacement handoff: `fe9bbcf8c650941b9c0788f633cd4796bbe6cb41`
+- exact audited current main: `fe9bbcf8c650941b9c0788f633cd4796bbe6cb41`
 
 The staged candidate keeps Member route and LINE Login external exchange enabled while private-media content routing, Favorites writes, MEMORY writes, and FAMILY PASS entitlement writes remain disabled.
 
 ## Runtime drift audit
 
-The compare from candidate source SHA `fdfa65fa797c3ee89885ee99244e7a9ad691b124` to current audited main `fe9bbcf8c650941b9c0788f633cd4796bbe6cb41` contains exactly five files.
+The compare from candidate source SHA `fdfa65fa797c3ee89885ee99244e7a9ad691b124` to exact audited main `fe9bbcf8c650941b9c0788f633cd4796bbe6cb41` contains **exactly five files**.
 
 The three PR #264 readiness files are:
 
@@ -38,42 +40,39 @@ After PR #267 and PR #268 advanced `main`, the candidate-to-current-main compari
 1. `src/crm-customer-list-daily-operations.mjs`
 2. `tests/customer-list-daily-operations.mjs`
 
-PR #268 updated those same inherited paths, so the audited blob evidence is refreshed to current main rather than reusing the earlier PR #267 blobs.
+PR #268 updated those same inherited paths, so the audited blob evidence was refreshed to exact current main rather than reusing the earlier PR #267 blobs.
 
-Those inherited files are not silently ignored. They are explicitly audited and pinned to exact Git blob SHAs:
+Their exact audited Git blob SHAs are:
 
 - `src/crm-customer-list-daily-operations.mjs` -> `06bd614f97bcb94992dcedbe47f48990f0a56b1f`
 - `tests/customer-list-daily-operations.mjs` -> `ca1ec71457b8ea5a5507d33ff85d1f686d4261a4`
 
-The Production entrypoint, `wrangler.jsonc`, and executable Production workflows are still required to remain unchanged by the candidate-to-current-main audit.
+The Production entrypoint, `wrangler.jsonc`, and executable Production workflows are required to remain unchanged by this candidate-to-audited-main comparison.
 
-Filename allowlisting alone is insufficient. A packet is not ready unless read-only drift evidence states that blob evidence was checked, provides exactly the pinned readiness paths and inherited paths, and every path has the exact audited blob SHA above.
+Filename allowlisting alone is insufficient. A packet is not ready unless all of the following are true:
 
-A merged blocked-handoff change would itself add three additional source-only handoff files:
+- `current_main_sha` is exactly `fe9bbcf8c650941b9c0788f633cd4796bbe6cb41`;
+- drift `head_sha` is exactly the same audited main;
+- the changed-file evidence is exactly the five paths above, with no missing, duplicate, or extra path;
+- readiness blob evidence is explicitly checked and contains exactly the three pinned readiness blobs;
+- inherited blob evidence is explicitly checked and contains exactly the two pinned current-main blobs.
 
-1. `src/member-production-line-login-promotion-blocked-handoff.mjs`
-2. `member_tests/member-production-line-login-promotion-blocked-handoff.test.mjs`
-3. `docs/member-app/member-production-line-login-promotion-blocked-handoff.md`
-
-The validator therefore requires all three readiness files and both audited inherited files, and permits either none or all three of the blocked-handoff files. Any other changed file, any partial blocked-handoff set, any duplicate changed-file evidence, any missing required drift file, or any readiness/inherited blob mismatch fails closed.
+The three blocked-handoff source files themselves are **not** part of this pinned candidate-to-audited-main comparison and must not be added to `runtime_drift_evidence.changed_files`. If this PR or any other change advances main, this snapshot becomes stale by design and requires a new audit against that new exact main.
 
 ## Blocked-handoff packet
 
 `src/member-production-line-login-promotion-blocked-handoff.mjs` is a pure source-only validator. It performs no network calls and no Production mutation.
 
-It carries its own immutable candidate constants instead of treating imported readiness constants as authority. The existing promotion-readiness validator remains an additional validation layer, and its returned identity must agree with those local immutable constants.
+It carries immutable candidate constants and an immutable audited-current-main SHA instead of trusting caller-provided current-main identity. The existing promotion-readiness validator remains an additional validation layer, and its returned candidate identity must agree with the local immutable constants.
 
 It requires all of the following before returning `packet_ready=true`:
 
 - the exact immutable candidate identity recorded by this packet;
 - promotion-readiness evidence remains `PASS` and returns the same candidate identity;
-- current main is syntactically valid and separately tracked from the candidate source SHA;
-- candidate-source-to-current-main changed-file evidence contains all three readiness files;
-- candidate-source-to-current-main changed-file evidence contains both audited inherited current-main files;
+- `current_main_sha` equals the exact audited main `fe9bbcf8c650941b9c0788f633cd4796bbe6cb41`;
+- candidate-source-to-audited-main changed-file evidence equals exactly the three readiness files plus the two inherited current-main files;
 - the three readiness paths have the exact pinned Git blob SHAs above;
 - the two inherited paths have the exact pinned Git blob SHAs above;
-- changed files are restricted to the immutable audited allowlist above plus the complete optional blocked-handoff set;
-- the blocked-handoff file set is either absent or complete;
 - Production entrypoint drift is explicitly false;
 - `wrangler.jsonc` drift is explicitly false;
 - runtime workflow drift is explicitly false;
@@ -81,6 +80,8 @@ It requires all of the following before returning `packet_ready=true`:
 - the blocked path is exactly `.github/workflows/member-production-line-login-promotion.yml`;
 - no bypass was attempted;
 - no executable promotion path is claimed to exist.
+
+Any stale/fabricated main SHA, changed-file extra, complete or partial handoff-file extra set, duplicate path, missing path, stale blob, missing blob, extra blob, or unchecked blob evidence fails closed.
 
 Even when the packet is ready, it always returns:
 
