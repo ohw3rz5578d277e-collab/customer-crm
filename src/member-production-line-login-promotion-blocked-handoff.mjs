@@ -17,8 +17,8 @@ const REQUIRED_INHERITED_DIFFS=Object.freeze([
   'tests/customer-list-daily-operations.mjs'
 ]);
 const REQUIRED_INHERITED_BLOBS=Object.freeze({
-  'src/crm-customer-list-daily-operations.mjs':'39f8abcb8671f8dd2d2f33c6c63e60228a29c992',
-  'tests/customer-list-daily-operations.mjs':'e853fc46f8c2fd4ff84726eba99f82942ffe9b68'
+  'src/crm-customer-list-daily-operations.mjs':'06bd614f97bcb94992dcedbe47f48990f0a56b1f',
+  'tests/customer-list-daily-operations.mjs':'ca1ec71457b8ea5a5507d33ff85d1f686d4261a4'
 });
 const OPTIONAL_HANDOFF_DIFFS=Object.freeze([
   'docs/member-app/member-production-line-login-promotion-blocked-handoff.md',
