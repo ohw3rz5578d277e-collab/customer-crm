@@ -36,7 +36,6 @@ const SHA_RE=/^[0-9a-f]{40}$/i;
 
 function text(v){return v==null?'':String(v).trim();}
 function bool(v){return v===true;}
-function sortedStrings(values){return Array.isArray(values)?values.map(text).filter(Boolean).sort():[];}
 function plainObject(value){return value&&typeof value==='object'&&!Array.isArray(value)?value:{};}
 
 export function buildMemberLineLoginPromotionBlockedHandoff(input={}){
@@ -83,9 +82,11 @@ export function buildMemberLineLoginPromotionBlockedHandoff(input={}){
   if(drift.wrangler_changed!==false)blockers.push('WRANGLER_DRIFT_NOT_EXCLUDED');
   if(drift.runtime_workflow_changed!==false)blockers.push('RUNTIME_WORKFLOW_DRIFT_NOT_EXCLUDED');
 
-  const changedFiles=sortedStrings(drift.changed_files);
+  const changedFileInputs=Array.isArray(drift.changed_files)?drift.changed_files:[];
+  const changedFiles=changedFileInputs.map(value=>typeof value==='string'?value.trim():'').sort();
   const changedSet=new Set(changedFiles);
   const requiredAuditedFiles=[...REQUIRED_AUDITED_DIFFS].sort();
+  if(changedFileInputs.some(value=>typeof value!=='string'||value.length===0||value.trim()!==value))blockers.push('NON_RUNTIME_DIFF_INVALID_ENTRY');
   if(changedSet.size!==changedFiles.length)blockers.push('NON_RUNTIME_DIFF_DUPLICATE');
   if(JSON.stringify(changedFiles)!==JSON.stringify(requiredAuditedFiles))blockers.push('AUDITED_DIFF_SET_MISMATCH');
   if(REQUIRED_READINESS_DIFFS.some(path=>!changedSet.has(path)))blockers.push('REQUIRED_READINESS_DIFF_MISSING');
