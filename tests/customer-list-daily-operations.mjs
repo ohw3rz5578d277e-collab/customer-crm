@@ -33,6 +33,15 @@ pass('mobile Customer360 close control remains 44px square minimum',daily.includ
 pass('mobile Customer360 profile typography is compact and readable',daily.includes('.crm-360-profile-main h2{font-size:22px!important;line-height:1.25!important}'));
 pass('mobile Customer360 cards use compact spacing',daily.includes('.crm-360-card,.crm-section{padding:10px!important;border-radius:14px!important}'));
 pass('mobile Customer360 action targets remain at least 44px',daily.includes('.crm-360-actions .crm-mkt-btn{min-height:44px!important'));
+pass('mobile analysis cards use compact density',daily.includes('.crm-period-analytics,.crm-approach-queue{margin:9px 0!important;padding:10px!important;border-radius:14px!important}'));
+pass('mobile analysis date inputs remain 44px minimum',daily.includes('.crm-period-range input{min-height:44px!important}'));
+pass('mobile approach rows are compact',daily.includes('.crm-approach-row{gap:8px!important;padding:8px!important;border-radius:13px!important}'));
+pass('mobile LINE shell is compact',daily.includes('.crm-line-chat-shell{height:calc(100vh - 142px)!important;min-height:460px!important;border-radius:12px!important}'));
+pass('mobile LINE search remains 44px minimum',daily.includes('.crm-line-chat-search{margin-top:8px!important;min-height:44px!important'));
+pass('mobile LINE customer rows remain easy to tap',daily.includes('.crm-line-chat-customer{min-height:52px!important'));
+pass('mobile LINE back and refresh controls remain 44px minimum',daily.includes('.crm-line-chat-back{min-width:44px!important;width:44px!important;height:44px!important}')&&daily.includes('.crm-line-chat-refresh{min-height:44px!important'));
+pass('mobile five-tab nav is denser while preserving tap safety',daily.includes('body.crm-owner-shell-v2 #crmOwnerMobileNav{height:calc(64px + env(safe-area-inset-bottom))!important')&&daily.includes('min-height:52px!important'));
+pass('mobile workspace bottom clearance tracks compact nav',daily.includes('body.crm-owner-shell-v2 #crmOwnerWorkspaceContent{padding-bottom:calc(80px + env(safe-area-inset-bottom))!important}'));
 pass('mobile action targets remain at least 44px',daily.includes('min-height:44px'));
 pass('daily operations no longer depends on duplicate Marketing HOME table',daily.includes('crm-daily-row')&&!daily.includes("top.map(marketingRow).join('')"));
 pass('adapter is idempotent',injectCustomerListDailyOperations(daily)===daily);
@@ -42,6 +51,7 @@ const adapterSrc=fs.readFileSync('src/crm-customer-list-daily-operations.mjs','u
 const entrySrc=fs.readFileSync('src/production-index-crm-customer360-entry.js','utf8');
 pass('UI adapter contains no direct customer mutation SQL',!/\b(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+customers\b/i.test(adapterSrc));
 pass('adapter contains no LINE send controls',!/broadcast|multicast|pushMessage|replyMessage/i.test(adapterSrc));
+pass('adapter does not alter Reservation handoff URL or behavior',!adapterSrc.includes('reservation-app-api')&&!adapterSrc.includes('crmOwnerNavReservation'));
 pass('adapter does not require legacy top opportunity renderer',!adapterSrc.includes(`||!out.includes("top.map(row).join('')")`));
 pass('production entry sanitizes legacy visuals and base admin UI before Customer360 marketing and daily operations',entrySrc.includes('const visualBase=stripLegacyOwnerVisualAssets(html);\n  const canonicalBase=stripLegacyBaseAdminUi(visualBase);\n  const withMarketing=injectCustomer360Marketing(canonicalBase);\n  const withDailyOperations=injectCustomerListDailyOperations(withMarketing);'));
 pass('production entry keeps Owner exclusive view composition after read-only LINE chat',entrySrc.includes('const withLineChat=injectOwnerLineChat(withDirectNavigation);')&&entrySrc.includes('const withOwnerViewState=injectOwnerViewState(withLineChat);'));
