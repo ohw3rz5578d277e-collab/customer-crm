@@ -20,8 +20,8 @@ const inheritedDiffs=[
   'tests/customer-list-daily-operations.mjs'
 ];
 const inheritedBlobs={
-  'src/crm-customer-list-daily-operations.mjs':'39f8abcb8671f8dd2d2f33c6c63e60228a29c992',
-  'tests/customer-list-daily-operations.mjs':'e853fc46f8c2fd4ff84726eba99f82942ffe9b68'
+  'src/crm-customer-list-daily-operations.mjs':'06bd614f97bcb94992dcedbe47f48990f0a56b1f',
+  'tests/customer-list-daily-operations.mjs':'ca1ec71457b8ea5a5507d33ff85d1f686d4261a4'
 };
 const handoffDiffs=[
   'src/member-production-line-login-promotion-blocked-handoff.mjs',
@@ -30,7 +30,7 @@ const handoffDiffs=[
 ];
 
 const candidate={
-  current_main_sha:'7e10f06f4cf3c7d6fe823682344237956afcf183',
+  current_main_sha:'fe9bbcf8c650941b9c0788f633cd4796bbe6cb41',
   candidate_source_sha:'fdfa65fa797c3ee89885ee99244e7a9ad691b124',
   staged_version_id:'be711f54-8716-4178-9949-d5ced183d9dc',
   candidate_sha256:'af11b47ca14b90985fd2a1f6aa5523626b77dbb4f72a7092c1e7fb5da1fb5cd8',
@@ -83,7 +83,7 @@ const candidate={
   runtime_drift_evidence:{
     checked:true,
     base_sha:'fdfa65fa797c3ee89885ee99244e7a9ad691b124',
-    head_sha:'7e10f06f4cf3c7d6fe823682344237956afcf183',
+    head_sha:'fe9bbcf8c650941b9c0788f633cd4796bbe6cb41',
     production_entry_changed:false,
     wrangler_changed:false,
     runtime_workflow_changed:false,
