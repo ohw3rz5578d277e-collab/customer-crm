@@ -105,6 +105,11 @@ try{
    const labels=(await page.locator('#crmOwnerMobileNav').innerText()).replace(/\s+/g,'');
    for(const label of ['顧客','検索','分析','LINE','予約'])assert.ok(labels.includes(label),viewport.width+': nav missing '+label);
    assert.equal(labels.includes('今日'),false,viewport.width+': Today navigation leaked');
+   const navTargets=await page.locator('#crmOwnerMobileNav button, #crmOwnerMobileNav a').evaluateAll(nodes=>nodes.map(el=>({label:el.textContent.trim(),height:el.getBoundingClientRect().height,width:el.getBoundingClientRect().width})));
+   assert.equal(navTargets.length,5,viewport.width+': canonical mobile nav must retain five destinations');
+   for(const target of navTargets)assert.ok(target.height>=44&&target.width>=44,viewport.width+': mobile nav touch target too small '+JSON.stringify(target));
+   const reservation=await page.locator('#crmOwnerNavReservation').evaluate(el=>({href:el.getAttribute('href'),target:el.target,rel:el.rel}));
+   assert.ok(reservation.href?.endsWith('/admin')&&reservation.target==='_blank'&&reservation.rel.includes('noopener'),viewport.width+': Reservation handoff changed');
   }else{
    assert.equal(await page.locator('#crmOwnerDesktopSidebar').isVisible(),true,viewport.width+': PC rendered as smartphone');
    assert.equal(await page.locator('#crmOwnerMobileNav').isVisible(),false,viewport.width+': mobile nav visible on desktop');
@@ -127,6 +132,10 @@ try{
   await page.locator(lineSelector).click();
   await page.waitForFunction(()=>window.__crmOwnerView.getCurrentView()==='line'&&document.getElementById('crmOwnerLineChat')&&getComputedStyle(document.getElementById('crmOwnerLineChat')).display!=='none');
   await page.waitForFunction(()=>document.querySelectorAll('#crmLineChatCustomers [data-line-customer]').length===101);
+  if(mobile){
+   const touch=await page.evaluate(()=>['#crmLineChatSearch','.crm-line-chat-customer'].map(selector=>{const el=document.querySelector(selector);return{selector,height:el?.getBoundingClientRect().height||0}}));
+   for(const target of touch)assert.ok(target.height>=44,viewport.width+': LINE control touch target too small '+JSON.stringify(target));
+  }
   assert.equal(await page.locator('#lineOpsPanel').isVisible(),false,viewport.width+': old LINE ops opened instead of chat');
   assert.equal(await page.locator('#crmCsvImportOpenInline').isVisible(),false,viewport.width+': CSV import action must not float over LINE');
   await page.locator('#crmLineChatSearch').fill('26999999');
@@ -136,6 +145,10 @@ try{
   await page.waitForFunction(()=>document.querySelectorAll('#crmLineChatCustomers [data-line-customer]').length===101);
   await page.locator('#crmLineChatCustomers [data-line-customer="26000101"]').click();
   await page.waitForFunction(()=>document.querySelectorAll('#crmLineChatMessages .crm-line-chat-row').length===2);
+  if(mobile){
+   const conversationControls=await page.evaluate(()=>['#crmLineChatRefresh','#crmLineChatBack'].map(selector=>{const el=document.querySelector(selector);return{selector,height:el?.getBoundingClientRect().height||0}}));
+   for(const target of conversationControls)assert.ok(target.height>=44,viewport.width+': LINE conversation control too small '+JSON.stringify(target));
+  }
   assert.ok((await page.locator('#crmLineChatMessages').innerText()).includes('七五三の撮影について相談したいです'),viewport.width+': inbound chat text missing');
   assert.ok((await page.locator('#crmLineChatMessages').innerText()).includes('候補日をご案内します'),viewport.width+': outbound chat text missing');
   assert.equal((await page.locator('#crmLineChatStatus').textContent()).trim(),'連携正常',viewport.width+': LINE connected status missing');
