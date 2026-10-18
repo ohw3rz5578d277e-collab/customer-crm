@@ -108,6 +108,9 @@ try{
    const navTargets=await page.locator('#crmOwnerMobileNav button, #crmOwnerMobileNav a').evaluateAll(nodes=>nodes.map(el=>({label:el.textContent.trim(),height:el.getBoundingClientRect().height,width:el.getBoundingClientRect().width})));
    assert.equal(navTargets.length,5,viewport.width+': canonical mobile nav must retain five destinations');
    for(const target of navTargets)assert.ok(target.height>=44&&target.width>=44,viewport.width+': mobile nav touch target too small '+JSON.stringify(target));
+   const navBounds=await page.locator('#crmOwnerMobileNav').evaluate(el=>{const r=el.getBoundingClientRect();return{left:r.left,right:r.right,bottom:r.bottom,viewportWidth:innerWidth,viewportHeight:innerHeight}});
+   assert.ok(navBounds.left>=-1&&navBounds.right<=navBounds.viewportWidth+1,viewport.width+': mobile nav overflows horizontal viewport '+JSON.stringify(navBounds));
+   assert.ok(navBounds.bottom<=navBounds.viewportHeight+1,viewport.width+': mobile nav extends below viewport '+JSON.stringify(navBounds));
    const reservation=await page.locator('#crmOwnerNavReservation').evaluate(el=>({href:el.getAttribute('href'),target:el.target,rel:el.rel}));
    assert.ok(reservation.href?.endsWith('/admin')&&reservation.target==='_blank'&&reservation.rel.includes('noopener'),viewport.width+': Reservation handoff changed');
   }else{
