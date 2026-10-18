@@ -133,7 +133,7 @@ try{
   await page.waitForFunction(()=>window.__crmOwnerView.getCurrentView()==='line'&&document.getElementById('crmOwnerLineChat')&&getComputedStyle(document.getElementById('crmOwnerLineChat')).display!=='none');
   await page.waitForFunction(()=>document.querySelectorAll('#crmLineChatCustomers [data-line-customer]').length===101);
   if(mobile){
-   const touch=await page.evaluate(()=>['#crmLineChatSearch','.crm-line-chat-customer','#crmLineChatRefresh','#crmLineChatBack'].map(selector=>{const el=document.querySelector(selector);return{selector,height:el?.getBoundingClientRect().height||0}}));
+   const touch=await page.evaluate(()=>['#crmLineChatSearch','.crm-line-chat-customer'].map(selector=>{const el=document.querySelector(selector);return{selector,height:el?.getBoundingClientRect().height||0}}));
    for(const target of touch)assert.ok(target.height>=44,viewport.width+': LINE control touch target too small '+JSON.stringify(target));
   }
   assert.equal(await page.locator('#lineOpsPanel').isVisible(),false,viewport.width+': old LINE ops opened instead of chat');
@@ -145,6 +145,10 @@ try{
   await page.waitForFunction(()=>document.querySelectorAll('#crmLineChatCustomers [data-line-customer]').length===101);
   await page.locator('#crmLineChatCustomers [data-line-customer="26000101"]').click();
   await page.waitForFunction(()=>document.querySelectorAll('#crmLineChatMessages .crm-line-chat-row').length===2);
+  if(mobile){
+   const conversationControls=await page.evaluate(()=>['#crmLineChatRefresh','#crmLineChatBack'].map(selector=>{const el=document.querySelector(selector);return{selector,height:el?.getBoundingClientRect().height||0}}));
+   for(const target of conversationControls)assert.ok(target.height>=44,viewport.width+': LINE conversation control too small '+JSON.stringify(target));
+  }
   assert.ok((await page.locator('#crmLineChatMessages').innerText()).includes('七五三の撮影について相談したいです'),viewport.width+': inbound chat text missing');
   assert.ok((await page.locator('#crmLineChatMessages').innerText()).includes('候補日をご案内します'),viewport.width+': outbound chat text missing');
   assert.equal((await page.locator('#crmLineChatStatus').textContent()).trim(),'連携正常',viewport.width+': LINE connected status missing');
