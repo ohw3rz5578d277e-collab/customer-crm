@@ -124,6 +124,10 @@ try{
   await page.locator(analysisSelector).click();
   await page.waitForFunction(()=>window.__crmOwnerView.getCurrentView()==='marketing'&&document.getElementById('crmMktHome')&&getComputedStyle(document.getElementById('crmMktHome')).display!=='none');
   assert.equal(await page.locator('.crm-period-analytics').count()>0,true,viewport.width+': period analytics missing');
+  if(mobile){
+   const overflow=await page.evaluate(()=>({scrollWidth:document.documentElement.scrollWidth,clientWidth:document.documentElement.clientWidth}));
+   assert.ok(overflow.scrollWidth<=overflow.clientWidth+1,viewport.width+': analysis view causes horizontal page overflow '+JSON.stringify(overflow));
+  }
   assert.equal(await page.locator('#crmCsvImportOpenInline').isVisible(),false,viewport.width+': CSV import action must not float over analysis');
   assert.ok((await page.locator('#crmMktHome').innerText()).includes('今月LINE追加'),viewport.width+': monthly LINE additions KPI missing');
   await page.locator('[data-analytics-preset="month"]').click();
@@ -135,6 +139,10 @@ try{
   await page.locator(lineSelector).click();
   await page.waitForFunction(()=>window.__crmOwnerView.getCurrentView()==='line'&&document.getElementById('crmOwnerLineChat')&&getComputedStyle(document.getElementById('crmOwnerLineChat')).display!=='none');
   await page.waitForFunction(()=>document.querySelectorAll('#crmLineChatCustomers [data-line-customer]').length===101);
+  if(mobile){
+   const overflow=await page.evaluate(()=>({scrollWidth:document.documentElement.scrollWidth,clientWidth:document.documentElement.clientWidth}));
+   assert.ok(overflow.scrollWidth<=overflow.clientWidth+1,viewport.width+': line view causes horizontal page overflow '+JSON.stringify(overflow));
+  }
   if(mobile){
    const touch=await page.evaluate(()=>['#crmLineChatSearch','.crm-line-chat-customer'].map(selector=>{const el=document.querySelector(selector);return{selector,height:el?.getBoundingClientRect().height||0}}));
    for(const target of touch)assert.ok(target.height>=44,viewport.width+': LINE control touch target too small '+JSON.stringify(target));
