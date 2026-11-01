@@ -160,6 +160,10 @@ try{
    const conversationControls=await page.evaluate(()=>['#crmLineChatRefresh','#crmLineChatBack'].map(selector=>{const el=document.querySelector(selector);return{selector,height:el?.getBoundingClientRect().height||0}}));
    for(const target of conversationControls)assert.ok(target.height>=44,viewport.width+': LINE conversation control too small '+JSON.stringify(target));
   }
+  if(mobile){
+   const conversationOverflow=await page.evaluate(()=>({documentScrollWidth:document.documentElement.scrollWidth,bodyScrollWidth:document.body.scrollWidth,viewportWidth:document.documentElement.clientWidth}));
+   assert.ok(Math.max(conversationOverflow.documentScrollWidth,conversationOverflow.bodyScrollWidth)<=conversationOverflow.viewportWidth+1,viewport.width+': LINE conversation causes horizontal page overflow '+JSON.stringify(conversationOverflow));
+  }
   assert.ok((await page.locator('#crmLineChatMessages').innerText()).includes('七五三の撮影について相談したいです'),viewport.width+': inbound chat text missing');
   assert.ok((await page.locator('#crmLineChatMessages').innerText()).includes('候補日をご案内します'),viewport.width+': outbound chat text missing');
   assert.equal((await page.locator('#crmLineChatStatus').textContent()).trim(),'連携正常',viewport.width+': LINE connected status missing');
