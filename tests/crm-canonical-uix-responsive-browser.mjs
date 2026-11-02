@@ -53,6 +53,19 @@ try{
   await page.goto(origin+'/admin',{waitUntil:'domcontentloaded'});
   await page.waitForFunction(()=>window.__crmOwnerView&&document.getElementById('crmOwnerAppShell')&&document.querySelector('#crmMktList tbody tr'));
   await page.waitForFunction(()=>window.__crmOwnerView.getCurrentView()==='customers');
+  const assertCurrentView=async key=>{
+   const navStates=await page.evaluate(()=>({
+    desktop:[...document.querySelectorAll('#crmOwnerDesktopSidebar [data-crm-shell-nav]')].map(el=>({key:el.dataset.crmShellNav,active:el.classList.contains('active'),current:el.getAttribute('aria-current')})),
+    mobile:[...document.querySelectorAll('#crmOwnerMobileNav [data-owner-tab]')].map(el=>({key:el.dataset.ownerTab,active:el.classList.contains('active'),current:el.getAttribute('aria-current')}))
+   }));
+   for(const [surface,items] of Object.entries(navStates)){
+    assert.equal(items.length,5,viewport.width+': '+surface+' navigation destinations changed');
+    assert.deepEqual(items.filter(x=>x.active).map(x=>x.key),[key],viewport.width+': '+surface+' active view mismatch');
+    assert.deepEqual(items.filter(x=>x.current==='page').map(x=>x.key),[key],viewport.width+': '+surface+' aria-current mismatch');
+    assert.ok(items.every(x=>x.current===(x.active?'page':null)),viewport.width+': '+surface+' inactive navigation incorrectly announced as current');
+   }
+  };
+  await assertCurrentView('customers');
   assert.equal(await page.locator('#crmTodayDashboard').isVisible(),false,viewport.width+': Today dashboard must stay removed');
   assert.equal(await page.locator('#lineOpsPanel').isVisible(),false,viewport.width+': legacy LINE panel must stay hidden');
   assert.equal(await page.locator('#crmUserFab').isVisible(),false,viewport.width+': legacy user-management overlay must stay quarantined');
@@ -123,6 +136,7 @@ try{
   const analysisSelector=mobile?'#crmOwnerNavMarketing':'#crmOwnerDesktopSidebar [data-crm-shell-nav="marketing"]';
   await page.locator(analysisSelector).click();
   await page.waitForFunction(()=>window.__crmOwnerView.getCurrentView()==='marketing'&&document.getElementById('crmMktHome')&&getComputedStyle(document.getElementById('crmMktHome')).display!=='none');
+  await assertCurrentView('marketing');
   assert.equal(await page.locator('.crm-period-analytics').count()>0,true,viewport.width+': period analytics missing');
   if(mobile){
    const overflow=await page.evaluate(()=>({scrollWidth:document.documentElement.scrollWidth,clientWidth:document.documentElement.clientWidth}));
@@ -138,6 +152,7 @@ try{
   const lineSelector=mobile?'#crmOwnerNavLine':'#crmOwnerDesktopSidebar [data-crm-shell-nav="line"]';
   await page.locator(lineSelector).click();
   await page.waitForFunction(()=>window.__crmOwnerView.getCurrentView()==='line'&&document.getElementById('crmOwnerLineChat')&&getComputedStyle(document.getElementById('crmOwnerLineChat')).display!=='none');
+  await assertCurrentView('line');
   await page.waitForFunction(()=>document.querySelectorAll('#crmLineChatCustomers [data-line-customer]').length===101);
   if(mobile){
    const overflow=await page.evaluate(()=>({scrollWidth:document.documentElement.scrollWidth,clientWidth:document.documentElement.clientWidth}));
