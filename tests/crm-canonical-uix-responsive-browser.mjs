@@ -137,6 +137,24 @@ try{
   await page.locator(analysisSelector).click();
   await page.waitForFunction(()=>window.__crmOwnerView.getCurrentView()==='marketing'&&document.getElementById('crmMktHome')&&getComputedStyle(document.getElementById('crmMktHome')).display!=='none');
   await assertCurrentView('marketing');
+  if(mobile){
+   await page.evaluate(()=>{
+    document.getElementById('crmOwnerMobileNav').replaceChildren();
+    document.dispatchEvent(new CustomEvent('crm:owner-view-change',{detail:{view:'marketing'}}));
+   });
+   await assertCurrentView('marketing');
+   assert.equal(await page.locator('#crmOwnerNavMarketing').count(),1,viewport.width+': mobile navigation not rebuilt after reset');
+  }
+  await page.keyboard.press('Tab');
+  const focusTarget=mobile?'#crmOwnerNavMarketing':'#crmOwnerDesktopSidebar [data-crm-shell-nav="marketing"]';
+  await page.locator(focusTarget).focus();
+  const focusVisual=await page.locator(focusTarget).evaluate(el=>({
+   focusVisible:el.matches(':focus-visible'),
+   outlineStyle:getComputedStyle(el).outlineStyle,
+   outlineWidth:parseFloat(getComputedStyle(el).outlineWidth)
+  }));
+  assert.equal(focusVisual.focusVisible,true,viewport.width+': keyboard-focused navigation lacks focus-visible state');
+  assert.ok(focusVisual.outlineStyle==='solid'&&focusVisual.outlineWidth>=3,viewport.width+': keyboard focus indicator not visible '+JSON.stringify(focusVisual));
   assert.equal(await page.locator('.crm-period-analytics').count()>0,true,viewport.width+': period analytics missing');
   if(mobile){
    const overflow=await page.evaluate(()=>({scrollWidth:document.documentElement.scrollWidth,clientWidth:document.documentElement.clientWidth}));
