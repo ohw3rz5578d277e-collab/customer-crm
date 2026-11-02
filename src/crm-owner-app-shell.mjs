@@ -65,6 +65,7 @@ body.crm-owner-shell-v2[data-crm-owner-view] #crmMktNav{display:none!important;m
  #crmOwnerWorkspaceHeader{padding-left:18px;padding-right:18px}
  #crmOwnerWorkspaceContent{padding-left:18px;padding-right:18px}
 }
+#crmOwnerDesktopSidebar [data-crm-shell-nav]:focus-visible,#crmOwnerMobileNav [data-owner-tab]:focus-visible,#crmShellStatus:focus-visible,#crmShellSettings:focus-visible,#crmShellStatusTop:focus-visible,#crmShellSettingsTop:focus-visible{outline:3px solid #0b6b55!important;outline-offset:2px!important}
 #crmOwnerMobileNav{display:none}
 #crmOwnerCanonicalSettings{display:none}
 [data-crm-legacy-nav-quarantined="1"]{display:none!important;visibility:hidden!important;pointer-events:none!important}
@@ -163,7 +164,7 @@ function ensureShell(){
  return true;
 }
 let tries=0;function boot(){if(ensureShell())return;if(++tries<40)requestAnimationFrame(boot)}
-document.addEventListener('crm:owner-view-change',e=>{setShellActive(e.detail?.view||document.body.dataset.crmOwnerView||'customers');canonicalizeMobileNav()});
+document.addEventListener('crm:owner-view-change',e=>{canonicalizeMobileNav();setShellActive(e.detail?.view||document.body.dataset.crmOwnerView||'customers')});
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot,{once:true});else boot();
 window.__crmOwnerAppShellApi={openView,setShellActive,ensureShell,canonicalizeMobileNav,quarantineForeignShellOwners,pruneLegacyVisualDom,openStatus,openSettings};
 })();
