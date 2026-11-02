@@ -104,8 +104,8 @@ const META={
 function esc(v){return String(v==null?'':v).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
 function setShellActive(view){
  const key=(view==='today'||view==='base'||!META[view])?'customers':view;
- document.querySelectorAll('#crmOwnerDesktopSidebar [data-crm-shell-nav]').forEach(el=>el.classList.toggle('active',el.dataset.crmShellNav===key));
- document.querySelectorAll('#crmOwnerMobileNav [data-owner-tab]').forEach(el=>el.classList.toggle('active',el.dataset.ownerTab===key));
+ document.querySelectorAll('#crmOwnerDesktopSidebar [data-crm-shell-nav]').forEach(el=>{const active=el.dataset.crmShellNav===key;el.classList.toggle('active',active);if(active)el.setAttribute('aria-current','page');else el.removeAttribute('aria-current')});
+ document.querySelectorAll('#crmOwnerMobileNav [data-owner-tab]').forEach(el=>{const active=el.dataset.ownerTab===key;el.classList.toggle('active',active);if(active)el.setAttribute('aria-current','page');else el.removeAttribute('aria-current')});
  const m=META[key]||META.customers,title=$('crmOwnerWorkspaceTitle'),hint=$('crmOwnerWorkspaceHint');
  if(title)title.textContent=m.title;if(hint)hint.textContent=m.hint;
 }
