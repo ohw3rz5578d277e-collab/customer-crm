@@ -44,7 +44,7 @@ await new Promise(r=>server.listen(0,'127.0.0.1',r));
 const origin='http://127.0.0.1:'+server.address().port;
 const browser=await chromium.launch({headless:true});
 try{
- for(const viewport of [{width:390,height:844},{width:412,height:915},{width:1024,height:768},{width:1440,height:900}]){
+ for(const viewport of [{width:320,height:720},{width:360,height:800},{width:390,height:844},{width:412,height:915},{width:1024,height:768},{width:1440,height:900}]){
   const mobile=viewport.width<=767;
   const context=await browser.newContext({viewport,hasTouch:mobile,isMobile:mobile});
   const page=await context.newPage(),errors=[];
@@ -205,6 +205,7 @@ try{
  console.log('LEGACY_MOBILE_NAV_OVERRIDE=0');
  for(const f of ['390-canonical-customer-list.png','390-canonical-analysis.png','390-canonical-line.png','1440-canonical-customer-list.png','1440-canonical-analysis.png','1440-canonical-line.png'])assert.ok(fs.existsSync(out+'/'+f),'canonical screenshot missing '+f);
  console.log('CANONICAL_SCREENSHOTS=6');
+ console.log('CANONICAL_MOBILE_WIDTHS=320,360,390,412');
  console.log('HTTP_WRITES=0');
 }finally{
  await browser.close();
