@@ -3,8 +3,8 @@ export function injectCustomer360SearchFocus(html){
   const script=`<script id="crm-customer360-search-focus">(()=>{
     let keepSearchFocus=false;
     const search=()=>document.getElementById('crmGlobalSearch');
-    const focusSearch=()=>{const el=search();if(!el)return;el.focus({preventScroll:true});const end=el.value.length;try{el.setSelectionRange(end,end)}catch(_){}};
-    document.addEventListener('focusin',e=>{if(e.target?.id==='crmGlobalSearch')keepSearchFocus=true},true);
+    const focusSearch=()=>{if(!keepSearchFocus)return;const el=search();if(!el)return;el.focus({preventScroll:true});const end=el.value.length;try{el.setSelectionRange(end,end)}catch(_){}};
+    document.addEventListener('focusin',e=>{keepSearchFocus=e.target?.id==='crmGlobalSearch'},true);
     document.addEventListener('pointerdown',e=>{const t=e.target;if(t?.id==='crmGlobalSearch'||t?.id==='crmSearchClear')return;keepSearchFocus=false},true);
     document.addEventListener('keydown',e=>{if(e.key!=='/'||/INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName||''))return;keepSearchFocus=true;e.preventDefault();queueMicrotask(focusSearch);setTimeout(focusSearch,80)},true);
     const observer=new MutationObserver(()=>{if(keepSearchFocus)queueMicrotask(focusSearch)});
