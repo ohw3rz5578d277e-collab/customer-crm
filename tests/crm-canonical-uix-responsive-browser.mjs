@@ -219,7 +219,7 @@ try{
    await page.waitForTimeout(800);
    assert.equal((await page.locator('#crmLineChatTitle').textContent()).trim(),'佐藤 未来','slow previous LINE history replaced selected customer title');
    assert.ok((await page.locator('#crmLineChatMessages').innerText()).includes('LINE履歴はまだありません。'),'slow previous LINE history replaced selected customer messages');
-   assert.equal((await page.locator('#crmLineChatStatus').textContent()).trim(),'保存履歴なし','slow previous LINE history replaced selected customer status');
+   assert.equal((await page.locator('#crmLineChatStatus').textContent()).trim(),'履歴未確認','slow previous LINE history replaced selected customer status');
    await page.evaluate(()=>window.__crmOwnerLineChat.openConversation('26000101'));
    await page.waitForFunction(()=>document.querySelectorAll('#crmLineChatMessages .crm-line-chat-row').length===2);
   }
