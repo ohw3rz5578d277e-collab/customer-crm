@@ -17,8 +17,9 @@ assert.equal(html.includes('const navObserver=new MutationObserver'),false,'cano
 assert.equal(html.includes("new MutationObserver(()=>reconcileDesktopLayout()).observe(document.documentElement"),false,'legacy desktop hotfix must not install a permanent document-wide observer');
 const out='artifacts/crm-canonical-uix-responsive';fs.mkdirSync(out,{recursive:true});
 const requests=[],notFoundRequests=[];
+let delayNextLineHistory=false;
 function send(res,status,data,type='application/json; charset=utf-8'){res.writeHead(status,{'content-type':type,'cache-control':'no-store'});res.end(type.startsWith('application/json')?JSON.stringify(data):data)}
-const server=http.createServer((req,res)=>{
+const server=http.createServer(async(req,res)=>{
  const u=new URL(req.url,'http://127.0.0.1');requests.push(req.method+' '+u.pathname+u.search);
  if(u.pathname==='/'||u.pathname==='/admin')return send(res,200,html,'text/html; charset=utf-8');
  if(u.pathname==='/api/customer360/marketing-home')return send(res,200,{ok:true,kpis:{customers:2,average_realized_ltv:81500,repeat_rate_pct:50,vip_high_ltv:1,event_90d:2,dormant_180:0,line_link_rate_pct:100,line_additions_this_month:7,approach_this_month:2},top_opportunities:customers,facets});
@@ -32,7 +33,8 @@ const server=http.createServer((req,res)=>{
  }
  if(u.pathname==='/api/customer360/analytics')return send(res,200,{ok:true,available:true,period:{from:'2026-09-01',to:'2026-09-30',span_days:30},current:{revenue:163000,completed_shoots:4,unique_customers:2,average_order_value:40750,repeat_customers_in_period:1,repeat_rate_pct:50,line_additions:7,genres:[],monthly:[]},previous:{line_additions:5},change_pct:{line_additions:40}});
  if(u.pathname==='/api/customer360/approach-queue')return send(res,200,{ok:true,items:[],summary:{total:0,ready:0,review_required:0,opted_out:0}});
- if(u.pathname==='/api/customers/26000101/line-history')return send(res,200,{ok:true,connected:true,count:2,messages:[{direction:'inbound',message_text:'七五三の撮影について相談したいです',sent_at:'2026-09-14 10:00'},{direction:'outbound',message_text:'ありがとうございます。候補日をご案内します。',sent_at:'2026-09-14 10:03'}]});
+ if(u.pathname==='/__fixture/delay-next-line-history'){delayNextLineHistory=true;return send(res,200,{ok:true})}
+ if(u.pathname==='/api/customers/26000101/line-history'){if(delayNextLineHistory){delayNextLineHistory=false;await new Promise(resolve=>setTimeout(resolve,650))}return send(res,200,{ok:true,connected:true,count:2,messages:[{direction:'inbound',message_text:'七五三の撮影について相談したいです',sent_at:'2026-09-14 10:00'},{direction:'outbound',message_text:'ありがとうございます。候補日をご案内します。',sent_at:'2026-09-14 10:03'}]})}
  if(u.pathname==='/api/customers/26000102/line-history')return send(res,200,{ok:true,connected:true,count:0,messages:[]});
  if(u.pathname==='/api/customers/26999999/line-history')return send(res,200,{ok:false,error:'line_history_unavailable'});
  if(u.pathname.startsWith('/api/customer360/media/')){const id=decodeURIComponent(u.pathname.split('/').pop());return send(res,200,{ok:true,media:{customer_id:id,avatar_data_url:'',avatar_updated_at:'',latest_delivery_link:null,delivery_links:[]}})}
@@ -208,6 +210,19 @@ try{
   assert.equal(/not_found|http\s*404|line_history_unavailable/i.test(lineFailureText),false,viewport.width+': raw LINE error exposed '+lineFailureText);
   await page.evaluate(()=>window.__crmOwnerLineChat.openConversation('26000101'));
   await page.waitForFunction(()=>document.querySelectorAll('#crmLineChatMessages .crm-line-chat-row').length===2);
+  if(viewport.width===390){
+   await page.request.get(origin+'/__fixture/delay-next-line-history');
+   await page.evaluate(()=>window.__crmOwnerLineChat.openConversation('26000101',true));
+   await page.waitForFunction(()=>document.getElementById('crmLineChatStatus')?.textContent==='取得中');
+   await page.evaluate(()=>window.__crmOwnerLineChat.openConversation('26000102'));
+   await page.waitForFunction(()=>document.getElementById('crmLineChatMessages')?.innerText.includes('LINE履歴はまだありません。'));
+   await page.waitForTimeout(800);
+   assert.equal((await page.locator('#crmLineChatTitle').textContent()).trim(),'佐藤 未来','slow previous LINE history replaced selected customer title');
+   assert.ok((await page.locator('#crmLineChatMessages').innerText()).includes('LINE履歴はまだありません。'),'slow previous LINE history replaced selected customer messages');
+   assert.equal((await page.locator('#crmLineChatStatus').textContent()).trim(),'保存履歴なし','slow previous LINE history replaced selected customer status');
+   await page.evaluate(()=>window.__crmOwnerLineChat.openConversation('26000101'));
+   await page.waitForFunction(()=>document.querySelectorAll('#crmLineChatMessages .crm-line-chat-row').length===2);
+  }
   if(mobile){
    const navState=await page.evaluate(()=>({
     labels:(document.getElementById('crmOwnerMobileNav')?.innerText||'').replace(/\\s+/g,''),
