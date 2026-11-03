@@ -45,6 +45,23 @@ if(width===390){
  assert(afterStale.includes('佐藤')&&!afterStale.includes('山田'),width+': stale response changed customer list');
  await page.locator('#crmSearchClear').click();
  await page.waitForFunction(()=>document.querySelector('.crm-search-status')?.textContent.includes('該当 5家族'));
+ holdStaleSearch=true;
+ await page.locator('#crmGlobalSearch').fill('山田');
+ await page.locator('#crmGlobalSearch').press('Enter');
+ for(let i=0;i<100&&delayedRaceResponses.length!==1;i++)await new Promise(resolve=>setTimeout(resolve,20));
+ assert(delayedRaceResponses.length===1,width+': debounce-race old search request did not start');
+ await page.locator('#crmGlobalSearch').fill('佐藤');
+ assert(await page.locator('#crmGlobalSearch').inputValue()==='佐藤',width+': new query input lost before debounce');
+ holdStaleSearch=false;
+ await delayedRaceResponses.shift()();
+ await page.waitForTimeout(100);
+ assert(!(await page.locator('.crm-search-status').innerText()).includes('該当 2家族'),width+': previous search completed during debounce and replaced newer query');
+ assert(await page.locator('#crmGlobalSearch').inputValue()==='佐藤',width+': stale response changed pending search input');
+ await page.waitForFunction(()=>document.querySelector('.crm-search-status')?.textContent.includes('該当 1家族'));
+ const debounceFinal=await page.locator('#crmMktList tbody').innerText();
+ assert(debounceFinal.includes('佐藤')&&!debounceFinal.includes('山田'),width+': latest debounced query did not win');
+ await page.locator('#crmSearchClear').click();
+ await page.waitForFunction(()=>document.querySelector('.crm-search-status')?.textContent.includes('該当 5家族'));
 }
 await page.keyboard.press('/');await page.waitForFunction(()=>document.activeElement?.id==='crmGlobalSearch');assert(await page.locator('#crmGlobalSearch').evaluate(e=>document.activeElement===e),width+': slash focus');
 await page.keyboard.press('Tab');
