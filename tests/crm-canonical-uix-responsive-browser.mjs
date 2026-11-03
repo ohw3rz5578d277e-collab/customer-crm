@@ -212,7 +212,7 @@ try{
   await page.waitForFunction(()=>document.querySelectorAll('#crmLineChatMessages .crm-line-chat-row').length===2);
   if(viewport.width===390){
    await page.request.get(origin+'/__fixture/delay-next-line-history');
-   await page.evaluate(()=>window.__crmOwnerLineChat.openConversation('26000101',true));
+   await page.evaluate(()=>{void window.__crmOwnerLineChat.openConversation('26000101',true)});
    await page.waitForFunction(()=>document.getElementById('crmLineChatStatus')?.textContent==='取得中');
    await page.evaluate(()=>window.__crmOwnerLineChat.openConversation('26000102'));
    await page.waitForFunction(()=>document.getElementById('crmLineChatMessages')?.innerText.includes('LINE履歴はまだありません。'));
