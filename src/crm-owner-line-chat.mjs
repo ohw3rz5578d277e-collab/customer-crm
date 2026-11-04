@@ -62,7 +62,10 @@ async function loadCustomers(force=false){
   state.customers=customers;filter();
  }catch(e){
   if(requestId!==customerListRequestId)return;
-  if(host)host.innerHTML='<div class="crm-line-chat-empty">LINE連携済み顧客の一覧を取得できませんでした。再度お試しください。</div>';
+  if(host){
+   host.innerHTML='<div class="crm-line-chat-empty">LINE連携済み顧客の一覧を取得できませんでした。<div><button type="button" id="crmLineChatListRetry" class="crm-line-chat-refresh" style="min-height:44px;margin-top:12px">再試行</button></div></div>';
+   $('crmLineChatListRetry')?.addEventListener('click',()=>loadCustomers(true));
+  }
  }finally{if(requestId===customerListRequestId)state.loading=false}
 }
 function safeEmptyMessage(data){
