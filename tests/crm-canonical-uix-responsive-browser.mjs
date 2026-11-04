@@ -30,7 +30,7 @@ const server=http.createServer(async(req,res)=>{
    const page=Number(u.searchParams.get('page')||1);
    if(page===1){
     if(delayNextLineList){delayNextLineList=false;await new Promise(resolve=>setTimeout(resolve,700));return send(res,200,{ok:true,total:0,all_total:0,page:1,page_size:100,has_next:false,items:[],facets})}
-    if(failNextLineList){failNextLineList=false;return send(res,503,{ok:false,error:'sensitive_internal_database_failure_do_not_render'})}
+    if(failNextLineList){failNextLineList=false;return send(res,200,{ok:false,error:'sensitive_internal_database_failure_do_not_render'})}
     return send(res,200,{ok:true,total:101,all_total:101,page:1,page_size:100,has_next:true,items:linePage1,facets,meta:{privacy_safe_list_dto:true}});
    }
    if(page===2)return send(res,200,{ok:true,total:101,all_total:101,page:2,page_size:100,has_next:false,items:[linePage2Customer],facets,meta:{privacy_safe_list_dto:true}});
