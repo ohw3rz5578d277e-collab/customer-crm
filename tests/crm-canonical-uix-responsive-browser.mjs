@@ -216,8 +216,10 @@ try{
    const listFailureText=await page.locator('#crmLineChatCustomers').innerText();
    assert.ok(listFailureText.includes('一覧を取得できませんでした'),'LINE list failure lacks user-friendly guidance');
    assert.equal(listFailureText.includes('sensitive_internal_database_failure'),false,'raw LINE list error exposed');
-   await page.evaluate(()=>window.__crmOwnerLineChat.loadCustomers(true));
-   assert.equal(await page.locator('#crmLineChatCustomers [data-line-customer]').count(),101,'LINE list does not recover from failed refresh');
+   assert.equal(await page.locator('#crmLineChatListRetry').isVisible(),true,'failed LINE list lacks a visible retry control');
+   await page.locator('#crmLineChatListRetry').click();
+   await page.waitForFunction(()=>document.querySelectorAll('#crmLineChatCustomers [data-line-customer]').length===101);
+   assert.equal(await page.locator('#crmLineChatCustomers [data-line-customer]').count(),101,'LINE list does not recover from retry button');
   }
   await page.locator('#crmLineChatCustomers [data-line-customer="26000101"]').click();
   await page.waitForFunction(()=>document.querySelectorAll('#crmLineChatMessages .crm-line-chat-row').length===2);
