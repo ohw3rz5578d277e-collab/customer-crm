@@ -8,6 +8,25 @@
 <style>
 :root{--bg:#f4f0e8;--paper:#fffdf8;--ink:#171815;--muted:#74756f;--line:#ded9ce;--green:#233b32;--soft:#ebe4d8;--shadow:0 14px 40px rgba(31,30,27,.09)}
 *{box-sizing:border-box}html,body{margin:0;background:var(--bg);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"Helvetica Neue",Arial,"Noto Sans JP",sans-serif}body{min-height:100vh}.app{max-width:760px;margin:auto;min-height:100vh;background:var(--paper);position:relative;padding-bottom:92px}.top{padding:28px 22px 16px;border-bottom:1px solid var(--line);position:sticky;top:0;background:rgba(255,253,248,.96);backdrop-filter:blur(12px);z-index:5}.brand{font-size:11px;letter-spacing:.24em;color:var(--green);font-weight:700}.title{font-family:Georgia,"Times New Roman",serif;font-size:31px;line-height:1;margin-top:7px}.demo{display:inline-block;margin-top:8px;padding:5px 9px;border:1px solid var(--line);border-radius:999px;font-size:10px;color:var(--muted);letter-spacing:.12em}.content{padding:18px 16px 28px}.hero{border-radius:24px;background:linear-gradient(140deg,#334d42,#1e2f29);color:white;padding:28px 24px;box-shadow:var(--shadow);overflow:hidden;position:relative}.hero:after{content:"";position:absolute;width:190px;height:190px;border:1px solid rgba(255,255,255,.17);border-radius:50%;right:-65px;top:-72px}.eyebrow{font-size:11px;letter-spacing:.18em;opacity:.8}.hero h2{font-family:Georgia,"Times New Roman",serif;font-weight:400;font-size:34px;line-height:1.15;margin:15px 0 9px}.hero p{font-size:13px;line-height:1.75;opacity:.86;margin:0}.section{margin-top:26px}.section-head{display:flex;align-items:end;justify-content:space-between;margin:0 6px 12px}.section-head h3{font-size:17px;margin:0}.section-head span{font-size:11px;color:var(--muted)}.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.card{background:#fff;border:1px solid var(--line);border-radius:20px;padding:17px;box-shadow:0 6px 18px rgba(40,35,27,.035)}.card strong{display:block;font-size:14px;margin-bottom:6px}.card small{color:var(--muted);line-height:1.55}.memory{min-height:190px;display:flex;flex-direction:column;justify-content:end;background:linear-gradient(180deg,rgba(38,58,49,.05),rgba(38,58,49,.16)),linear-gradient(135deg,#ddd3c4,#f3ede3)}.memory .date{font-family:Georgia,"Times New Roman",serif;font-size:25px;margin-bottom:4px}.wide{grid-column:1/-1}.pass{background:#171815;color:#f5f1e7;border-color:#171815}.pass small{color:#c8c4ba}.pill{display:inline-block;border:1px solid currentColor;border-radius:999px;padding:4px 7px;font-size:9px;letter-spacing:.12em;margin-bottom:16px}.tabs{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:min(760px,100%);display:grid;grid-template-columns:repeat(5,1fr);background:rgba(255,253,248,.97);backdrop-filter:blur(16px);border-top:1px solid var(--line);padding:9px 7px calc(9px + env(safe-area-inset-bottom));z-index:10}.tab{appearance:none;background:none;border:0;color:var(--muted);min-height:48px;padding:9px 3px;font-size:9px;letter-spacing:.06em;touch-action:manipulation}.tab:focus-visible{outline:2px solid var(--green);outline-offset:-2px;border-radius:10px}.tab b{display:block;font-size:18px;line-height:1;margin-bottom:5px;font-weight:500}.tab.active{color:var(--green);font-weight:700}.panel{display:none}.panel.active{display:block}.list{display:grid;gap:10px}.row{border:1px solid var(--line);border-radius:18px;padding:16px;background:#fff;display:flex;justify-content:space-between;gap:12px}.row span{font-size:12px;color:var(--muted)}.cta{display:block;text-align:center;background:var(--green);color:#fff;text-decoration:none;border-radius:16px;padding:15px;font-size:13px;margin-top:12px}.note{font-size:11px;color:var(--muted);line-height:1.7;margin:20px 6px 0}.pass-progress{height:5px;background:rgba(255,255,255,.26);border-radius:999px;overflow:hidden;margin:14px 0 12px}.pass-progress span{display:block;height:100%;width:80%;background:#e6d9bd;border-radius:999px}.pass-preview{font-size:11px;line-height:1.8;color:#d7d7d0}.black-preview{margin-top:20px;padding:30px 22px;border:1px solid #3a3a38;border-radius:22px;background:#151615;color:#f4f0e7}.black-preview .preview-kicker{font-size:10px;letter-spacing:.22em;color:#c8bda9}.black-preview h3{font-family:Georgia,serif;font-size:31px;line-height:1.2;font-weight:400;margin:16px 0 12px}.black-preview .black-benefit{font-family:Georgia,serif;font-size:20px;letter-spacing:.04em;margin:18px 0 12px}.black-preview p{font-size:12px;line-height:1.8;color:#d2d0c9;margin:0 0 10px}.black-preview .disclaimer{border-top:1px solid #444744;margin-top:18px;padding-top:14px;font-size:11px;color:#c5c2b9}@media(min-width:700px){body{padding:24px}.app{border-radius:28px;overflow:hidden;box-shadow:var(--shadow);min-height:calc(100vh - 48px)}.tabs{bottom:24px;border-radius:0 0 28px 28px}}
+
+/* Memories and Create remain local-only, accessible sample interactions. */
+.section-intro{font-size:12px;line-height:1.8;color:var(--muted);margin:0 6px 16px}
+.memory-journey{display:grid;gap:14px}.memory-choices{display:grid;gap:10px}
+.memory-choice{width:100%;text-align:left;display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:76px;background:#fff;border:1px solid var(--line);border-radius:17px;padding:14px 16px;font:inherit;color:var(--ink);cursor:pointer;touch-action:manipulation}
+.memory-choice strong{display:block;font-size:14px;margin-bottom:6px}.memory-choice small{display:block;color:var(--muted);font-size:11px;line-height:1.4}
+.memory-choice.selected{border-color:var(--green);background:#eff2ec;box-shadow:inset 3px 0 var(--green)}.choice-arrow{font-size:22px;color:var(--green)}
+.memory-choice:focus-visible,.cta:focus-visible,.create-select:focus-visible{outline:2px solid var(--green);outline-offset:3px}
+.memory-detail,.create-step,.create-output{background:#fff;border:1px solid var(--line);border-radius:20px;padding:20px}
+.detail-kicker,.step-kicker{font-size:10px;font-weight:700;letter-spacing:.17em;color:var(--green)}
+.memory-detail h4,.create-output h4{font-family:Georgia,"Times New Roman",serif;font-weight:400;font-size:25px;margin:10px 0 7px}
+.detail-meta{font-size:11px;color:var(--muted);margin:0 0 14px}.detail-description,.create-output p{color:var(--muted);font-size:12px;line-height:1.8;margin:14px 0 0}
+.memory-art,.create-output-art{background:linear-gradient(150deg,#d6c6b1,#e9e3d8 55%,#9dad9d);color:#314438;border-radius:16px;min-height:154px;display:flex;flex-direction:column;align-items:center;justify-content:space-around;padding:18px;gap:9px;text-align:center}
+.memory-art span,.create-output-art span{font-size:9px;letter-spacing:.18em}.memory-art strong,.create-output-art strong{font:400 30px Georgia,serif;letter-spacing:.13em}
+.cta.action{display:block;width:100%;border:0;cursor:pointer;min-height:48px;font:inherit;font-size:13px;font-weight:600;touch-action:manipulation}
+.create-form{display:grid;gap:12px}.form-label{display:block;font-size:13px;font-weight:700;margin:12px 0 8px}.create-select{display:block;width:100%;max-width:100%;min-height:48px;border:1px solid var(--line);border-radius:12px;background:#fffdf8;padding:10px 12px;font:inherit;color:var(--ink);font-size:13px}
+.create-output{margin-top:18px}.create-output-art{background:linear-gradient(140deg,#d9cbb7,#f4eddf);min-height:160px;margin-top:16px}.create-output.is-ready{border-color:#97a99d}.create-output-art.is-movie{background:linear-gradient(150deg,#2a4238,#7c8e7c);color:#f6f1e7}.create-output-art.is-story{background:linear-gradient(140deg,#a6927b,#e7dccb);color:#3f332a}
+@media(min-width:600px){.memory-journey{grid-template-columns:minmax(0,1fr) minmax(0,1.05fr);align-items:start}.create-form{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}.create-form>.cta{grid-column:1/-1}}
+@media(prefers-reduced-motion:reduce){html:focus-within{scroll-behavior:auto}}
 </style>
 </head>
 <body>
@@ -19,8 +38,46 @@
   <div class="section"><div class="section-head"><h3>Today's MEMORY</h3><span>サンプルの思い出</span></div><div class="grid"><div class="card memory wide"><div class="date">October 11, 2023</div><strong>Family Photo</strong><small>秋の公園での家族写真</small></div></div></div>
   <div class="section"><div class="section-head"><h3>For your family</h3><span>おすすめ</span></div><div class="grid"><div class="card"><strong>NEXT MEMORY</strong><small>次の記念日におすすめの撮影時期をお知らせ。</small></div><div class="card"><strong>CREATE</strong><small>お気に入りの写真から壁紙やムービーをつくる。</small></div><div class="card pass wide"><span class="pill">FAMILY PASS · DEMO</span><strong>8 / 10 MEMORIES</strong><div class="pass-progress" role="progressbar" aria-label="デモのBLACK進捗" aria-valuenow="8" aria-valuemin="0" aria-valuemax="10"><span></span></div><div class="pass-preview">1回の撮影につき原則1 MEMORY。家族単位で記録します。BLACKの条件は10 MEMORIESです。</div><small>サンプル値です。会員資格の確定や特典付与は行いません。</small></div></div></div>
 </section>
-<section class="panel" id="member-panel-memories" data-panel="memories" role="tabpanel" aria-labelledby="member-tab-memories" tabindex="0"><div class="section-head"><h3>MEMORIES</h3><span>家族の撮影記録</span></div><div class="list"><div class="row"><div><strong>七五三</strong><br><span>2026.10.03 · 100 photos</span></div><b>›</b></div><div class="row"><div><strong>Family</strong><br><span>2025.11.16 · 96 photos</span></div><b>›</b></div><div class="row"><div><strong>Birthday</strong><br><span>2024.10.20 · 88 photos</span></div><b>›</b></div></div><p class="note">このデモは固定サンプルのみです。Production D1・R2・顧客写真にはアクセスしません。</p></section>
-<section class="panel" id="member-panel-create" data-panel="create" role="tabpanel" aria-labelledby="member-tab-create" tabindex="0"><div class="section-head"><h3>CREATE</h3><span>写真からつくる</span></div><div class="grid"><div class="card"><strong>Wallpaper</strong><small>スマホ壁紙をつくる</small></div><div class="card"><strong>Memory Movie</strong><small>思い出を短いムービーに</small></div><div class="card wide"><strong>Photo Story</strong><small>撮影ごとのストーリーを残す、新しい家族アルバム。</small><a href="#" class="cta" onclick="return false">デモで見る</a></div></div></section>
+<section class="panel" id="member-panel-memories" data-panel="memories" role="tabpanel" aria-labelledby="member-tab-memories" tabindex="0">
+  <div class="section-head"><h3>MEMORIES</h3><span>家族の撮影記録</span></div>
+  <p class="section-intro">思い出を選ぶと、撮影記録のサンプル詳細を確認できます。</p>
+  <div class="memory-journey">
+    <div class="memory-choices" role="group" aria-label="撮影記録のサンプル一覧">
+      <button type="button" class="memory-choice selected" data-memory-key="shichigosan" aria-pressed="true"><span><strong>七五三</strong><small>2026.10.03 · 100 photos</small></span><span class="choice-arrow" aria-hidden="true">›</span></button>
+      <button type="button" class="memory-choice" data-memory-key="family" aria-pressed="false"><span><strong>Family</strong><small>2025.11.16 · 96 photos</small></span><span class="choice-arrow" aria-hidden="true">›</span></button>
+      <button type="button" class="memory-choice" data-memory-key="birthday" aria-pressed="false"><span><strong>Birthday</strong><small>2024.10.20 · 88 photos</small></span><span class="choice-arrow" aria-hidden="true">›</span></button>
+    </div>
+    <section class="memory-detail" aria-label="選択した撮影記録のサンプル詳細">
+      <div class="detail-kicker">SELECTED MEMORY · SAMPLE</div>
+      <h4 id="memory-detail-title">七五三</h4>
+      <p class="detail-meta" id="memory-detail-meta">2026.10.03 · 100 photos</p>
+      <div class="memory-art" aria-hidden="true"><span>YOUR FAMILY STORY</span><strong>MEMORY</strong><span>PHOTO PLACEHOLDER</span></div>
+      <p class="detail-description" id="memory-detail-description">大切な節目を家族でお祝いした日。写真が入る場所のデザインサンプルです。</p>
+      <button type="button" class="cta action" id="memory-create-button">この思い出からCREATEへ</button>
+    </section>
+  </div>
+  <p class="note">表示内容は架空のサンプルです。実際の写真表示・データ保存・Production D1 / R2へのアクセスは行いません。</p>
+</section>
+<section class="panel" id="member-panel-create" data-panel="create" role="tabpanel" aria-labelledby="member-tab-create" tabindex="0">
+  <div class="section-head"><h3>CREATE</h3><span>写真からつくる</span></div>
+  <p class="section-intro">思い出と仕上がりを選ぶと、家族の写真を使った制作体験のイメージを確認できます。</p>
+  <div class="create-form">
+    <div class="create-step"><div class="step-kicker">STEP 01 · MEMORY</div><label class="form-label" for="create-memory-select">もとになる思い出</label>
+      <select id="create-memory-select" class="create-select"><option value="shichigosan">七五三 · 2026.10.03</option><option value="family">Family · 2025.11.16</option><option value="birthday">Birthday · 2024.10.20</option></select>
+    </div>
+    <div class="create-step"><div class="step-kicker">STEP 02 · FORMAT</div><label class="form-label" for="create-format-select">つくりたいもの</label>
+      <select id="create-format-select" class="create-select"><option value="wallpaper">Wallpaper · スマホ壁紙</option><option value="movie">Memory Movie · ショートムービー</option><option value="story">Photo Story · 家族のストーリー</option></select>
+    </div>
+    <button type="button" class="cta action" id="create-preview-button">サンプルプレビューを表示</button>
+  </div>
+  <section class="create-output" aria-label="制作イメージのプレビュー" role="status" aria-live="polite" aria-atomic="true">
+    <div class="step-kicker">STEP 03 · PREVIEW</div>
+    <h4 id="create-preview-title">プレビューを表示できます</h4>
+    <div class="create-output-art" id="create-output-art" aria-hidden="true"><span>MEMORY STUDIO</span><strong id="create-preview-art-label">YOUR STORY</strong><span>STATIC SAMPLE</span></div>
+    <p id="create-preview-description">思い出と制作形式を選んでボタンを押してください。実際の画像・映像は生成しません。</p>
+  </section>
+  <p class="note">この機能は制作前の操作デモです。AI生成・写真アップロード・ファイル出力・購入・顧客データ連携はありません。</p>
+</section>
 <section class="panel" id="member-panel-shop" data-panel="shop" role="tabpanel" aria-labelledby="member-tab-shop" tabindex="0"><div class="section-head"><h3>SHOP</h3><span>家族の写真をかたちに</span></div><div class="grid"><div class="card memory"><strong>KOTOBUKI</strong><small>Album</small></div><div class="card memory"><strong>Frame</strong><small>Photo Frame</small></div><div class="card wide"><strong>Member Selection</strong><small>会員向け商品の見せ方を確認するためのデモです。決済は発生しません。</small></div></div></section>
 <section class="panel" id="member-panel-my" data-panel="my" role="tabpanel" aria-labelledby="member-tab-my" tabindex="0"><div class="section-head"><h3>MY</h3><span>Family profile</span></div><div class="list"><div class="row"><div><strong>山田ファミリー</strong><br><span>DEMO FAMILY</span></div><b>MEMBER</b></div><div class="row"><div><strong>Family Pass</strong><br><span>デモの進捗 · 8 / 10 MEMORIES</span></div><b>PREVIEW</b></div><div class="row"><div><strong>Notifications</strong><br><span>LINE連携はデモでは無効</span></div><b>OFF</b></div></div><section class="black-preview" aria-label="BLACK CARD デザインプレビュー"><div class="preview-kicker">FAMILY PASS · BLACK PREVIEW</div><h3>BLACK CARD</h3><p>家族の思い出を重ねた先に。永く続く特別な会員体験。</p><div class="black-benefit">PHOTO GOODS 10% OFF FOREVER</div><p>対象は写真関連の物販商品のみ。撮影料金は割引対象外です。</p><p class="disclaimer">これはデザイン確認用です。BLACKの資格は正規の家族単位の記録と承認済みの確定処理で判定されます。この画面では自動付与・割引適用・購入処理を行いません。</p></section></section>
 </main>
@@ -52,6 +109,65 @@ memberDemoTabs.forEach((tab,index)=>{
     selectMemberDemoTab(memberDemoTabs[next]);
   });
 });
+
+/* Static sample only: no personal data, network requests, uploads or purchases. */
+if(typeof document.getElementById==='function'){
+  const demoMemories={
+    shichigosan:{name:'七五三',date:'2026.10.03',photos:100,description:'大切な節目を家族でお祝いした日。写真が入る場所のデザインサンプルです。'},
+    family:{name:'Family',date:'2025.11.16',photos:96,description:'いつもの笑顔と季節の風景。家族の時間を残すイメージです。'},
+    birthday:{name:'Birthday',date:'2024.10.20',photos:88,description:'誕生日をみんなで迎えた思い出。成長の記録を飾るイメージです。'}
+  };
+  const demoFormats={
+    wallpaper:{label:'Wallpaper',caption:'スマホの待受画面を想定した縦長レイアウトのサンプルです。'},
+    movie:{label:'Memory Movie',caption:'短いムービーのタイトル画面を想定したサンプルです。動画再生や書き出しはありません。'},
+    story:{label:'Photo Story',caption:'家族の出来事をまとめた読みものの表紙を想定したサンプルです。'}
+  };
+  const memoryChoices=[...document.querySelectorAll('[data-memory-key]')];
+  const memorySelect=document.getElementById('create-memory-select');
+  const formatSelect=document.getElementById('create-format-select');
+  const output=document.querySelector('.create-output');
+  const art=document.getElementById('create-output-art');
+  function resetCreatePreview(){
+    output.classList.remove('is-ready');
+    art.classList.remove('is-movie','is-story');
+    document.getElementById('create-preview-title').textContent='プレビューを表示できます';
+    document.getElementById('create-preview-art-label').textContent='YOUR STORY';
+    document.getElementById('create-preview-description').textContent='選択内容を変更しました。ボタンを押すと新しいサンプルを表示します。';
+  }
+  memoryChoices.forEach(choice=>choice.addEventListener('click',()=>{
+    const key=choice.dataset.memoryKey;
+    const data=demoMemories[key];
+    if(!data)return;
+    memoryChoices.forEach(button=>{
+      const isSelected=button===choice;
+      button.classList.toggle('selected',isSelected);
+      button.setAttribute('aria-pressed',String(isSelected));
+    });
+    document.getElementById('memory-detail-title').textContent=data.name;
+    document.getElementById('memory-detail-meta').textContent=data.date+' · '+data.photos+' photos';
+    document.getElementById('memory-detail-description').textContent=data.description;
+    memorySelect.value=key;
+    resetCreatePreview();
+  }));
+  document.getElementById('memory-create-button').addEventListener('click',()=>{
+    const tab=document.getElementById('member-tab-create');
+    selectMemberDemoTab(tab);
+    memorySelect.focus();
+  });
+  memorySelect.addEventListener('change',resetCreatePreview);
+  formatSelect.addEventListener('change',resetCreatePreview);
+  document.getElementById('create-preview-button').addEventListener('click',()=>{
+    const memory=demoMemories[memorySelect.value];
+    const format=demoFormats[formatSelect.value];
+    if(!memory||!format)return;
+    document.getElementById('create-preview-title').textContent=memory.name+' · '+format.label;
+    document.getElementById('create-preview-art-label').textContent=format.label.toUpperCase();
+    document.getElementById('create-preview-description').textContent=memory.date+'の撮影記録（サンプル '+memory.photos+'枚）。'+format.caption+' 実際の写真や動画は使用していません。';
+    output.classList.add('is-ready');
+    art.classList.toggle('is-movie',formatSelect.value==='movie');
+    art.classList.toggle('is-story',formatSelect.value==='story');
+  });
+}
 </script>
 </body>
 </html>
