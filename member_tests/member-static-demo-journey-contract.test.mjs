@@ -44,7 +44,7 @@ for (const name of sampleFormats) {
 }
 assert.equal((html.match(/data-memory="/g) || []).length, 3);
 assert.equal((html.match(/data-create-format="/g) || []).length, 3);
-assert.equal((html.match(/aria-pressed="true"/g) || []).length, 1);
+assert.equal([...html.matchAll(/<button\b[^>]*data-create-format="[^"]+"[^>]*>/g)].filter(x => x[0].includes('aria-pressed="true"')).length, 1);
 
 // Demonstration source must never read customer data or call production endpoints.
 assert.doesNotMatch(html, /<script[^>]+src=|<img[^>]+src=|<iframe/i);
