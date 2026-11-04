@@ -19,6 +19,7 @@ export function injectOwnerLineChat(html){
 (()=>{
 if(window.__crmOwnerLineChat)return;
 const $=id=>document.getElementById(id),state={customers:[],filtered:[],selected:null,loading:false,media:{}};
+let conversationRequestId=0;
 function esc(v){return String(v==null?'':v).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
 function messageText(m){return m.message_text||m.text||m.message||m.body||m.content||''}
 function outbound(m){const d=String(m.direction||m.type||'').toLowerCase();return ['out','outbound','sent','send'].some(x=>d.includes(x))}
@@ -81,17 +82,19 @@ function renderMessages(data,c){
  host.innerHTML=arr.map(m=>'<div class="crm-line-chat-row '+(outbound(m)?'outbound':'inbound')+'"><div class="crm-line-chat-bubble">'+esc(messageText(m)||'（テキストなし）')+'<div class="crm-line-chat-time">'+esc(time(m))+'</div></div></div>').join('');host.scrollTop=host.scrollHeight;
 }
 async function openConversation(id,refresh=false){
- ensure();const c=state.customers.find(x=>String(x.customer_id)===String(id))||{customer_id:id,name:id};state.selected=c;renderCustomers();shell()?.setAttribute('data-chat-open','1');$('crmLineChatTitle').textContent=c.name||c.line_display_name||'LINE';$('crmLineChatMessages').innerHTML='<div class="crm-line-chat-empty">履歴を読み込み中…</div>';const status=$('crmLineChatStatus');if(status){status.textContent='取得中';status.classList.add('off')}
+ ensure();const requestId=++conversationRequestId;const c=state.customers.find(x=>String(x.customer_id)===String(id))||{customer_id:id,name:id};state.selected=c;renderCustomers();shell()?.setAttribute('data-chat-open','1');$('crmLineChatTitle').textContent=c.name||c.line_display_name||'LINE';$('crmLineChatMessages').innerHTML='<div class="crm-line-chat-empty">履歴を読み込み中…</div>';const status=$('crmLineChatStatus');if(status){status.textContent='取得中';status.classList.add('off')}
  try{
   const [historyRes,mediaRes]=await Promise.all([
    fetch('/api/customers/'+encodeURIComponent(id)+'/line-history'+(refresh?'?refresh=1':''),{credentials:'same-origin',cache:'no-store'}),
    fetch('/api/customer360/media/'+encodeURIComponent(id),{credentials:'same-origin',cache:'no-store'}).catch(()=>null)
   ]);
   const j=await historyRes.json().catch(()=>({}));
-  if(mediaRes?.ok){const mj=await mediaRes.json().catch(()=>({}));state.media[id]=mj.media||{}}
+  if(mediaRes?.ok){const mj=await mediaRes.json().catch(()=>({}));if(requestId!==conversationRequestId)return;state.media[id]=mj.media||{}}
+  if(requestId!==conversationRequestId)return;
   if(!historyRes.ok||j.ok===false)throw Error(j.error||j.message||'line_history_unavailable');
   renderMessages(j,c)
  }catch(e){
+  if(requestId!==conversationRequestId)return;
   console.warn('CRM_LINE_HISTORY_READ_FAILED');
   if(status){status.textContent='要確認';status.classList.add('off')}
   $('crmLineChatMessages').innerHTML='<div class="crm-line-chat-empty">'+friendlyHistoryError()+'</div>'
