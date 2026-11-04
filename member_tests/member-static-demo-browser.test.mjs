@@ -94,7 +94,7 @@ try {
     await evaluate("document.getElementById('member-tab-create').click()");
     assert.equal(await evaluate("document.querySelectorAll('#member-panel-create details.create-entry').length"), 3, width + ': create sample count');
     await evaluate("document.querySelector('#member-panel-create details.create-entry summary').focus()");
-    await send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
+    await send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13, text: '\r', unmodifiedText: '\r' });
     await send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
     assert.equal(await evaluate("document.querySelector('#member-panel-create details.create-entry').open"), true, width + ': keyboard CREATE detail did not open');
     const createExpanded = await state();
