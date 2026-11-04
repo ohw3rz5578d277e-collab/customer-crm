@@ -17,16 +17,22 @@ assert.equal(html.includes('const navObserver=new MutationObserver'),false,'cano
 assert.equal(html.includes("new MutationObserver(()=>reconcileDesktopLayout()).observe(document.documentElement"),false,'legacy desktop hotfix must not install a permanent document-wide observer');
 const out='artifacts/crm-canonical-uix-responsive';fs.mkdirSync(out,{recursive:true});
 const requests=[],notFoundRequests=[];
-let delayNextLineHistory=false;
+let delayNextLineHistory=false,delayNextLineList=false,failNextLineList=false;
 function send(res,status,data,type='application/json; charset=utf-8'){res.writeHead(status,{'content-type':type,'cache-control':'no-store'});res.end(type.startsWith('application/json')?JSON.stringify(data):data)}
 const server=http.createServer(async(req,res)=>{
  const u=new URL(req.url,'http://127.0.0.1');requests.push(req.method+' '+u.pathname+u.search);
  if(u.pathname==='/'||u.pathname==='/admin')return send(res,200,html,'text/html; charset=utf-8');
  if(u.pathname==='/api/customer360/marketing-home')return send(res,200,{ok:true,kpis:{customers:2,average_realized_ltv:81500,repeat_rate_pct:50,vip_high_ltv:1,event_90d:2,dormant_180:0,line_link_rate_pct:100,line_additions_this_month:7,approach_this_month:2},top_opportunities:customers,facets});
+ if(u.pathname==='/__fixture/delay-next-line-list'){delayNextLineList=true;return send(res,200,{ok:true})}
+ if(u.pathname==='/__fixture/fail-next-line-list'){failNextLineList=true;return send(res,200,{ok:true})}
  if(u.pathname==='/api/customer360/customers'){
   if(u.searchParams.get('line')==='linked'){
    const page=Number(u.searchParams.get('page')||1);
-   if(page===1)return send(res,200,{ok:true,total:101,all_total:101,page:1,page_size:100,has_next:true,items:linePage1,facets,meta:{privacy_safe_list_dto:true}});
+   if(page===1){
+    if(delayNextLineList){delayNextLineList=false;await new Promise(resolve=>setTimeout(resolve,700));return send(res,200,{ok:true,total:0,all_total:0,page:1,page_size:100,has_next:false,items:[],facets})}
+    if(failNextLineList){failNextLineList=false;return send(res,503,{ok:false,error:'sensitive_internal_database_failure_do_not_render'})}
+    return send(res,200,{ok:true,total:101,all_total:101,page:1,page_size:100,has_next:true,items:linePage1,facets,meta:{privacy_safe_list_dto:true}});
+   }
    if(page===2)return send(res,200,{ok:true,total:101,all_total:101,page:2,page_size:100,has_next:false,items:[linePage2Customer],facets,meta:{privacy_safe_list_dto:true}});
   }
   return send(res,200,{ok:true,total:2,all_total:2,page:1,page_size:100,has_next:false,items:customers,facets,meta:{privacy_safe_list_dto:true}});
@@ -187,8 +193,32 @@ try{
   await page.locator('#crmLineChatSearch').fill('26999999');
   await page.waitForFunction(()=>document.querySelectorAll('#crmLineChatCustomers [data-line-customer]').length===1);
   assert.equal(await page.locator('#crmLineChatCustomers [data-line-customer="26999999"]').isVisible(),true,viewport.width+': page-2 LINE customer missing from local search');
+  if(viewport.width===390){
+   await page.evaluate(()=>window.__crmOwnerLineChat.loadCustomers(true));
+   assert.equal((await page.locator('#crmLineChatSearch').inputValue()).trim(),'26999999','LINE list refresh cleared search input');
+   assert.equal(await page.locator('#crmLineChatCustomers [data-line-customer]').count(),1,'LINE list refresh lost active search filter');
+  }
   await page.locator('#crmLineChatSearch').fill('');
   await page.waitForFunction(()=>document.querySelectorAll('#crmLineChatCustomers [data-line-customer]').length===101);
+  if(viewport.width===390){
+   await page.request.get(origin+'/__fixture/delay-next-line-list');
+   const delayedRequest=page.waitForRequest(req=>req.url().includes('/api/customer360/customers?page=1&page_size=100&line=linked'));
+   await page.evaluate(()=>{void window.__crmOwnerLineChat.loadCustomers(true)});
+   await delayedRequest;
+   await page.waitForTimeout(80);
+   await page.evaluate(()=>window.__crmOwnerLineChat.loadCustomers(true));
+   await page.waitForFunction(()=>document.querySelectorAll('#crmLineChatCustomers [data-line-customer]').length===101);
+   await page.waitForTimeout(800);
+   assert.equal(await page.locator('#crmLineChatCustomers [data-line-customer]').count(),101,'outdated LINE list replaced newer full results');
+   assert.equal(await page.evaluate(()=>window.__crmOwnerLineChat.getState().loading),false,'older LINE list request changed current loading state');
+   await page.request.get(origin+'/__fixture/fail-next-line-list');
+   await page.evaluate(()=>window.__crmOwnerLineChat.loadCustomers(true));
+   const listFailureText=await page.locator('#crmLineChatCustomers').innerText();
+   assert.ok(listFailureText.includes('一覧を取得できませんでした'),'LINE list failure lacks user-friendly guidance');
+   assert.equal(listFailureText.includes('sensitive_internal_database_failure'),false,'raw LINE list error exposed');
+   await page.evaluate(()=>window.__crmOwnerLineChat.loadCustomers(true));
+   assert.equal(await page.locator('#crmLineChatCustomers [data-line-customer]').count(),101,'LINE list does not recover from failed refresh');
+  }
   await page.locator('#crmLineChatCustomers [data-line-customer="26000101"]').click();
   await page.waitForFunction(()=>document.querySelectorAll('#crmLineChatMessages .crm-line-chat-row').length===2);
   if(mobile){
