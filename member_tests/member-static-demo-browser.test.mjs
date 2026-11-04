@@ -79,6 +79,29 @@ try {
     assert.equal(afterKey.selected, 'home', width + ': keyboard wrap failed');
     assert.equal(focus, 'home', width + ': keyboard focus failed');
     assert.ok(Math.max(afterKey.doc, afterKey.body) <= afterKey.viewport + 1, width + ': overflow after navigation');
+    // Native disclosures remain keyboard accessible and do not trigger external data access.
+    await evaluate("document.getElementById('member-tab-memories').click()");
+    const memoryBefore = await evaluate("({count:document.querySelectorAll('#member-panel-memories details.memory-entry').length,open:document.querySelector('#member-panel-memories details.memory-entry').open})");
+    assert.equal(memoryBefore.count, 3, width + ': memory sample count');
+    assert.equal(memoryBefore.open, false, width + ': memory samples start collapsed');
+    await evaluate("document.querySelector('#member-panel-memories details.memory-entry summary').click()");
+    assert.equal(await evaluate("document.querySelector('#member-panel-memories details.memory-entry').open"), true, width + ': memory detail did not open');
+    const memoryExpanded = await state();
+    assert.ok(Math.max(memoryExpanded.doc, memoryExpanded.body) <= memoryExpanded.viewport + 1, width + ': memory detail overflow');
+    await evaluate("document.querySelector('#member-panel-memories details.memory-entry summary').click()");
+    assert.equal(await evaluate("document.querySelector('#member-panel-memories details.memory-entry').open"), false, width + ': memory detail did not close');
+
+    await evaluate("document.getElementById('member-tab-create').click()");
+    assert.equal(await evaluate("document.querySelectorAll('#member-panel-create details.create-entry').length"), 3, width + ': create sample count');
+    await evaluate("document.querySelector('#member-panel-create details.create-entry summary').focus()");
+    await send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13, text: '\r', unmodifiedText: '\r' });
+    await send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
+    assert.equal(await evaluate("document.querySelector('#member-panel-create details.create-entry').open"), true, width + ': keyboard CREATE detail did not open');
+    const createExpanded = await state();
+    assert.ok(Math.max(createExpanded.doc, createExpanded.body) <= createExpanded.viewport + 1, width + ': CREATE detail overflow');
+    assert.equal(createExpanded.selected, 'create');
+    assert.deepEqual(createExpanded.visible, ['create']);
+    console.log('MEMBER_DISCLOSURES_VIEWPORT_' + width + '=PASS');
     console.log('MEMBER_BROWSER_VIEWPORT_' + width + '=PASS');
   }
   console.log('MEMBER_STATIC_DEMO_CHROMIUM=PASS');
