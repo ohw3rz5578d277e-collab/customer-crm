@@ -79,6 +79,49 @@ try {
     assert.equal(afterKey.selected, 'home', width + ': keyboard wrap failed');
     assert.equal(focus, 'home', width + ': keyboard focus failed');
     assert.ok(Math.max(afterKey.doc, afterKey.body) <= afterKey.viewport + 1, width + ': overflow after navigation');
+
+    // MEMORY selection, preserved selection, and CREATE local-only samples.
+    await evaluate("document.getElementById('member-tab-memories').click()");
+    const initialMemory = await evaluate("({title:document.getElementById('memory-detail-title').textContent,pressed:[...document.querySelectorAll('[data-memory-key][aria-pressed=true]')].map(x=>x.dataset.memoryKey)})");
+    assert.equal(initialMemory.title, '七五三', width + ': initial memory title');
+    assert.deepEqual(initialMemory.pressed, ['shichigosan'], width + ': initial memory selection');
+    await evaluate("document.querySelector('[data-memory-key=birthday]').click()");
+    const birthday = await evaluate("({title:document.getElementById('memory-detail-title').textContent,pressed:[...document.querySelectorAll('[data-memory-key][aria-pressed=true]')].map(x=>x.dataset.memoryKey),photos:document.getElementById('memory-detail-meta').textContent})");
+    assert.equal(birthday.title, 'Birthday', width + ': memory selection title');
+    assert.deepEqual(birthday.pressed, ['birthday'], width + ': memory selection state');
+    assert.ok(birthday.photos.includes('88 photos'), width + ': memory photo count');
+    await evaluate("document.getElementById('memory-create-button').click()");
+    const handoff = await evaluate("({selected:document.querySelector('[role=tab][aria-selected=true]')?.dataset.tab,memory:document.getElementById('create-memory-select').value,focus:document.activeElement?.id})");
+    assert.equal(handoff.selected, 'create', width + ': MEMORY to CREATE tab');
+    assert.equal(handoff.memory, 'birthday', width + ': selected memory handoff');
+    assert.equal(handoff.focus, 'create-memory-select', width + ': memory selector focus');
+
+    await evaluate("document.getElementById('create-preview-button').click()");
+    const wallpaper = await evaluate("({heading:document.getElementById('create-preview-title').textContent,body:document.getElementById('create-preview-description').textContent,ready:document.querySelector('.create-output').classList.contains('is-ready')})");
+    assert.equal(wallpaper.heading, 'Birthday · Wallpaper', width + ': Wallpaper preview');
+    assert.ok(wallpaper.body.includes('実際の写真や動画は使用していません'), width + ': no customer photos');
+    assert.equal(wallpaper.ready, true, width + ': preview ready state');
+
+    await evaluate("document.getElementById('create-format-select').value='movie';document.getElementById('create-format-select').dispatchEvent(new Event('change',{bubbles:true}))");
+    assert.equal(await evaluate("document.querySelector('.create-output').classList.contains('is-ready')"), false, width + ': invalidate stale preview');
+    await evaluate("document.getElementById('create-preview-button').click()");
+    const movie = await evaluate("({heading:document.getElementById('create-preview-title').textContent,movie:document.getElementById('create-output-art').classList.contains('is-movie')})");
+    assert.equal(movie.heading, 'Birthday · Memory Movie', width + ': movie title');
+    assert.equal(movie.movie, true, width + ': movie style');
+
+    await evaluate("document.getElementById('create-format-select').value='story';document.getElementById('create-format-select').dispatchEvent(new Event('change',{bubbles:true}));document.getElementById('create-preview-button').click()");
+    const story = await evaluate("({heading:document.getElementById('create-preview-title').textContent,story:document.getElementById('create-output-art').classList.contains('is-story'),movie:document.getElementById('create-output-art').classList.contains('is-movie')})");
+    assert.equal(story.heading, 'Birthday · Photo Story', width + ': story title');
+    assert.equal(story.story, true, width + ': story style');
+    assert.equal(story.movie, false, width + ': stale movie style cleared');
+
+    await evaluate("document.getElementById('create-memory-select').value='family';document.getElementById('create-memory-select').dispatchEvent(new Event('change',{bubbles:true}))");
+    assert.equal(await evaluate("document.querySelector('.create-output').classList.contains('is-ready')"), false, width + ': memory change clears stale preview');
+    await evaluate("document.getElementById('create-preview-button').click()");
+    assert.equal(await evaluate("document.getElementById('create-preview-title').textContent"), 'Family · Photo Story', width + ': manual memory selection');
+    const finalFlow = await state();
+    assert.ok(Math.max(finalFlow.doc, finalFlow.body) <= finalFlow.viewport + 1, width + ': overflow in MEMORY/CREATE flow');
+    console.log('MEMBER_BROWSER_CREATE_FLOW_' + width + '=PASS');
     console.log('MEMBER_BROWSER_VIEWPORT_' + width + '=PASS');
   }
   console.log('MEMBER_STATIC_DEMO_CHROMIUM=PASS');
