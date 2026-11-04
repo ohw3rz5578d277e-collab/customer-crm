@@ -79,6 +79,31 @@ try {
     assert.equal(afterKey.selected, 'home', width + ': keyboard wrap failed');
     assert.equal(focus, 'home', width + ': keyboard focus failed');
     assert.ok(Math.max(afterKey.doc, afterKey.body) <= afterKey.viewport + 1, width + ': overflow after navigation');
+    // Verify the in-place detail accordion and selected-memory handoff.
+    await evaluate("document.getElementById('member-tab-memories').click()");
+    await evaluate("document.querySelector('[data-memory-toggle=\"shichigosan\"]').click()");
+    const firstDetail = await evaluate("({open:document.querySelector('[data-memory-toggle=\"shichigosan\"]').getAttribute('aria-expanded'),hidden:document.getElementById('memory-detail-shichigosan').hidden})");
+    assert.equal(firstDetail.open, 'true', width + ': first memory aria-expanded');
+    assert.equal(firstDetail.hidden, false, width + ': first detail should be visible');
+    await evaluate("document.querySelector('[data-memory-toggle=\"family\"]').click()");
+    const secondDetail = await evaluate("({firstHidden:document.getElementById('memory-detail-shichigosan').hidden,secondHidden:document.getElementById('memory-detail-family').hidden})");
+    assert.equal(secondDetail.firstHidden, true, width + ': prior detail not collapsed');
+    assert.equal(secondDetail.secondHidden, false, width + ': second memory not expanded');
+    await evaluate("document.querySelector('[data-memory-create=\"family\"]').click()");
+    const handoff = await evaluate("({tab:document.querySelector('[role=tab][aria-selected=true]').dataset.tab,memory:document.getElementById('create-memory').value,focus:document.activeElement.id,title:document.getElementById('create-preview-title').textContent})");
+    assert.equal(handoff.tab, 'create', width + ': CREATE tab did not open');
+    assert.equal(handoff.memory, 'family', width + ': selected memory not carried');
+    assert.equal(handoff.focus, 'create-memory', width + ': CREATE selection not focused');
+    assert.ok(handoff.title.includes('Family · 2025.11.16'), width + ': CREATE preview has wrong memory');
+    await evaluate("document.querySelector('[data-create-format=\"movie\"]').click()");
+    const movie = await evaluate("({pressed:[...document.querySelectorAll('[data-create-format]')].filter(x=>x.getAttribute('aria-pressed')==='true').map(x=>x.dataset.createFormat),title:document.getElementById('create-preview-title').textContent})");
+    assert.deepEqual(movie.pressed, ['movie'], width + ': CREATE format pressed state');
+    assert.ok(movie.title.includes('Memory Movie'), width + ': movie preview unchanged');
+    await evaluate("document.getElementById('create-memory').value='birthday';document.getElementById('create-memory').dispatchEvent(new Event('change',{bubbles:true}))");
+    const birthday = await evaluate("({title:document.getElementById('create-preview-title').textContent,overflow:document.documentElement.scrollWidth>document.documentElement.clientWidth+1})");
+    assert.ok(birthday.title.includes('Birthday · 2024.10.20'), width + ': sample memory selection unchanged');
+    assert.equal(birthday.overflow, false, width + ': CREATE horizontal overflow');
+    console.log('MEMBER_MEMORIES_CREATE_VIEWPORT_' + width + '=PASS');
     console.log('MEMBER_BROWSER_VIEWPORT_' + width + '=PASS');
   }
   console.log('MEMBER_STATIC_DEMO_CHROMIUM=PASS');
