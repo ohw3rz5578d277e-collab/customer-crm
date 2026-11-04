@@ -19,7 +19,7 @@ export function injectOwnerLineChat(html){
 (()=>{
 if(window.__crmOwnerLineChat)return;
 const $=id=>document.getElementById(id),state={customers:[],filtered:[],selected:null,loading:false,media:{}};
-let conversationRequestId=0;
+let conversationRequestId=0,customerListRequestId=0;
 function esc(v){return String(v==null?'':v).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
 function messageText(m){return m.message_text||m.text||m.message||m.body||m.content||''}
 function outbound(m){const d=String(m.direction||m.type||'').toLowerCase();return ['out','outbound','sent','send'].some(x=>d.includes(x))}
@@ -55,8 +55,18 @@ async function fetchCustomers(){
  throw Error('LINE連携済み顧客のページ数が上限を超えました');
 }
 async function loadCustomers(force=false){
- if(state.loading&&!force)return;state.loading=true;ensure();const host=$('crmLineChatCustomers');if(host)host.innerHTML='<div class="crm-line-chat-empty">読み込み中…</div>';
- try{state.customers=(await fetchCustomers()).filter(c=>c.line_linked!==false);state.filtered=state.customers;renderCustomers()}catch(e){if(host)host.innerHTML='<div class="crm-line-chat-empty">読み込み失敗<br>'+esc(e.message||e)+'</div>'}finally{state.loading=false}
+ if(state.loading&&!force)return;const requestId=++customerListRequestId;state.loading=true;ensure();const host=$('crmLineChatCustomers');if(host)host.innerHTML='<div class="crm-line-chat-empty">読み込み中…</div>';
+ try{
+  const customers=(await fetchCustomers()).filter(c=>c.line_linked!==false);
+  if(requestId!==customerListRequestId)return;
+  state.customers=customers;filter();
+ }catch(e){
+  if(requestId!==customerListRequestId)return;
+  if(host){
+   host.innerHTML='<div class="crm-line-chat-empty">LINE連携済み顧客の一覧を取得できませんでした。<div><button type="button" id="crmLineChatListRetry" class="crm-line-chat-refresh" style="min-height:44px;margin-top:12px">再試行</button></div></div>';
+   $('crmLineChatListRetry')?.addEventListener('click',()=>loadCustomers(true));
+  }
+ }finally{if(requestId===customerListRequestId)state.loading=false}
 }
 function safeEmptyMessage(data){
  if(data?.connected===false)return 'LINE連携を確認して、再取得してください。';
