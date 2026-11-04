@@ -92,14 +92,19 @@ function renderMessages(data,c){
  host.innerHTML=arr.map(m=>'<div class="crm-line-chat-row '+(outbound(m)?'outbound':'inbound')+'"><div class="crm-line-chat-bubble">'+esc(messageText(m)||'（テキストなし）')+'<div class="crm-line-chat-time">'+esc(time(m))+'</div></div></div>').join('');host.scrollTop=host.scrollHeight;
 }
 async function openConversation(id,refresh=false){
- ensure();const requestId=++conversationRequestId;const c=state.customers.find(x=>String(x.customer_id)===String(id))||{customer_id:id,name:id};state.selected=c;renderCustomers();shell()?.setAttribute('data-chat-open','1');$('crmLineChatTitle').textContent=c.name||c.line_display_name||'LINE';$('crmLineChatMessages').innerHTML='<div class="crm-line-chat-empty">履歴を読み込み中…</div>';const status=$('crmLineChatStatus');if(status){status.textContent='取得中';status.classList.add('off')}
+ ensure();const requestId=++conversationRequestId;const c=state.customers.find(x=>String(x.customer_id)===String(id))||{customer_id:id,name:id};state.selected=c;renderCustomers();shell()?.setAttribute('data-chat-open','1');$('crmLineChatTitle').textContent=c.name||c.line_display_name||'LINE';$('crmLineChatSubtitle').textContent='LINE履歴';renderAvatar(c,state.media[id]||{});$('crmLineChatMessages').innerHTML='<div class="crm-line-chat-empty">履歴を読み込み中…</div>';const status=$('crmLineChatStatus');if(status){status.textContent='取得中';status.classList.add('off')}
+ // Profile media is optional: never delay text history or convert a media failure into a history error.
+ void fetch('/api/customer360/media/'+encodeURIComponent(id),{credentials:'same-origin',cache:'no-store'})
+  .then(async res=>{
+   if(!res.ok)return;
+   const mj=await res.json().catch(()=>({}));
+   if(requestId!==conversationRequestId)return;
+   state.media[id]=mj.media||{};
+   renderAvatar(c,state.media[id]);
+  }).catch(()=>{});
  try{
-  const [historyRes,mediaRes]=await Promise.all([
-   fetch('/api/customers/'+encodeURIComponent(id)+'/line-history'+(refresh?'?refresh=1':''),{credentials:'same-origin',cache:'no-store'}),
-   fetch('/api/customer360/media/'+encodeURIComponent(id),{credentials:'same-origin',cache:'no-store'}).catch(()=>null)
-  ]);
+  const historyRes=await fetch('/api/customers/'+encodeURIComponent(id)+'/line-history'+(refresh?'?refresh=1':''),{credentials:'same-origin',cache:'no-store'});
   const j=await historyRes.json().catch(()=>({}));
-  if(mediaRes?.ok){const mj=await mediaRes.json().catch(()=>({}));if(requestId!==conversationRequestId)return;state.media[id]=mj.media||{}}
   if(requestId!==conversationRequestId)return;
   if(!historyRes.ok||j.ok===false)throw Error(j.error||j.message||'line_history_unavailable');
   renderMessages(j,c)
