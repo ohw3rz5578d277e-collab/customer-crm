@@ -60,7 +60,7 @@ async function loadCustomers(force=false){
   const customers=(await fetchCustomers()).filter(c=>c.line_linked!==false);
   if(requestId!==customerListRequestId)return;
   state.customers=customers;filter();
-  if(focusedCustomerId){const target=[...host.querySelectorAll('[data-line-customer]')].find(el=>el.dataset.lineCustomer===focusedCustomerId);(target||$('crmLineChatSearch'))?.focus({preventScroll:true})}
+  if(focusedCustomerId&&(document.activeElement===document.body||document.activeElement===host)){const target=[...host.querySelectorAll('[data-line-customer]')].find(el=>el.dataset.lineCustomer===focusedCustomerId);(target||$('crmLineChatSearch'))?.focus({preventScroll:true})}
  }catch(e){
   if(requestId!==customerListRequestId)return;
   if(host){
