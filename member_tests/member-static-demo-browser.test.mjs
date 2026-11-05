@@ -46,7 +46,7 @@ try {
   };
   const pressKey = async (key, code, virtualKey) => {
     for (const type of ['keyDown', 'keyUp']) {
-      const enterText = type === 'keyDown' && key === 'Enter' ? { text: '\\r', unmodifiedText: '\\r' } : {};
+      const enterText = type === 'keyDown' && key === 'Enter' ? { text: '\r', unmodifiedText: '\r' } : {};
       await send('Input.dispatchKeyEvent', { type, key, code, windowsVirtualKeyCode: virtualKey, ...enterText });
     }
   };
