@@ -138,6 +138,15 @@ try {
     assert.ok(Math.max(shopSize.doc,shopSize.body)<=shopSize.viewport+1,width+': SHOP overflow');
     await pressKey('Enter', 'Enter', 13);
     assert.equal(await evaluate("document.querySelector('#member-panel-shop details.shop-preview').open"), false, width + ': SHOP keyboard collapse');
+    // The second sample product must also be keyboard operable without changing the first.
+    await evaluate("document.querySelectorAll('#member-panel-shop details.shop-preview summary')[1].focus()");
+    await pressKey(' ', 'Space', 32);
+    const secondShopOpen = await evaluate("({expanded:[...document.querySelectorAll('#member-panel-shop details.shop-preview')].map(x=>x.open),focus:document.activeElement===document.querySelectorAll('#member-panel-shop details.shop-preview summary')[1]})");
+    assert.deepEqual(secondShopOpen, { expanded: [false, true], focus: true }, width + ': second SHOP keyboard expand and focus');
+    const secondShopSize = await state();
+    assert.ok(Math.max(secondShopSize.doc,secondShopSize.body)<=secondShopSize.viewport+1,width+': second SHOP overflow');
+    await pressKey(' ', 'Space', 32);
+    assert.deepEqual(await evaluate("[...document.querySelectorAll('#member-panel-shop details.shop-preview')].map(x=>x.open)"), [false, false], width + ': second SHOP keyboard collapse');
     await evaluate("document.getElementById('member-tab-my').click();document.querySelector('#member-panel-my .my-info summary').focus()");
     await pressKey('Enter', 'Enter', 13);
     assert.equal(await evaluate("document.querySelector('#member-panel-my .my-info').open"), true, width + ': MY keyboard expand');
