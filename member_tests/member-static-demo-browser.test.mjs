@@ -44,6 +44,11 @@ try {
     assert.ok(!r.exceptionDetails, 'Browser JavaScript error: ' + JSON.stringify(r.exceptionDetails));
     return r.result.value;
   };
+  const pressKey = async (key, code, virtualKey) => {
+    for (const type of ['keyDown', 'keyUp']) {
+      await send('Input.dispatchKeyEvent', { type, key, code, windowsVirtualKeyCode: virtualKey });
+    }
+  };
   await send('Page.enable');
   await send('Runtime.enable');
   for (const width of [320, 375, 390, 768]) {
@@ -84,13 +89,15 @@ try {
     const memoryStart = await evaluate("({indexVisible:!document.getElementById('memory-index').hidden,detailHidden:document.getElementById('memory-detail').hidden,entryHeight:document.querySelector('[data-memory=family]').getBoundingClientRect().height})");
     assert.ok(memoryStart.indexVisible && memoryStart.detailHidden, width + ': MEMORIES initial state');
     assert.ok(memoryStart.entryHeight >= 44, width + ': MEMORIES tap target');
-    await evaluate("document.querySelector('[data-memory=family]').click()");
+    await evaluate("document.querySelector('[data-memory=family]').focus()");
+    await pressKey('Enter', 'Enter', 13);
     const detail = await evaluate("({indexHidden:document.getElementById('memory-index').hidden,detailVisible:!document.getElementById('memory-detail').hidden,title:document.getElementById('memory-detail-title').textContent,focus:document.activeElement?.id,actionHeight:document.getElementById('memory-to-create').getBoundingClientRect().height})");
     assert.ok(detail.indexHidden && detail.detailVisible, width + ': MEMORY detail visibility');
     assert.equal(detail.title, 'Family', width + ': MEMORY detail title');
     assert.equal(detail.focus, 'memory-detail', width + ': MEMORY detail focus');
     assert.ok(detail.actionHeight >= 44, width + ': MEMORY CTA target');
-    await evaluate("document.getElementById('memory-to-create').click()");
+    await evaluate("document.getElementById('memory-to-create').focus()");
+    await pressKey('Enter', 'Enter', 13);
     const transferred = await evaluate("({tab:document.querySelector('[role=tab][aria-selected=true]').dataset.tab,memory:document.getElementById('create-memory-select').value,editor:!document.getElementById('create-editor').hidden,focus:document.activeElement?.id})");
     assert.deepEqual(transferred, { tab: 'create', memory: 'family', editor: true, focus: 'create-memory-select' }, width + ': MEMORY to CREATE transfer');
     const picker = await evaluate("({selectHeight:document.getElementById('create-memory-select').getBoundingClientRect().height,formats:[...document.querySelectorAll('[data-create-format]')].map(x=>({name:x.dataset.createFormat,height:x.getBoundingClientRect().height,pressed:x.getAttribute('aria-pressed')}))})");
@@ -98,18 +105,22 @@ try {
     assert.deepEqual(picker.formats.map(x=>x.name), ['wallpaper', 'movie', 'story'], width + ': CREATE formats');
     assert.ok(picker.formats.every(x=>x.height >= 44), width + ': CREATE format targets');
     assert.deepEqual(picker.formats.map(x=>x.pressed), ['true', 'false', 'false'], width + ': default format');
-    await evaluate("document.querySelector('[data-create-format=movie]').click()");
+    await evaluate("document.querySelector('[data-create-format=movie]').focus()");
+    await pressKey(' ', 'Space', 32);
     const newFormats = await evaluate("[...document.querySelectorAll('[data-create-format]')].map(x=>x.getAttribute('aria-pressed'))");
     assert.deepEqual(newFormats, ['false', 'true', 'false'], width + ': selected format');
-    await evaluate("document.getElementById('create-preview-open').click()");
+    await evaluate("document.getElementById('create-preview-open').focus()");
+    await pressKey('Enter', 'Enter', 13);
     const preview = await evaluate("({editorHidden:document.getElementById('create-editor').hidden,previewVisible:!document.getElementById('create-preview').hidden,title:document.getElementById('create-preview-title').textContent,summary:document.getElementById('create-preview-summary').textContent,focus:document.activeElement?.id})");
     assert.ok(preview.editorHidden && preview.previewVisible, width + ': CREATE preview visibility');
     assert.ok(preview.title.includes('Memory Movie') && preview.summary.includes('Family'), width + ': CREATE preview text');
     assert.equal(preview.focus, 'create-preview', width + ': CREATE preview focus');
-    await evaluate("document.getElementById('create-preview-back').click()");
+    await evaluate("document.getElementById('create-preview-back').focus()");
+    await pressKey('Enter', 'Enter', 13);
     const restored = await evaluate("({editorVisible:!document.getElementById('create-editor').hidden,previewHidden:document.getElementById('create-preview').hidden,focus:document.activeElement?.id})");
     assert.deepEqual(restored, { editorVisible: true, previewHidden: true, focus: 'create-preview-open' }, width + ': CREATE edit restore');
-    await evaluate("document.getElementById('member-tab-memories').click();document.getElementById('memory-back').click()");
+    await evaluate("document.getElementById('member-tab-memories').click();document.getElementById('memory-back').focus()");
+    await pressKey('Enter', 'Enter', 13);
     const returned = await evaluate("({indexVisible:!document.getElementById('memory-index').hidden,detailHidden:document.getElementById('memory-detail').hidden,focus:document.activeElement?.dataset.memory,viewport:document.documentElement.clientWidth,scrollWidth:Math.max(document.documentElement.scrollWidth,document.body.scrollWidth)})");
     assert.ok(returned.indexVisible && returned.detailHidden, width + ': memory back');
     assert.equal(returned.focus, 'family', width + ': memory back focus');
