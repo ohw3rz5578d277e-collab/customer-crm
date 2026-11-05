@@ -228,6 +228,10 @@ try{
    await page.locator('#crmLineChatListRetry').click();
    await page.waitForFunction(()=>document.querySelectorAll('#crmLineChatCustomers [data-line-customer]').length===101);
    assert.equal(await page.locator('#crmLineChatCustomers [data-line-customer]').count(),101,'LINE list does not recover from retry button');
+   await page.locator('#crmLineChatCustomers [data-line-customer="26000101"]').focus();
+   await page.evaluate(()=>window.__crmOwnerLineChat.loadCustomers(true));
+   assert.equal(await page.evaluate(()=>document.activeElement?.getAttribute('data-line-customer')),'26000101','LINE list reload must restore keyboard focus to the same customer');
+   assert.equal(await page.locator('#crmLineChatCustomers [data-line-customer]').count(),101,'LINE list reload changed results');
   }
   await page.locator('#crmLineChatCustomers [data-line-customer="26000101"]').click();
   await page.waitForFunction(()=>document.querySelectorAll('#crmLineChatMessages .crm-line-chat-row').length===2);
