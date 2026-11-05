@@ -228,6 +228,20 @@ try{
    await page.locator('#crmLineChatListRetry').click();
    await page.waitForFunction(()=>document.querySelectorAll('#crmLineChatCustomers [data-line-customer]').length===101);
    assert.equal(await page.locator('#crmLineChatCustomers [data-line-customer]').count(),101,'LINE list does not recover from retry button');
+   await page.locator('#crmLineChatCustomers [data-line-customer="26000101"]').focus();
+   await page.evaluate(()=>window.__crmOwnerLineChat.loadCustomers(true));
+   assert.equal(await page.evaluate(()=>document.activeElement?.getAttribute('data-line-customer')),'26000101','LINE list reload must restore keyboard focus to the same customer');
+   assert.equal(await page.locator('#crmLineChatCustomers [data-line-customer]').count(),101,'LINE list reload changed results');
+   await page.request.get(origin+'/__fixture/delay-next-line-list');
+   const focusReloadRequest=page.waitForRequest(req=>req.url().includes('/api/customer360/customers?page=1&page_size=100&line=linked'));
+   await page.locator('#crmLineChatCustomers [data-line-customer="26000101"]').focus();
+   await page.evaluate(()=>{void window.__crmOwnerLineChat.loadCustomers(true)});
+   await focusReloadRequest;
+   await page.locator('#crmLineChatSearch').focus();
+   await page.waitForFunction(()=>document.getElementById('crmLineChatCustomers')?.innerText.includes('LINE連携済みの顧客が見つかりません。'));
+   assert.equal(await page.evaluate(()=>document.activeElement?.id),'crmLineChatSearch','LINE list reload stole focus from a different control');
+   await page.evaluate(()=>window.__crmOwnerLineChat.loadCustomers(true));
+   await page.waitForFunction(()=>document.querySelectorAll('#crmLineChatCustomers [data-line-customer]').length===101);
   }
   await page.locator('#crmLineChatCustomers [data-line-customer="26000101"]').click();
   await page.waitForFunction(()=>document.querySelectorAll('#crmLineChatMessages .crm-line-chat-row').length===2);

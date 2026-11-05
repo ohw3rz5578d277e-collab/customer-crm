@@ -55,11 +55,12 @@ async function fetchCustomers(){
  throw Error('LINE連携済み顧客のページ数が上限を超えました');
 }
 async function loadCustomers(force=false){
- if(state.loading&&!force)return;const requestId=++customerListRequestId;state.loading=true;ensure();const host=$('crmLineChatCustomers');if(host)host.innerHTML='<div class="crm-line-chat-empty">読み込み中…</div>';
+ if(state.loading&&!force)return;const requestId=++customerListRequestId;state.loading=true;ensure();const host=$('crmLineChatCustomers');const focusedCustomerId=host?.contains(document.activeElement)?document.activeElement?.closest('[data-line-customer]')?.dataset.lineCustomer:null;if(host)host.innerHTML='<div class="crm-line-chat-empty">読み込み中…</div>';
  try{
   const customers=(await fetchCustomers()).filter(c=>c.line_linked!==false);
   if(requestId!==customerListRequestId)return;
   state.customers=customers;filter();
+  if(focusedCustomerId&&(document.activeElement===document.body||document.activeElement===host)){const target=[...host.querySelectorAll('[data-line-customer]')].find(el=>el.dataset.lineCustomer===focusedCustomerId);(target||$('crmLineChatSearch'))?.focus({preventScroll:true})}
  }catch(e){
   if(requestId!==customerListRequestId)return;
   if(host){
