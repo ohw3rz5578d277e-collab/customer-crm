@@ -232,6 +232,15 @@ try{
   await page.locator('#crmLineChatCustomers [data-line-customer="26000101"]').click();
   await page.waitForFunction(()=>document.querySelectorAll('#crmLineChatMessages .crm-line-chat-row').length===2);
   if(mobile){
+   assert.equal(await page.evaluate(()=>document.activeElement?.id),'crmLineChatBack',viewport.width+': opening conversation must focus visible back control');
+   await page.locator('#crmLineChatBack').click();
+   assert.equal(await page.locator('#crmLineChatCustomers [data-line-customer="26000101"]').isVisible(),true,viewport.width+': back must expose LINE customer list');
+   assert.equal(await page.evaluate(()=>document.activeElement?.getAttribute('data-line-customer')),'26000101',viewport.width+': back must restore focus to selected customer');
+   await page.keyboard.press('Enter');
+   await page.waitForFunction(()=>document.querySelectorAll('#crmLineChatMessages .crm-line-chat-row').length===2);
+   assert.equal(await page.evaluate(()=>document.activeElement?.id),'crmLineChatBack',viewport.width+': keyboard reopening must focus conversation back control');
+  }
+  if(mobile){
    const conversationControls=await page.evaluate(()=>['#crmLineChatRefresh','#crmLineChatBack'].map(selector=>{const el=document.querySelector(selector);return{selector,height:el?.getBoundingClientRect().height||0}}));
    for(const target of conversationControls)assert.ok(target.height>=44,viewport.width+': LINE conversation control too small '+JSON.stringify(target));
   }
