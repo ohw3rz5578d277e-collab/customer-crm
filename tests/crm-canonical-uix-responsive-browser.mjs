@@ -17,25 +17,43 @@ assert.equal(html.includes('const navObserver=new MutationObserver'),false,'cano
 assert.equal(html.includes("new MutationObserver(()=>reconcileDesktopLayout()).observe(document.documentElement"),false,'legacy desktop hotfix must not install a permanent document-wide observer');
 const out='artifacts/crm-canonical-uix-responsive';fs.mkdirSync(out,{recursive:true});
 const requests=[],notFoundRequests=[];
+let delayNextLineHistory=false,delayNextLineList=false,failNextLineList=false,malformedNextLineList=false;
+let holdNextLineAvatar=false,releaseHeldLineAvatar=null;
 function send(res,status,data,type='application/json; charset=utf-8'){res.writeHead(status,{'content-type':type,'cache-control':'no-store'});res.end(type.startsWith('application/json')?JSON.stringify(data):data)}
-const server=http.createServer((req,res)=>{
+const server=http.createServer(async(req,res)=>{
  const u=new URL(req.url,'http://127.0.0.1');requests.push(req.method+' '+u.pathname+u.search);
  if(u.pathname==='/'||u.pathname==='/admin')return send(res,200,html,'text/html; charset=utf-8');
  if(u.pathname==='/api/customer360/marketing-home')return send(res,200,{ok:true,kpis:{customers:2,average_realized_ltv:81500,repeat_rate_pct:50,vip_high_ltv:1,event_90d:2,dormant_180:0,line_link_rate_pct:100,line_additions_this_month:7,approach_this_month:2},top_opportunities:customers,facets});
+ if(u.pathname==='/__fixture/delay-next-line-list'){delayNextLineList=true;return send(res,200,{ok:true})}
+ if(u.pathname==='/__fixture/fail-next-line-list'){failNextLineList=true;return send(res,200,{ok:true})}
+ if(u.pathname==='/__fixture/malformed-next-line-list'){malformedNextLineList=true;return send(res,200,{ok:true})}
  if(u.pathname==='/api/customer360/customers'){
   if(u.searchParams.get('line')==='linked'){
    const page=Number(u.searchParams.get('page')||1);
-   if(page===1)return send(res,200,{ok:true,total:101,all_total:101,page:1,page_size:100,has_next:true,items:linePage1,facets,meta:{privacy_safe_list_dto:true}});
+   if(page===1){
+    if(delayNextLineList){delayNextLineList=false;await new Promise(resolve=>setTimeout(resolve,700));return send(res,200,{ok:true,total:0,all_total:0,page:1,page_size:100,has_next:false,items:[],facets})}
+    if(failNextLineList){failNextLineList=false;return send(res,200,{ok:false,error:'sensitive_internal_database_failure_do_not_render'})}
+    if(malformedNextLineList){malformedNextLineList=false;return send(res,200,{ok:true,has_next:false,items:null})}
+    return send(res,200,{ok:true,total:101,all_total:101,page:1,page_size:100,has_next:true,items:linePage1,facets,meta:{privacy_safe_list_dto:true}});
+   }
    if(page===2)return send(res,200,{ok:true,total:101,all_total:101,page:2,page_size:100,has_next:false,items:[linePage2Customer],facets,meta:{privacy_safe_list_dto:true}});
   }
   return send(res,200,{ok:true,total:2,all_total:2,page:1,page_size:100,has_next:false,items:customers,facets,meta:{privacy_safe_list_dto:true}});
  }
  if(u.pathname==='/api/customer360/analytics')return send(res,200,{ok:true,available:true,period:{from:'2026-09-01',to:'2026-09-30',span_days:30},current:{revenue:163000,completed_shoots:4,unique_customers:2,average_order_value:40750,repeat_customers_in_period:1,repeat_rate_pct:50,line_additions:7,genres:[],monthly:[]},previous:{line_additions:5},change_pct:{line_additions:40}});
  if(u.pathname==='/api/customer360/approach-queue')return send(res,200,{ok:true,items:[],summary:{total:0,ready:0,review_required:0,opted_out:0}});
- if(u.pathname==='/api/customers/26000101/line-history')return send(res,200,{ok:true,connected:true,count:2,messages:[{direction:'inbound',message_text:'七五三の撮影について相談したいです',sent_at:'2026-09-14 10:00'},{direction:'outbound',message_text:'ありがとうございます。候補日をご案内します。',sent_at:'2026-09-14 10:03'}]});
+ if(u.pathname==='/__fixture/delay-next-line-history'){delayNextLineHistory=true;return send(res,200,{ok:true})}
+ if(u.pathname==='/api/customers/26000101/line-history'){if(delayNextLineHistory){delayNextLineHistory=false;await new Promise(resolve=>setTimeout(resolve,650))}return send(res,200,{ok:true,connected:true,count:2,messages:[{direction:'inbound',message_text:'七五三の撮影について相談したいです',sent_at:'2026-09-14 10:00'},{direction:'outbound',message_text:'ありがとうございます。候補日をご案内します。',sent_at:'2026-09-14 10:03'}]})}
  if(u.pathname==='/api/customers/26000102/line-history')return send(res,200,{ok:true,connected:true,count:0,messages:[]});
  if(u.pathname==='/api/customers/26999999/line-history')return send(res,200,{ok:false,error:'line_history_unavailable'});
- if(u.pathname.startsWith('/api/customer360/media/')){const id=decodeURIComponent(u.pathname.split('/').pop());return send(res,200,{ok:true,media:{customer_id:id,avatar_data_url:'',avatar_updated_at:'',latest_delivery_link:null,delivery_links:[]}})}
+ if(u.pathname==='/__fixture/hold-next-line-avatar'){holdNextLineAvatar=true;return send(res,200,{ok:true})}
+ if(u.pathname==='/__fixture/release-line-avatar'){releaseHeldLineAvatar?.();releaseHeldLineAvatar=null;return send(res,200,{ok:true})}
+ if(u.pathname.startsWith('/api/customer360/media/')){
+  const id=decodeURIComponent(u.pathname.split('/').pop());let held=false;
+  if(id==='26000101'&&holdNextLineAvatar){holdNextLineAvatar=false;held=true;await new Promise(resolve=>{releaseHeldLineAvatar=resolve})}
+  const avatar=held?'data:image/svg+xml,%3Csvg%20xmlns=%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width=%221%22%20height=%221%22%3E%3C%2Fsvg%3E':'';
+  return send(res,200,{ok:true,media:{customer_id:id,avatar_data_url:avatar,avatar_updated_at:'',latest_delivery_link:null,delivery_links:[]}})
+ }
  if(u.pathname.startsWith('/api/customer360/customer/')){const id=decodeURIComponent(u.pathname.split('/').pop());const c=customers.find(x=>x.customer_id===id)||customers[0];return send(res,200,{ok:true,customer:{...c,address:{},family:[],opportunities:[],reservations:[],line_history:[],marketing_history:[],consent:{},raw:{}}})}
  notFoundRequests.push(req.method+' '+u.pathname+u.search);
  return send(res,404,{ok:false,error:'not_found'});
@@ -185,10 +203,66 @@ try{
   await page.locator('#crmLineChatSearch').fill('26999999');
   await page.waitForFunction(()=>document.querySelectorAll('#crmLineChatCustomers [data-line-customer]').length===1);
   assert.equal(await page.locator('#crmLineChatCustomers [data-line-customer="26999999"]').isVisible(),true,viewport.width+': page-2 LINE customer missing from local search');
+  if(viewport.width===390){
+   await page.evaluate(()=>window.__crmOwnerLineChat.loadCustomers(true));
+   assert.equal((await page.locator('#crmLineChatSearch').inputValue()).trim(),'26999999','LINE list refresh cleared search input');
+   assert.equal(await page.locator('#crmLineChatCustomers [data-line-customer]').count(),1,'LINE list refresh lost active search filter');
+  }
   await page.locator('#crmLineChatSearch').fill('');
   await page.waitForFunction(()=>document.querySelectorAll('#crmLineChatCustomers [data-line-customer]').length===101);
+  if(viewport.width===390){
+   await page.request.get(origin+'/__fixture/delay-next-line-list');
+   const delayedRequest=page.waitForRequest(req=>req.url().includes('/api/customer360/customers?page=1&page_size=100&line=linked'));
+   await page.evaluate(()=>{void window.__crmOwnerLineChat.loadCustomers(true)});
+   await delayedRequest;
+   await page.waitForTimeout(80);
+   await page.evaluate(()=>window.__crmOwnerLineChat.loadCustomers(true));
+   await page.waitForFunction(()=>document.querySelectorAll('#crmLineChatCustomers [data-line-customer]').length===101);
+   await page.waitForTimeout(800);
+   assert.equal(await page.locator('#crmLineChatCustomers [data-line-customer]').count(),101,'outdated LINE list replaced newer full results');
+   assert.equal(await page.evaluate(()=>window.__crmOwnerLineChat.getState().loading),false,'older LINE list request changed current loading state');
+   await page.request.get(origin+'/__fixture/fail-next-line-list');
+   await page.evaluate(()=>window.__crmOwnerLineChat.loadCustomers(true));
+   const listFailureText=await page.locator('#crmLineChatCustomers').innerText();
+   assert.ok(listFailureText.includes('一覧を取得できませんでした'),'LINE list failure lacks user-friendly guidance');
+   assert.equal(listFailureText.includes('sensitive_internal_database_failure'),false,'raw LINE list error exposed');
+   assert.equal(await page.locator('#crmLineChatListRetry').isVisible(),true,'failed LINE list lacks a visible retry control');
+   await page.locator('#crmLineChatListRetry').click();
+   await page.waitForFunction(()=>document.querySelectorAll('#crmLineChatCustomers [data-line-customer]').length===101);
+   assert.equal(await page.locator('#crmLineChatCustomers [data-line-customer]').count(),101,'LINE list does not recover from retry button');
+   await page.request.get(origin+'/__fixture/malformed-next-line-list');
+   await page.evaluate(()=>window.__crmOwnerLineChat.loadCustomers(true));
+   assert.ok((await page.locator('#crmLineChatCustomers').innerText()).includes('一覧を取得できませんでした'),'malformed LINE list was incorrectly reported as zero linked customers');
+   assert.equal(await page.locator('#crmLineChatListRetry').isVisible(),true,'malformed LINE list must show a retry action');
+   await page.locator('#crmLineChatListRetry').click();
+   await page.waitForFunction(()=>document.querySelectorAll('#crmLineChatCustomers [data-line-customer]').length===101);
+   assert.equal(await page.locator('#crmLineChatCustomers [data-line-customer]').count(),101,'LINE list did not recover after malformed payload');
+   await page.locator('#crmLineChatCustomers [data-line-customer="26000101"]').focus();
+   await page.evaluate(()=>window.__crmOwnerLineChat.loadCustomers(true));
+   assert.equal(await page.evaluate(()=>document.activeElement?.getAttribute('data-line-customer')),'26000101','LINE list reload must restore keyboard focus to the same customer');
+   assert.equal(await page.locator('#crmLineChatCustomers [data-line-customer]').count(),101,'LINE list reload changed results');
+   await page.request.get(origin+'/__fixture/delay-next-line-list');
+   const focusReloadRequest=page.waitForRequest(req=>req.url().includes('/api/customer360/customers?page=1&page_size=100&line=linked'));
+   await page.locator('#crmLineChatCustomers [data-line-customer="26000101"]').focus();
+   await page.evaluate(()=>{void window.__crmOwnerLineChat.loadCustomers(true)});
+   await focusReloadRequest;
+   await page.locator('#crmLineChatSearch').focus();
+   await page.waitForFunction(()=>document.getElementById('crmLineChatCustomers')?.innerText.includes('LINE連携済みの顧客が見つかりません。'));
+   assert.equal(await page.evaluate(()=>document.activeElement?.id),'crmLineChatSearch','LINE list reload stole focus from a different control');
+   await page.evaluate(()=>window.__crmOwnerLineChat.loadCustomers(true));
+   await page.waitForFunction(()=>document.querySelectorAll('#crmLineChatCustomers [data-line-customer]').length===101);
+  }
   await page.locator('#crmLineChatCustomers [data-line-customer="26000101"]').click();
   await page.waitForFunction(()=>document.querySelectorAll('#crmLineChatMessages .crm-line-chat-row').length===2);
+  if(mobile){
+   assert.equal(await page.evaluate(()=>document.activeElement?.id),'crmLineChatBack',viewport.width+': opening conversation must focus visible back control');
+   await page.locator('#crmLineChatBack').click();
+   assert.equal(await page.locator('#crmLineChatCustomers [data-line-customer="26000101"]').isVisible(),true,viewport.width+': back must expose LINE customer list');
+   assert.equal(await page.evaluate(()=>document.activeElement?.getAttribute('data-line-customer')),'26000101',viewport.width+': back must restore focus to selected customer');
+   await page.keyboard.press('Enter');
+   await page.waitForFunction(()=>document.querySelectorAll('#crmLineChatMessages .crm-line-chat-row').length===2);
+   assert.equal(await page.evaluate(()=>document.activeElement?.id),'crmLineChatBack',viewport.width+': keyboard reopening must focus conversation back control');
+  }
   if(mobile){
    const conversationControls=await page.evaluate(()=>['#crmLineChatRefresh','#crmLineChatBack'].map(selector=>{const el=document.querySelector(selector);return{selector,height:el?.getBoundingClientRect().height||0}}));
    for(const target of conversationControls)assert.ok(target.height>=44,viewport.width+': LINE conversation control too small '+JSON.stringify(target));
@@ -208,6 +282,40 @@ try{
   assert.equal(/not_found|http\s*404|line_history_unavailable/i.test(lineFailureText),false,viewport.width+': raw LINE error exposed '+lineFailureText);
   await page.evaluate(()=>window.__crmOwnerLineChat.openConversation('26000101'));
   await page.waitForFunction(()=>document.querySelectorAll('#crmLineChatMessages .crm-line-chat-row').length===2);
+  if(viewport.width===390){
+   await page.request.get(origin+'/__fixture/hold-next-line-avatar');
+   const delayedAvatarRequest=page.waitForRequest(req=>req.url().includes('/api/customer360/media/26000101'));
+   await page.evaluate(()=>{void window.__crmOwnerLineChat.openConversation('26000101',true)});
+   await delayedAvatarRequest;
+   await page.waitForFunction(()=>document.querySelectorAll('#crmLineChatMessages .crm-line-chat-row').length===2,null,{timeout:4000});
+   assert.equal((await page.locator('#crmLineChatStatus').textContent()).trim(),'連携正常','LINE history waited for unrelated avatar response');
+   await page.request.get(origin+'/__fixture/release-line-avatar');
+   await page.waitForFunction(()=>!!document.querySelector('#crmLineChatHeadAvatar img[src^="data:image/svg+xml,"]'));
+   assert.equal(await page.locator('#crmLineChatMessages .crm-line-chat-row').count(),2,'avatar response erased loaded LINE history');
+   await page.request.get(origin+'/__fixture/hold-next-line-avatar');
+   const staleAvatarRequest=page.waitForRequest(req=>req.url().includes('/api/customer360/media/26000101'));
+   await page.evaluate(()=>{void window.__crmOwnerLineChat.openConversation('26000101',true)});
+   await staleAvatarRequest;
+   await page.evaluate(()=>window.__crmOwnerLineChat.openConversation('26000102'));
+   await page.waitForFunction(()=>document.getElementById('crmLineChatMessages')?.innerText.includes('LINE履歴はまだありません。'));
+   await page.request.get(origin+'/__fixture/release-line-avatar');
+   await page.waitForTimeout(120);
+   assert.equal(await page.locator('#crmLineChatHeadAvatar img').count(),0,'old customer avatar replaced selected customer');
+   assert.equal((await page.locator('#crmLineChatTitle').textContent()).trim(),'佐藤 未来','old media response changed LINE customer');
+   await page.evaluate(()=>window.__crmOwnerLineChat.openConversation('26000101'));
+   await page.waitForFunction(()=>document.querySelectorAll('#crmLineChatMessages .crm-line-chat-row').length===2);
+   await page.request.get(origin+'/__fixture/delay-next-line-history');
+   await page.evaluate(()=>{void window.__crmOwnerLineChat.openConversation('26000101',true)});
+   await page.waitForFunction(()=>document.getElementById('crmLineChatStatus')?.textContent==='取得中');
+   await page.evaluate(()=>window.__crmOwnerLineChat.openConversation('26000102'));
+   await page.waitForFunction(()=>document.getElementById('crmLineChatMessages')?.innerText.includes('LINE履歴はまだありません。'));
+   await page.waitForTimeout(800);
+   assert.equal((await page.locator('#crmLineChatTitle').textContent()).trim(),'佐藤 未来','slow previous LINE history replaced selected customer title');
+   assert.ok((await page.locator('#crmLineChatMessages').innerText()).includes('LINE履歴はまだありません。'),'slow previous LINE history replaced selected customer messages');
+   assert.equal((await page.locator('#crmLineChatStatus').textContent()).trim(),'履歴未確認','slow previous LINE history replaced selected customer status');
+   await page.evaluate(()=>window.__crmOwnerLineChat.openConversation('26000101'));
+   await page.waitForFunction(()=>document.querySelectorAll('#crmLineChatMessages .crm-line-chat-row').length===2);
+  }
   if(mobile){
    const navState=await page.evaluate(()=>({
     labels:(document.getElementById('crmOwnerMobileNav')?.innerText||'').replace(/\\s+/g,''),
