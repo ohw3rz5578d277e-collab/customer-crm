@@ -48,7 +48,8 @@ async function fetchCustomers(){
  for(let page=1;page<=1000;page++){
   const r=await fetch('/api/customer360/customers?page='+page+'&page_size=100&line=linked',{credentials:'same-origin',cache:'no-store'}),j=await r.json().catch(()=>({}));
   if(!r.ok||j.ok===false)throw Error(j.error||j.message||'顧客一覧を取得できません');
-  const items=Array.isArray(j.items)?j.items:[];
+  if(!Array.isArray(j.items))throw Error('LINE顧客一覧のレスポンス形式が正しくありません');
+  const items=j.items;
   for(const c of items){const id=String(c&&c.customer_id||'');if(id&&seen.has(id))continue;if(id)seen.add(id);all.push(c)}
   if(j.has_next!==true)return all;
  }
