@@ -17,7 +17,7 @@ assert.equal(html.includes('const navObserver=new MutationObserver'),false,'cano
 assert.equal(html.includes("new MutationObserver(()=>reconcileDesktopLayout()).observe(document.documentElement"),false,'legacy desktop hotfix must not install a permanent document-wide observer');
 const out='artifacts/crm-canonical-uix-responsive';fs.mkdirSync(out,{recursive:true});
 const requests=[],notFoundRequests=[];
-let delayNextLineHistory=false,delayNextLineList=false,failNextLineList=false,malformedNextLineList=false;
+let delayNextLineHistory=false,delayNextLineList=false,failNextLineList=false,malformedNextLineList=false,stalledNextLineList=null;
 let holdNextLineAvatar=false,releaseHeldLineAvatar=null;
 function send(res,status,data,type='application/json; charset=utf-8'){res.writeHead(status,{'content-type':type,'cache-control':'no-store'});res.end(type.startsWith('application/json')?JSON.stringify(data):data)}
 const server=http.createServer(async(req,res)=>{
@@ -27,6 +27,7 @@ const server=http.createServer(async(req,res)=>{
  if(u.pathname==='/__fixture/delay-next-line-list'){delayNextLineList=true;return send(res,200,{ok:true})}
  if(u.pathname==='/__fixture/fail-next-line-list'){failNextLineList=true;return send(res,200,{ok:true})}
  if(u.pathname==='/__fixture/malformed-next-line-list'){malformedNextLineList=true;return send(res,200,{ok:true})}
+ if(u.pathname==='/__fixture/stall-next-line-list'){stalledNextLineList=u.searchParams.get('mode')||'empty';return send(res,200,{ok:true})}
  if(u.pathname==='/api/customer360/customers'){
   if(u.searchParams.get('line')==='linked'){
    const page=Number(u.searchParams.get('page')||1);
@@ -36,7 +37,10 @@ const server=http.createServer(async(req,res)=>{
     if(malformedNextLineList){malformedNextLineList=false;return send(res,200,{ok:true,has_next:false,items:null})}
     return send(res,200,{ok:true,total:101,all_total:101,page:1,page_size:100,has_next:true,items:linePage1,facets,meta:{privacy_safe_list_dto:true}});
    }
-   if(page===2)return send(res,200,{ok:true,total:101,all_total:101,page:2,page_size:100,has_next:false,items:[linePage2Customer],facets,meta:{privacy_safe_list_dto:true}});
+   if(page===2){
+     if(stalledNextLineList){const mode=stalledNextLineList;stalledNextLineList=null;return send(res,200,{ok:true,total:101,all_total:101,page:2,page_size:100,has_next:true,items:mode==='duplicate'?linePage1:[],facets})}
+     return send(res,200,{ok:true,total:101,all_total:101,page:2,page_size:100,has_next:false,items:[linePage2Customer],facets,meta:{privacy_safe_list_dto:true}});
+    }
   }
   return send(res,200,{ok:true,total:2,all_total:2,page:1,page_size:100,has_next:false,items:customers,facets,meta:{privacy_safe_list_dto:true}});
  }
@@ -237,6 +241,16 @@ try{
    await page.locator('#crmLineChatListRetry').click();
    await page.waitForFunction(()=>document.querySelectorAll('#crmLineChatCustomers [data-line-customer]').length===101);
    assert.equal(await page.locator('#crmLineChatCustomers [data-line-customer]').count(),101,'LINE list did not recover after malformed payload');
+   for(const mode of ['empty','duplicate']){
+    const thirdPageBefore=requests.filter(x=>x.includes('/api/customer360/customers?page=3&page_size=100&line=linked')).length;
+    await page.request.get(origin+'/__fixture/stall-next-line-list?mode='+mode);
+    await page.evaluate(()=>window.__crmOwnerLineChat.loadCustomers(true));
+    assert.ok((await page.locator('#crmLineChatCustomers').innerText()).includes('一覧を取得できませんでした'),'stalled LINE list pagination hid fetch error: '+mode);
+    assert.equal(await page.locator('#crmLineChatListRetry').isVisible(),true,'stalled LINE list pagination lacks retry: '+mode);
+    assert.equal(requests.filter(x=>x.includes('/api/customer360/customers?page=3&page_size=100&line=linked')).length,thirdPageBefore,'stalled LINE pagination sent an unnecessary third request: '+mode);
+    await page.locator('#crmLineChatListRetry').click();
+    await page.waitForFunction(()=>document.querySelectorAll('#crmLineChatCustomers [data-line-customer]').length===101);
+   }
    await page.locator('#crmLineChatCustomers [data-line-customer="26000101"]').focus();
    await page.evaluate(()=>window.__crmOwnerLineChat.loadCustomers(true));
    assert.equal(await page.evaluate(()=>document.activeElement?.getAttribute('data-line-customer')),'26000101','LINE list reload must restore keyboard focus to the same customer');
