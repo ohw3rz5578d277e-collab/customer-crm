@@ -110,7 +110,9 @@ async function openConversation(id,refresh=false){
   const j=await historyRes.json().catch(()=>({}));
   if(requestId!==conversationRequestId)return;
   if(!historyRes.ok||j.ok===false)throw Error(j.error||j.message||'line_history_unavailable');
-  renderMessages(j,c)
+  const messages=Array.isArray(j.messages)?j.messages:Array.isArray(j.items)?j.items:null;
+  if(!messages)throw Error('line_history_invalid_payload');
+  renderMessages({...j,messages},c)
  }catch(e){
   if(requestId!==conversationRequestId)return;
   console.warn('CRM_LINE_HISTORY_READ_FAILED');

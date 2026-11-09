@@ -17,7 +17,7 @@ assert.equal(html.includes('const navObserver=new MutationObserver'),false,'cano
 assert.equal(html.includes("new MutationObserver(()=>reconcileDesktopLayout()).observe(document.documentElement"),false,'legacy desktop hotfix must not install a permanent document-wide observer');
 const out='artifacts/crm-canonical-uix-responsive';fs.mkdirSync(out,{recursive:true});
 const requests=[],notFoundRequests=[];
-let delayNextLineHistory=false,delayNextLineList=false,failNextLineList=false,malformedNextLineList=false,stalledNextLineList=null;
+let delayNextLineHistory=false,delayNextLineList=false,failNextLineList=false,malformedNextLineList=false,stalledNextLineList=null,malformedNextLineHistory=null;
 let holdNextLineAvatar=false,releaseHeldLineAvatar=null;
 function send(res,status,data,type='application/json; charset=utf-8'){res.writeHead(status,{'content-type':type,'cache-control':'no-store'});res.end(type.startsWith('application/json')?JSON.stringify(data):data)}
 const server=http.createServer(async(req,res)=>{
@@ -47,7 +47,8 @@ const server=http.createServer(async(req,res)=>{
  if(u.pathname==='/api/customer360/analytics')return send(res,200,{ok:true,available:true,period:{from:'2026-09-01',to:'2026-09-30',span_days:30},current:{revenue:163000,completed_shoots:4,unique_customers:2,average_order_value:40750,repeat_customers_in_period:1,repeat_rate_pct:50,line_additions:7,genres:[],monthly:[]},previous:{line_additions:5},change_pct:{line_additions:40}});
  if(u.pathname==='/api/customer360/approach-queue')return send(res,200,{ok:true,items:[],summary:{total:0,ready:0,review_required:0,opted_out:0}});
  if(u.pathname==='/__fixture/delay-next-line-history'){delayNextLineHistory=true;return send(res,200,{ok:true})}
- if(u.pathname==='/api/customers/26000101/line-history'){if(delayNextLineHistory){delayNextLineHistory=false;await new Promise(resolve=>setTimeout(resolve,650))}return send(res,200,{ok:true,connected:true,count:2,messages:[{direction:'inbound',message_text:'七五三の撮影について相談したいです',sent_at:'2026-09-14 10:00'},{direction:'outbound',message_text:'ありがとうございます。候補日をご案内します。',sent_at:'2026-09-14 10:03'}]})}
+ if(u.pathname==='/__fixture/malformed-next-line-history'){malformedNextLineHistory=u.searchParams.get('shape')||'missing';return send(res,200,{ok:true})}
+ if(u.pathname==='/api/customers/26000101/line-history'){if(malformedNextLineHistory){const shape=malformedNextLineHistory;malformedNextLineHistory=null;return send(res,200,shape==='object'?{ok:true,connected:true,messages:{unexpected:'object'}}:{ok:true,connected:true})}if(delayNextLineHistory){delayNextLineHistory=false;await new Promise(resolve=>setTimeout(resolve,650))}return send(res,200,{ok:true,connected:true,count:2,messages:[{direction:'inbound',message_text:'七五三の撮影について相談したいです',sent_at:'2026-09-14 10:00'},{direction:'outbound',message_text:'ありがとうございます。候補日をご案内します。',sent_at:'2026-09-14 10:03'}]})}
  if(u.pathname==='/api/customers/26000102/line-history')return send(res,200,{ok:true,connected:true,count:0,messages:[]});
  if(u.pathname==='/api/customers/26999999/line-history')return send(res,200,{ok:false,error:'line_history_unavailable'});
  if(u.pathname==='/__fixture/hold-next-line-avatar'){holdNextLineAvatar=true;return send(res,200,{ok:true})}
@@ -297,6 +298,16 @@ try{
   await page.evaluate(()=>window.__crmOwnerLineChat.openConversation('26000101'));
   await page.waitForFunction(()=>document.querySelectorAll('#crmLineChatMessages .crm-line-chat-row').length===2);
   if(viewport.width===390){
+   for(const shape of ['missing','object']){
+    await page.request.get(origin+'/__fixture/malformed-next-line-history?shape='+shape);
+    await page.evaluate(()=>window.__crmOwnerLineChat.openConversation('26000101',true));
+    assert.ok((await page.locator('#crmLineChatMessages').innerText()).includes('LINE履歴を取得できませんでした。再取得してください。'),'malformed LINE history was misreported as empty: '+shape);
+    assert.equal(await page.locator('#crmLineChatMessages .crm-line-chat-row').count(),0,'malformed LINE history rendered fake messages: '+shape);
+    assert.equal((await page.locator('#crmLineChatStatus').textContent()).trim(),'要確認','malformed LINE history showed connected status: '+shape);
+    await page.locator('#crmLineChatRefresh').click();
+    await page.waitForFunction(()=>document.querySelectorAll('#crmLineChatMessages .crm-line-chat-row').length===2);
+    assert.equal((await page.locator('#crmLineChatStatus').textContent()).trim(),'連携正常','LINE history did not recover after retry: '+shape);
+   }
    await page.request.get(origin+'/__fixture/hold-next-line-avatar');
    const delayedAvatarRequest=page.waitForRequest(req=>req.url().includes('/api/customer360/media/26000101'));
    await page.evaluate(()=>{void window.__crmOwnerLineChat.openConversation('26000101',true)});
