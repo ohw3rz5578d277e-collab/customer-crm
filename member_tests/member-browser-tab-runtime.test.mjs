@@ -48,7 +48,7 @@ function makeNavigation(locationName){
     getAttribute(name){return name==='data-member-tab'?this.tab:this.attrs[name]??null},
     setAttribute(name,value){this.attrs[name]=value},
     closest(selector){
-      if(selector==='[data-member-tab]')return this;
+      if(selector==='[data-member-tab]'||selector==='[data-member-tab],[data-home-go-tab],[data-my-go-tab]')return this;
       if(selector==='[role="tablist"]')return nav;
       if(selector==='[data-member-app-shell]')return root;
       return null;
