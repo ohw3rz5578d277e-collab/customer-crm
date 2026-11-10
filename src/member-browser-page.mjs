@@ -187,7 +187,7 @@ export function renderMemberBrowserApp(data,{active_tab='home'}={}){
       catalog:data.creative,
       memory_details:[]
     })),
-    shop:renderMemberShopMarkup(buildMemberShopViewModel(data.shop)),
+    shop:renderMemberShopMarkup(buildMemberShopViewModel(data.shop),{read_only_disclosure:true}),
     my:renderMemberMyMarkup(buildMemberMyViewModel(data.my))
   };
 
