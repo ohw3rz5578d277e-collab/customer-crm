@@ -18,7 +18,7 @@ export function injectOwnerLineChat(html){
   const script=String.raw`<script id="crm-owner-line-chat-script">
 (()=>{
 if(window.__crmOwnerLineChat)return;
-const $=id=>document.getElementById(id),state={customers:[],filtered:[],selected:null,loading:false,listTrusted:false,media:{}};
+const $=id=>document.getElementById(id),state={customers:[],filtered:[],selected:null,loading:false,listError:false,listTrusted:false,media:{}};
 let conversationRequestId=0,customerListRequestId=0,customerListController=null;
 function esc(v){return String(v==null?'':v).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
 function messageText(m){return m.message_text||m.text||m.message||m.body||m.content||''}
@@ -38,6 +38,12 @@ function ensure(){
 }
 function renderCustomers(){
  const host=$('crmLineChatCustomers');if(!host)return;
+ if(state.loading){host.innerHTML='<div class="crm-line-chat-empty">読み込み中…</div>';return}
+ if(state.listError){
+  host.innerHTML='<div class="crm-line-chat-empty">LINE連携済み顧客の一覧を取得できませんでした。<div><button type="button" id="crmLineChatListRetry" class="crm-line-chat-refresh" style="min-height:44px;margin-top:12px">再試行</button></div></div>';
+  $('crmLineChatListRetry')?.addEventListener('click',()=>loadCustomers(true));
+  return;
+ }
  if(!state.filtered.length){host.innerHTML='<div class="crm-line-chat-empty">LINE連携済みの顧客が見つかりません。</div>';return}
  host.innerHTML=state.filtered.map(c=>'<button type="button" class="crm-line-chat-customer '+(state.selected?.customer_id===c.customer_id?'active':'')+'" data-line-customer="'+esc(c.customer_id)+'"><span class="crm-line-chat-avatar">'+esc((c.name||c.line_display_name||'?').slice(0,1))+'</span><span><div class="crm-line-chat-name">'+esc(c.name||c.line_display_name||'名称未設定')+'</div><div class="crm-line-chat-meta">'+esc(c.line_display_name||'LINE連携済み')+' · '+esc(c.customer_id||'')+'</div></span></button>').join('');
  host.querySelectorAll('[data-line-customer]').forEach(b=>b.onclick=()=>openConversation(b.dataset.lineCustomer));
@@ -60,18 +66,15 @@ async function fetchCustomers(signal){
  throw Error('LINE連携済み顧客のページ数が上限を超えました');
 }
 async function loadCustomers(force=false){
- if(state.loading&&!force)return;customerListController?.abort();const controller=new AbortController();customerListController=controller;const requestId=++customerListRequestId;state.loading=true;state.listTrusted=false;ensure();const host=$('crmLineChatCustomers');const focusedCustomerId=host?.contains(document.activeElement)?document.activeElement?.closest('[data-line-customer]')?.dataset.lineCustomer:null;if(host)host.innerHTML='<div class="crm-line-chat-empty">読み込み中…</div>';
+ if(state.loading&&!force)return;customerListController?.abort();const controller=new AbortController();customerListController=controller;const requestId=++customerListRequestId;state.loading=true;state.listTrusted=false;ensure();const host=$('crmLineChatCustomers');const focusedCustomerId=host?.contains(document.activeElement)?document.activeElement?.closest('[data-line-customer]')?.dataset.lineCustomer:null;renderCustomers();
  try{
   const customers=(await fetchCustomers(controller.signal)).filter(c=>c.line_linked!==false);
   if(requestId!==customerListRequestId)return;
-  state.customers=customers;state.listTrusted=true;filter();
+  state.customers=customers;state.listError=false;state.loading=false;state.listTrusted=true;filter();
   if(focusedCustomerId&&(document.activeElement===document.body||document.activeElement===host)){const target=[...host.querySelectorAll('[data-line-customer]')].find(el=>el.dataset.lineCustomer===focusedCustomerId);(target||$('crmLineChatSearch'))?.focus({preventScroll:true})}
  }catch(e){
   if(requestId!==customerListRequestId)return;
-  if(host){
-   host.innerHTML='<div class="crm-line-chat-empty">LINE連携済み顧客の一覧を取得できませんでした。<div><button type="button" id="crmLineChatListRetry" class="crm-line-chat-refresh" style="min-height:44px;margin-top:12px">再試行</button></div></div>';
-   $('crmLineChatListRetry')?.addEventListener('click',()=>loadCustomers(true));
-  }
+  state.listError=true;state.loading=false;renderCustomers();
  }finally{if(requestId===customerListRequestId){state.loading=false;customerListController=null}}
 }
 function safeEmptyMessage(data){
@@ -98,7 +101,7 @@ function renderMessages(data,c){
  host.innerHTML=arr.map(m=>'<div class="crm-line-chat-row '+(outbound(m)?'outbound':'inbound')+'"><div class="crm-line-chat-bubble">'+esc(messageText(m)||'（テキストなし）')+'<div class="crm-line-chat-time">'+esc(time(m))+'</div></div></div>').join('');host.scrollTop=host.scrollHeight;
 }
 async function openConversation(id,refresh=false){
- ensure();const c=typeof id==='string'&&/^\d{8}$/.test(id)&&state.listTrusted&&!state.loading?state.customers.find(x=>x.customer_id===id&&x.line_linked!==false):null;if(!c)return false;const requestId=++conversationRequestId;state.selected=c;renderCustomers();shell()?.setAttribute('data-chat-open','1');if(window.matchMedia('(max-width:767px)').matches)$('crmLineChatBack')?.focus({preventScroll:true});$('crmLineChatTitle').textContent=c.name||c.line_display_name||'LINE';$('crmLineChatSubtitle').textContent='LINE履歴';renderAvatar(c,state.media[id]||{});$('crmLineChatMessages').innerHTML='<div class="crm-line-chat-empty">履歴を読み込み中…</div>';const status=$('crmLineChatStatus');if(status){status.textContent='取得中';status.classList.add('off')}
+ ensure();const c=typeof id==='string'&&/^\d{8}$/.test(id)&&state.listTrusted&&!state.loading&&!state.listError?state.customers.find(x=>x.customer_id===id&&x.line_linked!==false):null;if(!c)return false;const requestId=++conversationRequestId;state.selected=c;renderCustomers();shell()?.setAttribute('data-chat-open','1');if(window.matchMedia('(max-width:767px)').matches)$('crmLineChatBack')?.focus({preventScroll:true});$('crmLineChatTitle').textContent=c.name||c.line_display_name||'LINE';$('crmLineChatSubtitle').textContent='LINE履歴';renderAvatar(c,state.media[id]||{});$('crmLineChatMessages').innerHTML='<div class="crm-line-chat-empty">履歴を読み込み中…</div>';const status=$('crmLineChatStatus');if(status){status.textContent='取得中';status.classList.add('off')}
  // Profile media is optional: never delay text history or convert a media failure into a history error.
  void fetch('/api/customer360/media/'+encodeURIComponent(id),{credentials:'same-origin',cache:'no-store'})
   .then(async res=>{
@@ -123,7 +126,7 @@ async function openConversation(id,refresh=false){
   $('crmLineChatMessages').innerHTML='<div class="crm-line-chat-empty">'+friendlyHistoryError()+'</div>'
  }
 }
-async function open(){let tries=0;while(!ensure()&&tries++<40)await new Promise(r=>setTimeout(r,25));if(!state.customers.length)await loadCustomers();return true}
+async function open(){let tries=0;while(!ensure()&&tries++<40)await new Promise(r=>setTimeout(r,25));if(state.listError||!state.customers.length)await loadCustomers();return true}
 window.__crmOwnerLineChat={open,loadCustomers,openConversation,getState:()=>({...state})};
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>{let n=0;const t=setInterval(()=>{if(ensure()||++n>40)clearInterval(t)},25)},{once:true});else ensure();
 })();
