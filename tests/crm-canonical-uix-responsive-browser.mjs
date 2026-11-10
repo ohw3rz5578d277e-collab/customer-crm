@@ -216,6 +216,14 @@ try{
   await page.locator('#crmLineChatSearch').fill('');
   await page.waitForFunction(()=>document.querySelectorAll('#crmLineChatCustomers [data-line-customer]').length===101);
   if(viewport.width===390){
+   await page.evaluate(()=>{
+    window.__crmLineListOriginalFetch=window.fetch;
+    window.__crmLineListAbortSignals=[];
+    window.fetch=(input,options)=>{
+     if(String(input).includes('/api/customer360/customers?page=1&page_size=100&line=linked'))window.__crmLineListAbortSignals.push(options?.signal||null);
+     return window.__crmLineListOriginalFetch.call(window,input,options);
+    };
+   });
    await page.request.get(origin+'/__fixture/delay-next-line-list');
    const delayedRequest=page.waitForRequest(req=>req.url().includes('/api/customer360/customers?page=1&page_size=100&line=linked'));
    await page.evaluate(()=>{void window.__crmOwnerLineChat.loadCustomers(true)});
@@ -223,6 +231,15 @@ try{
    await page.waitForTimeout(80);
    await page.evaluate(()=>window.__crmOwnerLineChat.loadCustomers(true));
    await page.waitForFunction(()=>document.querySelectorAll('#crmLineChatCustomers [data-line-customer]').length===101);
+   const signals=await page.evaluate(()=>{
+    const values=window.__crmLineListAbortSignals.map(signal=>signal?.aborted??null);
+    window.fetch=window.__crmLineListOriginalFetch;
+    delete window.__crmLineListOriginalFetch;
+    delete window.__crmLineListAbortSignals;
+    return values;
+   });
+   assert.equal(signals.length,2,'LINE reload must capture both page-1 requests');
+   assert.deepEqual(signals,[true,false],'new LINE reload did not abort the stale request or aborted the current request');
    await page.waitForTimeout(800);
    assert.equal(await page.locator('#crmLineChatCustomers [data-line-customer]').count(),101,'outdated LINE list replaced newer full results');
    assert.equal(await page.evaluate(()=>window.__crmOwnerLineChat.getState().loading),false,'older LINE list request changed current loading state');
