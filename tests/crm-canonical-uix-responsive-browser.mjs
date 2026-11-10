@@ -17,7 +17,7 @@ assert.equal(html.includes('const navObserver=new MutationObserver'),false,'cano
 assert.equal(html.includes("new MutationObserver(()=>reconcileDesktopLayout()).observe(document.documentElement"),false,'legacy desktop hotfix must not install a permanent document-wide observer');
 const out='artifacts/crm-canonical-uix-responsive';fs.mkdirSync(out,{recursive:true});
 const requests=[],notFoundRequests=[];
-let delayNextLineHistory=false,delayNextLineList=false,failNextLineList=false,malformedNextLineList=false,stalledNextLineList=null,malformedNextLineHistory=null;
+let delayNextLineHistory=false,delayNextLineList=false,failNextLineList=false,malformedNextLineList=false,malformedNextLineRow=null,stalledNextLineList=null,malformedNextLineHistory=null;
 let holdNextLineAvatar=false,releaseHeldLineAvatar=null;
 function send(res,status,data,type='application/json; charset=utf-8'){res.writeHead(status,{'content-type':type,'cache-control':'no-store'});res.end(type.startsWith('application/json')?JSON.stringify(data):data)}
 const server=http.createServer(async(req,res)=>{
@@ -27,6 +27,7 @@ const server=http.createServer(async(req,res)=>{
  if(u.pathname==='/__fixture/delay-next-line-list'){delayNextLineList=true;return send(res,200,{ok:true})}
  if(u.pathname==='/__fixture/fail-next-line-list'){failNextLineList=true;return send(res,200,{ok:true})}
  if(u.pathname==='/__fixture/malformed-next-line-list'){malformedNextLineList=true;return send(res,200,{ok:true})}
+ if(u.pathname==='/__fixture/malformed-next-line-row'){malformedNextLineRow=u.searchParams.get('shape')||'missing';return send(res,200,{ok:true})}
  if(u.pathname==='/__fixture/stall-next-line-list'){stalledNextLineList=u.searchParams.get('mode')||'empty';return send(res,200,{ok:true})}
  if(u.pathname==='/api/customer360/customers'){
   if(u.searchParams.get('line')==='linked'){
@@ -35,6 +36,7 @@ const server=http.createServer(async(req,res)=>{
     if(delayNextLineList){delayNextLineList=false;await new Promise(resolve=>setTimeout(resolve,700));return send(res,200,{ok:true,total:0,all_total:0,page:1,page_size:100,has_next:false,items:[],facets})}
     if(failNextLineList){failNextLineList=false;return send(res,200,{ok:false,error:'sensitive_internal_database_failure_do_not_render'})}
     if(malformedNextLineList){malformedNextLineList=false;return send(res,200,{ok:true,has_next:false,items:null})}
+    if(malformedNextLineRow){const shape=malformedNextLineRow;malformedNextLineRow=null;const invalid=shape==='null'?null:shape==='number'?{customer_id:26000888,name:'Invalid',line_linked:true}:shape==='array'?[]:shape==='bad-format'?{customer_id:'CRM-26000888',name:'Invalid',line_linked:true}:{name:'Invalid',line_linked:true};return send(res,200,{ok:true,has_next:false,items:[...linePage1.slice(0,99),invalid],facets})}
     return send(res,200,{ok:true,total:101,all_total:101,page:1,page_size:100,has_next:true,items:linePage1,facets,meta:{privacy_safe_list_dto:true}});
    }
    if(page===2){
@@ -259,6 +261,16 @@ try{
    await page.locator('#crmLineChatListRetry').click();
    await page.waitForFunction(()=>document.querySelectorAll('#crmLineChatCustomers [data-line-customer]').length===101);
    assert.equal(await page.locator('#crmLineChatCustomers [data-line-customer]').count(),101,'LINE list did not recover after malformed payload');
+   for(const shape of ['missing','number','bad-format','null','array']){
+    await page.request.get(origin+'/__fixture/malformed-next-line-row?shape='+shape);
+    await page.evaluate(()=>window.__crmOwnerLineChat.loadCustomers(true));
+    const rejectedText=await page.locator('#crmLineChatCustomers').innerText();
+    assert.ok(rejectedText.includes('一覧を取得できませんでした'),'invalid LINE customer row must fail closed: '+shape);
+    assert.equal(await page.locator('#crmLineChatCustomers [data-line-customer]').count(),0,'invalid LINE customer row was rendered: '+shape);
+    assert.equal(await page.locator('#crmLineChatListRetry').isVisible(),true,'invalid LINE customer row lacks retry: '+shape);
+    await page.locator('#crmLineChatListRetry').click();
+    await page.waitForFunction(()=>document.querySelectorAll('#crmLineChatCustomers [data-line-customer]').length===101);
+   }
    for(const mode of ['empty','duplicate']){
     const thirdPageBefore=requests.filter(x=>x.includes('/api/customer360/customers?page=3&page_size=100&line=linked')).length;
     await page.request.get(origin+'/__fixture/stall-next-line-list?mode='+mode);
