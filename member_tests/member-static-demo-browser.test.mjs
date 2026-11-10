@@ -71,6 +71,35 @@ try {
     assert.ok(initial.tabs.every(t => t.height >= 44), width + ': small tap target');
     assert.equal(initial.selected, 'home');
     assert.deepEqual(initial.visible, ['home']);
+    // HOME source-only journey: featured Family MEMORY -> detail -> HOME;
+    // NEXT MEMORY sample guidance; then jump directly into CREATE.
+    const homeTargets = await evaluate("({memory:document.getElementById('home-memory-open').getBoundingClientRect().height,next:document.querySelector('#home-next summary').getBoundingClientRect().height,create:document.getElementById('home-create-open').getBoundingClientRect().height})");
+    assert.ok(Object.values(homeTargets).every(h => h >= 44), width + ': HOME controls must be accessible');
+    await evaluate("document.getElementById('home-memory-open').focus()");
+    await pressKey('Enter', 'Enter', 13);
+    const homeToMemory = await evaluate("({tab:document.querySelector('[role=tab][aria-selected=true]')?.dataset.tab,detail:!document.getElementById('memory-detail').hidden,indexHidden:document.getElementById('memory-index').hidden,title:document.getElementById('memory-detail-title').textContent,focus:document.activeElement?.id})");
+    assert.deepEqual(homeToMemory, {tab:'memories',detail:true,indexHidden:true,title:'Family',focus:'memory-detail'}, width + ': HOME featured memory handoff');
+    await evaluate("document.getElementById('memory-back').focus()");
+    await pressKey('Enter', 'Enter', 13);
+    const backToHome = await evaluate("({tab:document.querySelector('[role=tab][aria-selected=true]')?.dataset.tab,detailHidden:document.getElementById('memory-detail').hidden,indexVisible:!document.getElementById('memory-index').hidden,focus:document.activeElement?.id})");
+    assert.deepEqual(backToHome, {tab:'home',detailHidden:true,indexVisible:true,focus:'home-memory-open'}, width + ': HOME memory return/focus');
+    await evaluate("document.querySelector('#home-next summary').focus()");
+    await pressKey('Enter', 'Enter', 13);
+    assert.equal(await evaluate("document.getElementById('home-next').open"), true, width + ': NEXT MEMORY expand');
+    const nextMemory = await evaluate("({body:document.querySelector('#home-next .home-next-body').textContent,doc:Math.max(document.documentElement.scrollWidth,document.body.scrollWidth),viewport:document.documentElement.clientWidth})");
+    assert.ok(nextMemory.body.includes('個別の記念日判定・通知・予約は行いません'), width + ': NEXT MEMORY demo notice');
+    assert.ok(nextMemory.doc <= nextMemory.viewport + 1, width + ': NEXT MEMORY overflow');
+    await pressKey(' ', 'Space', 32);
+    assert.equal(await evaluate("document.getElementById('home-next').open"), false, width + ': NEXT MEMORY collapse');
+    await evaluate("document.getElementById('home-create-open').focus()");
+    await pressKey('Enter', 'Enter', 13);
+    const homeToCreate = await evaluate("({tab:document.querySelector('[role=tab][aria-selected=true]')?.dataset.tab,editor:!document.getElementById('create-editor').hidden,previewHidden:document.getElementById('create-preview').hidden,focus:document.activeElement?.id})");
+    assert.deepEqual(homeToCreate, {tab:'create',editor:true,previewHidden:true,focus:'create-memory-select'}, width + ': HOME CREATE shortcut');
+    await evaluate("document.getElementById('member-tab-home').click()");
+    const returnedHome = await state();
+    assert.deepEqual(returnedHome.visible,['home'],width+': HOME should remain navigable after shortcuts');
+    assert.ok(Math.max(returnedHome.doc,returnedHome.body)<=returnedHome.viewport+1,width+': HOME after shortcut overflow');
+    console.log('MEMBER_HOME_JOURNEY_VIEWPORT_' + width + '=PASS');
     for (const name of names) {
       await evaluate("document.getElementById('member-tab-" + name + "').click()");
       const result = await state();

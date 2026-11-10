@@ -46,6 +46,16 @@ assert.equal((html.match(/data-memory="/g) || []).length, 3);
 assert.equal((html.match(/data-create-format="/g) || []).length, 3);
 assert.equal([...html.matchAll(/<button\b[^>]*data-create-format="[^"]+"[^>]*>/g)].filter(x => x[0].includes('aria-pressed="true"')).length, 1);
 
+// HOME sample journey is navigable without real dates, reminders or bookings.
+assert.match(html, /id="home-memory-open"[^>]*data-home-memory="family"/);
+assert.match(html, /November 16, 2025/);
+assert.match(html, /id="home-next"/);
+assert.match(html, /個別の記念日判定・通知・予約は行いません/);
+assert.match(html, /id="home-create-open"/);
+assert.match(html, /homeMemoryOpen\.addEventListener\('click'/);
+assert.match(html, /homeCreateOpen\.addEventListener\('click'/);
+assert.match(html, /memoryReturnTarget/);
+
 // Demonstration source must never read customer data or call production endpoints.
 assert.doesNotMatch(html, /<script[^>]+src=|<img[^>]+src=|<iframe/i);
 assert.doesNotMatch(html, /\bfetch\s*\(|XMLHttpRequest|WebSocket|EventSource|localStorage|sessionStorage|navigator\.sendBeacon|\/api\//i);
