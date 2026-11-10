@@ -48,7 +48,7 @@ const server=http.createServer(async(req,res)=>{
  if(u.pathname==='/api/customer360/approach-queue')return send(res,200,{ok:true,items:[],summary:{total:0,ready:0,review_required:0,opted_out:0}});
  if(u.pathname==='/__fixture/delay-next-line-history'){delayNextLineHistory=true;return send(res,200,{ok:true})}
  if(u.pathname==='/__fixture/malformed-next-line-history'){malformedNextLineHistory=u.searchParams.get('shape')||'missing';return send(res,200,{ok:true})}
- if(u.pathname==='/api/customers/26000101/line-history'){if(malformedNextLineHistory){const shape=malformedNextLineHistory;malformedNextLineHistory=null;return send(res,200,shape==='object'?{ok:true,connected:true,messages:{unexpected:'object'}}:{ok:true,connected:true})}if(delayNextLineHistory){delayNextLineHistory=false;await new Promise(resolve=>setTimeout(resolve,650))}return send(res,200,{ok:true,connected:true,count:2,messages:[{direction:'inbound',message_text:'七五三の撮影について相談したいです',sent_at:'2026-09-14 10:00'},{direction:'outbound',message_text:'ありがとうございます。候補日をご案内します。',sent_at:'2026-09-14 10:03'}]})}
+ if(u.pathname==='/api/customers/26000101/line-history'){if(malformedNextLineHistory){const shape=malformedNextLineHistory;malformedNextLineHistory=null;return send(res,200,shape==='object'?{ok:true,connected:true,messages:{unexpected:'object'}}:shape==='null-item'?{ok:true,connected:true,messages:[null]}:shape==='string-item'?{ok:true,connected:true,messages:['invalid']}:shape==='array-item'?{ok:true,connected:true,messages:[[]]}:{ok:true,connected:true})}if(delayNextLineHistory){delayNextLineHistory=false;await new Promise(resolve=>setTimeout(resolve,650))}return send(res,200,{ok:true,connected:true,count:2,messages:[{direction:'inbound',message_text:'七五三の撮影について相談したいです',sent_at:'2026-09-14 10:00'},{direction:'outbound',message_text:'ありがとうございます。候補日をご案内します。',sent_at:'2026-09-14 10:03'}]})}
  if(u.pathname==='/api/customers/26000102/line-history')return send(res,200,{ok:true,connected:true,count:0,messages:[]});
  if(u.pathname==='/api/customers/26999999/line-history')return send(res,200,{ok:false,error:'line_history_unavailable'});
  if(u.pathname==='/__fixture/hold-next-line-avatar'){holdNextLineAvatar=true;return send(res,200,{ok:true})}
@@ -298,7 +298,7 @@ try{
   await page.evaluate(()=>window.__crmOwnerLineChat.openConversation('26000101'));
   await page.waitForFunction(()=>document.querySelectorAll('#crmLineChatMessages .crm-line-chat-row').length===2);
   if(viewport.width===390){
-   for(const shape of ['missing','object']){
+   for(const shape of ['missing','object','null-item','string-item','array-item']){
     await page.request.get(origin+'/__fixture/malformed-next-line-history?shape='+shape);
     await page.evaluate(()=>window.__crmOwnerLineChat.openConversation('26000101',true));
     assert.ok((await page.locator('#crmLineChatMessages').innerText()).includes('LINE履歴を取得できませんでした。再取得してください。'),'malformed LINE history was misreported as empty: '+shape);
