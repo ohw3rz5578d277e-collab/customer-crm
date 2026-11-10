@@ -75,6 +75,42 @@ pass('authenticated render produces canonical five-tab shell',rendered.status===
 pass('requested tab is active in server-rendered shell',rendered.html.includes('data-active-tab="shop"'));
 pass('rendered page references only same-origin built-in app assets',rendered.html.includes('href="/member-assets/member-app.css"')&&rendered.html.includes('src="/member-assets/member-app.js"'));
 
+const memoriesWithAuthorizedMetadata={
+  ...baseData,
+  memories:{
+    status:'ok',
+    family_id:'family-secret',
+    favorites_available:false,
+    favorite_mutation_ready:false,
+    memories:[
+      {memory_id:'mem-2026-01',title:'Family & Friends <Story>',
+        shoot_date:'2026-09-01',genre:'ファミリー',preview_count:12,
+        cover:{storage_key:'must-not-leak',media_id:'media-secret'}},
+      {memory_id:'mem-2025-02',title:'七五三',
+        shoot_date:'2025-11-15',genre:'七五三',preview_count:0}
+    ]
+  }
+};
+const memoriesDocument=renderMemberBrowserApp(memoriesWithAuthorizedMetadata,{active_tab:'memories'}).html;
+pass('server-rendered browser MEMORIES offers native read-only details',
+  (memoriesDocument.match(/<details class="mp-memories__card mp-memories__read-only-card">/g)||[]).length===2
+  &&(memoriesDocument.match(/<summary class="mp-memories__read-only-summary">/g)||[]).length===2);
+pass('browser MEMORIES has no inert detail buttons or private-media actions',
+  !memoriesDocument.includes('data-memory-open')
+  &&!memoriesDocument.includes('data-memory-detail')
+  &&memoriesDocument.includes('個別写真の表示・お気に入り変更・注文はこの画面ではできません'));
+pass('MEMORIES summary escapes titles and strips identity/media internals',
+  memoriesDocument.includes('Family &amp; Friends &lt;Story&gt;')
+  &&!memoriesDocument.includes('family-secret')
+  &&!memoriesDocument.includes('media-secret')
+  &&!memoriesDocument.includes('must-not-leak')
+  &&!memoriesDocument.includes('mem-2026-01'));
+pass('read-only browser MEMORY still displays authorized shoot dates and genres',
+  memoriesDocument.includes('2026-09-01')
+  &&memoriesDocument.includes('2025-11-15')
+  &&memoriesDocument.includes('ファミリー')
+  &&memoriesDocument.includes('七五三'));
+
 const shopWithAuthorizedCatalog={
   ...baseData,
   shop:{
@@ -117,6 +153,21 @@ pass('real browser SHOP strips identity and unsafe media URLs and escapes titles
   &&!shopDocument.includes('private-r2-key')
   &&!shopDocument.includes('product-album-1')
   &&!shopDocument.includes('evil.example'));
+
+const combinedReadonlyDocument=renderMemberBrowserApp({...shopWithAuthorizedCatalog,memories:memoriesWithAuthorizedMetadata.memories},{active_tab:'memories'}).html;
+pass('combined browser MEMORIES and SHOP preserve independent native disclosure views',
+  (combinedReadonlyDocument.match(/<details class="mp-memories__card mp-memories__read-only-card">/g)||[]).length===2
+  &&(combinedReadonlyDocument.match(/<details class="mp-shop__card mp-shop__read-only-card">/g)||[]).length===2
+  &&combinedReadonlyDocument.includes('data-active-tab="memories"'));
+pass('combined read-only tabs expose no inert detail, mutation, pricing or identity payloads',
+  !combinedReadonlyDocument.includes('data-memory-open')
+  &&!combinedReadonlyDocument.includes('data-shop-product')
+  &&!combinedReadonlyDocument.includes('data-shop-detail')
+  &&!combinedReadonlyDocument.includes('980000')
+  &&!combinedReadonlyDocument.includes('family-secret')
+  &&!combinedReadonlyDocument.includes('private-r2-key')
+  &&!combinedReadonlyDocument.includes('must-not-leak')
+  &&!combinedReadonlyDocument.includes('evil.example'));
 
 const app=await handleMemberBrowserPageRequest(
   new Request(origin+'/member/shop'),
