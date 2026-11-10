@@ -270,7 +270,15 @@ try{
    assert.equal(requests.filter(x=>x.includes('/line-history')).length,failedHistoryBefore,'failed LINE list made a stale history request');
    assert.equal(listFailureText.includes('sensitive_internal_database_failure'),false,'raw LINE list error exposed');
    assert.equal(await page.locator('#crmLineChatListRetry').isVisible(),true,'failed LINE list lacks a visible retry control');
+   await page.locator('#crmLineChatSearch').fill('26000101');
+   assert.ok((await page.locator('#crmLineChatCustomers').innerText()).includes('一覧を取得できませんでした'),'search during LINE list failure replaced error with a misleading empty list');
+   assert.equal(await page.locator('#crmLineChatCustomers [data-line-customer]').count(),0,'search during LINE list failure exposed stale selectable customers');
+   assert.equal(await page.locator('#crmLineChatListRetry').isVisible(),true,'search during LINE list failure removed retry button');
    await page.locator('#crmLineChatListRetry').click();
+   await page.waitForFunction(()=>document.querySelectorAll('#crmLineChatCustomers [data-line-customer]').length===1);
+   assert.equal(await page.locator('#crmLineChatSearch').inputValue(),'26000101','LINE list retry lost active search query');
+   assert.equal(await page.locator('#crmLineChatCustomers [data-line-customer="26000101"]').isVisible(),true,'LINE list retry did not restore filtered customer');
+   await page.locator('#crmLineChatSearch').fill('');
    await page.waitForFunction(()=>document.querySelectorAll('#crmLineChatCustomers [data-line-customer]').length===101);
    assert.equal(await page.locator('#crmLineChatCustomers [data-line-customer]').count(),101,'LINE list does not recover from retry button');
    await page.request.get(origin+'/__fixture/malformed-next-line-list');
@@ -280,6 +288,17 @@ try{
    await page.locator('#crmLineChatListRetry').click();
    await page.waitForFunction(()=>document.querySelectorAll('#crmLineChatCustomers [data-line-customer]').length===101);
    assert.equal(await page.locator('#crmLineChatCustomers [data-line-customer]').count(),101,'LINE list did not recover after malformed payload');
+   await page.request.get(origin+'/__fixture/delay-next-line-list');
+   const loadingRequest=page.waitForRequest(req=>req.url().includes('/api/customer360/customers?page=1&page_size=100&line=linked'));
+   await page.evaluate(()=>{void window.__crmOwnerLineChat.loadCustomers(true)});
+   await loadingRequest;
+   await page.locator('#crmLineChatSearch').fill('26000101');
+   assert.ok((await page.locator('#crmLineChatCustomers').innerText()).includes('読み込み中…'),'search during LINE list loading hid the loading state');
+   assert.equal(await page.locator('#crmLineChatCustomers [data-line-customer]').count(),0,'search during LINE list loading exposed stale selectable customers');
+   await page.evaluate(()=>{void window.__crmOwnerLineChat.loadCustomers(true)});
+   await page.waitForFunction(()=>document.querySelectorAll('#crmLineChatCustomers [data-line-customer]').length===1);
+   await page.locator('#crmLineChatSearch').fill('');
+   await page.waitForFunction(()=>document.querySelectorAll('#crmLineChatCustomers [data-line-customer]').length===101);
    for(const shape of ['missing','number','bad-format','null','array']){
     await page.request.get(origin+'/__fixture/malformed-next-line-row?shape='+shape);
     await page.evaluate(()=>window.__crmOwnerLineChat.loadCustomers(true));
