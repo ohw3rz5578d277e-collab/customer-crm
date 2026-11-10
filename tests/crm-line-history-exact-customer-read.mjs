@@ -6,7 +6,7 @@ import {exactCustomerLineHistoryQuery,readExactCustomerLocalLineMessages} from '
 const source=fs.readFileSync('src/index.js','utf8');
 const getLocal=source.slice(source.indexOf('async function getLocalCustomerLineHistory('),source.indexOf('async function fetchRemoteLineHistory('));
 assert.ok(getLocal.startsWith('async function getLocalCustomerLineHistory('),'local history selector missing');
-assert.match(source,/import \{ readExactCustomerLocalLineMessages \} from ['"]\.\/crm-line-history-exact-customer-read\.mjs['"]/);
+assert.match(source,/import \{\s*readExactCustomerLocalLineMessages(?:\s*,\s*[^}]*)?\s*\} from ['"]\.\/crm-line-history-exact-customer-read\.mjs['"]/);
 assert.match(getLocal,/readExactCustomerLocalLineMessages\(env\.DB,\s*customer\?\.customer_id\)/);
 assert.doesNotMatch(getLocal,/OR\s+line_user_id|line_user_id\s*=\s*\?/i,'unsafe LINE ID cross-customer fallback remains');
 
