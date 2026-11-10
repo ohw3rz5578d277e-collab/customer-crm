@@ -98,6 +98,29 @@ pass('favorite renders as state indicator',markup.includes('お気に入り'));
 pass('private image URL is not invented',!markup.includes('storage_key')&&!markup.includes('blob:')&&!markup.includes('https://'));
 pass('detail explains private media activation boundary',markup.includes('Private Media配信のProduction有効化後'));
 
+const readOnlyMarkup=renderMemberMemoriesMarkup(vm,{read_only_disclosure:true});
+pass('browser-only timeline uses two native disclosure cards',
+  (readOnlyMarkup.match(/<details class="mp-memories__card mp-memories__read-only-card">/g)||[]).length===2
+  &&(readOnlyMarkup.match(/<summary class="mp-memories__read-only-summary">/g)||[]).length===2);
+pass('read-only timeline cannot invite non-functional detail or write operations',
+  !readOnlyMarkup.includes('data-memory-open')
+  &&!readOnlyMarkup.includes('data-memory-detail')
+  &&!readOnlyMarkup.includes('data-memory-close')
+  &&readOnlyMarkup.includes('個別写真の表示・お気に入り変更・注文はこの画面ではできません'));
+pass('read-only cards preserve authorized dates and genres without exposing private data',
+  readOnlyMarkup.includes('2026-09-01')
+  &&readOnlyMarkup.includes('ファミリー')
+  &&readOnlyMarkup.includes('2025-11-15')
+  &&readOnlyMarkup.includes('七五三')
+  &&!readOnlyMarkup.includes('family-secret')
+  &&!readOnlyMarkup.includes('media-secret')
+  &&!readOnlyMarkup.includes('must-not-leak')
+  &&!readOnlyMarkup.includes('mem-2026-01')
+  &&!readOnlyMarkup.includes('http'));
+pass('existing interactive controller timeline remains unchanged by default',
+  markup.includes('data-memory-open="mem-2026-01"')
+  &&markup.includes('data-memory-detail'));
+
 const css=memberMemoriesCss();
 pass('MEMORIES is responsive',css.includes('@media(min-width:760px)')&&css.includes('grid-template-columns:repeat(3'));
 pass('MEMORIES supports BLACK shell',css.includes('.mp-shell--black .mp-memories'));
