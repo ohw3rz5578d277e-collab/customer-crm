@@ -182,7 +182,7 @@ export function renderMemberBrowserApp(data,{active_tab='home'}={}){
   let shell=renderMemberAppShellMarkup(shellVm);
   const tabMarkup={
     home:renderMemberHomeMarkup(buildMemberHomeViewModel(data.home)),
-    memories:renderMemberMemoriesMarkup(buildMemberMemoriesViewModel(data.memories)),
+    memories:renderMemberMemoriesMarkup(buildMemberMemoriesViewModel(data.memories),{read_only_disclosure:true}),
     create:renderMemberCreativeCreateMarkup(buildMemberCreativeCreateViewModel({
       catalog:data.creative,
       memory_details:[]
