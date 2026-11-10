@@ -126,17 +126,32 @@ function favoriteMark(memory){
   return '<span class="mp-memories__favorite" aria-label="お気に入り">♥</span>';
 }
 
-function renderTimeline(vm){
+function renderTimeline(vm,{read_only_disclosure=false}={}){
   if(!vm.memories.length){
     return '<div class="mp-memories__empty"><p>まだMEMORYはありません。</p><span>撮影した家族の時間が、ここに少しずつ増えていきます。</span></div>';
   }
 
-  return '<div class="mp-memories__grid">'+vm.memories.map(memory=>
-    '<button type="button" class="mp-memories__card" data-memory-open="'+escapeHtml(memory.memory_id)+'">'
+  const cards=vm.memories.map(memory=>{
+    if(read_only_disclosure){
+      return '<details class="mp-memories__card mp-memories__read-only-card">'
+        +'<summary class="mp-memories__read-only-summary">'
+        +'<span class="mp-memories__read-only-photo" aria-hidden="true">PHOTO</span>'
+        +'<span class="mp-memories__card-copy"><small>'+escapeHtml(memory.shoot_date||'MEMORY')+'</small><strong>'+escapeHtml(memory.title)+'</strong><span>'+escapeHtml(memory.genre)+'</span></span>'
+        +'</summary>'
+        +'<div class="mp-memories__read-only-info">'
+        +'<p>撮影日：'+escapeHtml(memory.shoot_date||'未設定')+'</p>'
+        +'<p>撮影ジャンル：'+escapeHtml(memory.genre||'未設定')+'</p>'
+        +'<small>MEMORYの基本情報のみ表示しています。個別写真の表示・お気に入り変更・注文はこの画面ではできません。</small>'
+        +'</div></details>';
+    }
+
+    return '<button type="button" class="mp-memories__card" data-memory-open="'+escapeHtml(memory.memory_id)+'">'
       +'<div class="mp-memories__card-photo">'+placeholder({label:memory.preview_count?'PHOTO '+memory.preview_count:'PHOTO'})+favoriteMark(memory)+'</div>'
       +'<div class="mp-memories__card-copy"><small>'+escapeHtml(memory.shoot_date||'MEMORY')+'</small><strong>'+escapeHtml(memory.title)+'</strong><span>'+escapeHtml(memory.genre)+'</span></div>'
-    +'</button>'
-  ).join('')+'</div>';
+    +'</button>';
+  }).join('');
+
+  return '<div class="mp-memories__grid">'+cards+'</div>';
 }
 
 function renderDetail(vm){
@@ -167,7 +182,7 @@ function renderDetail(vm){
     +'</div>';
 }
 
-export function renderMemberMemoriesMarkup(vm){
+export function renderMemberMemoriesMarkup(vm,{read_only_disclosure=false}={}){
   if(vm?.status!=='ok'){
     return '<section class="mp-memories mp-memories--unavailable"><p>MEMORIESを表示できません。</p></section>';
   }
@@ -177,8 +192,8 @@ export function renderMemberMemoriesMarkup(vm){
     +'<div class="mp-memories__toolbar"><span>NEWEST FIRST</span>'
       +(vm.favorites_available?'<span>♥ お気に入り表示対応</span>':'<span>お気に入りは準備中</span>')
       +'</div>'
-    +renderTimeline(vm)
-    +renderDetail(vm)
+    +renderTimeline(vm,{read_only_disclosure})
+    +(read_only_disclosure?'':renderDetail(vm))
     +'</section>';
 }
 
@@ -189,6 +204,7 @@ export function memberMemoriesCss(){
     '.mp-memories__toolbar{display:flex;justify-content:space-between;gap:14px;margin:0 2px 14px;color:var(--mm-muted);font:700 10px ui-sans-serif,sans-serif;letter-spacing:.08em}.mp-memories__grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.mp-memories__card{position:relative;appearance:none;border:0;padding:0;overflow:hidden;border-radius:24px;background:var(--mm-card);color:inherit;text-align:left;box-shadow:0 12px 32px rgba(35,38,34,.07);cursor:pointer}.mp-memories__card-photo{position:relative}.mp-memories__photo-placeholder{display:grid;place-items:center;width:100%;aspect-ratio:4/3;background:linear-gradient(145deg,#e7e3d9,#d7d4ca);color:#8b8e86;font:800 10px ui-sans-serif,sans-serif;letter-spacing:.15em}.mp-memories__photo-placeholder.is-hero{aspect-ratio:5/4}.mp-memories__favorite{position:absolute;top:12px;right:12px;display:grid;place-items:center;width:30px;height:30px;border-radius:999px;background:rgba(255,253,248,.92);color:#315d4f;font-size:15px;box-shadow:0 4px 12px rgba(35,38,34,.08)}.mp-memories__card-copy{display:grid;gap:4px;padding:14px 15px 17px}.mp-memories__card-copy small,.mp-memories__card-copy span{color:var(--mm-muted);font-size:11px}.mp-memories__card-copy strong{font-size:17px;font-weight:600}',
     '.mp-memories__empty{padding:40px 24px;border-radius:24px;background:var(--mm-card);text-align:center}.mp-memories__empty p{font-size:22px;margin:0 0 8px}.mp-memories__empty span{color:var(--mm-muted);line-height:1.8}',
     '.mp-memories__detail{position:fixed;inset:0;z-index:45;overflow:auto;background:#f7f4ec;padding:18px 16px max(110px,env(safe-area-inset-bottom))}.mp-memories__detail-head{position:sticky;top:0;z-index:2;display:flex;justify-content:space-between;align-items:center;padding:10px 0 16px;background:linear-gradient(#f7f4ec 72%,rgba(247,244,236,0))}.mp-memories__detail-head button{border:0;background:transparent;padding:8px 0;color:var(--mm-green);font-weight:700}.mp-memories__delivery{display:inline-block;margin-left:8px;padding:6px 9px;border-radius:999px;background:#e8eee9;color:var(--mm-green);font:700 10px ui-sans-serif,sans-serif}.mp-memories__detail-head .mp-memories__favorite{position:static;display:inline-grid}.mp-memories__detail-title{max-width:850px;margin:12px auto 24px}.mp-memories__detail-title p{margin:0 0 8px;color:var(--mm-green);font-size:12px}.mp-memories__detail-title h2{margin:0 0 7px;font-size:clamp(34px,7vw,62px);font-weight:500;letter-spacing:-.04em}.mp-memories__detail-title span{color:var(--mm-muted)}.mp-memories__detail-grid{max-width:1080px;margin:0 auto;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.mp-memories__detail-photo:first-child{grid-column:1/-1}.mp-memories__detail-note{max-width:850px;margin:24px auto 0;display:flex;justify-content:space-between;gap:20px;color:var(--mm-muted);font-size:12px;line-height:1.6}.mp-memories__detail-note strong{color:var(--mm-ink)}.mp-memories__loading{max-width:850px;margin:80px auto;color:var(--mm-muted)}',
+    '.mp-memories__read-only-summary{display:block;list-style:none;cursor:pointer}.mp-memories__read-only-summary::-webkit-details-marker{display:none}.mp-memories__read-only-summary:focus-visible{outline:3px solid var(--mm-green);outline-offset:-3px}.mp-memories__read-only-photo{display:grid;place-items:center;width:100%;aspect-ratio:4/3;background:linear-gradient(145deg,#e7e3d9,#d7d4ca);color:#8b8e86;font:800 10px ui-sans-serif,sans-serif;letter-spacing:.15em}.mp-memories__read-only-info{border-top:1px solid rgba(35,38,34,.12);padding:14px 16px 18px}.mp-memories__read-only-info p{margin:0 0 8px;font:500 12px/1.7 ui-sans-serif,sans-serif}.mp-memories__read-only-info small{display:block;margin-top:12px;color:var(--mm-muted);font:400 11px/1.8 ui-sans-serif,sans-serif}.mp-shell--black .mp-memories__read-only-photo{background:linear-gradient(145deg,#292c27,#1c1f1b);color:#8d9188}.mp-shell--black .mp-memories__read-only-info{border-color:rgba(255,255,255,.12)}',
     '@media(min-width:760px){.mp-memories{padding:48px 34px 110px}.mp-memories__grid{grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}.mp-memories__detail{padding:26px 34px 80px}.mp-memories__detail-grid{grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.mp-memories__detail-photo:first-child{grid-column:span 2;grid-row:span 2}.mp-memories__detail-photo:first-child .mp-memories__photo-placeholder{height:100%;aspect-ratio:auto;min-height:520px}}',
     '.mp-shell--black .mp-memories{--mm-card:#1a1d19;--mm-ink:#f3efe6;--mm-muted:#aaa99f;--mm-green:#d6c6a3}.mp-shell--black .mp-memories__photo-placeholder{background:linear-gradient(145deg,#292c27,#1c1f1b);color:#8d9188}.mp-shell--black .mp-memories__detail{background:#111310}.mp-shell--black .mp-memories__detail-head{background:linear-gradient(#111310 72%,rgba(17,19,16,0))}.mp-shell--black .mp-memories__favorite{background:#252922;color:#d6c6a3}.mp-shell--black .mp-memories__delivery{background:#252922;color:#d6c6a3}'
   ].join('');
