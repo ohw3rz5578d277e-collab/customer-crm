@@ -1,3 +1,4 @@
+import { readExactCustomerLocalLineMessages } from './crm-line-history-exact-customer-read.mjs';
 // ======================================================
 // CUSTOMER CRM API / COMPLETE WORKER
 // build: customer-crm-api-complete-20260530-secrets-required-03
@@ -888,24 +889,8 @@ function normalizeLineHistoryMessages(items) {
 }
 
 async function getLocalCustomerLineHistory(env, customer) {
-  const params = [];
-  let where = "customer_id = ?";
-  params.push(customer.customer_id);
-
-  if (text(customer.line_user_id)) {
-    where = "(customer_id = ? OR line_user_id = ?)";
-    params.push(text(customer.line_user_id));
-  }
-
-  const result = await env.DB.prepare(`
-    SELECT *
-    FROM customer_line_messages
-    WHERE ${where}
-    ORDER BY COALESCE(sent_at, created_at) ASC, id ASC
-    LIMIT 300
-  `).bind(...params).all();
-
-  return normalizeLineHistoryMessages(result.results || []);
+  const rows = await readExactCustomerLocalLineMessages(env.DB, customer?.customer_id);
+  return normalizeLineHistoryMessages(rows);
 }
 
 async function fetchRemoteLineHistory(env, customer) {
