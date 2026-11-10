@@ -92,6 +92,38 @@ pass('checkout CTA stays disabled',markup.includes('disabled aria-disabled="true
 pass('discount boundary is visible',markup.includes('割引適用はまだ有効ではありません'));
 pass('external URL is absent from markup',!markup.includes('evil.example')&&!markup.includes('https://'));
 
+const readonlyMarkup=renderMemberShopMarkup(vm,{read_only_disclosure:true});
+pass('browser-only SHOP has exactly two native product disclosures',
+  (readonlyMarkup.match(/<details class="mp-shop__card mp-shop__read-only-card">/g)||[]).length===2
+  &&(readonlyMarkup.match(/<summary class="mp-shop__read-only-summary">/g)||[]).length===2);
+pass('read-only SHOP category labels are informational rather than inert buttons',
+  readonlyMarkup.includes('aria-label="取り扱い商品カテゴリ"')
+  &&readonlyMarkup.includes('<span>ALBUM</span>')
+  &&readonlyMarkup.includes('<span>CANVAS</span>')
+  &&!readonlyMarkup.includes('data-shop-category'));
+pass('read-only SHOP prevents inert product, close, checkout and payment controls',
+  !readonlyMarkup.includes('data-shop-product')
+  &&!readonlyMarkup.includes('data-shop-close')
+  &&!readonlyMarkup.includes('data-shop-detail')
+  &&!readonlyMarkup.includes('data-shop-category')
+  &&!readonlyMarkup.includes('<button')
+  &&readonlyMarkup.includes('価格・購入は準備中です。注文処理やFamily Pass特典の割引適用は行いません。'));
+pass('SHOP native disclosures retain authorized product detail without Commerce guesses or secrets',
+  readonlyMarkup.includes('KAHO')
+  &&readonlyMarkup.includes('TYPE')
+  &&readonlyMarkup.includes('SEASON')
+  &&readonlyMarkup.includes('PHOTO GOODS')
+  &&!readonlyMarkup.includes('999999')
+  &&!readonlyMarkup.includes('must-not-leak')
+  &&!readonlyMarkup.includes('family-secret')
+  &&!readonlyMarkup.includes('26000001')
+  &&!readonlyMarkup.includes('evil.example')
+  &&!readonlyMarkup.includes('https://'));
+pass('existing SHOP controller interactive rendering remains the default mode',
+  markup.includes('data-shop-product="prod-album-01"')
+  &&markup.includes('data-shop-category="all"')
+  &&markup.includes('data-shop-detail'));
+
 const css=memberShopCss();
 pass('SHOP is responsive',css.includes('@media(min-width:760px)')&&css.includes('grid-template-columns:repeat(3'));
 pass('SHOP supports BLACK shell',css.includes('.mp-shell--black .mp-shop'));

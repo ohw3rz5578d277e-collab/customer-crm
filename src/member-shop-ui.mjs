@@ -127,7 +127,14 @@ function categoryLabel(type){
   })[type]||'SHOP';
 }
 
-function renderCategories(vm){
+function renderCategories(vm,{read_only_disclosure=false}={}){
+  if(read_only_disclosure){
+    const categories=[...new Set(vm.products.map(item=>item.product_type))];
+    return '<div class="mp-shop__read-only-categories" aria-label="取り扱い商品カテゴリ">'
+      +'<span>商品カテゴリ</span>'
+      +(categories.length?categories.map(category=>'<span>'+escapeHtml(categoryLabel(category))+'</span>').join(''):'<span>準備中</span>')
+      +'</div>';
+  }
   const categories=[
     ['all','ALL'],
     ['album','ALBUM'],
@@ -143,9 +150,23 @@ function renderCategories(vm){
     +'</div>';
 }
 
-function renderGrid(vm){
+function renderGrid(vm,{read_only_disclosure=false}={}){
   if(!vm.visible_products.length){
     return '<div class="mp-shop__empty"><p>このカテゴリの商品は準備中です。</p></div>';
+  }
+  if(read_only_disclosure){
+    const cards=vm.visible_products.map(product=>
+      '<details class="mp-shop__card mp-shop__read-only-card">'
+        +'<summary class="mp-shop__read-only-summary">'
+          +productImage(product)
+          +'<span class="mp-shop__card-copy"><small>'+escapeHtml(categoryLabel(product.product_type))+'</small><strong>'+escapeHtml(product.title)+'</strong><span>'+escapeHtml(product.description)+'</span><span class="mp-shop__read-only-prompt">商品情報を見る</span></span>'
+        +'</summary>'
+        +'<div class="mp-shop__read-only-info">'
+          +'<dl><div><dt>TYPE</dt><dd>'+escapeHtml(categoryLabel(product.product_type))+'</dd></div><div><dt>SEASON</dt><dd>'+escapeHtml(product.season_tag)+'</dd></div></dl>'
+          +'<p>価格・購入は準備中です。注文処理やFamily Pass特典の割引適用は行いません。</p>'
+        +'</div></details>'
+    ).join('');
+    return '<div class="mp-shop__grid">'+cards+'</div>';
   }
   return '<div class="mp-shop__grid">'+vm.visible_products.map(product=>
     '<button type="button" class="mp-shop__card" data-shop-product="'+escapeHtml(product.product_id)+'">'
@@ -179,16 +200,16 @@ function renderDetail(vm){
     +'</div></div></div>';
 }
 
-export function renderMemberShopMarkup(vm){
+export function renderMemberShopMarkup(vm,{read_only_disclosure=false}={}){
   if(vm?.status!=='ok'){
     return '<section class="mp-shop mp-shop--unavailable"><p>SHOPを表示できません。</p></section>';
   }
 
   return '<section class="mp-shop" data-member-shop-ui>'
     +'<header class="mp-shop__hero"><p>SHOP</p><h1>写真を、<br>暮らしの中へ。</h1><span>アルバム、フレーム、キャンバス。家族の記憶を、手に触れられるかたちに。</span><small>'+escapeHtml(vm.available_count)+' ITEMS</small></header>'
-    +renderCategories(vm)
-    +renderGrid(vm)
-    +renderDetail(vm)
+    +renderCategories(vm,{read_only_disclosure})
+    +renderGrid(vm,{read_only_disclosure})
+    +(read_only_disclosure?'':renderDetail(vm))
     +'</section>';
 }
 
@@ -199,6 +220,7 @@ export function memberShopCss(){
     '.mp-shop__categories{display:flex;gap:8px;overflow-x:auto;padding:0 2px 14px;scrollbar-width:none}.mp-shop__categories::-webkit-scrollbar{display:none}.mp-shop__categories button{flex:0 0 auto;border:1px solid rgba(49,93,79,.14);border-radius:999px;background:transparent;padding:9px 13px;color:var(--ms-muted);font:700 10px ui-sans-serif,sans-serif;letter-spacing:.08em}.mp-shop__categories button.is-active{background:var(--ms-green);border-color:var(--ms-green);color:white}',
     '.mp-shop__grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.mp-shop__card{appearance:none;border:0;padding:0;overflow:hidden;border-radius:24px;background:var(--ms-card);color:inherit;text-align:left;box-shadow:0 12px 30px rgba(36,38,32,.07);cursor:pointer}.mp-shop__image,.mp-shop__placeholder{display:block;width:100%;aspect-ratio:4/5;object-fit:cover}.mp-shop__placeholder{display:grid;place-items:center;background:linear-gradient(145deg,#e6e2d7,#d5d1c8);color:#898b84;font:800 10px ui-sans-serif,sans-serif;letter-spacing:.16em}.mp-shop__card-copy{display:grid;gap:5px;padding:15px}.mp-shop__card-copy small{color:var(--ms-green);font:700 9px ui-sans-serif,sans-serif;letter-spacing:.12em}.mp-shop__card-copy strong{font-size:18px;font-weight:600}.mp-shop__card-copy p{margin:0;color:var(--ms-muted);font-size:12px;line-height:1.6}.mp-shop__card-copy span{margin-top:4px;color:var(--ms-green);font:700 10px ui-sans-serif,sans-serif}.mp-shop__empty{padding:40px 22px;border-radius:24px;background:var(--ms-card);color:var(--ms-muted);text-align:center}',
     '.mp-shop__detail{position:fixed;inset:0;z-index:45;overflow:auto;background:#f7f4ec;padding:18px 16px max(110px,env(safe-area-inset-bottom))}.mp-shop__detail-head{position:sticky;top:0;z-index:2;display:flex;justify-content:space-between;align-items:center;padding:10px 0 18px;background:linear-gradient(#f7f4ec 72%,rgba(247,244,236,0));color:var(--ms-muted);font:700 10px ui-sans-serif,sans-serif;letter-spacing:.08em}.mp-shop__detail-head button{border:0;background:transparent;padding:8px 0;color:var(--ms-green);font-weight:700}.mp-shop__detail-layout{max-width:1060px;margin:0 auto;display:grid;gap:26px}.mp-shop__image.is-hero,.mp-shop__placeholder.is-hero{aspect-ratio:4/5;border-radius:28px}.mp-shop__detail-copy>p{margin:0 0 9px;color:var(--ms-green);font:700 10px ui-sans-serif,sans-serif;letter-spacing:.18em}.mp-shop__detail-copy h2{margin:0 0 12px;font-size:clamp(38px,7vw,64px);font-weight:500;letter-spacing:-.04em}.mp-shop__detail-copy>span{display:block;color:var(--ms-muted);line-height:1.9}.mp-shop__detail-copy dl{margin:28px 0;display:grid;gap:1px;border-top:1px solid rgba(36,38,32,.1)}.mp-shop__detail-copy dl>div{display:flex;justify-content:space-between;gap:20px;padding:13px 0;border-bottom:1px solid rgba(36,38,32,.1)}.mp-shop__detail-copy dt{color:var(--ms-muted);font:700 9px ui-sans-serif,sans-serif;letter-spacing:.12em}.mp-shop__detail-copy dd{margin:0}.mp-shop__commerce-note{display:grid;gap:6px;padding:18px;border-radius:18px;background:rgba(49,93,79,.07)}.mp-shop__commerce-note span,.mp-shop__detail-copy>small{color:var(--ms-muted);font-size:12px;line-height:1.7}.mp-shop__detail-copy>small{display:block;margin:14px 2px}.mp-shop__disabled-cta{width:100%;border:0;border-radius:16px;padding:16px;background:#deddd7;color:#8e9089;font-weight:700}.mp-shop__commerce-ready{padding:16px;border-radius:16px;background:#e7efe9;color:var(--ms-green)}',
+    '.mp-shop__read-only-categories{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:0 0 17px;color:var(--ms-muted);font:700 10px/1.3 ui-sans-serif,sans-serif;letter-spacing:.08em}.mp-shop__read-only-categories span{padding:8px 10px;border:1px solid rgba(49,93,79,.13);border-radius:99px}.mp-shop__read-only-categories span:first-child{padding-left:0;border:0}.mp-shop__read-only-summary{display:block;list-style:none;cursor:pointer}.mp-shop__read-only-summary::-webkit-details-marker{display:none}.mp-shop__read-only-summary:focus-visible{outline:3px solid var(--ms-green);outline-offset:-3px}.mp-shop__read-only-summary .mp-shop__card-copy{display:grid;gap:5px}.mp-shop__read-only-prompt{margin-top:4px;color:var(--ms-green);font:700 10px/1.5 ui-sans-serif,sans-serif}.mp-shop__read-only-info{padding:15px;border-top:1px solid rgba(36,38,32,.1)}.mp-shop__read-only-info dl{display:grid;gap:8px;margin:0 0 14px}.mp-shop__read-only-info dl>div{display:flex;justify-content:space-between;gap:8px}.mp-shop__read-only-info dt{color:var(--ms-muted);font:700 10px ui-sans-serif,sans-serif}.mp-shop__read-only-info dd{margin:0;font-size:12px}.mp-shop__read-only-info p{margin:0;color:var(--ms-muted);font:400 11px/1.8 ui-sans-serif,sans-serif}.mp-shell--black .mp-shop__read-only-info{border-color:rgba(255,255,255,.12)}',
     '@media(min-width:760px){.mp-shop{padding:48px 34px 110px}.mp-shop__grid{grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}.mp-shop__detail{padding:28px 34px 80px}.mp-shop__detail-layout{grid-template-columns:minmax(0,1.15fr) minmax(320px,.85fr);align-items:start}.mp-shop__detail-copy{position:sticky;top:78px;padding:20px 0}}',
     '.mp-shell--black .mp-shop{--ms-card:#1a1d19;--ms-ink:#f3efe6;--ms-muted:#aaa99f;--ms-green:#d6c6a3}.mp-shell--black .mp-shop__categories button.is-active{color:#171912}.mp-shell--black .mp-shop__placeholder{background:linear-gradient(145deg,#292c27,#1c1f1b);color:#8d9188}.mp-shell--black .mp-shop__detail{background:#111310}.mp-shell--black .mp-shop__detail-head{background:linear-gradient(#111310 72%,rgba(17,19,16,0))}.mp-shell--black .mp-shop__commerce-note{background:#20251f}'
   ].join('');
