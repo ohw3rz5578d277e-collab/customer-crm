@@ -75,6 +75,49 @@ pass('authenticated render produces canonical five-tab shell',rendered.status===
 pass('requested tab is active in server-rendered shell',rendered.html.includes('data-active-tab="shop"'));
 pass('rendered page references only same-origin built-in app assets',rendered.html.includes('href="/member-assets/member-app.css"')&&rendered.html.includes('src="/member-assets/member-app.js"'));
 
+const shopWithAuthorizedCatalog={
+  ...baseData,
+  shop:{
+    status:'ok',
+    family_id:'family-secret',
+    customer_id:'26000001',
+    available_count:2,
+    pricing_authoritative:false,
+    checkout_ready:false,
+    discount_enforcement_ready:false,
+    products:[
+      {product_id:'product-album-1',product_type:'album',
+        title:'KAHO <Album>',description:'家族の&記録',
+        season_tag:'evergreen',hero_asset_ref:{public_asset:{public_path:'/member-assets/shop/album.jpg'},storage_key:'private-r2-key'},
+        pricing:{authoritative:false,amount:980000},checkout:{ready:false}},
+      {product_id:'product-canvas-2',product_type:'canvas',
+        title:'CANVAS',description:'写真を飾る',
+        season_tag:'evergreen',
+        hero_asset_ref:{public_asset:{public_path:'https://evil.example/remote.jpg'}}}
+    ]
+  }
+};
+const shopDocument=renderMemberBrowserApp(shopWithAuthorizedCatalog,{active_tab:'shop'}).html;
+pass('real browser SHOP exposes native category and product information rather than inert buttons',
+  (shopDocument.match(/<details class="mp-shop__card mp-shop__read-only-card">/g)||[]).length===2
+  &&shopDocument.includes('aria-label="取り扱い商品カテゴリ"')
+  &&!shopDocument.includes('data-shop-category')
+  &&!shopDocument.includes('data-shop-product')
+  &&!shopDocument.includes('data-shop-close'));
+pass('real browser SHOP provides pricing and discount boundary without checkout or order actions',
+  shopDocument.includes('価格・購入は準備中です。注文処理やFamily Pass特典の割引適用は行いません。')
+  &&!shopDocument.includes('980000')
+  &&!shopDocument.includes('data-shop-detail'));
+pass('real browser SHOP strips identity and unsafe media URLs and escapes titles',
+  shopDocument.includes('KAHO &lt;Album&gt;')
+  &&shopDocument.includes('家族の&amp;記録')
+  &&shopDocument.includes('/member-assets/shop/album.jpg')
+  &&!shopDocument.includes('family-secret')
+  &&!shopDocument.includes('26000001')
+  &&!shopDocument.includes('private-r2-key')
+  &&!shopDocument.includes('product-album-1')
+  &&!shopDocument.includes('evil.example'));
+
 const app=await handleMemberBrowserPageRequest(
   new Request(origin+'/member/shop'),
   {},
