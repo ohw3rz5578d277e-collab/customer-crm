@@ -1,4 +1,5 @@
 import { readExactCustomerLocalLineMessages } from './crm-line-history-exact-customer-read.mjs';
+import { verifyRemoteLineIdentityOwnership, validateRemoteLineHistoryPayload } from './crm-line-history-remote-identity.mjs';
 // ======================================================
 // CUSTOMER CRM API / COMPLETE WORKER
 // build: customer-crm-api-complete-20260530-secrets-required-03
@@ -905,6 +906,19 @@ async function fetchRemoteLineHistory(env, customer) {
     };
   }
 
+  // Before querying the LINE Worker, require an unambiguous exact CRM owner.
+  // A duplicated LINE user ID must never be used to infer the Customer ID.
+  const ownership = await verifyRemoteLineIdentityOwnership(env.DB, customer);
+  if (!ownership.allowed) {
+    return {
+      ok: false,
+      connected: false,
+      message: "LINE履歴の顧客紐付けを確認してください。",
+      messages: [],
+      debug: [{ step: ownership.reason }]
+    };
+  }
+
   const adminToken = getAdminToken(env);
   const lineHistoryInternalTokens = Array.from(new Set([
     text(env.RESERVATION_INTERNAL_TOKEN),
@@ -956,11 +970,22 @@ async function fetchRemoteLineHistory(env, customer) {
         });
 
         if (res.ok && data && data.ok !== false) {
+          const verified = validateRemoteLineHistoryPayload(data, lineUserId);
+          if (!verified.valid) {
+            return {
+              ok: false,
+              connected: false,
+              source: "remote_line_identity_unverified",
+              message: "LINE履歴の顧客照合ができませんでした。",
+              messages: [],
+              debug: [{ step: verified.reason }]
+            };
+          }
           return {
             ok: true,
             connected: true,
             source: "LINE_SERVICE" + path,
-            messages: normalizeLineHistoryMessages(data.messages || data.items || []),
+            messages: normalizeLineHistoryMessages(verified.items),
             debug
           };
         }
@@ -1008,11 +1033,22 @@ async function fetchRemoteLineHistory(env, customer) {
         });
 
         if (res.ok && data && data.ok !== false) {
+          const verified = validateRemoteLineHistoryPayload(data, lineUserId);
+          if (!verified.valid) {
+            return {
+              ok: false,
+              connected: false,
+              source: "remote_line_identity_unverified",
+              message: "LINE履歴の顧客照合ができませんでした。",
+              messages: [],
+              debug: [{ step: verified.reason }]
+            };
+          }
           return {
             ok: true,
             connected: true,
             source: base + path,
-            messages: normalizeLineHistoryMessages(arr),
+            messages: normalizeLineHistoryMessages(verified.items),
             debug
           };
         }
