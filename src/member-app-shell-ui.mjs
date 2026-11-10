@@ -61,14 +61,14 @@ export function buildMemberAppShellViewModel({
 }
 
 function navButton(tab,{compact=false}={}){
-  return '<button type="button" class="mp-shell__nav-item'+(tab.active?' is-active':'')+'" data-member-tab="'+escapeHtml(tab.id)+'" aria-selected="'+(tab.active?'true':'false')+'" role="tab">'
+  return '<button type="button" class="mp-shell__nav-item'+(tab.active?' is-active':'')+'" data-member-tab="'+escapeHtml(tab.id)+'" aria-selected="'+(tab.active?'true':'false')+'" aria-controls="member-panel-'+escapeHtml(tab.id)+'" tabindex="'+(tab.active?'0':'-1')+'" role="tab">'
     +'<span class="mp-shell__nav-label">'+escapeHtml(tab.label)+'</span>'
     +(compact?'':'<small>'+escapeHtml(tab.caption)+'</small>')
     +'</button>';
 }
 
 function panel(tab){
-  return '<section class="mp-shell__panel" data-member-panel="'+escapeHtml(tab.id)+'" role="tabpanel" aria-label="'+escapeHtml(tab.label)+'"'+(tab.active?'':' hidden')+'>'
+  return '<section class="mp-shell__panel" id="member-panel-'+escapeHtml(tab.id)+'" data-member-panel="'+escapeHtml(tab.id)+'" role="tabpanel" aria-label="'+escapeHtml(tab.label)+'"'+(tab.active?'':' hidden')+'>'
     +'<div class="mp-shell__mount" data-member-mount="'+escapeHtml(tab.id)+'"></div>'
     +'</section>';
 }
@@ -103,6 +103,7 @@ export function setMemberAppShellActiveTab(root,nextTab){
     const active=button.getAttribute('data-member-tab')===tab;
     button.classList?.toggle('is-active',active);
     button.setAttribute?.('aria-selected',active?'true':'false');
+    button.tabIndex=active?0:-1;
   }
 
   for(const section of root.querySelectorAll('[data-member-panel]')){
@@ -126,6 +127,43 @@ export function bindMemberAppShellNavigation(root,{
 
   if(root.dataset)root.dataset.memberNavBound='1';
 
+  const announceTabChange=result=>{
+    if(!result.ok)return;
+    if(typeof on_tab_change==='function')on_tab_change(result.active_tab);
+    if(typeof root.dispatchEvent==='function'&&typeof CustomEvent==='function'){
+      root.dispatchEvent(new CustomEvent('member:tab-change',{
+        detail:{tab:result.active_tab},
+        bubbles:false
+      }));
+    }
+  };
+
+  root.addEventListener('keydown',event=>{
+    if(event?.altKey||event?.ctrlKey||event?.metaKey)return;
+    const target=event?.target?.closest?.('[data-member-tab]');
+    if(!target||!root.contains?.(target))return;
+    const index=MEMBER_APP_TABS.findIndex(tab=>tab.id===target.getAttribute('data-member-tab'));
+    if(index<0)return;
+    const count=MEMBER_APP_TABS.length;
+    const next=event.key==='ArrowRight'?(index+1)%count
+      :event.key==='ArrowLeft'?(index+count-1)%count
+      :event.key==='Home'?0
+      :event.key==='End'?count-1
+      :null;
+    if(next===null)return;
+    // The desktop and mobile tablists are duplicated: focus only within
+    // the tablist where the keyboard event originated.
+    const nav=target.closest?.('[role="tablist"]');
+    const nextId=MEMBER_APP_TABS[next].id;
+    const button=[...(nav?.querySelectorAll?.('[data-member-tab]')||[])]
+      .find(item=>item.getAttribute('data-member-tab')===nextId);
+    if(!button)return;
+    event.preventDefault?.();
+    const result=setMemberAppShellActiveTab(root,nextId);
+    button.focus?.();
+    announceTabChange(result);
+  });
+
   root.addEventListener('click',event=>{
     const target=event?.target?.closest?.('[data-member-tab]');
     if(!target||!root.contains?.(target))return;
@@ -134,16 +172,7 @@ export function bindMemberAppShellNavigation(root,{
     if(!TAB_IDS.has(text(requested)))return;
 
     const result=setMemberAppShellActiveTab(root,requested);
-    if(result.ok&&typeof on_tab_change==='function'){
-      on_tab_change(result.active_tab);
-    }
-
-    if(result.ok&&typeof root.dispatchEvent==='function'&&typeof CustomEvent==='function'){
-      root.dispatchEvent(new CustomEvent('member:tab-change',{
-        detail:{tab:result.active_tab},
-        bubbles:false
-      }));
-    }
+    announceTabChange(result);
   });
 
   return {ok:true,already_bound:false};
@@ -170,6 +199,9 @@ export function memberAppShellUiHealth(){
     navigation_tabs:MEMBER_APP_TABS.map(tab=>tab.id),
     mobile_bottom_navigation:true,
     desktop_side_navigation:true,
+    keyboard_tablist_navigation:true,
+    linked_tab_panels:true,
+    roving_tabindex:true,
     responsive_breakpoint_px:820,
     black_theme_source:'authorized_family_pass_effective_black',
     client_tier_override:false,
