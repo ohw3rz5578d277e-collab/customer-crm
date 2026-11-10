@@ -65,12 +65,26 @@ async function fetchCustomers(signal){
  }
  throw Error('LINE連携済み顧客のページ数が上限を超えました');
 }
+function reconcileSelectedAfterListRefresh(){
+ if(!state.selected)return;
+ const current=state.customers.find(c=>c.customer_id===state.selected.customer_id&&c.line_linked!==false);
+ if(current){state.selected=current;return}
+ // Revoke the old display and invalidate any in-flight media/history responses.
+ ++conversationRequestId;state.selected=null;
+ shell()?.setAttribute('data-chat-open','0');
+ const title=$('crmLineChatTitle'),subtitle=$('crmLineChatSubtitle'),status=$('crmLineChatStatus'),messages=$('crmLineChatMessages');
+ if(title)title.textContent='顧客を選択';
+ if(subtitle)subtitle.textContent='LINE履歴';
+ if(status){status.textContent='未選択';status.classList.add('off')}
+ if(messages)messages.innerHTML='<div class="crm-line-chat-empty">左の顧客一覧から選択してください。</div>';
+ renderAvatar(null,{});
+}
 async function loadCustomers(force=false){
  if(state.loading&&!force)return;customerListController?.abort();const controller=new AbortController();customerListController=controller;const requestId=++customerListRequestId;state.loading=true;state.listTrusted=false;ensure();const host=$('crmLineChatCustomers');const focusedCustomerId=host?.contains(document.activeElement)?document.activeElement?.closest('[data-line-customer]')?.dataset.lineCustomer:null;renderCustomers();
  try{
   const customers=(await fetchCustomers(controller.signal)).filter(c=>c.line_linked!==false);
   if(requestId!==customerListRequestId)return;
-  state.customers=customers;state.listError=false;state.loading=false;state.listTrusted=true;filter();
+  state.customers=customers;state.listError=false;state.loading=false;state.listTrusted=true;reconcileSelectedAfterListRefresh();filter();
   if(focusedCustomerId&&(document.activeElement===document.body||document.activeElement===host)){const target=[...host.querySelectorAll('[data-line-customer]')].find(el=>el.dataset.lineCustomer===focusedCustomerId);(target||$('crmLineChatSearch'))?.focus({preventScroll:true})}
  }catch(e){
   if(requestId!==customerListRequestId)return;
