@@ -18,7 +18,7 @@ assert.equal(html.includes("new MutationObserver(()=>reconcileDesktopLayout()).o
 const out='artifacts/crm-canonical-uix-responsive';fs.mkdirSync(out,{recursive:true});
 const requests=[],notFoundRequests=[];
 let delayNextLineHistory=false,delayNextLineList=false,failNextLineList=false,malformedNextLineList=false,malformedNextLineRow=null,stalledNextLineList=null,malformedNextLineHistory=null;
-let holdNextLineAvatar=false,releaseHeldLineAvatar=null;
+let holdNextLineAvatar=false,releaseHeldLineAvatar=null,omitSelectedLineCustomerOnce=false;
 function send(res,status,data,type='application/json; charset=utf-8'){res.writeHead(status,{'content-type':type,'cache-control':'no-store'});res.end(type.startsWith('application/json')?JSON.stringify(data):data)}
 const server=http.createServer(async(req,res)=>{
  const u=new URL(req.url,'http://127.0.0.1');requests.push(req.method+' '+u.pathname+u.search);
@@ -29,10 +29,12 @@ const server=http.createServer(async(req,res)=>{
  if(u.pathname==='/__fixture/malformed-next-line-list'){malformedNextLineList=true;return send(res,200,{ok:true})}
  if(u.pathname==='/__fixture/malformed-next-line-row'){malformedNextLineRow=u.searchParams.get('shape')||'missing';return send(res,200,{ok:true})}
  if(u.pathname==='/__fixture/stall-next-line-list'){stalledNextLineList=u.searchParams.get('mode')||'empty';return send(res,200,{ok:true})}
+ if(u.pathname==='/__fixture/omit-selected-line-customer'){omitSelectedLineCustomerOnce=true;return send(res,200,{ok:true})}
  if(u.pathname==='/api/customer360/customers'){
   if(u.searchParams.get('line')==='linked'){
    const page=Number(u.searchParams.get('page')||1);
    if(page===1){
+    if(omitSelectedLineCustomerOnce){omitSelectedLineCustomerOnce=false;const items=linePage1.filter(c=>c.customer_id!=='26000101');return send(res,200,{ok:true,total:items.length,all_total:items.length,page:1,page_size:100,has_next:false,items,facets})}
     if(delayNextLineList){delayNextLineList=false;await new Promise(resolve=>setTimeout(resolve,700));return send(res,200,{ok:true,total:0,all_total:0,page:1,page_size:100,has_next:false,items:[],facets})}
     if(failNextLineList){failNextLineList=false;return send(res,200,{ok:false,error:'sensitive_internal_database_failure_do_not_render'})}
     if(malformedNextLineList){malformedNextLineList=false;return send(res,200,{ok:true,has_next:false,items:null})}
@@ -207,6 +209,21 @@ try{
   }
   assert.equal(await page.locator('#lineOpsPanel').isVisible(),false,viewport.width+': old LINE ops opened instead of chat');
   assert.equal(await page.locator('#crmCsvImportOpenInline').isVisible(),false,viewport.width+': CSV import action must not float over LINE');
+  if(viewport.width===390){
+   assert.equal(await page.evaluate(()=>window.__crmOwnerLineChat.getState().listTrusted),true,'successful verified LINE list not trusted');
+   const historyBefore=requests.filter(x=>x.includes('/line-history')).length;
+   const mediaBefore=requests.filter(x=>x.includes('/api/customer360/media/')).length;
+   const blocked=await page.evaluate(async()=>{
+    const api=window.__crmOwnerLineChat;
+    const outcomes=[];
+    for(const id of ['26000888','CRM-26000101','26000101/../26000102',null])outcomes.push(await api.openConversation(id));
+    return {outcomes,selected:api.getState().selected};
+   });
+   assert.deepEqual(blocked.outcomes,[false,false,false,false],'unknown or malformed LINE customer IDs must fail closed');
+   assert.equal(blocked.selected,null,'rejected LINE customer unexpectedly changed selection');
+   assert.equal(requests.filter(x=>x.includes('/line-history')).length,historyBefore,'rejected LINE customer initiated history fetch');
+   assert.equal(requests.filter(x=>x.includes('/api/customer360/media/')).length,mediaBefore,'rejected LINE customer initiated media fetch');
+  }
   await page.locator('#crmLineChatSearch').fill('26999999');
   await page.waitForFunction(()=>document.querySelectorAll('#crmLineChatCustomers [data-line-customer]').length===1);
   assert.equal(await page.locator('#crmLineChatCustomers [data-line-customer="26999999"]').isVisible(),true,viewport.width+': page-2 LINE customer missing from local search');
@@ -249,9 +266,21 @@ try{
    await page.evaluate(()=>window.__crmOwnerLineChat.loadCustomers(true));
    const listFailureText=await page.locator('#crmLineChatCustomers').innerText();
    assert.ok(listFailureText.includes('一覧を取得できませんでした'),'LINE list failure lacks user-friendly guidance');
+   assert.equal(await page.evaluate(()=>window.__crmOwnerLineChat.getState().listTrusted),false,'failed LINE list remained trusted');
+   const failedHistoryBefore=requests.filter(x=>x.includes('/line-history')).length;
+   assert.equal(await page.evaluate(()=>window.__crmOwnerLineChat.openConversation('26000101')),false,'failed LINE list allowed stale customer history');
+   assert.equal(requests.filter(x=>x.includes('/line-history')).length,failedHistoryBefore,'failed LINE list made a stale history request');
    assert.equal(listFailureText.includes('sensitive_internal_database_failure'),false,'raw LINE list error exposed');
    assert.equal(await page.locator('#crmLineChatListRetry').isVisible(),true,'failed LINE list lacks a visible retry control');
+   await page.locator('#crmLineChatSearch').fill('26000101');
+   assert.ok((await page.locator('#crmLineChatCustomers').innerText()).includes('一覧を取得できませんでした'),'search during LINE list failure replaced error with a misleading empty list');
+   assert.equal(await page.locator('#crmLineChatCustomers [data-line-customer]').count(),0,'search during LINE list failure exposed stale selectable customers');
+   assert.equal(await page.locator('#crmLineChatListRetry').isVisible(),true,'search during LINE list failure removed retry button');
    await page.locator('#crmLineChatListRetry').click();
+   await page.waitForFunction(()=>document.querySelectorAll('#crmLineChatCustomers [data-line-customer]').length===1);
+   assert.equal(await page.locator('#crmLineChatSearch').inputValue(),'26000101','LINE list retry lost active search query');
+   assert.equal(await page.locator('#crmLineChatCustomers [data-line-customer="26000101"]').isVisible(),true,'LINE list retry did not restore filtered customer');
+   await page.locator('#crmLineChatSearch').fill('');
    await page.waitForFunction(()=>document.querySelectorAll('#crmLineChatCustomers [data-line-customer]').length===101);
    assert.equal(await page.locator('#crmLineChatCustomers [data-line-customer]').count(),101,'LINE list does not recover from retry button');
    await page.request.get(origin+'/__fixture/malformed-next-line-list');
@@ -261,6 +290,17 @@ try{
    await page.locator('#crmLineChatListRetry').click();
    await page.waitForFunction(()=>document.querySelectorAll('#crmLineChatCustomers [data-line-customer]').length===101);
    assert.equal(await page.locator('#crmLineChatCustomers [data-line-customer]').count(),101,'LINE list did not recover after malformed payload');
+   await page.request.get(origin+'/__fixture/delay-next-line-list');
+   const loadingRequest=page.waitForRequest(req=>req.url().includes('/api/customer360/customers?page=1&page_size=100&line=linked'));
+   await page.evaluate(()=>{void window.__crmOwnerLineChat.loadCustomers(true)});
+   await loadingRequest;
+   await page.locator('#crmLineChatSearch').fill('26000101');
+   assert.ok((await page.locator('#crmLineChatCustomers').innerText()).includes('読み込み中…'),'search during LINE list loading hid the loading state');
+   assert.equal(await page.locator('#crmLineChatCustomers [data-line-customer]').count(),0,'search during LINE list loading exposed stale selectable customers');
+   await page.evaluate(()=>{void window.__crmOwnerLineChat.loadCustomers(true)});
+   await page.waitForFunction(()=>document.querySelectorAll('#crmLineChatCustomers [data-line-customer]').length===1);
+   await page.locator('#crmLineChatSearch').fill('');
+   await page.waitForFunction(()=>document.querySelectorAll('#crmLineChatCustomers [data-line-customer]').length===101);
    for(const shape of ['missing','number','bad-format','null','array']){
     await page.request.get(origin+'/__fixture/malformed-next-line-row?shape='+shape);
     await page.evaluate(()=>window.__crmOwnerLineChat.loadCustomers(true));
@@ -369,6 +409,31 @@ try{
    assert.equal((await page.locator('#crmLineChatStatus').textContent()).trim(),'履歴未確認','slow previous LINE history replaced selected customer status');
    await page.evaluate(()=>window.__crmOwnerLineChat.openConversation('26000101'));
    await page.waitForFunction(()=>document.querySelectorAll('#crmLineChatMessages .crm-line-chat-row').length===2);
+   // A customer removed from a freshly verified LINE roster must not retain stale chat UI.
+   await page.request.get(origin+'/__fixture/delay-next-line-history');
+   await page.request.get(origin+'/__fixture/hold-next-line-avatar');
+   const removedHistoryRequest=page.waitForRequest(req=>req.url().includes('/api/customers/26000101/line-history'));
+   const removedAvatarRequest=page.waitForRequest(req=>req.url().includes('/api/customer360/media/26000101'));
+   await page.evaluate(()=>{void window.__crmOwnerLineChat.openConversation('26000101',true)});
+   await Promise.all([removedHistoryRequest,removedAvatarRequest]);
+   await page.request.get(origin+'/__fixture/omit-selected-line-customer');
+   await page.evaluate(()=>window.__crmOwnerLineChat.loadCustomers(true));
+   await page.waitForFunction(()=>window.__crmOwnerLineChat.getState().selected===null);
+   assert.equal(await page.evaluate(()=>window.__crmOwnerLineChat.getState().listTrusted),true,'valid LINE roster after unlink was not trusted');
+   assert.equal((await page.locator('#crmLineChatTitle').textContent()).trim(),'顧客を選択','removed LINE customer remained in conversation header');
+   assert.equal((await page.locator('#crmLineChatStatus').textContent()).trim(),'未選択','removed LINE customer retained connected status');
+   assert.equal(await page.evaluate(()=>document.querySelector('#crmOwnerLineChat .crm-line-chat-shell')?.dataset.chatOpen),'0','removed LINE customer retained mobile chat display');
+   assert.equal(await page.locator('#crmLineChatMessages .crm-line-chat-row').count(),0,'removed LINE customer retained chat bubbles');
+   const removedHistoryBefore=requests.filter(x=>x.includes('/api/customers/26000101/line-history')).length;
+   const removedMediaBefore=requests.filter(x=>x.includes('/api/customer360/media/26000101')).length;
+   assert.equal(await page.evaluate(()=>window.__crmOwnerLineChat.openConversation('26000101')),false,'removed LINE customer reopened after refreshed roster');
+   assert.equal(requests.filter(x=>x.includes('/api/customers/26000101/line-history')).length,removedHistoryBefore,'removed LINE customer started a history fetch');
+   assert.equal(requests.filter(x=>x.includes('/api/customer360/media/26000101')).length,removedMediaBefore,'removed LINE customer started a media fetch');
+   await page.request.get(origin+'/__fixture/release-line-avatar');
+   await page.waitForTimeout(800);
+   assert.equal((await page.locator('#crmLineChatTitle').textContent()).trim(),'顧客を選択','stale history resurrected unlinked customer');
+   assert.equal(await page.locator('#crmLineChatMessages .crm-line-chat-row').count(),0,'stale history resurrected chat bubbles after unlink');
+   assert.equal(await page.locator('#crmLineChatHeadAvatar img').count(),0,'stale media resurrected unlinked customer avatar');
   }
   if(mobile){
    const navState=await page.evaluate(()=>({
