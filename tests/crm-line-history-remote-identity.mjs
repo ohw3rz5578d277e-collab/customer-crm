@@ -4,7 +4,7 @@ import {DatabaseSync} from 'node:sqlite';
 import {
   verifyRemoteLineIdentityOwnership,
   validateRemoteLineHistoryPayload
-} from '../src/crm-line-history-remote-identity.mjs';
+} from '../src/crm-line-history-exact-customer-read.mjs';
 
 const source = fs.readFileSync('src/index.js', 'utf8');
 const remoteStart = source.indexOf('async function fetchRemoteLineHistory(');
