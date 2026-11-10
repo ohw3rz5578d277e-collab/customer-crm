@@ -1,4 +1,5 @@
 import app from './production-index-crm-browser-root-entry.js';
+import {crmRes15IdentityRead} from './crm-res15-identity-readonly.mjs';
 import { handleMemberProductionRequest, memberProductionRouteModeEnabled } from './member-production-request-composition.mjs';
 import { createMemberPrivateMediaStorageAdapter } from './member-production-storage-adapter.mjs';
 import todayReadOnlyApp from './production-index-crm-today-dashboard.js';
@@ -340,6 +341,8 @@ export default {
   async fetch(request,env,ctx){
     const blocked=enforceProductionRequestBoundary(request,env);
     if(blocked)return hardenProductionResponse(blocked,request);
+    const res15IdentityRead=await crmRes15IdentityRead(request,env);
+    if(res15IdentityRead)return hardenProductionResponse(res15IdentityRead,request);
     const privateMediaStorageAdapter=createMemberPrivateMediaStorageAdapter(env?.MEMBER_PRIVATE_MEDIA_BUCKET);
     const memberResponse=await handleMemberProductionRequest(request,env,{
       approved:MEMBER_PRODUCTION_OWNER_APPROVED,
