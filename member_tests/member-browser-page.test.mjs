@@ -169,6 +169,24 @@ pass('combined read-only tabs expose no inert detail, mutation, pricing or ident
   &&!combinedReadonlyDocument.includes('must-not-leak')
   &&!combinedReadonlyDocument.includes('evil.example'));
 
+const combinedTabIds=['home','memories','create','shop','my'];
+pass('combined read-only browser links both desktop/mobile tabs to canonical panels',
+  combinedTabIds.every(tab=>
+    combinedReadonlyDocument.split('aria-controls="member-panel-'+tab+'"').length===3
+    &&combinedReadonlyDocument.includes('id="member-panel-'+tab+'" data-member-panel="'+tab+'"')
+  ));
+pass('combined browser renders selected-only roving keyboard stops for both navs',
+  (combinedReadonlyDocument.match(/tabindex="0" role="tab"/g)||[]).length===2
+  &&(combinedReadonlyDocument.match(/tabindex="-1" role="tab"/g)||[]).length===8
+  &&combinedReadonlyDocument.split('data-member-tab="memories" aria-selected="true" aria-controls="member-panel-memories" tabindex="0" role="tab"').length===3
+  &&shopDocument.split('data-member-tab="shop" aria-selected="true" aria-controls="member-panel-shop" tabindex="0" role="tab"').length===3);
+pass('combined read-only browser retains served keyboard-capable asset without private data',
+  combinedReadonlyDocument.includes('src="/member-assets/member-app.js"')
+  &&combinedReadonlyDocument.includes('data-member-app-shell')
+  &&!combinedReadonlyDocument.includes('must-not-leak')
+  &&!combinedReadonlyDocument.includes('private-r2-key')
+  &&!combinedReadonlyDocument.includes('family-secret'));
+
 const app=await handleMemberBrowserPageRequest(
   new Request(origin+'/member/shop'),
   {},
