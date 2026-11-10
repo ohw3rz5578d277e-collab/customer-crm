@@ -50,7 +50,10 @@ async function fetchCustomers(signal){
   if(!r.ok||j.ok===false)throw Error(j.error||j.message||'顧客一覧を取得できません');
   if(!Array.isArray(j.items))throw Error('LINE顧客一覧のレスポンス形式が正しくありません');
   const items=j.items,previousUniqueCount=seen.size;
-  for(const c of items){const id=String(c&&c.customer_id||'');if(id&&seen.has(id))continue;if(id)seen.add(id);all.push(c)}
+  for(const c of items){
+   if(!c||typeof c!=='object'||Array.isArray(c)||typeof c.customer_id!=='string'||!/^\d{8}$/.test(c.customer_id))throw Error('LINE顧客一覧の顧客ID形式が正しくありません');
+   const id=c.customer_id;if(seen.has(id))continue;seen.add(id);all.push(c)
+  }
   if(j.has_next!==true)return all;
   if(seen.size===previousUniqueCount)throw Error('LINE顧客一覧のページ送りが進行していません');
  }
