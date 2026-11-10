@@ -207,6 +207,21 @@ try{
   }
   assert.equal(await page.locator('#lineOpsPanel').isVisible(),false,viewport.width+': old LINE ops opened instead of chat');
   assert.equal(await page.locator('#crmCsvImportOpenInline').isVisible(),false,viewport.width+': CSV import action must not float over LINE');
+  if(viewport.width===390){
+   assert.equal(await page.evaluate(()=>window.__crmOwnerLineChat.getState().listTrusted),true,'successful verified LINE list not trusted');
+   const historyBefore=requests.filter(x=>x.includes('/line-history')).length;
+   const mediaBefore=requests.filter(x=>x.includes('/api/customer360/media/')).length;
+   const blocked=await page.evaluate(async()=>{
+    const api=window.__crmOwnerLineChat;
+    const outcomes=[];
+    for(const id of ['26000888','CRM-26000101','26000101/../26000102',null])outcomes.push(await api.openConversation(id));
+    return {outcomes,selected:api.getState().selected};
+   });
+   assert.deepEqual(blocked.outcomes,[false,false,false,false],'unknown or malformed LINE customer IDs must fail closed');
+   assert.equal(blocked.selected,null,'rejected LINE customer unexpectedly changed selection');
+   assert.equal(requests.filter(x=>x.includes('/line-history')).length,historyBefore,'rejected LINE customer initiated history fetch');
+   assert.equal(requests.filter(x=>x.includes('/api/customer360/media/')).length,mediaBefore,'rejected LINE customer initiated media fetch');
+  }
   await page.locator('#crmLineChatSearch').fill('26999999');
   await page.waitForFunction(()=>document.querySelectorAll('#crmLineChatCustomers [data-line-customer]').length===1);
   assert.equal(await page.locator('#crmLineChatCustomers [data-line-customer="26999999"]').isVisible(),true,viewport.width+': page-2 LINE customer missing from local search');
@@ -249,6 +264,10 @@ try{
    await page.evaluate(()=>window.__crmOwnerLineChat.loadCustomers(true));
    const listFailureText=await page.locator('#crmLineChatCustomers').innerText();
    assert.ok(listFailureText.includes('一覧を取得できませんでした'),'LINE list failure lacks user-friendly guidance');
+   assert.equal(await page.evaluate(()=>window.__crmOwnerLineChat.getState().listTrusted),false,'failed LINE list remained trusted');
+   const failedHistoryBefore=requests.filter(x=>x.includes('/line-history')).length;
+   assert.equal(await page.evaluate(()=>window.__crmOwnerLineChat.openConversation('26000101')),false,'failed LINE list allowed stale customer history');
+   assert.equal(requests.filter(x=>x.includes('/line-history')).length,failedHistoryBefore,'failed LINE list made a stale history request');
    assert.equal(listFailureText.includes('sensitive_internal_database_failure'),false,'raw LINE list error exposed');
    assert.equal(await page.locator('#crmLineChatListRetry').isVisible(),true,'failed LINE list lacks a visible retry control');
    await page.locator('#crmLineChatListRetry').click();
