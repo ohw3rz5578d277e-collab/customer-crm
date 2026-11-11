@@ -974,6 +974,7 @@ async function fetchRemoteLineHistory(env, customer) {
             return {
               ok: false,
               connected: false,
+              attempted: true,
               source: "remote_line_identity_unverified",
               message: "LINE履歴の顧客照合ができませんでした。",
               messages: [],
@@ -983,6 +984,7 @@ async function fetchRemoteLineHistory(env, customer) {
           return {
             ok: true,
             connected: true,
+            attempted: true,
             source: "LINE_SERVICE" + path,
             messages: normalizeLineHistoryMessages(verified.items),
             debug
@@ -1037,6 +1039,7 @@ async function fetchRemoteLineHistory(env, customer) {
             return {
               ok: false,
               connected: false,
+              attempted: true,
               source: "remote_line_identity_unverified",
               message: "LINE履歴の顧客照合ができませんでした。",
               messages: [],
@@ -1046,6 +1049,7 @@ async function fetchRemoteLineHistory(env, customer) {
           return {
             ok: true,
             connected: true,
+            attempted: true,
             source: base + path,
             messages: normalizeLineHistoryMessages(verified.items),
             debug
@@ -1063,6 +1067,7 @@ async function fetchRemoteLineHistory(env, customer) {
   return {
     ok: false,
     connected: false,
+              attempted: true,
     message: "LINE履歴APIに接続できませんでした。LINEワーカー単体は成功しているため、CRM側からのfetchまたは認証で停止しています。",
     messages: [],
     debug
