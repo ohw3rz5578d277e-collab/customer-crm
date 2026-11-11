@@ -1,4 +1,4 @@
-import { readExactCustomerLocalLineMessages, verifyRemoteLineIdentityOwnership, validateRemoteLineHistoryPayload } from './crm-line-history-exact-customer-read.mjs';
+import { readExactCustomerLocalLineMessages, verifyRemoteLineIdentityOwnership, verifyRemoteLineHistoryAtDelivery, validateRemoteLineHistoryPayload } from './crm-line-history-exact-customer-read.mjs';
 // ======================================================
 // CUSTOMER CRM API / COMPLETE WORKER
 // build: customer-crm-api-complete-20260530-secrets-required-03
@@ -1072,6 +1072,19 @@ async function fetchRemoteLineHistory(env, customer) {
 async function getCustomerLineHistory(env, customer) {
   const localMessages = await getLocalCustomerLineHistory(env, customer);
   const remote = await fetchRemoteLineHistory(env, customer);
+  // A valid linkage at request start is not sufficient if it changed mid-fetch.
+  const delivery = await verifyRemoteLineHistoryAtDelivery(env.DB, customer, remote);
+  if (!delivery.allowed) {
+    return {
+      ok: false,
+      connected: false,
+      source: "remote_line_identity_changed",
+      message: "LINEの顧客紐づけが変更されました。顧客一覧を更新して再確認してください。",
+      line_user_id: "",
+      count: 0,
+      messages: []
+    };
+  }
 
   const combined = normalizeLineHistoryMessages([
     ...localMessages,
