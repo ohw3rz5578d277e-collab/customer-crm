@@ -19,7 +19,7 @@ assert.equal((remote.match(/normalizeLineHistoryMessages\(verified\.items\)/g) |
 assert.match(remote, /remote_line_identity_unverified/, 'identity mismatch must fail closed');
 const readStart = source.indexOf('async function getCustomerLineHistory(');
 const detailStart = source.indexOf('async function getCustomerDetail(',readStart);
-assert.ok(readStart > remoteEnd && detailStart > readStart,'customer history delivery path missing');
+assert.ok(readStart === remoteEnd && detailStart > readStart,'customer history delivery path missing');
 const deliverySource = source.slice(readStart,detailStart);
 const fetchIndex = deliverySource.indexOf('await fetchRemoteLineHistory(env, customer)');
 const postCheckIndex = deliverySource.indexOf('await verifyRemoteLineHistoryAtDelivery(env.DB, customer, remote)');
