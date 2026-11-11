@@ -25,6 +25,7 @@ const fetchIndex = deliverySource.indexOf('await fetchRemoteLineHistory(env, cus
 const postCheckIndex = deliverySource.indexOf('await verifyRemoteLineHistoryAtDelivery(env.DB, customer, remote)');
 const composeIndex = deliverySource.indexOf('const combined = normalizeLineHistoryMessages(');
 assert.ok(fetchIndex >= 0 && postCheckIndex > fetchIndex && composeIndex > postCheckIndex,'remote identity must be rechecked after fetch and before returning history');
+assert.match(remote,/attempted:\s*true/,'remote attempts must be tracked independently of connection success');
 assert.match(deliverySource.slice(postCheckIndex,composeIndex),/if \(!delivery.allowed\)\s*\{[\s\S]*?ok:\s*false[\s\S]*?messages:\s*\[\]/,'failed ownership recheck must return zero messages');
 
 const db = new DatabaseSync(':memory:');
@@ -92,7 +93,9 @@ const ownerB={customer_id:'26000102',line_user_id:lineB};
 assert.equal((await verifyRemoteLineHistoryAtDelivery(d1,ownerB,{connected:true,messages:[inbound]})).allowed,true);
 const beforeNoRemote=reads;
 assert.deepEqual(await verifyRemoteLineHistoryAtDelivery(d1,ownerB,{connected:false,messages:[]}),{allowed:true,remoteHistoryAvailable:false});
-assert.equal(reads,beforeNoRemote,'disconnected remote response must not force extra DB reads');
+assert.equal(reads,beforeNoRemote,'no remote attempt must not force extra DB reads');
+assert.deepEqual(await verifyRemoteLineHistoryAtDelivery(d1,ownerB,{attempted:true,connected:false,messages:[]}),{allowed:true,remoteHistoryAvailable:false},'failed remote fetch must recheck a stable owner');
+assert.equal(reads,beforeNoRemote+1,'failed attempted remote fetch must recheck ownership');
 
 async function delayedResponseOwnershipCheck(customer,duringNetwork) {
   const initial=await verifyRemoteLineIdentityOwnership(d1,customer);
@@ -108,6 +111,14 @@ async function delayedResponseOwnershipCheck(customer,duringNetwork) {
   release({connected:true,messages:[{line_user_id:customer.line_user_id,message_text:'synthetic delayed history'}]});
   return request;
 }
+
+// A failed remote lookup must not expose local history after unlink during the request.
+const beforeFailedAttempt=await verifyRemoteLineIdentityOwnership(d1,ownerB);
+assert.equal(beforeFailedAttempt.allowed,true);
+db.prepare('UPDATE customers SET line_user_id=NULL WHERE customer_id=?').run('26000102');
+const failedAttempt=await verifyRemoteLineHistoryAtDelivery(d1,ownerB,{attempted:true,connected:false,messages:[]});
+assert.equal(failedAttempt.allowed,false,'failed Worker fetch must not bypass delivery ownership check');
+db.prepare('UPDATE customers SET line_user_id=? WHERE customer_id=?').run(lineB,'26000102');
 
 // A formerly valid owner becomes unlinked before remote fetch completes.
 const unlinked=await delayedResponseOwnershipCheck(ownerB,()=>{
