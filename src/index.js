@@ -1,3 +1,4 @@
+import { readExactCustomerLocalLineMessages, verifyRemoteLineIdentityOwnership, verifyRemoteLineHistoryAtDelivery, validateRemoteLineHistoryPayload } from './crm-line-history-exact-customer-read.mjs';
 // ======================================================
 // CUSTOMER CRM API / COMPLETE WORKER
 // build: customer-crm-api-complete-20260530-secrets-required-03
@@ -888,24 +889,8 @@ function normalizeLineHistoryMessages(items) {
 }
 
 async function getLocalCustomerLineHistory(env, customer) {
-  const params = [];
-  let where = "customer_id = ?";
-  params.push(customer.customer_id);
-
-  if (text(customer.line_user_id)) {
-    where = "(customer_id = ? OR line_user_id = ?)";
-    params.push(text(customer.line_user_id));
-  }
-
-  const result = await env.DB.prepare(`
-    SELECT *
-    FROM customer_line_messages
-    WHERE ${where}
-    ORDER BY COALESCE(sent_at, created_at) ASC, id ASC
-    LIMIT 300
-  `).bind(...params).all();
-
-  return normalizeLineHistoryMessages(result.results || []);
+  const rows = await readExactCustomerLocalLineMessages(env.DB, customer?.customer_id);
+  return normalizeLineHistoryMessages(rows);
 }
 
 async function fetchRemoteLineHistory(env, customer) {
@@ -917,6 +902,19 @@ async function fetchRemoteLineHistory(env, customer) {
       message: "この顧客には line_user_id がまだありません。LINE連携後に履歴を表示できます。",
       messages: [],
       debug: [{ step: "missing_line_user_id" }]
+    };
+  }
+
+  // Before querying the LINE Worker, require an unambiguous exact CRM owner.
+  // A duplicated LINE user ID must never be used to infer the Customer ID.
+  const ownership = await verifyRemoteLineIdentityOwnership(env.DB, customer);
+  if (!ownership.allowed) {
+    return {
+      ok: false,
+      connected: false,
+      message: "LINE履歴の顧客紐付けを確認してください。",
+      messages: [],
+      debug: [{ step: ownership.reason }]
     };
   }
 
@@ -971,11 +969,24 @@ async function fetchRemoteLineHistory(env, customer) {
         });
 
         if (res.ok && data && data.ok !== false) {
+          const verified = validateRemoteLineHistoryPayload(data, lineUserId);
+          if (!verified.valid) {
+            return {
+              ok: false,
+              connected: false,
+              attempted: true,
+              source: "remote_line_identity_unverified",
+              message: "LINE履歴の顧客照合ができませんでした。",
+              messages: [],
+              debug: [{ step: verified.reason }]
+            };
+          }
           return {
             ok: true,
             connected: true,
+            attempted: true,
             source: "LINE_SERVICE" + path,
-            messages: normalizeLineHistoryMessages(data.messages || data.items || []),
+            messages: normalizeLineHistoryMessages(verified.items),
             debug
           };
         }
@@ -1023,11 +1034,24 @@ async function fetchRemoteLineHistory(env, customer) {
         });
 
         if (res.ok && data && data.ok !== false) {
+          const verified = validateRemoteLineHistoryPayload(data, lineUserId);
+          if (!verified.valid) {
+            return {
+              ok: false,
+              connected: false,
+              attempted: true,
+              source: "remote_line_identity_unverified",
+              message: "LINE履歴の顧客照合ができませんでした。",
+              messages: [],
+              debug: [{ step: verified.reason }]
+            };
+          }
           return {
             ok: true,
             connected: true,
+            attempted: true,
             source: base + path,
-            messages: normalizeLineHistoryMessages(arr),
+            messages: normalizeLineHistoryMessages(verified.items),
             debug
           };
         }
@@ -1043,6 +1067,7 @@ async function fetchRemoteLineHistory(env, customer) {
   return {
     ok: false,
     connected: false,
+              attempted: true,
     message: "LINE履歴APIに接続できませんでした。LINEワーカー単体は成功しているため、CRM側からのfetchまたは認証で停止しています。",
     messages: [],
     debug
@@ -1052,6 +1077,19 @@ async function fetchRemoteLineHistory(env, customer) {
 async function getCustomerLineHistory(env, customer) {
   const localMessages = await getLocalCustomerLineHistory(env, customer);
   const remote = await fetchRemoteLineHistory(env, customer);
+  // A valid linkage at request start is not sufficient if it changed mid-fetch.
+  const delivery = await verifyRemoteLineHistoryAtDelivery(env.DB, customer, remote);
+  if (!delivery.allowed) {
+    return {
+      ok: false,
+      connected: false,
+      source: "remote_line_identity_changed",
+      message: "LINEの顧客紐づけが変更されました。顧客一覧を更新して再確認してください。",
+      line_user_id: "",
+      count: 0,
+      messages: []
+    };
+  }
 
   const combined = normalizeLineHistoryMessages([
     ...localMessages,
