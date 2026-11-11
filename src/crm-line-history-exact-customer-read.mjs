@@ -51,6 +51,17 @@ export async function verifyRemoteLineIdentityOwnership(db, customer) {
   }
 }
 
+// Revalidate after the async LINE Worker request, before returning any history.
+// The owner might have been unlinked or changed while the network call was pending.
+export async function verifyRemoteLineHistoryAtDelivery(db, customer, remote) {
+  if (remote?.connected !== true) return { allowed: true, remoteHistoryAvailable: false };
+  const fresh = await verifyRemoteLineIdentityOwnership(db, customer);
+  if (!fresh.allowed) {
+    return { allowed: false, remoteHistoryAvailable: false, reason: 'remote_line_identity_changed_during_fetch' };
+  }
+  return { allowed: true, remoteHistoryAvailable: true };
+}
+
 function sameIdentityFields(record, expected) {
   if (!record || typeof record !== 'object' || Array.isArray(record)) return false;
   let present = false;
