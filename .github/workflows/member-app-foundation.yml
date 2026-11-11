@@ -145,6 +145,7 @@ jobs:
 ; then
             test -f src/crm-res15-identity-readonly.mjs
             test -f tests/crm-res15-identity-readonly.test.mjs
+            test -f .github/workflows/res15-crm-identity-readonly.yml
             node --check src/crm-res15-identity-readonly.mjs
             node tests/crm-res15-identity-readonly.test.mjs
             echo 'RES15_CROSS_SCOPE_READ_ONLY_CONTRACT=PASS'
