@@ -105,44 +105,7 @@ jobs:
             ! grep -E "(INSERT[[:space:]]+INTO|UPDATE|DELETE[[:space:]]+FROM)[[:space:]]+(customers|customer_reservations|customer_delivery_links)" src/crm-member-*.mjs src/member-*.mjs
           fi
 
-          if printf '%s\n' "${changed[@]}" | grep -Eq '^(src/crm-res15-identity-readonly\.mjs|tests/crm-res15-identity-readonly\.test\.mjs|\.github/workflows/res15-crm-identity-readonly\.yml)
-          echo 'PRODUCTION_D1_WRITE=0'
-          echo 'PRODUCTION_SCHEMA_APPLY=0'
-          echo 'CANONICAL_CUSTOMER_WRITE=0'
-          echo 'CUSTOMER_ID_GENERATION=0'
-          echo 'FAMILY_AUTO_LINK=0'
-          echo 'LINE_SEND=0'
-          echo 'PRODUCTION_DEPLOY=0'
-
-      - name: Set up Node
-        uses: actions/setup-node@v5
-        with:
-          node-version: '22'
-
-      - name: Member syntax
-        shell: bash
-        run: |
-          set -euo pipefail
-          for file in src/crm-member-*.mjs src/member-*.mjs; do
-            test -f "$file" || continue
-            node --check "$file"
-          done
-          node --check src/production-index-crm-customer360-entry.js
-          echo 'MEMBER_SYNTAX=PASS'
-
-      - name: Member regressions
-        shell: bash
-        run: |
-          set -euo pipefail
-          mapfile -t tests < <(find member_tests -maxdepth 1 -type f -name '*.test.mjs' -printf '%p\n' | sort)
-          test "${#tests[@]}" -gt 0
-          for test_file in "${tests[@]}"; do
-            echo "::group::$test_file"
-            node "$test_file"
-            echo '::endgroup::'
-          done
-          echo "MEMBER_TEST_FILES=${#tests[@]} PASS"
-; then
+          if printf '%s\n' "${changed[@]}" | grep -Eq '^(src/crm-res15-identity-readonly\.mjs|tests/crm-res15-identity-readonly\.test\.mjs|\.github/workflows/res15-crm-identity-readonly\.yml)$'; then
             test -f src/crm-res15-identity-readonly.mjs
             test -f tests/crm-res15-identity-readonly.test.mjs
             test -f .github/workflows/res15-crm-identity-readonly.yml
