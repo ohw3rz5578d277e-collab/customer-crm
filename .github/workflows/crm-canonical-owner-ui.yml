@@ -56,7 +56,7 @@ jobs:
           mapfile -t identity_changed < <(printf '%s\n' "${changed[@]}" | grep -E '^src/.*(identity|customer-id|canonical-customer)' || true)
           for path in "${identity_changed[@]}"; do
             case "$path" in
-              src/customer-identity-resolver.mjs|src/crm-customer-id-autofill-runtime.mjs) ;;
+              src/customer-identity-resolver.mjs|src/crm-customer-id-autofill-runtime.mjs|src/crm-res15-identity-readonly.mjs) ;;
               *) echo "::error::Unexpected identity source change: $path"; exit 1 ;;
             esac
           done
@@ -64,10 +64,16 @@ jobs:
           test ! -e src/crm-owner-view-state.mjs
           test -f src/production-index-crm-line-ops.js
           ! grep -E 'injectLineOpsButton|crm-line-ops-style|crm-line-ops-script|lineOpsOpen|crm-lineops-fab' src/production-index-crm-line-ops.js
+          if printf '%s\n' "${identity_changed[@]}" | grep -Fxq 'src/crm-res15-identity-readonly.mjs'; then
+            test -f tests/crm-res15-identity-readonly.test.mjs
+            node --check src/crm-res15-identity-readonly.mjs
+            node tests/crm-res15-identity-readonly.test.mjs
+            echo 'RES15_IDENTITY_READ_ONLY_CONTRACT=PASS'
+          fi
           echo 'LEGACY_OWNER_UI_SOURCE_FILES=0'
           echo 'LINE_OPS_LEGACY_UI_INJECTION=0'
           echo 'LINE_OPS_API_COMPATIBILITY=PRESERVED'
-          echo 'IDENTITY_SOURCE_CHANGE=0'
+          echo 'IDENTITY_SOURCE_CHANGE=RESTRICTED_ALLOWLIST'
           echo "AUTHORIZED_ADDITIVE_MIGRATION_COUNT=${#migrations[@]}"
           echo 'PRODUCTION_D1_WRITE=0'
           echo 'PRODUCTION_CUSTOMER_WRITE=0'
