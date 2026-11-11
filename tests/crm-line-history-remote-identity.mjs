@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import {DatabaseSync} from 'node:sqlite';
 import {
   verifyRemoteLineIdentityOwnership,
+  verifyRemoteLineHistoryAtDelivery,
   validateRemoteLineHistoryPayload
 } from '../src/crm-line-history-exact-customer-read.mjs';
 
@@ -16,6 +17,15 @@ assert.match(remote, /if \(!ownership\.allowed\)/, 'remote LINE lookup does not 
 assert.equal((remote.match(/validateRemoteLineHistoryPayload\(data, lineUserId\)/g) || []).length, 2, 'both Worker routes must validate response identities');
 assert.equal((remote.match(/normalizeLineHistoryMessages\(verified\.items\)/g) || []).length, 2, 'remote messages must come from verified payload');
 assert.match(remote, /remote_line_identity_unverified/, 'identity mismatch must fail closed');
+const readStart = source.indexOf('async function getCustomerLineHistory(');
+const detailStart = source.indexOf('async function getCustomerDetail(',readStart);
+assert.ok(readStart > remoteEnd && detailStart > readStart,'customer history delivery path missing');
+const deliverySource = source.slice(readStart,detailStart);
+const fetchIndex = deliverySource.indexOf('await fetchRemoteLineHistory(env, customer)');
+const postCheckIndex = deliverySource.indexOf('await verifyRemoteLineHistoryAtDelivery(env.DB, customer, remote)');
+const composeIndex = deliverySource.indexOf('const combined = normalizeLineHistoryMessages(');
+assert.ok(fetchIndex >= 0 && postCheckIndex > fetchIndex && composeIndex > postCheckIndex,'remote identity must be rechecked after fetch and before returning history');
+assert.match(deliverySource.slice(postCheckIndex,composeIndex),/if \(!delivery.allowed\)\s*\{[\s\S]*?ok:\s*false[\s\S]*?messages:\s*\[\]/,'failed ownership recheck must return zero messages');
 
 const db = new DatabaseSync(':memory:');
 db.exec('CREATE TABLE customers(customer_id TEXT PRIMARY KEY, line_user_id TEXT)');
@@ -75,7 +85,56 @@ assert.equal(validateRemoteLineHistoryPayload({...valid,messages:[{...inbound,li
 assert.equal(validateRemoteLineHistoryPayload({...valid,ok:false},lineB).valid,false);
 assert.equal(validateRemoteLineHistoryPayload({...valid,contact:{name:'not an identity'}},lineB).valid,false);
 assert.equal(validateRemoteLineHistoryPayload({...valid},'bad-line-id').valid,false);
+// No live CRM reads: emulate a real linkage change while a remote response is delayed.
+const stableBefore=await verifyRemoteLineIdentityOwnership(d1,ownerA);
+assert.equal(stableBefore.allowed,false,'previous duplicate fixture must still be ambiguous');
+const ownerB={customer_id:'26000102',line_user_id:lineB};
+assert.equal((await verifyRemoteLineHistoryAtDelivery(d1,ownerB,{connected:true,messages:[inbound]})).allowed,true);
+const beforeNoRemote=reads;
+assert.deepEqual(await verifyRemoteLineHistoryAtDelivery(d1,ownerB,{connected:false,messages:[]}),{allowed:true,remoteHistoryAvailable:false});
+assert.equal(reads,beforeNoRemote,'disconnected remote response must not force extra DB reads');
+
+async function delayedResponseOwnershipCheck(customer,duringNetwork) {
+  const initial=await verifyRemoteLineIdentityOwnership(d1,customer);
+  assert.equal(initial.allowed,true,'the request must start with a valid identity');
+  let release;
+  const pending=new Promise(resolve=>{release=resolve});
+  const request=(async()=>{
+    const response=await pending;
+    const delivery=await verifyRemoteLineHistoryAtDelivery(d1,customer,response);
+    return {delivery,messages:delivery.allowed?response.messages:[]};
+  })();
+  duringNetwork();
+  release({connected:true,messages:[{line_user_id:customer.line_user_id,message_text:'synthetic delayed history'}]});
+  return request;
+}
+
+// A formerly valid owner becomes unlinked before remote fetch completes.
+const unlinked=await delayedResponseOwnershipCheck(ownerB,()=>{
+  db.prepare('UPDATE customers SET line_user_id=NULL WHERE customer_id=?').run('26000102');
+});
+assert.equal(unlinked.delivery.allowed,false,'unlink during fetch must invalidate the response');
+assert.equal(unlinked.delivery.reason,'remote_line_identity_changed_during_fetch');
+assert.deepEqual(unlinked.messages,[],'stale remote messages must not be exposed');
+
+// Reassignment and duplicate links must also invalidate an in-flight response.
+insert.run('26000105',lineB);
+const changed=await delayedResponseOwnershipCheck({customer_id:'26000105',line_user_id:lineB},()=>{
+  db.prepare('UPDATE customers SET line_user_id=? WHERE customer_id=?').run(lineA,'26000105');
+});
+assert.equal(changed.delivery.allowed,false);
+assert.deepEqual(changed.messages,[]);
+db.prepare('UPDATE customers SET line_user_id=? WHERE customer_id=?').run(lineB,'26000105');
+const duplicate=await delayedResponseOwnershipCheck({customer_id:'26000105',line_user_id:lineB},()=>{
+  db.prepare('UPDATE customers SET line_user_id=? WHERE customer_id=?').run(lineB,'26000103');
+});
+assert.equal(duplicate.delivery.allowed,false,'second CRM customer linked during fetch must block');
+assert.deepEqual(duplicate.messages,[]);
+assert.equal((await verifyRemoteLineHistoryAtDelivery({prepare(){throw Error('synthetic read failure')}},ownerB,{connected:true,messages:[inbound]})).allowed,false);
 db.close();
+console.log('CRM_REMOTE_LINE_IDENTITY_MID_FETCH_UNLINK=BLOCKED');
+console.log('CRM_REMOTE_LINE_IDENTITY_MID_FETCH_RELINK=BLOCKED');
+console.log('CRM_REMOTE_LINE_IDENTITY_MID_FETCH_DUPLICATE=BLOCKED');
 console.log('CRM_REMOTE_LINE_IDENTITY_OWNER_GATE=PASS');
 console.log('CRM_REMOTE_LINE_DUPLICATE_LINK=BLOCKED');
 console.log('CRM_REMOTE_LINE_WORKER_ENVELOPE_AND_ROWS=VERIFIED');
