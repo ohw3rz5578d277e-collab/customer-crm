@@ -142,6 +142,85 @@ const duplicate=await delayedResponseOwnershipCheck({customer_id:'26000105',line
 assert.equal(duplicate.delivery.allowed,false,'second CRM customer linked during fetch must block');
 assert.deepEqual(duplicate.messages,[]);
 assert.equal((await verifyRemoteLineHistoryAtDelivery({prepare(){throw Error('synthetic read failure')}},ownerB,{connected:true,messages:[inbound]})).allowed,false);
+
+// Exercise the actual source-level fetch + delivery functions, not only the
+// delivery helper. All transports and local messages are synthetic.
+const runtime = new Function(
+  'getLocalCustomerLineHistory', 'verifyRemoteLineIdentityOwnership',
+  'verifyRemoteLineHistoryAtDelivery', 'validateRemoteLineHistoryPayload',
+  'normalizeLineHistoryMessages', 'text', 'getAdminToken',
+  'DEFAULT_LINE_WORKER_BASE', 'fetch', 'Request', 'URL',
+  remote + '\n' + deliverySource + '\nreturn getCustomerLineHistory;'
+);
+const syntheticLocal = [{customer_id:ownerB.customer_id,line_user_id:lineB,message_text:'synthetic local only'}];
+function createHistoryRunner(transport) {
+  return runtime(
+    async()=>syntheticLocal,
+    verifyRemoteLineIdentityOwnership,
+    verifyRemoteLineHistoryAtDelivery,
+    validateRemoteLineHistoryPayload,
+    items=>items,
+    value=>String(value??'').trim(),
+    ()=>'synthetic-admin',
+    'https://synthetic-worker.invalid',
+    transport.https,
+    Request, URL
+  );
+}
+function resetOwnerB() {
+  db.prepare('UPDATE customers SET line_user_id=? WHERE customer_id=?').run(lineB,ownerB.customer_id);
+  db.prepare('UPDATE customers SET line_user_id=? WHERE customer_id=?').run(lineC,'26000103');
+  db.prepare('UPDATE customers SET line_user_id=? WHERE customer_id=?').run(lineA,'26000105');
+}
+function deferred() {
+  let release;
+  const promise=new Promise(resolve=>{release=resolve});
+  return {promise,release};
+}
+const failedResponse={ok:false,status:403,text:async()=>JSON.stringify({ok:false,message:'synthetic rejected'})};
+resetOwnerB();
+// Service Binding rejects after unlink; HTTPS also fails. Even the previously
+// loaded local row must not be returned to the now-unlinked identity.
+{
+  const gate=deferred();
+  const run=createHistoryRunner({https:async()=>failedResponse});
+  const pending=run({
+    DB:d1,LINE_SERVICE:{fetch:async()=>gate.promise},
+    LINE_HISTORY_API_BASE:'https://synthetic-worker.invalid'
+  },ownerB);
+  db.prepare('UPDATE customers SET line_user_id=NULL WHERE customer_id=?').run(ownerB.customer_id);
+  gate.release(failedResponse);
+  const result=await pending;
+  assert.equal(result.ok,false,'failed Service Binding + unlink must fail closed');
+  assert.deepEqual(result.messages,[],'failed Service Binding leaked local history');
+  assert.equal(result.line_user_id,'','failed Service Binding leaked stale LINE identity');
+}
+resetOwnerB();
+// HTTPS fallback rejects after reassignment, with no Service Binding configured.
+{
+  const gate=deferred();
+  const run=createHistoryRunner({https:async()=>gate.promise});
+  const pending=run({DB:d1,LINE_HISTORY_API_BASE:'https://synthetic-worker.invalid'},ownerB);
+  db.prepare('UPDATE customers SET line_user_id=NULL WHERE customer_id=?').run(ownerB.customer_id);
+  gate.release(failedResponse);
+  const result=await pending;
+  assert.equal(result.ok,false,'failed HTTPS fetch + unlink must fail closed');
+  assert.deepEqual(result.messages,[],'failed HTTPS fetch leaked local history');
+}
+resetOwnerB();
+// With an unchanged owner, an unsuccessful remote fetch may still deliver only
+// the exact-customer local messages.
+{
+  const run=createHistoryRunner({https:async()=>failedResponse});
+  const result=await run({DB:d1,LINE_HISTORY_API_BASE:'https://synthetic-worker.invalid'},ownerB);
+  assert.equal(result.ok,true);
+  assert.equal(result.connected,false);
+  assert.deepEqual(result.messages,syntheticLocal);
+}
+console.log('CRM_REMOTE_LINE_FAILED_SERVICE_DELIVERY=BLOCKED');
+console.log('CRM_REMOTE_LINE_FAILED_HTTPS_DELIVERY=BLOCKED');
+console.log('CRM_REMOTE_LINE_STABLE_OWNER_LOCAL_ONLY=PASS');
+
 db.close();
 console.log('CRM_REMOTE_LINE_IDENTITY_MID_FETCH_UNLINK=BLOCKED');
 console.log('CRM_REMOTE_LINE_IDENTITY_MID_FETCH_RELINK=BLOCKED');
