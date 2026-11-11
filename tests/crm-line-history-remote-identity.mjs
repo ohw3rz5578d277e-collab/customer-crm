@@ -183,11 +183,13 @@ resetOwnerB();
 // loaded local row must not be returned to the now-unlinked identity.
 {
   const gate=deferred();
+  const entered=deferred();
   const run=createHistoryRunner({https:async()=>failedResponse});
   const pending=run({
-    DB:d1,LINE_SERVICE:{fetch:async()=>gate.promise},
+    DB:d1,LINE_SERVICE:{fetch:async()=>{entered.release();return gate.promise;}},
     LINE_HISTORY_API_BASE:'https://synthetic-worker.invalid'
   },ownerB);
+  await entered.promise;
   db.prepare('UPDATE customers SET line_user_id=NULL WHERE customer_id=?').run(ownerB.customer_id);
   gate.release(failedResponse);
   const result=await pending;
@@ -199,8 +201,10 @@ resetOwnerB();
 // HTTPS fallback rejects after reassignment, with no Service Binding configured.
 {
   const gate=deferred();
-  const run=createHistoryRunner({https:async()=>gate.promise});
+  const entered=deferred();
+  const run=createHistoryRunner({https:async()=>{entered.release();return gate.promise;}});
   const pending=run({DB:d1,LINE_HISTORY_API_BASE:'https://synthetic-worker.invalid'},ownerB);
+  await entered.promise;
   db.prepare('UPDATE customers SET line_user_id=NULL WHERE customer_id=?').run(ownerB.customer_id);
   gate.release(failedResponse);
   const result=await pending;
