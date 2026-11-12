@@ -44,27 +44,33 @@ assert.ok(discovered.length>=required.length);
  // The synthetic revision planner must remain outside every runtime source
  // import graph. Inspect all app sources, not just the immediate entrypoint.
  const adapterName='crm-res15-synthetic-revision-adapter.mjs';
- // Resolve module string specifiers rather than matching three spellings.
- // All static/side-effect/multiline/export-from/dynamic imports must fail closed.
- const moduleSpecifiers=(source)=>[
-  ...source.matchAll(/\b(?:import|export)\s*(?:[\s\S]{0,400}?\s+from\s*)?['"]([^'"\n]+)['"]/g),
-  ...source.matchAll(/\b(?:import|require)\s*\(\s*['"]([^'"\n]+)['"]\s*\)/g)
- ].map(m=>m[1].split(/[?#]/)[0].split('/').at(-1));
- const syntheticWiringDetected=(source)=>
-  moduleSpecifiers(source).includes(adapterName)||
-  source.includes('res15_synthetic_mutation_ids');
+ // Conservatively reject any literal mention in real app source, including
+ // long/multiline static imports, comments, side-effect statements, optional
+ // trailing commas and template-literal dynamic imports. False positives
+ // require human review, never automatic permission. Constructed module
+ // identifiers without a literal basename still need manual call-graph audit.
+ const syntheticWiringDetected=source=>typeof source==='string'&&
+  (source.includes(adapterName)||source.includes('res15_synthetic_mutation_ids')||
+   source.includes('res15-synthetic-revision-adapter'));
  const unexpectedImports=[...byPath.entries()].filter(([path,source])=>
   !path.endsWith('/'+adapterName)&&syntheticWiringDetected(source));
- for(const sample of [
+ const tick=String.fromCharCode(96);
+ const adversarial=[
   'import "./'+adapterName+'";',
   "import './"+adapterName+"';",
   "import { x }\nfrom\n'./"+adapterName+"';",
   'const x = import("./'+adapterName+'");',
   'export { x } from "../src/'+adapterName+'";',
-  "const x=require('./"+adapterName+"');"
- ]){
+  "const x=require('./"+adapterName+"');",
+  'import /* runtime dependency */ "./'+adapterName+'";',
+  'const x=import('+tick+'./'+adapterName+tick+');',
+  'import("./'+adapterName+'",);',
+  'import { '+Array.from({length:60},(_,i)=>'candidate'+i+' as alias'+i).join(', ')+
+    ' } from "./'+adapterName+'";'
+ ];
+ for(const sample of adversarial){
   assert.equal(syntheticWiringDetected(sample),true,
-   'Synthetic planner import form must fail closed: '+sample);
+   'Synthetic planner import spelling must fail closed: '+sample.slice(0,80));
  }
  assert.deepEqual(unexpectedImports.map(([path])=>path),[],
   'Synthetic CAS implementation/DDL must not be wired into live app source');
