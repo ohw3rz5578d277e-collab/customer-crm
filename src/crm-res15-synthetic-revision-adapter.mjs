@@ -10,7 +10,7 @@ const plain=v=>v!==null&&typeof v==='object'&&!Array.isArray(v)&&
  (Object.getPrototypeOf(v)===Object.prototype||Object.getPrototypeOf(v)===null);
 const safe=v=>typeof v==='string'&&v.length>0&&v.length<=160&&v===v.trim()&&!/[\x00-\x1f\x7f]/.test(v);
 const keyOk=(kind,v)=>kind==='integer'?Number.isSafeInteger(v)&&v>0:
- kind==='customer'?typeof v==='string'&&/^\\d{2}(?!000000)\\d{6}$/.test(v):
+ kind==='customer'?typeof v==='string'&&/^\d{2}(?!000000)\d{6}$/.test(v):
  kind==='line'?typeof v==='string'&&/^U[0-9a-fA-F]{32}$/.test(v):safe(v);
 export const RES15_SYNTHETIC_SERVICE='crm';
 export const RES15_SYNTHETIC_ATOMIC_SCOPES=Object.freeze(Object.keys(DEFINITIONS));
