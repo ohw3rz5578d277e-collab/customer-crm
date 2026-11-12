@@ -5,6 +5,7 @@ import {planRes15ServiceSyntheticMutation,RES15_SYNTHETIC_ATOMIC_SCOPES} from '.
 const entry=readFileSync('src/production-index-crm-customer360-entry.js','utf8');
 assert.equal(entry.includes('crm-res15-synthetic-revision-adapter.mjs'),false,'entrypoint must not import synthetic planner');
 const raw=new DatabaseSync(':memory:');
+raw.exec("CREATE TABLE res15_synthetic_mutation_ids(scope TEXT NOT NULL,entity_key TEXT NOT NULL,mutation_id TEXT NOT NULL,PRIMARY KEY(scope,entity_key,mutation_id))");
 const cases=[
  ['crm_customer','customers','customer_id','TEXT PRIMARY KEY','line_user_id TEXT,deleted_at TEXT','26001234',{line_user_id:'U'+('a'.repeat(32))}],
  ['crm_registry','customer_identity_registry','line_user_id','TEXT PRIMARY KEY','customer_id TEXT,status TEXT','U'+('b'.repeat(32)),{customer_id:'26001234',status:'active'}]
@@ -18,6 +19,8 @@ assert.equal(RES15_SYNTHETIC_ATOMIC_SCOPES.length,2);
 for(const [scope,table,key,keyType,columns,value,changes] of cases){
  raw.exec('CREATE TABLE '+table+' ('+key+' '+keyType+','+columns+
   ',res15_revision INTEGER NOT NULL,res15_last_mutation_id TEXT,res15_payload_sha256 TEXT)');
+ raw.exec("CREATE TRIGGER res15_synthetic_history_"+scope+" AFTER UPDATE OF res15_revision ON "+table+
+  " WHEN NEW.res15_revision>OLD.res15_revision BEGIN INSERT INTO res15_synthetic_mutation_ids(scope,entity_key,mutation_id) VALUES('"+scope+"',CAST(NEW."+key+" AS TEXT),NEW.res15_last_mutation_id); END");
  raw.prepare('INSERT INTO '+table+' ('+key+',res15_revision) VALUES (?,?)').run(value,3);
  const req=await plan(scope,value,3,'mutation-'+scope,changes);
  assert.equal(req.ok,true,scope);
@@ -35,6 +38,17 @@ for(const [scope,table,key,keyType,columns,value,changes] of cases){
  assert.equal(exec(other).length,1);
  assert.equal(row(table,key,value).res15_revision,5);
  assert.equal(exec(req).length,0,'ABA stale cannot advance');
+ // The synthetic trigger ledger also prohibits A->B->A reuse at a *fresh* revision.
+ const reusedAfterOther=await plan(scope,value,5,'mutation-'+scope,changes);
+ assert.equal(exec(reusedAfterOther).length,0,'A/B/A must be blocked by ledger');
+ assert.equal(row(table,key,value).res15_revision,5);
+ const mutableScope={scope,entity_key:value,expected_revision:7,mutation_id:'scope-snapshot-'+scope,changes};
+ const planned=planRes15ServiceSyntheticMutation(mutableScope,context);
+ mutableScope.scope='constructor';
+ const scopeSnapshot=await planned;
+ assert.equal(scopeSnapshot.ok,true);
+ assert.equal(scopeSnapshot.scope,scope);
+ assert.equal(scopeSnapshot.synthetic_mutation_history_trigger_required,true);
  // Capture a mutable caller value before crypto awaits.
  const later={...changes},first=Object.keys(later)[0],original=later[first];
  const future=plan(scope,value,5,'snapshot-'+scope,later);
@@ -62,9 +76,19 @@ const before=row(first[1],first[2],first[5]);
 assert.throws(()=>exec(failed),/synthetic injected error/);
 const after=row(first[1],first[2],first[5]);
 assert.deepEqual(after,before);
+const historyBefore=raw.prepare('SELECT COUNT(*) AS n FROM res15_synthetic_mutation_ids WHERE scope=? AND entity_key=?').get(first[0],String(first[5])).n;
+raw.exec('DROP TRIGGER res15_synthetic_history_'+first[0]);
+const noHistory=await plan(first[0],first[5],8,'without-history-trigger',target);
+assert.equal(exec(noHistory).length,0,'a missing history trigger must fail closed');
+assert.equal(raw.prepare('SELECT COUNT(*) AS n FROM res15_synthetic_mutation_ids WHERE scope=? AND entity_key=?').get(first[0],String(first[5])).n,historyBefore);
+assert.deepEqual(row(first[1],first[2],first[5]),before);
 let negative=0;
 for(const wrong of [
  {scope:'unexpected',entity_key:first[5],expected_revision:8,mutation_id:'bad',changes:target},
+ {scope:'constructor',entity_key:first[5],expected_revision:8,mutation_id:'bad',changes:target},
+ {scope:'__proto__',entity_key:first[5],expected_revision:8,mutation_id:'bad',changes:target},
+ {scope:'toString',entity_key:first[5],expected_revision:8,mutation_id:'bad',changes:target},
+ {scope:[],entity_key:first[5],expected_revision:8,mutation_id:'bad',changes:target},
  {scope:first[0],entity_key:first[5],expected_revision:0,mutation_id:'bad',changes:target},
  {scope:first[0],entity_key:first[5],expected_revision:8,mutation_id:'bad',changes:{sql_injection:'X'}},
  {scope:first[0],entity_key:first[5],expected_revision:8,mutation_id:'bad',changes:{}},
