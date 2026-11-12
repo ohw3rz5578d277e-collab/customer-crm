@@ -1,0 +1,36 @@
+name: RES-15 CRM identity read-only source CI
+on:
+  pull_request:
+    paths:
+      - 'src/crm-res15-identity-readonly.mjs'
+      - 'src/production-index-crm-customer360-entry.js'
+      - 'tests/crm-res15-identity-readonly.test.mjs'
+      - 'src/crm-res15-synthetic-revision-adapter.mjs'
+      - 'tests/crm-res15-synthetic-revision-adapter.test.mjs'
+      - 'tests/res15-writer-source-inventory.test.mjs'
+      - 'tests/res15-entrypoint-writer-callgraph.test.mjs'
+      - 'src/customer-identity-resolver.mjs'
+      - 'src/crm-customer360-profile-enrichment.mjs'
+      - 'src/index.js'
+      - '.github/workflows/res15-crm-identity-readonly.yml'
+permissions:
+  contents: read
+jobs:
+  source_only:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: |
+          set -euo pipefail
+          node --check src/crm-res15-identity-readonly.mjs
+          node --check src/production-index-crm-customer360-entry.js
+          node tests/crm-res15-identity-readonly.test.mjs
+          node --check src/crm-res15-synthetic-revision-adapter.mjs
+          node tests/crm-res15-synthetic-revision-adapter.test.mjs
+          node tests/res15-writer-source-inventory.test.mjs
+          node tests/res15-entrypoint-writer-callgraph.test.mjs
+          echo 'DEPLOY=0 D1_REMOTE=0 CRM_WRITE=0 LINE_SEND=0 SECRETS_CHANGED=0'
