@@ -82,6 +82,31 @@ const openEdges=edges.filter(e=>!byPath.has(e.to));
 const migrations=[...walk(join(ROOT,'migrations'),['.sql']),...walk(join(ROOT,'migrations_managed'),['.sql'])];
 const staticTriggerFiles=migrations.filter(p=>/\bCREATE\s+TRIGGER\b/i.test(readFileSync(p,'utf8')));
 const sourceDDL=discovered.filter(x=>x.signals.ddl).length;
+
+const allMigrationSql=migrations.map(path=>({path:relative(ROOT,path).replaceAll('\\','/'),
+ source:readFileSync(path,'utf8')}));
+const extractObjects=(source,type)=>[...source.matchAll(new RegExp(
+ 'CREATE\\s+(?:TEMP(?:ORARY)?\\s+)?'+type+'\\s+(?:IF\\s+NOT\\s+EXISTS\\s+)?(["\`\\[]?[a-zA-Z0-9_.-]+["\`\\]]?)','gi'))].map(m=>m[1]);
+const triggers=allMigrationSql.flatMap(m=>extractObjects(m.source,'TRIGGER').map(name=>({
+ path:m.path,name,sha256_attested:false,production_applied:false,
+ identity_relevant:/\b(?:customers|customer_identity_registry|app_reservations|ai_reservation_drafts|forwarded_line_reservation_intakes)\b/i.test(m.source)
+})));
+const views=allMigrationSql.flatMap(m=>extractObjects(m.source,'VIEW').map(name=>({path:m.path,name})));
+const materialSql=allMigrationSql.filter(m=>
+ /\b(?:INSERT\s+INTO|UPDATE\s+|DELETE\s+FROM|CREATE\s+TRIGGER|CREATE\s+VIEW)\b/i.test(m.source));
+const revisionMigrationSql=allMigrationSql.filter(m=>/\bres15_(?:revision|last_mutation_id|payload_sha256|synthetic_mutation_ids)\b/i.test(m.source));
+assert.equal(revisionMigrationSql.length,0,
+ 'RES-15 revision schema must not appear in migration files without separate Owner gate');
+assert.ok(materialSql.length>0,'migrations must be inspected for material SQL/trigger paths');
+assert.ok(triggers.every(t=>t.production_applied===false));
+console.log('RES15_MIGRATION_TRIGGER_VIEW_READONLY_AUDIT='+JSON.stringify({
+ migration_file_count:allMigrationSql.length,material_sql_files:materialSql.length,
+ trigger_definitions:triggers,view_definitions:views,
+ revision_schema_migration_present:revisionMigrationSql.length>0,
+ runtime_triggers_verified:false,production_schema_attested:false
+}));
+console.log('RES15_MIGRATION_SCHEMA_APPLY=0');
+
 const summary={
  mode:'repository_source_only',owner:'crm',complete_writer_callgraph:false,
  production_schema_attested:false,real_data_modified:false,
