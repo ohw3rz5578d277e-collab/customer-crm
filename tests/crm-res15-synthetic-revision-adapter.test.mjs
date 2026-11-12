@@ -5,6 +5,20 @@ import {planRes15ServiceSyntheticMutation,RES15_SYNTHETIC_ATOMIC_SCOPES} from '.
 const entry=readFileSync('src/production-index-crm-customer360-entry.js','utf8');
 assert.equal(entry.includes('crm-res15-synthetic-revision-adapter.mjs'),false,'entrypoint must not import synthetic planner');
 const raw=new DatabaseSync(':memory:');
+// The assertions below run against real CRM source files at the checked-out
+// Draft HEAD, not simulated writer copies. No imported production handler runs.
+const realIndex=readFileSync('src/index.js','utf8');
+const realResolver=readFileSync('src/customer-identity-resolver.mjs','utf8');
+const realProfile=readFileSync('src/crm-customer360-profile-enrichment.mjs','utf8');
+assert.ok(realIndex.includes('INSERT INTO customers ('),'canonical CRM customers UPSERT must remain visible');
+assert.ok(realIndex.includes('line_user_id=COALESCE(excluded.line_user_id,customers.line_user_id)'),
+ 'CRM canonical customer LINE binding writer requires review before revision integration');
+assert.ok(realResolver.includes('UPDATE customer_identity_sequence'),'canonical ID sequence writer must remain visible');
+assert.ok(realResolver.includes('UPDATE customers SET name=?,line_display_name=?'),
+ 'identity-associated customer metadata writer must remain visible');
+assert.ok(realProfile.includes('UPDATE customers SET ${col}=?'),
+ 'dynamic column writer requires explicit source-level review');
+console.log('RES15_CRM_REAL_SOURCE_CANONICAL_UPSERT_SEQUENCE_DYNAMIC_FIELD_PATHS=PASS');
 raw.exec("CREATE TABLE res15_synthetic_mutation_ids(scope TEXT NOT NULL,entity_key TEXT NOT NULL,mutation_id TEXT NOT NULL,PRIMARY KEY(scope,entity_key,mutation_id))");
 const cases=[
  ['crm_customer','customers','customer_id','TEXT PRIMARY KEY','line_user_id TEXT,deleted_at TEXT','26001234',{line_user_id:'U'+('a'.repeat(32))}],
@@ -16,6 +30,22 @@ const plan=(scope,entity_key,revision,mutation_id,changes,options=context)=>plan
 const exec=(v)=>raw.prepare(v.sql).all(...v.bindings);
 const row=(table,key,value)=>raw.prepare('SELECT * FROM '+table+' WHERE '+key+'=?').get(value);
 assert.equal(RES15_SYNTHETIC_ATOMIC_SCOPES.length,2);
+let rejectedIdentityValues=0;
+const invalidExamples=[
+ ['crm_customer','26001234',{line_user_id:'not-a-line-id'}],
+ ['crm_customer','26001234',{line_user_id:null}],
+ ['crm_customer','26001234',{line_user_id:[]}],
+ ['crm_registry','U'+('b'.repeat(32)),{customer_id:'bad'}],
+ ['crm_registry','U'+('b'.repeat(32)),{customer_id:null}],
+ ['crm_registry','U'+('b'.repeat(32)),{customer_id:'26000000'}],
+ ['crm_registry','U'+('b'.repeat(32)),{status:null}]
+];
+for(const [kind,key,changes] of invalidExamples){
+ const r=await plan(kind,key,3,'invalid-material-'+rejectedIdentityValues,changes);
+ assert.equal(r.ok,false,kind+' must reject invalid/empty identity material');
+ rejectedIdentityValues++;
+}
+console.log('RES15_CRM_CANONICAL_IDENTITY_MATERIAL_INVALID_REJECTED='+rejectedIdentityValues);
 for(const [scope,table,key,keyType,columns,value,changes] of cases){
  raw.exec('CREATE TABLE '+table+' ('+key+' '+keyType+','+columns+
   ',res15_revision INTEGER NOT NULL,res15_last_mutation_id TEXT,res15_payload_sha256 TEXT)');

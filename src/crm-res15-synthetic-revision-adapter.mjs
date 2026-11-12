@@ -10,6 +10,16 @@ const DEFINITIONS=Object.freeze({
 const plain=v=>v!==null&&typeof v==='object'&&!Array.isArray(v)&&
  (Object.getPrototypeOf(v)===Object.prototype||Object.getPrototypeOf(v)===null);
 const safe=v=>typeof v==='string'&&v.length>0&&v.length<=160&&v===v.trim()&&!/[\x00-\x1f\x7f]/.test(v);
+const FORMAL_CUSTOMER_ID=/^\d{2}(?!000000)\d{6}$/;
+const FORMAL_LINE_ID=/^U[0-9a-fA-F]{32}$/;
+// Candidate identity values must obey CRM canonical formats even in inert
+// test plans. Never use this as authority to generate/rebind Customer IDs.
+const validMaterial=(column,value)=>{
+ if(column==='customer_id')return typeof value==='string'&&FORMAL_CUSTOMER_ID.test(value);
+ if(column==='line_user_id')return typeof value==='string'&&FORMAL_LINE_ID.test(value);
+ if(column==='deleted_at')return value===null||safe(value);
+ return safe(value);
+};
 const keyOk=(kind,v)=>kind==='integer'?Number.isSafeInteger(v)&&v>0:
  kind==='customer'?typeof v==='string'&&/^\d{2}(?!000000)\d{6}$/.test(v):
  kind==='line'?typeof v==='string'&&/^U[0-9a-fA-F]{32}$/.test(v):safe(v);
@@ -31,8 +41,7 @@ export async function planRes15ServiceSyntheticMutation(input={},context={}){
  const props=Object.getOwnPropertyDescriptors(changes),columns=Object.keys(props).sort();
  if(!columns.length||columns.length>def.fields.length||columns.some(k=>
   !def.fields.includes(k)||!Object.prototype.hasOwnProperty.call(props[k],'value')||
-  !(props[k].value===null||safe(props[k].value)||
-    (k==='intake_id'&&Number.isSafeInteger(props[k].value)&&props[k].value>0))))
+  !validMaterial(k,props[k].value)))
    return denied('invalid_material_values');
  const snapshot=columns.map(k=>[k,props[k].value]);
  let hash;
