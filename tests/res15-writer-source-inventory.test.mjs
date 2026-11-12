@@ -44,12 +44,28 @@ assert.ok(discovered.length>=required.length);
  // The synthetic revision planner must remain outside every runtime source
  // import graph. Inspect all app sources, not just the immediate entrypoint.
  const adapterName='crm-res15-synthetic-revision-adapter.mjs';
+ // Resolve module string specifiers rather than matching three spellings.
+ // All static/side-effect/multiline/export-from/dynamic imports must fail closed.
+ const moduleSpecifiers=(source)=>[
+  ...source.matchAll(/\b(?:import|export)\s*(?:[\s\S]{0,400}?\s+from\s*)?['"]([^'"\n]+)['"]/g),
+  ...source.matchAll(/\b(?:import|require)\s*\(\s*['"]([^'"\n]+)['"]\s*\)/g)
+ ].map(m=>m[1].split(/[?#]/)[0].split('/').at(-1));
+ const syntheticWiringDetected=(source)=>
+  moduleSpecifiers(source).includes(adapterName)||
+  source.includes('res15_synthetic_mutation_ids');
  const unexpectedImports=[...byPath.entries()].filter(([path,source])=>
-   !path.endsWith('/'+adapterName)&&
-   (source.includes('from "./'+adapterName+'"')||
-    source.includes("from './"+adapterName+"'")||
-    source.includes("import('./"+adapterName+"')")||
-    source.includes('res15_synthetic_mutation_ids')));
+  !path.endsWith('/'+adapterName)&&syntheticWiringDetected(source));
+ for(const sample of [
+  'import "./'+adapterName+'";',
+  "import './"+adapterName+"';",
+  "import { x }\nfrom\n'./"+adapterName+"';",
+  'const x = import("./'+adapterName+'");',
+  'export { x } from "../src/'+adapterName+'";',
+  "const x=require('./"+adapterName+"');"
+ ]){
+  assert.equal(syntheticWiringDetected(sample),true,
+   'Synthetic planner import form must fail closed: '+sample);
+ }
  assert.deepEqual(unexpectedImports.map(([path])=>path),[],
   'Synthetic CAS implementation/DDL must not be wired into live app source');
  assert.ok(byPath.has('src/crm-customer360-line-profile-extraction.mjs'),'the newly traced identity/evidence writer must remain in repo');
