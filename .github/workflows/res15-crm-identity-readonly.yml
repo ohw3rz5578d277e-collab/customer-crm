@@ -8,6 +8,7 @@ on:
       - 'src/crm-res15-synthetic-revision-adapter.mjs'
       - 'tests/crm-res15-synthetic-revision-adapter.test.mjs'
       - 'tests/res15-writer-source-inventory.test.mjs'
+      - 'tests/res15-entrypoint-writer-callgraph.test.mjs'
       - 'src/customer-identity-resolver.mjs'
       - 'src/crm-customer360-profile-enrichment.mjs'
       - 'src/index.js'
@@ -31,4 +32,5 @@ jobs:
           node --check src/crm-res15-synthetic-revision-adapter.mjs
           node tests/crm-res15-synthetic-revision-adapter.test.mjs
           node tests/res15-writer-source-inventory.test.mjs
+          node tests/res15-entrypoint-writer-callgraph.test.mjs
           echo 'DEPLOY=0 D1_REMOTE=0 CRM_WRITE=0 LINE_SEND=0 SECRETS_CHANGED=0'
