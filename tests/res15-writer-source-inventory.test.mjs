@@ -19,18 +19,18 @@ const walk=(dir,exts)=>{
 };
 const paths=walk(srcRoot,['.js','.mjs']).sort();
 const byPath=new Map(paths.map(path=>[relative(ROOT,path).replaceAll('\\','/'),readFileSync(path,'utf8')]));
-const mutate=/\\b(?:INSERT\\s+(?:OR\\s+\\w+\\s+)?INTO|UPDATE\\s+|DELETE\\s+FROM|REPLACE\\s+INTO)\\b/i;
-const dynamic=/(?:UPDATE|INSERT|DELETE|ON CONFLICT)[\\s\\S]{0,180}\\$\\{/i;
-const delegated=/\\b(?:prepareUpsert|upsert|safeRun|run|db\\.batch)\\s*\\(/i;
-const ddl=/\\b(?:CREATE\\s+(?:TRIGGER|TABLE|INDEX)|ALTER\\s+TABLE)\\b/i;
+const mutate=/\b(?:INSERT\s+(?:OR\s+\w+\s+)?INTO|UPDATE\s+|DELETE\s+FROM|REPLACE\s+INTO)\b/i;
+const dynamic=/(?:UPDATE|INSERT|DELETE|ON CONFLICT)[\s\S]{0,180}\$\{/i;
+const delegated=/\b(?:prepareUpsert|upsert|safeRun|run|db\.batch)\s*\(/i;
+const ddl=/\b(?:CREATE\s+(?:TRIGGER|TABLE|INDEX)|ALTER\s+TABLE)\b/i;
 const edges=[];
 const discovered=[];
 for(const [path,source] of byPath){
  const signals={mutation:mutate.test(source),dynamic:dynamic.test(source),
   delegated:delegated.test(source),ddl:ddl.test(source),
-  batch:/\\.batch\\s*\\(/.test(source)};
+  batch:/\.batch\s*\(/.test(source)};
  if(Object.values(signals).some(Boolean))discovered.push({path,signals});
- for(const m of source.matchAll(/\\bimport\\s+[^'"]{0,240}?\\bfrom\\s+['"](\\.\\/[^'"]+)['"]/g)){
+ for(const m of source.matchAll(/\bimport\s+[^'"]{0,240}?\bfrom\s+['"](\.\/[^'"]+)['"]/g)){
   const target=relative(ROOT,resolve(dirname(join(ROOT,path)),m[1])).replaceAll('\\','/');
   edges.push({from:path,to:target});
  }
@@ -43,7 +43,7 @@ for(const path of required){
 assert.ok(discovered.length>=required.length);
 const openEdges=edges.filter(e=>!byPath.has(e.to));
 const migrations=[...walk(join(ROOT,'migrations'),['.sql']),...walk(join(ROOT,'migrations_managed'),['.sql'])];
-const staticTriggerFiles=migrations.filter(p=>/\\bCREATE\\s+TRIGGER\\b/i.test(readFileSync(p,'utf8')));
+const staticTriggerFiles=migrations.filter(p=>/\bCREATE\s+TRIGGER\b/i.test(readFileSync(p,'utf8')));
 const sourceDDL=discovered.filter(x=>x.signals.ddl).length;
 const summary={
  mode:'repository_source_only',owner:'crm',complete_writer_callgraph:false,
