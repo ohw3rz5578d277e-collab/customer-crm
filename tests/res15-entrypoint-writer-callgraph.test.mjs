@@ -6,7 +6,12 @@ import {readdirSync,readFileSync,existsSync} from 'node:fs';
 import {join,relative,resolve,dirname,extname} from 'node:path';
 const ROOT=process.cwd();
 const service="crm";
-const entrypoints=["src/index.js","src/secure-index.js","src/production-index.js"];
+// Read the configured local entry file, not only historical inner wrappers.
+const wranglerMain=readFileSync(join(ROOT,'wrangler.jsonc'),'utf8').match(/"main"\s*:\s*"([^"]+)"/);
+assert.ok(wranglerMain,'CRM Wrangler main entry must be inspectable');
+assert.equal(wranglerMain[1],'src/production-index-crm-customer360-entry.js',
+ 'review configured entrypoint changes before accepting A06 graph');
+const entrypoints=[wranglerMain[1],"src/index.js","src/secure-index.js","src/production-index.js"];
 const mandatory=["src/customer-identity-resolver.mjs","src/crm-customer-id-autofill-runtime.mjs","src/crm-customer360-profile-enrichment.mjs","src/crm-customer-csv-import.mjs"];
 const pth=path=>relative(ROOT,path).replaceAll('\\','/');
 function files(dir,extensions){
@@ -74,8 +79,10 @@ const migrationSummary=migrationFiles.map(path=>{
  return{path:pth(path),triggers,identity_text:/(customer_id|customer_identity_registry|app_reservations|ai_reservation_drafts)/i.test(s)};
 });
 const byPath=new Map(statements.map(x=>[x.path,x]));
-for(const name of mandatory)assert.ok(byPath.has(name),
- 'known material/delegating writer must stay in inventory: '+name);
+for(const name of mandatory){
+ assert.ok(byPath.has(name),'known material/delegating writer must stay in inventory: '+name);
+ assert.ok(reachable.has(name),'configured CRM entry must statically reach '+name);
+}
 assert.ok(statements.length>10,'source inventory unexpectedly empty');
 const summary={
  service,source_only:true,production_schema_attested:false,
