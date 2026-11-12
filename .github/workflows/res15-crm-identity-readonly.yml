@@ -7,6 +7,10 @@ on:
       - 'tests/crm-res15-identity-readonly.test.mjs'
       - 'src/crm-res15-synthetic-revision-adapter.mjs'
       - 'tests/crm-res15-synthetic-revision-adapter.test.mjs'
+      - 'tests/res15-writer-source-inventory.test.mjs'
+      - 'src/customer-identity-resolver.mjs'
+      - 'src/crm-customer360-profile-enrichment.mjs'
+      - 'src/index.js'
       - '.github/workflows/res15-crm-identity-readonly.yml'
 permissions:
   contents: read
@@ -26,4 +30,5 @@ jobs:
           node tests/crm-res15-identity-readonly.test.mjs
           node --check src/crm-res15-synthetic-revision-adapter.mjs
           node tests/crm-res15-synthetic-revision-adapter.test.mjs
+          node tests/res15-writer-source-inventory.test.mjs
           echo 'DEPLOY=0 D1_REMOTE=0 CRM_WRITE=0 LINE_SEND=0 SECRETS_CHANGED=0'
