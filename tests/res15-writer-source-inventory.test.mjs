@@ -35,12 +35,27 @@ for(const [path,source] of byPath){
   edges.push({from:path,to:target});
  }
 }
-const required=["src/index.js","src/customer-identity-resolver.mjs","src/crm-customer360-profile-enrichment.mjs","src/crm-customer-csv-import.mjs"];
+const required=["src/index.js","src/customer-identity-resolver.mjs","src/crm-customer360-profile-enrichment.mjs","src/crm-customer-csv-import.mjs",'src/crm-customer360-line-profile-extraction.mjs'];
 for(const path of required){
  assert.ok(byPath.has(path),'required real source is unavailable: '+path);
  assert.ok(discovered.some(x=>x.path===path),'required source must remain a candidate: '+path);
 }
 assert.ok(discovered.length>=required.length);
+ // The synthetic revision planner must remain outside every runtime source
+ // import graph. Inspect all app sources, not just the immediate entrypoint.
+ const adapterName='crm-res15-synthetic-revision-adapter.mjs';
+ const unexpectedImports=[...byPath.entries()].filter(([path,source])=>
+   !path.endsWith('/'+adapterName)&&
+   (source.includes('from "./'+adapterName+'"')||
+    source.includes("from './"+adapterName+"'")||
+    source.includes("import('./"+adapterName+"')")||
+    source.includes('res15_synthetic_mutation_ids')));
+ assert.deepEqual(unexpectedImports.map(([path])=>path),[],
+  'Synthetic CAS implementation/DDL must not be wired into live app source');
+ assert.ok(byPath.has('src/crm-customer360-line-profile-extraction.mjs'),'the newly traced identity/evidence writer must remain in repo');
+ assert.ok(discovered.some(item=>item.path==='src/crm-customer360-line-profile-extraction.mjs'),
+  'the new writer must remain discoverable by source scanner');
+ console.log('RES15_CRM_SYNTHETIC_ADAPTER_TRANSITIVE_SOURCE_ISOLATION=PASS');
 const openEdges=edges.filter(e=>!byPath.has(e.to));
 const migrations=[...walk(join(ROOT,'migrations'),['.sql']),...walk(join(ROOT,'migrations_managed'),['.sql'])];
 const staticTriggerFiles=migrations.filter(p=>/\bCREATE\s+TRIGGER\b/i.test(readFileSync(p,'utf8')));
@@ -53,6 +68,8 @@ const summary={
  bulk_or_batch_candidate_files:discovered.filter(x=>x.signals.batch).length,
  static_import_edges:edges.length,unresolved_static_import_edges:openEdges.length,
  source_ddl_candidate_files:sourceDDL,static_migration_trigger_files:staticTriggerFiles.length,
+ static_migration_trigger_paths:staticTriggerFiles.map(p=>relative(ROOT,p).replaceAll('\\','/')).slice(0,12),
+ dynamic_sql_candidate_examples:discovered.filter(x=>x.signals.dynamic).slice(0,12).map(x=>x.path),
  mandatory_candidate_paths:required,
  example_candidates:discovered.slice(0,10).map(x=>x.path),
  unmatched_import_examples:openEdges.slice(0,8)
